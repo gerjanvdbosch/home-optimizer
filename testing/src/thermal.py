@@ -172,12 +172,12 @@ class ThermalPlanner:
             # Hoe kouder buiten, hoe hoger de benodigde aanvoer (stooklijn).
             # Dit is een simpele stooklijn-gok voor de simulatie:
             boost_freq = 75.0 # Hz
-            boost_supply = 40.0 if row['temp'] < 5 else 35.0
+            boost_supply = 40.0 if row.get('temp', 0) < 5 else 35.0
 
             # Vraag het model: Wat gebeurt er als we VOL GAS geven?
             delta = self.model.predict_step(
                 inside=sim_temp,
-                outside=row['temp'],
+                outside=row.get('temp', 0),
                 freq=boost_freq,
                 supply_temp=boost_supply,
                 solar=row.get('pv_estimate', 0),
@@ -218,7 +218,7 @@ class ThermalPlanner:
             # Supply temp zakt langzaam, maar voor model simulatie: laag houden
             delta = self.model.predict_step(
                 inside=sim_temp,
-                outside=row['temp'],
+                outside=row.get('temp', 0),
                 freq=0.0,
                 supply_temp=20.0, # Kamertemperatuur water
                 solar=row.get('pv_estimate', 0),

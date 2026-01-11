@@ -17,13 +17,15 @@ class Collector:
     def __init__(
         self, client: HAClient, database: Database, context: Context, config: Config
     ):
-        self.weather = WeatherClient(config)
+        self.weather = WeatherClient(client)
         self.client = client
         self.database = database
         self.context = context
         self.config = config
 
     def update_forecast(self):
+        self.client.reload()
+
         solcast = self.client.get_forecast(self.config.sensor_solcast)
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
@@ -66,6 +68,8 @@ class Collector:
         logger.info("[Collector] Forecast updated")
 
     def update_sensors(self):
+        self.client.reload()
+
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
         self.context.current_load = self.client.get_load_power(self.config.sensor_load)
 
@@ -77,6 +81,9 @@ class Collector:
         )
 
         self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
+
+        self.context.room_temp = self.client.get_room_temperature()
+        self.context.tank_temp = self.client.get_dhw_temperature()
 
         logger.info("[Collector] Sensors updated")
 

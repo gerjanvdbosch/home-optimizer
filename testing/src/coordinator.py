@@ -11,11 +11,11 @@ from context import Context
 from collector import Collector
 from client import HAClient
 from planner import Planner
-from mpc import Planner
 from database import Database
 from dhw import DhwMachine
 from climate import ClimateMachine
 from webapi import api
+from mpc import MPCPlanner
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -34,18 +34,21 @@ class Coordinator:
         self.context = context
         self.config = config
         self.collector = collector
+        self.mpc = MPCPlanner(context)
 
     def tick(self):
         self.collector.update_sensors()
 
         self.context.now = datetime.now(timezone.utc)
 
-        plan = self.planner.create_plan()
-
+        plan = self.mpc.create_plan()
         logger.debug(f"[Coordinator] Generated plan: {plan}")
+
+        plan = self.planner.create_plan()
 
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
+
 
     def train(self):
         cutoff_date = self.context.now - timedelta(days=730)
@@ -86,7 +89,7 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
         scheduler.add_job(collector.update_pv, "interval", seconds=15)
 
-        scheduler.add_job(coordinator.tick, "interval", minutes=1)
+        scheduler.add_job(coordinator.tick, "interval", seconds=5)
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
 
         logger.info("[System] Engine running")

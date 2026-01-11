@@ -5,7 +5,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, time
 from context import Context
-from mpc_config import MPCConfig
+from thermal import ThermalNowCaster, ThermalModel
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,97 @@ class SystemState:
     hp_power_factor: float # 0.0 tot 1.0 (of freq / 100)
     supply_temp: float
 
+@dataclass
+class DemandScore:
+    name: str
+    score: float
+    reason: str
+
+# =========================================================
+# ARBITER (De Beslisser)
+# =========================================================
+class PriorityEvaluator:
+    def __init__(self, config: MPCConfig):
+        self.cfg = config
+
+    def get_boiler_score(self, current_temp: float, mpc_power_kw: float) -> DemandScore:
+        score = 0.0
+        reasons = []
+
+        # 1. VERZADIGING (Is hij vol?)
+        if current_temp >= self.cfg.tank_max_temp - 1.0:
+            return DemandScore("Boiler", -1.0, "Vol")
+
+        # 2. NOODGEVAL (Koud water, niet douchen)
+        # Grens: 40 graden
+        if current_temp < 40.0:
+            score += 5000.0 # Wint ALTIJD
+            reasons.append(f"Kritiek ({current_temp:.1f}°C)")
+            return DemandScore("Boiler", score, ", ".join(reasons))
+
+        # 3. URGENTIE (Lauw water, zsm bijwarmen)
+        # Grens: 40 tot 48 graden.
+        # Dit moet winnen van een warmtepomp die het huis op temperatuur houdt (score ~50-100),
+        # maar verliezen van een ijskoud huis (score > 300).
+        if current_temp < 48.0:
+            score += 300.0
+            reasons.append("Urgent laag")
+
+        # 4. MPC WENS (Efficiency / Zon / Planning)
+        if mpc_power_kw > 0.1:
+            score += 50.0
+            reasons.append("MPC schema")
+
+        # 5. VULLINGSGRAAD (Comfort buffer)
+        # Hoe leger, hoe liever. Max 20 punten.
+        # Dit zorgt dat hij bij 50 graden minder 'gretig' is dan bij 49.
+        deficit = max(0, 55.0 - current_temp)
+        score += deficit * 2.0
+
+        if score > 0:
+            return DemandScore("Boiler", score, ", ".join(reasons))
+        return DemandScore("Boiler", 0.0, "Geen vraag")
+
+    def get_hp_score(self, current_temp: float, target_temp: float, mpc_power_kw: float) -> DemandScore:
+        # 1. VERZADIGING (Is het warm?)
+        # Als we OP of BOVEN target zitten, is de score 0 (tenzij MPC wil bufferen)
+        if current_temp >= target_temp:
+            # We geven hier GEEN negatieve score, want misschien wil MPC bufferen (zon).
+            # Maar we geven ook geen comfort-punten.
+            pass
+
+        score = 0.0
+        reasons = []
+
+        # 2. NOODGEVAL (Bevriezing)
+        if current_temp < 16.0:
+            score += 4000.0 # Wint van Boiler Urgent, verliest van Boiler Kritiek
+            reasons.append("Kritiek koud")
+
+        # 3. COMFORT TEKORT (Lineair)
+        # 0.5 graad te koud = 100 punten.
+        # 1.0 graad te koud = 200 punten.
+        deficit = max(0, target_temp - current_temp)
+
+        if deficit > 0.05: # Kleine hysterese
+            comfort_score = deficit * 200.0
+            score += comfort_score
+            reasons.append(f"Comfort vraag ({deficit:.1f}°C)")
+
+        # 4. MPC WENS (Bufferen / Efficiency)
+        # Alleen als er GEEN comfort vraag is, is dit "Luxe".
+        # Als er WEL comfort vraag is, zit MPC wens daar vaak al in verwerkt.
+        if mpc_power_kw > 0.1:
+            # Als huis al warm is, is dit 'Solar Bufferen'. Score laag (40).
+            # Als huis koud is, is dit 'Ondersteuning'. Score hoog (+50).
+            base = 40.0 if deficit <= 0 else 50.0
+            score += base
+            reasons.append("Vloer bufferen" if deficit <= 0 else "MPC schema")
+
+        if score > 0:
+            return DemandScore("HeatPump", score, ", ".join(reasons))
+        return DemandScore("HeatPump", 0.0, "Geen vraag")
+
 @dataclass(frozen=True)
 class MPCConfig:
     # Tijdstappen
@@ -29,9 +121,9 @@ class MPCConfig:
     horizon_steps: int = 48  # Kijk 12 uur vooruit (4 * 12)
 
     # Apparaat Limieten (kW)
-    hp_max_kw: float = 3.0       # Max elektrisch vermogen WP
-    boiler_max_kw: float = 2.5   # Max elektrisch vermogen Boiler
-    grid_max_kw: float = 6.0     # Hoofdzekering limiet (bijv 3x25A = ~17kW, maar hier veilig 6)
+    hp_max_kw: float = 1.3       # Max elektrisch vermogen WP
+    boiler_max_kw: float = 2.9   # Max elektrisch vermogen Boiler
+    grid_max_kw: float = 5.0     # Hoofdzekering limiet (bijv 3x25A = ~17kW, maar hier veilig 6)
 
     # --- FYSICA HUIS (THERMISCH) ---
     # Hoeveel kWh is nodig om huis 1 graad op te warmen?
@@ -47,18 +139,24 @@ class MPCConfig:
     tank_loss_kw: float = 0.05            # Stilstandverlies (goede isolatie)
 
     # Doelen
-    tank_min_temp: float = 55.0   # Minimum voor legionella/comfort
-    tank_max_temp: float = 80.0   # Max temperatuur
-    tank_start_temp: float = 40.0 # Koud water inlaat schatting
+#     tank_min_temp: float = 40.0   # Minimum voor legionella/comfort
+    tank_max_temp: float = 50.0   # Max temperatuur
+#     tank_start_temp: float = 40.0 # Koud water inlaat schatting
 
     # Kosten (Wegingsfactoren voor de solver)
     grid_price_eur_per_kwh: float = 0.30
+    solar_buffer_bonus: float = 0.05
     discomfort_cost: float = 50.0  # Hoge straf op koud huis
     switch_cost: float = 0.05      # Kleine straf op aan/uit klapperen
 
     # Comfort Profiel (Graden Celsius)
-    temp_night: float = 18.0    # 22:00 - 06:00
-    temp_day: float = 19.5      # 06:00 - 22:00
+    temp_night: float = 19.0    # 22:00 - 06:00
+    temp_day: float = 20.0    # 06:00 - 22:00
+
+    min_room_temp: float = 15.0
+    max_room_temp: float = 22.0
+
+    boiler_daily_energy_kwh: float = 3.0
 
 @dataclass
 class Plan:
@@ -68,9 +166,9 @@ class Plan:
     boiler_power: float = 0.0
 
 class MPCPlanner:
-    def __init__(self, context: Context, config: MPCConfig):
+    def __init__(self, context: Context):
         self.context = context
-        self.cfg = config
+        self.cfg = MPCConfig()
         self.thermal_model = ThermalModel(Path("thermal_model.pkl"))
         self.nowcaster = ThermalNowCaster() # Voor live correcties
 
@@ -97,19 +195,36 @@ class MPCPlanner:
             logger.warning(f"[MPC] Solver faalde ({status}), fallback naar simpele logica.")
             return self._fallback_plan(horizon)
 
-        # 5. Actie bepalen (Interlock: Boiler wint)
-        action = "OFF"
-        reason = "Idle"
+        # 5. Actie bepalen
+        arbiter = PriorityEvaluator(self.cfg)
 
-        # Drempelwaarde van 100 Watt om ruis te filteren
-        if u_boiler > 0.1:
-            action = "BOILER"
-            reason = f"MPC: Boiler laden ({u_boiler:.1f} kW)"
-        elif u_hp > 0.1:
-            action = "HEAT_PUMP"
-            reason = f"MPC: Verwarmen ({u_hp:.1f} kW)"
+        room_now = getattr(self.context, "room_temp", 20.0)
+        tank_now = getattr(self.context, "tank_temp", 50.0)
+        room_target = self._get_target_temp(self.context.now.time())
 
-        return Plan(action, reason, hp_power=u_hp, boiler_power=u_boiler)
+        arbiter = PriorityEvaluator(self.cfg)
+
+        # Laat ze bieden!
+        boiler_req = arbiter.get_boiler_score(tank_now, u_boiler)
+        hp_req = arbiter.get_hp_score(room_now, room_target, u_hp)
+
+        # De Winnaar
+        if boiler_req.score <= 0 and hp_req.score <= 0:
+           return Plan("OFF", "Verzadigd (Geen vraag)")
+
+        elif boiler_req.score > hp_req.score:
+           return Plan(
+               "BOILER",
+               f"Prioriteit: {boiler_req.reason} (Score {int(boiler_req.score)})",
+               u_hp, u_boiler
+           )
+
+        else:
+           return Plan(
+               "HEAT_PUMP",
+               f"Prioriteit: {hp_req.reason} (Score {int(hp_req.score)})",
+               u_hp, u_boiler
+           )
 
     def _solve_mpc(self, df: pd.DataFrame):
         N = len(df)
@@ -123,7 +238,7 @@ class MPCPlanner:
         P_grid = cp.Variable(N) # Hulpvariabele voor import (>= 0)
 
         # --- INITIAL STATE ---
-        T_room_0 = getattr(self.context, "room_temp", 19.0)
+        T_room_0 = float(getattr(self.context, "room_temp", 19.0))
 
         thermal_residuals = self._calculate_thermal_residuals(df, T_room_0)
 
@@ -138,17 +253,23 @@ class MPCPlanner:
 
         cost = 0
 
+        slack_min_temp = cp.Variable(N, nonneg=True) # Te koud
+        slack_max_temp = cp.Variable(N, nonneg=True) # Te warm
+
+        slack_min = cp.Variable(N, nonneg=True)
+        slack_max = cp.Variable(N, nonneg=True)
+
         # --- LOOP OVER HORIZON ---
         for t in range(N):
             row = df.iloc[t]
 
             # Inputs
-            T_out = float(row["temp"])
+            T_out = float(row.get("temp", 0.0))
             PV = float(row.get("power_corrected", 0.0))
             Load = float(row.get("consumption", 0.2))
 
             # Doel
-            ts_local = row["timestamp"].astimezone()
+            ts_local = row["timestamp"].tz_convert(datetime.now().astimezone().tzinfo)
             T_target = self._get_target_temp(ts_local.time())
 
             # COP Curve (Rendement)
@@ -156,14 +277,12 @@ class MPCPlanner:
 
             # 1. Power Constraints
             constraints += [
-                P_hp[t] >= 0, P_hp[t] <= self.cfg.hp_max_kw,
-                P_boiler[t] >= 0, P_boiler[t] <= self.cfg.boiler_max_kw,
-                # Totale limiet (Interlock software-side enforcement)
+                P_hp[t] <= self.cfg.hp_max_kw,
+                P_boiler[t] <= self.cfg.boiler_max_kw,
                 P_hp[t] + P_boiler[t] <= self.cfg.grid_max_kw,
 
-                # Grid balans (Import kan niet negatief zijn voor kosten)
-                P_grid[t] >= P_hp[t] + P_boiler[t] + Load - PV,
-                P_grid[t] >= 0
+                # Grid balans
+                P_grid[t] >= P_hp[t] + P_boiler[t] + Load - PV
             ]
 
             # 2. Thermische Dynamica (Huis)
@@ -173,11 +292,11 @@ class MPCPlanner:
             phys_change = (heat_in - heat_loss) * (dt / self.cfg.room_capacity_kwh_per_c)
 
             constraints += [
-                T_room[t+1] == T_room[t] + phys_change + thermal_residuals[t]
+                T_room[t+1] == T_room[t] + phys_change + thermal_residuals[t],
 
                 # Comfort bandbreedte (Harde grenzen)
-                T_room[t+1] >= self.cfg.min_room_temp,
-                T_room[t+1] <= self.cfg.max_room_temp
+                T_room[t+1] + slack_min_temp[t] >= self.cfg.min_room_temp,
+                T_room[t+1] - slack_max_temp[t] <= self.cfg.max_room_temp
             ]
 
             # 3. Boiler Accumulatie
@@ -188,6 +307,7 @@ class MPCPlanner:
             # 4. Kostenfunctie
             # A. Euro's
             cost += P_grid[t] * self.cfg.grid_price_eur_per_kwh * dt
+            cost -= P_boiler[t] * self.cfg.solar_buffer_bonus * dt
 
             # B. Comfort Straf (Kwadratisch: beetje koud is ok, heel koud is erg)
             # We straffen alleen als we ONDER target zitten.
@@ -214,7 +334,14 @@ class MPCPlanner:
 
         try:
             # Probeer standaard OSQP solver
-            problem.solve(solver=cp.OSQP, warm_start=True)
+            problem.solve(
+                solver=cp.OSQP,
+                warm_start=False,    # <--- BELANGRIJK: Reset memory
+                max_iter=50000,
+                adaptive_rho=True,
+                eps_abs=1e-2,
+                eps_rel=1e-2
+            )
         except Exception:
             try:
                 # Fallback naar ECOS
@@ -262,11 +389,11 @@ class MPCPlanner:
             # We simuleren de 'natuurlijke' loop van het huis
             ml_delta = self.thermal_model.predict_step(
                 inside=sim_temp,
-                outside=row['temp'],
-                power_factor=0.0, # Verwarming uit
-                supply_temp=20.0, # Kamertemp
-                solar=row.get('pv_estimate', 0),
-                wind=row.get('wind', 0),
+                outside=float(row.get("temp", 0.0)),
+                freq=0.0, # Verwarming UIT
+                supply_temp=25.0, # Kamertemp
+                solar=float(row.get('pv_estimate', 0)),
+                wind=float(row.get('wind', 0)),
                 prev_delta=prev_delta
             )
 
@@ -275,7 +402,7 @@ class MPCPlanner:
 
             # 2. Wat zegt de simpele MPC formule? (Met verwarming UIT)
             # Delta = -Verlies * (Binnen - Buiten) / Capaciteit
-            phys_delta = -Loss_room * (sim_temp - row['temp']) * (dt_hours / C_room)
+            phys_delta = -Loss_room * (sim_temp - float(row.get("temp", 0.0))) * (dt_hours / C_room)
 
             # 3. Het verschil is de 'invloed van het weer' (Zon + Wind + Tocht)
             # Als ML zegt: +0.2 (door zon) en Fysica zegt: -0.1 (door kou),
@@ -287,7 +414,7 @@ class MPCPlanner:
             sim_temp += ml_delta
             prev_delta = ml_delta
 
-        return residuals
+        return np.nan_to_num(residuals, nan=0.0).tolist()
 
     def update_nowcaster(self):
         """
@@ -347,7 +474,7 @@ class MPCPlanner:
             timestamp=datetime.now(timezone.utc),
             room_temp=getattr(self.context, "room_temp", 20.0),
             outside_temp=getattr(self.context, "outside_temp", 10.0),
-            solar_rad=getattr(self.context, "solar_rad", 0.0), # Of uit PV vermogen afleiden
+            solar_rad=getattr(self.context, "current_pv", 0.0), # Of uit PV vermogen afleiden
             wind_speed=getattr(self.context, "wind_speed", 0.0),
             hp_power_factor=power_factor,
             supply_temp=getattr(self.context, "supply_temp", 20.0)

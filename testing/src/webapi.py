@@ -51,7 +51,7 @@ def index(request: Request, explain: str = None):
             "Load Huidig": f"{forecast.load_now:.2f} kW",
             "Prognose Nu": f"{forecast.energy_now:.2f} kWh",
             "Prognose Beste": f"{forecast.energy_best:.2f} kWh",
-            "Opp. Kosten": f"{forecast.opportunity_cost * 100:.1f} %",
+            "Kans kosten": f"{forecast.opportunity_cost * 100:.1f} %",
             "Betrouwbaarheid": f"{forecast.confidence * 100:.1f} %",
             "Bias": f"{forecast.current_bias * 100:.1f} %",
             "Geplande Start": start_str,

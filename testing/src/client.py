@@ -9,17 +9,33 @@ logger = logging.getLogger(__name__)
 
 
 class HAClient:
+    def __init__(self):
+        self.data = {}
+
+    def reload(self):
+        with open("data.json", "r") as f:
+            self.data = json.load(f)
+
     def get_location(self, entity_id):
         return 51.9, 5.3
 
     def get_pv_power(self, entity_id):
-        return 0.4
+        return float(self.data.get("pv_power", 0.0))
 
     def get_load_power(self, entity_id):
-        return 0.1
+        return float(self.data.get("load_power", 0.0))
+
+    def get_room_temperature(self):
+        return float(self.data.get("room_temp", 19.5))
+
+    def get_dhw_temperature(self):
+        return float(self.data.get("dhw_temp", 50.0))
 
     def get_hvac_mode(self, entity_id):
         return HvacMode(HvacMode.OFF)
 
     def get_forecast(self, entity_id):
-        return json.loads('[{"period_start": "2026-01-10T00:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0},{ "period_start": "2026-01-10T00:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T01:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T01:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T02:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T02:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T03:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T03:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T04:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T04:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T05:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T05:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T06:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T06:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T07:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T07:30:00+00:00", "pv_estimate": 0.0006, "pv_estimate10": 0.0006, "pv_estimate90": 0.0006 },{ "period_start": "2026-01-10T08:00:00+00:00", "pv_estimate": 0.0091, "pv_estimate10": 0.008, "pv_estimate90": 0.0103 },{ "period_start": "2026-01-10T08:30:00+00:00", "pv_estimate": 0.024, "pv_estimate10": 0.0217, "pv_estimate90": 0.0252 },{ "period_start": "2026-01-10T09:00:00+00:00", "pv_estimate": 0.0109, "pv_estimate10": 0.008, "pv_estimate90": 0.0137 },{ "period_start": "2026-01-10T09:30:00+00:00", "pv_estimate": 0.0215, "pv_estimate10": 0.017, "pv_estimate90": 0.0249 },{ "period_start": "2026-01-10T10:00:00+00:00", "pv_estimate": 0.1916, "pv_estimate10": 0.0697, "pv_estimate90": 0.4036 },{ "period_start": "2026-01-10T10:30:00+00:00", "pv_estimate": 0.655, "pv_estimate10": 0.6409, "pv_estimate90": 0.655 },{ "period_start": "2026-01-10T11:00:00+00:00", "pv_estimate": 0.6279, "pv_estimate10": 0.5012, "pv_estimate90": 0.6428 },{ "period_start": "2026-01-10T11:30:00+00:00", "pv_estimate": 0.6256, "pv_estimate10": 0.6256, "pv_estimate90": 0.6256 },{ "period_start": "2026-01-10T12:00:00+00:00", "pv_estimate": 0.5552, "pv_estimate10": 0.5065, "pv_estimate90": 0.5692 },{ "period_start": "2026-01-10T12:30:00+00:00", "pv_estimate": 0.6041, "pv_estimate10": 0.591, "pv_estimate90": 0.6084 },{ "period_start": "2026-01-10T13:00:00+00:00", "pv_estimate": 0.5096, "pv_estimate10": 0.5096, "pv_estimate90": 0.5096 },{ "period_start": "2026-01-10T13:30:00+00:00", "pv_estimate": 0.4113, "pv_estimate10": 0.4008, "pv_estimate90": 0.4157 },{ "period_start": "2026-01-10T14:00:00+00:00", "pv_estimate": 0.315, "pv_estimate10": 0.3065, "pv_estimate90": 0.315 },{ "period_start": "2026-01-10T14:30:00+00:00", "pv_estimate": 0.1574, "pv_estimate10": 0.1271, "pv_estimate90": 0.1671 },{ "period_start": "2026-01-10T15:00:00+00:00", "pv_estimate": 0.01, "pv_estimate10": 0.0073, "pv_estimate90": 0.0214 },{ "period_start": "2026-01-10T15:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T16:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T16:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T17:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T17:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T18:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T18:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T19:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T19:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T20:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T20:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T21:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T21:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T22:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T22:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T23:00:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0 },{ "period_start": "2026-01-10T23:30:00+00:00", "pv_estimate": 0, "pv_estimate10": 0, "pv_estimate90": 0}]')
+        return self.data.get("solcast", {})
+
+    def get_weather(self):
+        return self.data.get("weather", {})
