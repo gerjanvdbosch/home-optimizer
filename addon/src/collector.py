@@ -107,9 +107,6 @@ class Collector:
 
         self.context.slot_samples.append(self.context.current_pv)
 
-    def log_snapshot(self):
-        pass
-
     def _update_buffer(self, buffer: deque, value: float) -> float:
         buffer.append(value)
         return float(np.median(buffer))
