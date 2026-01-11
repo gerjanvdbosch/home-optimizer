@@ -33,11 +33,11 @@ class Config:
 
     sensor_home: str = "zone.home"
 
-    database_path: str = "/config/db/database.sqlite"
-    solar_model_path: str = "/config/models/solar_model.joblib"
+    database_path: str = "/data/database.sqlite"
+    solar_model_path: str = "/data/solar_model.joblib"
     solar_model_ratio: float = 0.7
 
-    webapi_host: str = "0.0.0.0"
+    webapi_host: str = "127.0.0.1"
     webapi_port: int = 8000
 
     @staticmethod

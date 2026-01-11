@@ -232,7 +232,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 name="Model",
                 line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
                 opacity=0.6,
-                # visible="legendonly",
+                #visible="legendonly",
             )
         )
 

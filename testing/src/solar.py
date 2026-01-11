@@ -433,8 +433,6 @@ class SolarForecaster:
             df_calc, current_time, current_load_kw, self.context.stable_pv
         )
 
-        context.current_bias = round(self.nowcaster.current_ratio, 3)
-
         self.context.forecast_df = df_calc
 
         return status, context
