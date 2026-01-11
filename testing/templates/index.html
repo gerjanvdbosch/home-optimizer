@@ -178,8 +178,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: var(--bg-color);
-            opacity: 0.8;
+            background-color: rgb(17, 17, 17, 0.9);
             z-index: 9999; /* Boven alles */
             justify-content: center;
             align-items: center;
@@ -281,7 +280,7 @@
 
     <div class="card">
         <div class="header">
-            <h3 style="margin: 0;">Wat is belangrijk?</h3>
+            <h3 style="margin: 0;">Importance</h3>
         </div>
         <div class="chart-container">
             {{ importance_plot | safe }}
@@ -290,7 +289,7 @@
 
     <div class="card">
         <div class="header">
-            <h3 style="margin: 0;">Hoe reageert het model?</h3>
+            <h3 style="margin: 0;">Behavior</h3>
         </div>
         <div class="chart-container">
             {{ behavior_plot | safe }}

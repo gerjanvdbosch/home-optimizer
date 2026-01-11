@@ -16,6 +16,8 @@ class WeatherClient:
         self.base_url = "https://api.open-meteo.com/v1/forecast"
 
     def get_forecast(self):
+        return pd.DataFrame({"timestamp": [], "temp": [], "cloud": [], "wind": [], "precipitation": [], "radiation": [], "diffuse": [], "tilted": []})
+
         sensors = {
             "temperature_2m",
             "cloud_cover",

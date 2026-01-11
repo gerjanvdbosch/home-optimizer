@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import json
 
 from context import HvacMode
 

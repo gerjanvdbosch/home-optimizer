@@ -42,6 +42,8 @@ class Coordinator:
 
         plan = self.planner.create_plan()
 
+        logger.debug(f"[Coordinator] Generated plan: {plan}")
+
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
 

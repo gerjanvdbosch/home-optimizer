@@ -106,7 +106,7 @@ class ThermalModel:
             # Fallback Physics (Isolatiewaarde gok)
             loss = (inside - outside) * 0.015
             # Gain is afhankelijk van frequentie en aanvoer
-            power_factor = freq / 70.0
+            power_factor = freq / 100.0
             gain = 0.35 * power_factor
             return (gain - loss) + (0.0001 * solar)
 
@@ -171,7 +171,7 @@ class ThermalPlanner:
             # Als we moeten inhalen, doen we dat op hoog vermogen.
             # Hoe kouder buiten, hoe hoger de benodigde aanvoer (stooklijn).
             # Dit is een simpele stooklijn-gok voor de simulatie:
-            boost_freq = 70.0 # Hz
+            boost_freq = 75.0 # Hz
             boost_supply = 40.0 if row['temp'] < 5 else 35.0
 
             # Vraag het model: Wat gebeurt er als we VOL GAS geven?
