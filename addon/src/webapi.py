@@ -53,7 +53,7 @@ def index(request: Request, explain: str = None):
             "Prognose Beste": f"{forecast.energy_best:.2f} kWh",
             "Opp. Kosten": f"{forecast.opportunity_cost * 100:.1f} %",
             "Betrouwbaarheid": f"{forecast.confidence * 100:.1f} %",
-            "Bias": f"{forecast.current_bias:.2f}",
+            "Bias": f"{forecast.current_bias * 100:.1f} %",
             "Geplande Start": start_str,
         }
 
@@ -671,8 +671,8 @@ def _get_behavior_plot_plotly(request: Request) -> str:
 
         # 2. Kies de features die we willen inspecteren
         # We pakken hardcoded de 3 interessantste, dat is sneller dan eerst sorteren.
-        features_to_plot = ["pv_estimate10", "pv_estimate", "pv_estimate10"]
-        feature_labels = ["Solcast Min (kW)", "Solcast (kW)", "Solcast Max (kW)"]
+        features_to_plot = ["pv_estimate10", "radiation", "pv_estimate10"]
+        feature_labels = ["Solcast Min (kW)", "Straling", "Solcast Max (kW)"]
 
         # 3. Maak Subplots (1 rij, 3 kolommen)
         fig = make_subplots(
