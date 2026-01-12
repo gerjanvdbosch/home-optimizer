@@ -10,7 +10,7 @@ class BoilerConfig:
     volume_liters: float = 200.0
     power_kw: float = 2.2
     target_temp: float = 50.0
-    min_temp: float = 30.0
+    min_temp: float = 25.0
     max_temp: float = 60.0
     loss_coef: float = 0.5
     deadline_hour: int = 17
