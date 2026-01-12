@@ -12,8 +12,6 @@ from collector import Collector
 from client import HAClient
 from planner import Planner
 from database import Database
-from dhw import DhwMachine
-from climate import ClimateMachine
 from webapi import api
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -28,8 +26,6 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 class Coordinator:
     def __init__(self, context: Context, config: Config, collector: Collector):
         self.planner = Planner(context, config)
-        self.dhw_machine = DhwMachine(context)
-        self.climate_machine = ClimateMachine(context)
         self.context = context
         self.config = config
         self.collector = collector
@@ -38,11 +34,7 @@ class Coordinator:
         self.collector.update_sensors()
 
         self.context.now = datetime.now(timezone.utc)
-
-        plan = self.planner.create_plan()
-
-        self.dhw_machine.process(plan)
-        self.climate_machine.process(plan)
+        self.planner.create_plan()
 
     def train(self):
         cutoff_date = self.context.now - timedelta(days=730)
