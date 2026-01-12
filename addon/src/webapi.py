@@ -3,8 +3,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 
-from plotly.subplots import make_subplots
-from sklearn.inspection import partial_dependence, permutation_importance
+from sklearn.inspection import permutation_importance
 from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
@@ -26,7 +25,6 @@ def index(request: Request, explain: str = None):
     # Haal de HTML div string op in plaats van een plaatje
     plot_html = _get_solar_forecast_plot(request)
     importance_html = ""
-    behavior_html = ""
 
     coordinator = request.app.state.coordinator
     context = coordinator.context
@@ -61,7 +59,6 @@ def index(request: Request, explain: str = None):
         if explain == "1":
             explanation = _get_explanation_data(coordinator)
             importance_html = _get_importance_plot_plotly(request)
-            behavior_html = _get_behavior_plot_plotly(request)
 
     return templates.TemplateResponse(
         "index.html",
@@ -69,7 +66,6 @@ def index(request: Request, explain: str = None):
             "request": request,
             "forecast_plot": plot_html,
             "importance_plot": importance_html,
-            "behavior_plot": behavior_html,
             "details": details,
             "explanation": explanation,
         },
@@ -642,87 +638,3 @@ def _get_importance_plot_plotly(request: Request) -> str:
     return pio.to_html(
         fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
-
-
-def _get_behavior_plot_plotly(request: Request) -> str:
-    """
-    Genereert Partial Dependence Plots (PDP) voor de belangrijkste fysieke features.
-    """
-    coordinator = request.app.state.coordinator
-    forecaster = coordinator.planner.forecaster
-    database = coordinator.collector.database
-
-    if not forecaster.model.is_fitted:
-        return ""
-
-    # 1. Data ophalen (Laatste 14 dagen is genoeg voor gedrag)
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
-    df_hist = database.get_forecast_history(cutoff_date)
-
-    # Filter op daglicht
-    is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
-    df_day = df_hist[is_daytime].copy()
-
-    if len(df_day) < 50:
-        return "<div class='p-4 text-muted'>Te weinig data voor gedragsanalyse.</div>"
-
-    try:
-        X = forecaster.model._prepare_features(df_day)
-
-        # 2. Kies de features die we willen inspecteren
-        # We pakken hardcoded de 3 interessantste, dat is sneller dan eerst sorteren.
-        features_to_plot = ["pv_estimate10", "uncertainty", "pv_estimate90"]
-        feature_labels = ["Solcast Min (kW)", "Onzekerheid", "Solcast Max (kW)"]
-
-        # 3. Maak Subplots (1 rij, 3 kolommen)
-        fig = make_subplots(
-            rows=1, cols=3, subplot_titles=feature_labels, horizontal_spacing=0.05
-        )
-
-        # 4. Berekenen en tekenen per feature
-        for i, feature in enumerate(features_to_plot):
-            if feature not in X.columns:
-                continue
-
-            # Dit is het zware werk: Sklearn rekent de lijn uit
-            pdp_results = partial_dependence(
-                forecaster.model.model, X, [feature], grid_resolution=20, kind="average"
-            )
-
-            x_vals = pdp_results["grid_values"][0]
-            y_vals = pdp_results["average"][0]
-
-            # Voeg lijn toe aan de subplot
-            fig.add_trace(
-                go.Scatter(
-                    x=x_vals,
-                    y=y_vals,
-                    mode="lines",
-                    name=feature,
-                    line=dict(width=2, color="#4fa8ff"),  # Mooi blauw
-                    showlegend=False,
-                ),
-                row=1,
-                col=i + 1,
-            )
-
-        # 5. Opmaak
-        fig.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="rgb(28, 28, 28)",
-            plot_bgcolor="rgb(28, 28, 28)",
-            margin=dict(l=20, r=20, t=50, b=20),
-            height=300,  # Niet te hoog maken
-            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
-        )
-
-        return pio.to_html(
-            fig,
-            full_html=False,
-            include_plotlyjs=False,
-            config={"displayModeBar": False},
-        )
-
-    except Exception as e:
-        logger.error(f"Fout bij behavior plot: {e}")
-        return "<div class='p-4 text-danger'>Kon gedrag niet analyseren.</div>"

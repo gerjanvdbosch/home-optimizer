@@ -25,25 +25,3 @@ class Planner:
         status, forecast = self.forecaster.analyze(now, self.context.stable_load)
 
         self.context.forecast = forecast
-
-
-#         logger.info(f"[Planner] Status {status}")
-#
-#         if forecast is not None:
-#             if forecast.planned_start is None:
-#                 forecast.planned_start = datetime.now(timezone.utc).replace(
-#                     hour=16, minute=0, second=0, microsecond=0
-#                 )
-#
-#                 if forecast.planned_start < now:
-#                     forecast.planned_start = None
-
-#             logger.info(f"[Planner] Reason {forecast.reason}")
-#             logger.info(f"[Planner] PV now {forecast.actual_pv}kW")
-#             logger.info(f"[Planner] Load now {forecast.load_now}kW")
-#             logger.info(f"[Planner] Forecast now {forecast.energy_now}kW")
-#             logger.info(f"[Planner] Forecast best {forecast.energy_best}kW")
-#             logger.info(f"[Planner] Opportunity cost {forecast.opportunity_cost}")
-#             logger.info(f"[Planner] Confidence {forecast.confidence}")
-#             logger.info(f"[Planner] Bias {forecast.current_bias}")
-#             logger.info(f"[Planner] Planned start {forecast.planned_start}")
