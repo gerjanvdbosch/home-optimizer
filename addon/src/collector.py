@@ -78,6 +78,8 @@ class Collector:
 
         self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
 
+        self.context.dhw_temp = self.client.get_dhw_temp(self.config.sensor_dhw_temp)
+
         logger.info("[Collector] Sensors updated")
 
     def update_pv(self):

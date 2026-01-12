@@ -37,9 +37,11 @@ class Coordinator:
     def tick(self):
         self.collector.update_sensors()
 
-        self.context.now = datetime.now(timezone.utc)
+        self.context.now = datetime.now(timezone.utc).replace(hour=15)
 
         plan = self.planner.create_plan()
+
+        logger.info(f"[Coordinator] Plan: {plan.action} - {plan.reason}, MPC Power: {plan.mpc_power:.2f}kW")
 
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)

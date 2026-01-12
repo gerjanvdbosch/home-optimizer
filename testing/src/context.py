@@ -51,15 +51,11 @@ class Context:
     forecast: SolarContext | None = None
     forecast_df: pd.DataFrame | None = None
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
-    load_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
+    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=2))
+    load_buffer: deque = field(default_factory=lambda: deque(maxlen=2))
 
     current_slot_start: datetime | None = None
     slot_samples: list[float] = field(default_factory=list)
 
-    last_state = None
-
-    room_temp: float = 19.5
-    tank_temp: float = 50.0
-    outside_temp: float = 1.0
-    daily_boiler_kwh: float = 0.0
+    room_temp: float = 0.0
+    dhw_temp: float = 0.0

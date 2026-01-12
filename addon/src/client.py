@@ -43,6 +43,9 @@ class HAClient:
         }.get(self._get_state(entity_id))
         return HvacMode(hvac)
 
+    def get_dhw_temp(self, entity_id):
+        return float(self._get_state(entity_id))
+
     def get_forecast(self, entity_id):
         attributes = self._get_attributes(entity_id)
         if not attributes:

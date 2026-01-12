@@ -27,6 +27,7 @@ class Config:
 
     sensor_pv: str = "sensor.pv_output"
     sensor_load: str = "sensor.stroomverbruik"
+    sensor_dhw_temp: str = "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
     sensor_solcast: str = "sensor.solcast_pv_forecast_forecast_today"
     sensor_home: str = "zone.home"

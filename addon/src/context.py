@@ -56,3 +56,5 @@ class Context:
 
     current_slot_start: datetime | None = None
     slot_samples: list[float] = field(default_factory=list)
+
+    dhw_temp: float = 0.0
