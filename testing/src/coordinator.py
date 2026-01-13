@@ -41,8 +41,6 @@ class Coordinator:
 
         plan = self.planner.create_plan()
 
-        logger.info(f"[Coordinator] Plan: {plan.action} - {plan.reason}, MPC Power: {plan.mpc_power:.2f}kW")
-
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
 

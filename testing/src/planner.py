@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from context import Context
 from config import Config
 from solar import SolarForecaster
+from optimizer import Optimizer
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class Plan:
 class Planner:
     def __init__(self, context: Context, config: Config):
         self.forecaster = SolarForecaster(config, context)
+        self.optimizer = Optimizer(config.pv_max_kw, config.dhw_duration_hours)
         self.context = context
 
     def create_plan(self):
@@ -23,6 +25,10 @@ class Planner:
         status, forecast = self.forecaster.analyze(now, self.context.stable_load)
 
         self.context.forecast = forecast
+
+        status, context = self.optimizer.optimize(self.context.forecast_df, now)
+
+        logger.info(f"[Planner] Status {status}, Reason: {context.reason}, Energy Now: {context.energy_best}kW")
 
 
 #         logger.info(f"[Planner] Status {status}")
