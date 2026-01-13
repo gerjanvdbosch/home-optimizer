@@ -15,15 +15,12 @@ class Plan:
     reason: str
     mpc_power: float = 0.0
 
+
 class Planner:
     def __init__(self, context: Context, config: Config):
         self.forecaster = SolarForecaster(config, context)
         self.context = context
-        mpc_cfg = BoilerConfig(
-            volume_liters=200,
-            power_kw=2.2,
-            deadline_hour=17
-        )
+        mpc_cfg = BoilerConfig(volume_liters=200, power_kw=2.2, deadline_hour=17)
         self.mpc = BoilerMPC(mpc_cfg)
 
     def create_plan(self):
@@ -33,7 +30,7 @@ class Planner:
         self.context.forecast = forecast
 
         df_future = self.context.forecast_df[
-            self.context.forecast_df['timestamp'] >= now
+            self.context.forecast_df["timestamp"] >= now
         ].copy()
 
         temp_now = self.context.dhw_temp
@@ -51,10 +48,12 @@ class Planner:
         predicted_temp = result_df.iloc[0]["mpc_temp"]
 
         # Drempelwaarde voor relais (b.v. 500W)
-        should_heat = power_cmd > 0.5
+        should_heat = power_cmd > 1.0
 
         if should_heat:
-            is_solar = result_df.iloc[0]["power_corrected"] > (self.context.stable_load + 1.0)
+            is_solar = result_df.iloc[0]["power_corrected"] > (
+                self.context.stable_load + 1.0
+            )
             reason_src = "Zonnestroom" if is_solar else "Deadline/Grid"
 
             # GEBRUIK HIER predicted_temp IN DE TEKST:
@@ -72,4 +71,3 @@ class Planner:
                 msg = f"In rust (Verwacht: {predicted_temp:.1f}°C)"
 
             return Plan("IDLE", msg, power_cmd)
-

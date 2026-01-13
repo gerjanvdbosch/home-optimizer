@@ -51,7 +51,7 @@ class Planner:
         predicted_temp = result_df.iloc[0]["mpc_temp"]
 
         # Drempelwaarde voor relais (b.v. 500W)
-        should_heat = power_cmd > 0.5
+        should_heat = power_cmd > 1.0
 
         if should_heat:
             is_solar = result_df.iloc[0]["power_corrected"] > (self.context.stable_load + 1.0)

@@ -1,6 +1,5 @@
 import cvxpy as cp
 import pandas as pd
-import numpy as np
 import logging
 from dataclasses import dataclass
 
@@ -11,7 +10,7 @@ class BoilerConfig:
     volume_liters: float = 200.0
     power_kw: float = 2.2
     target_temp: float = 50.0
-    min_temp: float = 40.0
+    min_temp: float = 30.0
     max_temp: float = 60.0
     loss_coef: float = 0.5
     deadline_hour: int = 17
@@ -27,7 +26,8 @@ class BoilerMPC:
     def solve(self, df_forecast: pd.DataFrame, current_temp: float, base_load_kw: float = 0.2):
         df = df_forecast.copy().reset_index(drop=True)
         N = len(df)
-        if N == 0: return None
+        if N == 0:
+            return None
 
         dt = (df["timestamp"].iloc[1] - df["timestamp"].iloc[0]).total_seconds() / 3600.0
 
@@ -83,16 +83,18 @@ class BoilerMPC:
         # --- OBJECTIVE ---
 
         # Kosten:
-        cost_solar = cp.sum(P_boiler * self.cfg.solar_price)
-        cost_grid_premium = cp.sum(P_grid * (self.cfg.grid_price - self.cfg.solar_price))
+        SCALE_FACTOR = 1000.0
 
-        # Penalties (Heel hoog):
-        # 1000 euro straf per graad te koud -> Solver doet ALLES om dit te voorkomen
-        penalty_min = cp.sum(slack_min) * 1000
-        penalty_target = slack_target * 2000
+        cost_solar = cp.sum(P_boiler * self.cfg.solar_price) * SCALE_FACTOR
+        cost_grid_premium = cp.sum(P_grid * (self.cfg.grid_price - self.cfg.solar_price)) * SCALE_FACTOR
 
-        # Smoothness (klein beetje)
-        smoothness = 0.01 * cp.sum_squares(P_boiler[1:] - P_boiler[:-1])
+        # Penalties (Laten we zo, of iets verlagen)
+        # penalty_min zorgt dat we boven de 25 graden blijven
+        penalty_min = cp.sum(slack_min) * 5000
+        penalty_target = slack_target * 5000
+
+        # Smoothness iets agressiever om 'noise' van 0.68kW te killen
+        smoothness = 1.0 * cp.sum_squares(P_boiler[1:] - P_boiler[:-1])
 
         objective = cp.Minimize(
             cost_solar + cost_grid_premium + penalty_min + penalty_target + smoothness
@@ -115,7 +117,7 @@ class BoilerMPC:
                 continue
 
         if status == "failed":
-            logger.error(f"[MPC] All solvers failed. Fallback logic.")
+            logger.error("[MPC] All solvers failed. Fallback logic.")
             return None
 
         # Resultaten
