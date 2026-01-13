@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class BoilerConfig:
     volume_liters: float = 200.0
@@ -18,24 +17,19 @@ class BoilerConfig:
 
     # Kosten
     grid_price: float = 0.22
-    solar_price: float = 0.05  # Opportunity cost
-
+    solar_price: float = 0.05     # Opportunity cost
 
 class BoilerMPC:
     def __init__(self, config: BoilerConfig):
         self.cfg = config
 
-    def solve(
-        self, df_forecast: pd.DataFrame, current_temp: float, base_load_kw: float = 0.2
-    ):
+    def solve(self, df_forecast: pd.DataFrame, current_temp: float, base_load_kw: float = 0.2):
         df = df_forecast.copy().reset_index(drop=True)
         N = len(df)
         if N == 0:
             return None
 
-        dt = (
-            df["timestamp"].iloc[1] - df["timestamp"].iloc[0]
-        ).total_seconds() / 3600.0
+        dt = (df["timestamp"].iloc[1] - df["timestamp"].iloc[0]).total_seconds() / 3600.0
 
         # Physics
         kwh_per_degree = self.cfg.volume_liters * 0.001163
@@ -49,8 +43,8 @@ class BoilerMPC:
 
         # SLACK VARIABELEN (De "Redders in Nood")
         # Dit zijn variabelen die meten hoeveel we de regels overtreden
-        slack_min = cp.Variable(N, nonneg=True)  # Hoeveel graden te koud (ondergrens)?
-        slack_target = cp.Variable(nonneg=True)  # Hoeveel graden te koud (deadline)?
+        slack_min = cp.Variable(N, nonneg=True)      # Hoeveel graden te koud (ondergrens)?
+        slack_target = cp.Variable(nonneg=True)      # Hoeveel graden te koud (deadline)?
 
         # --- CONSTRAINTS ---
         constraints = []
@@ -62,19 +56,17 @@ class BoilerMPC:
 
         for t in range(N):
             # 2. Fysica
-            constraints.append(
-                T[t + 1] == T[t] + (P_boiler[t] * temp_gain_per_kw) - temp_loss_step
-            )
+            constraints.append(T[t+1] == T[t] + (P_boiler[t] * temp_gain_per_kw) - temp_loss_step)
 
             # 3. Boiler Grenzen
             constraints.append(P_boiler[t] >= 0)
             constraints.append(P_boiler[t] <= self.cfg.power_kw)
 
             # 4. Temperatuur Grenzen (SOFT CONSTRAINT)
-            constraints.append(T[t + 1] + slack_min[t] >= self.cfg.min_temp)
+            constraints.append(T[t+1] + slack_min[t] >= self.cfg.min_temp)
 
             # Max temp mag hard blijven (veiligheid), of ook soft maken:
-            constraints.append(T[t + 1] <= self.cfg.max_temp)
+            constraints.append(T[t+1] <= self.cfg.max_temp)
 
             # 5. Grid Balans
             constraints.append(P_grid[t] >= P_boiler[t] - excess_solar[t])
@@ -91,20 +83,18 @@ class BoilerMPC:
         # --- OBJECTIVE ---
 
         # Kosten:
-        SCALE = 10000.0
+        SCALE_FACTOR = 1000.0
 
-        # Kosten (x SCALE)
-        cost_solar = cp.sum(P_boiler * self.cfg.solar_price) * SCALE
-        cost_grid_premium = (
-            cp.sum(P_grid * (self.cfg.grid_price - self.cfg.solar_price)) * SCALE
-        )
+        cost_solar = cp.sum(P_boiler * self.cfg.solar_price) * SCALE_FACTOR
+        cost_grid_premium = cp.sum(P_grid * (self.cfg.grid_price - self.cfg.solar_price)) * SCALE_FACTOR
 
-        # Penalties (Laten we zo, die zijn al groot genoeg)
+        # Penalties (Laten we zo, of iets verlagen)
+        # penalty_min zorgt dat we boven de 25 graden blijven
         penalty_min = cp.sum(slack_min) * 5000
-        penalty_target = slack_target * 100000  # Enorme klap als deadline gemist wordt
+        penalty_target = slack_target * 5000
 
-        # Smoothness: Agressiever (x10) om 'geklapper' van 0.04kW tegen te gaan
-        smoothness = 10.0 * cp.sum_squares(P_boiler[1:] - P_boiler[:-1])
+        # Smoothness iets agressiever om 'noise' van 0.68kW te killen
+        smoothness = 1.0 * cp.sum_squares(P_boiler[1:] - P_boiler[:-1])
 
         objective = cp.Minimize(
             cost_solar + cost_grid_premium + penalty_min + penalty_target + smoothness
