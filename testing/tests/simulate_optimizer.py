@@ -52,18 +52,28 @@ def run_simulation():
     now = datetime(2024, 6, 21, 7, 0, 0) # 7 uur 's ochtends
     df = generate_dummy_data(now)
 
-    # Optimizer config
-    dhw_duration = 1.0 # uur
-    dhw_power = 2.7    # kW
-    optimizer = Optimizer(pv_max_kw=2.0, duration_hours=dhw_duration, dhw_power_kw=dhw_power)
+    # 1. Input parameters
+    current_water_temp = 30.0 # Koud water
+    target_water_temp = 55.0  # Heet water
+    outside_temp = 1.0
+
+    # 2. Initialiseer optimizer en BEREKEN HET PROFIEL
+    optimizer = Optimizer(pv_max_kw=4.0)
+
+    # Dit berekent nu: [1.7, 2.0, 2.3, 2.7, 2.7, ...] afhankelijk van temperatuur
+    profile = optimizer.calculate_profile(current_water_temp, target_water_temp, outside_temp=outside_temp)
 
     print(f"--- Start Simulatie @ {now} ---")
-    status, context = optimizer.optimize(df, now)
+    print(f"Berekend profiel (kW): {profile}")
+    print(f"Totale duur: {len(profile) * 15} minuten")
+
+    status, context = optimizer.optimize(df, now, profile)
 
     print(f"Besluit: {status}")
     print(f"Reden: {context.reason}")
-    print(f"Geplande start: {context.planned_start}")
-    print(f"Verwachte zonne-energie in boiler: {context.energy_best:.2f} kWh")
+    if context.planned_start:
+        print(f"Geplande start: {context.planned_start}")
+        print(f"Verwachte zonne-energie in boiler: {context.energy_best:.2f} kWh")
 
     # --- PLOTTEN ---
     plt.figure(figsize=(12, 6))
@@ -73,24 +83,41 @@ def run_simulation():
 
     # 2. Het geplande blok
     if context.planned_start:
-        start_idx = df[df["timestamp"] == context.planned_start].index[0]
-        steps = int(dhw_duration * 4)
+        # Zoek waar de starttijd zit in de dataframe
+        mask = df["timestamp"] == context.planned_start
+        if mask.any():
+            start_idx = df[mask].index[0]
 
-        dhw_profile = np.zeros(len(df))
-        dhw_profile[start_idx : start_idx + steps] = dhw_power
+            # AANPASSING: Gebruik de lengte en waarden van 'profile'
+            steps = len(profile)
 
-        # Plot de DHW lijn
-        plt.plot(df["timestamp"], dhw_profile, label="Geplande DHW Run (kW)", color="blue", linewidth=2, linestyle="--")
+            # Maak een array met nullen ter grootte van de hele grafiek
+            dhw_profile_plot = np.zeros(len(df))
 
-        # Vul de oppervlakte in die overlapt met zon (Self Consumption)
-        overlap = np.minimum(df["power_corrected"], dhw_profile)
-        plt.fill_between(df["timestamp"], 0, overlap, color="green", alpha=0.3, label="Direct Zonneverbruik")
+            # Zorg dat we niet buiten de array schrijven als de start heel laat is
+            end_idx = start_idx + steps
+            if end_idx > len(df):
+                # Knip het profiel af als het buiten de grafiek valt
+                actual_steps = len(df) - start_idx
+                dhw_profile_plot[start_idx:] = profile[:actual_steps]
+            else:
+                # Plak het berekende profiel (de ramp-up) in de plot array
+                dhw_profile_plot[start_idx : end_idx] = profile
 
-        # Vul de oppervlakte in die Grid is (Grijs)
-        grid_needed = np.maximum(0, dhw_profile - df["power_corrected"])
-        # We plotten dit "bovenop" de zon visueel, of gewoon apart
-        # Hieronder: simpel visueel trucje, vul rood in waar DHW > PV
-        plt.fill_between(df["timestamp"], df["power_corrected"], dhw_profile, where=(dhw_profile > df["power_corrected"]), color="red", alpha=0.3, label="Grid Import")
+            # Plot de DHW lijn (Blauw stippellijn)
+            plt.plot(df["timestamp"], dhw_profile_plot, label="Geplande DHW Profiel (kW)", color="blue", linewidth=2, linestyle="--")
+
+            # Vul de oppervlakte in die overlapt met zon (Groen - Gratis energie)
+            overlap = np.minimum(df["power_corrected"], dhw_profile_plot)
+            plt.fill_between(df["timestamp"], 0, overlap, color="green", alpha=0.3, label="Direct Zonneverbruik")
+
+            # Vul de oppervlakte in die Grid is (Rood - Import)
+            # Waar DHW > Zon, moeten we importeren
+            plt.fill_between(df["timestamp"], df["power_corrected"], dhw_profile_plot,
+                             where=(dhw_profile_plot > df["power_corrected"]),
+                             color="red", alpha=0.3, label="Grid Import")
+        else:
+            print("Waarschuwing: Geplande starttijd valt buiten plot bereik.")
 
     plt.title("Solar DHW Optimalisatie (CVXPY)")
     plt.ylabel("Vermogen (kW)")

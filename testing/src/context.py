@@ -35,7 +35,6 @@ class SolarContext:
     reason: str
     planned_start: Optional[datetime] = None
     current_bias: float = 1.0
-    solar_coverage_pct: float = 0 # Hoeveel % van de run is groen?
 
 
 @dataclass
