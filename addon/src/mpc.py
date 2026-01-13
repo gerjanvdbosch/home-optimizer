@@ -91,20 +91,20 @@ class BoilerMPC:
         # --- OBJECTIVE ---
 
         # Kosten:
-        SCALE_FACTOR = 1000.0
+        SCALE = 10000.0
 
-        cost_solar = cp.sum(P_boiler * self.cfg.solar_price) * SCALE_FACTOR
+        # Kosten (x SCALE)
+        cost_solar = cp.sum(P_boiler * self.cfg.solar_price) * SCALE
         cost_grid_premium = (
-            cp.sum(P_grid * (self.cfg.grid_price - self.cfg.solar_price)) * SCALE_FACTOR
+            cp.sum(P_grid * (self.cfg.grid_price - self.cfg.solar_price)) * SCALE
         )
 
-        # Penalties (Laten we zo, of iets verlagen)
-        # penalty_min zorgt dat we boven de 25 graden blijven
+        # Penalties (Laten we zo, die zijn al groot genoeg)
         penalty_min = cp.sum(slack_min) * 5000
-        penalty_target = slack_target * 5000
+        penalty_target = slack_target * 100000  # Enorme klap als deadline gemist wordt
 
-        # Smoothness iets agressiever om 'noise' van 0.68kW te killen
-        smoothness = 1.0 * cp.sum_squares(P_boiler[1:] - P_boiler[:-1])
+        # Smoothness: Agressiever (x10) om 'geklapper' van 0.04kW tegen te gaan
+        smoothness = 10.0 * cp.sum_squares(P_boiler[1:] - P_boiler[:-1])
 
         objective = cp.Minimize(
             cost_solar + cost_grid_premium + penalty_min + penalty_target + smoothness
