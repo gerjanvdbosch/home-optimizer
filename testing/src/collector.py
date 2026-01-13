@@ -81,7 +81,6 @@ class Collector:
         )
 
         self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
-
         self.context.room_temp = self.client.get_room_temp()
         self.context.dhw_temp = self.client.get_dhw_temp()
 

@@ -34,11 +34,7 @@ class Coordinator:
         self.collector.update_sensors()
 
         self.context.now = datetime.now(timezone.utc)
-        plan = self.planner.create_plan()
-
-        logger.info(
-            f"[Coordinator] Plan: {plan.action} - {plan.reason}, MPC Power: {plan.mpc_power:.2f}kW"
-        )
+        self.planner.create_plan()
 
     def train(self):
         cutoff_date = self.context.now - timedelta(days=730)

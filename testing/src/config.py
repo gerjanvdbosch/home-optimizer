@@ -7,11 +7,6 @@ from dataclasses import dataclass
 
 @dataclass
 class Config:
-    temp_night: float = 19.0
-    temp_morning: float = 19.5
-    temp_day: float = 19.5
-    temp_evening: float = 20.0
-
     latitude: float = 52.0
     longitude: float = 5.0
 
