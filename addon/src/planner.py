@@ -44,7 +44,7 @@ class Planner:
         status, context = opt.optimize(self.context.forecast_df, now, profile)
 
         logger.info(
-            f"[Planner] Status {status}, Reason: {context.reason}, Energy Now: {context.energy_best}kW"
+            f"[Planner] Status {status}, Reason: {context.reason}, Energy Best: {context.energy_best}kWh"
         )
 
 
