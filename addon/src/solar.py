@@ -106,7 +106,6 @@ class SolarModel:
             "temp",
             "cloud",
             "wind",
-            "precipitation",
             "radiation",
             "diffuse",
             "tilted",

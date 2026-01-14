@@ -50,13 +50,13 @@ def generate_dummy_data(start_time, hours=24):
 
 def run_simulation():
     # Setup
-    now = datetime(2024, 6, 21, 7, 0, 0) # 7 uur 's ochtends
+    now = datetime(2024, 6, 21, 7, 0, 0).replace(tzinfo=datetime.now().astimezone().tzinfo)  # Zomertijd
     df = generate_dummy_data(now)
 
     # 1. Input parameters
     current_water_temp = 30.0 # Koud water
-    target_water_temp = 55.0  # Heet water
-    outside_temp = 1.0
+    target_water_temp = 50.0  # Heet water
+    outside_temp = 5.0
 
     # 2. Initialiseer optimizer en BEREKEN HET PROFIEL
     optimizer = Optimizer(pv_max_kw=4.0)

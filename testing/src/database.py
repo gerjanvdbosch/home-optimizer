@@ -28,7 +28,6 @@ class SolarForecast(Base):
     temp = Column(Float)
     cloud = Column(Float)
     wind = Column(Float)
-    precipitation = Column(Float)
     radiation = Column(Float)
     diffuse = Column(Float)
     tilted = Column(Float)

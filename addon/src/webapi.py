@@ -493,7 +493,6 @@ def _get_explanation_data(coordinator) -> dict:
             "tilted": "Dakhelling Effect",
             "uncertainty": "Onzekerheid",
             "wind": "Wind",
-            "precipitation": "Neerslag",
             "doy_cos": "Seizoen",
             "doy_sin": "Seizoen (Cyclisch)",
         }
@@ -596,7 +595,6 @@ def _get_importance_plot_plotly(request: Request) -> str:
         "tilted": "Dakhelling Effect",
         "uncertainty": "Onzekerheid",
         "wind": "Wind",
-        "precipitation": "Neerslag",
         "doy_cos": "Seizoen",
         "doy_sin": "Seizoen (Cyclisch)",
     }

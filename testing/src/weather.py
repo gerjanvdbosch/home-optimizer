@@ -20,7 +20,6 @@ class WeatherClient:
                 "temp": minutely["temperature_2m"],
                 "cloud": minutely["cloud_cover"],
                 "wind": minutely["wind_speed_10m"],
-                "precipitation": minutely["precipitation"],
                 "radiation": minutely["shortwave_radiation_instant"],
                 "diffuse": minutely["diffuse_radiation_instant"],
                 "tilted": minutely["global_tilted_irradiance_instant"],
