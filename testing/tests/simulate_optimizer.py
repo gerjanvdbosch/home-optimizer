@@ -43,6 +43,18 @@ def generate_dummy_data(start_time, hours=24):
     noise = np.random.normal(0, 0.1, len(pv_raw))
     df["power_corrected"] = (pv_raw + noise).clip(0)
 
+    # --- TOEVOEGING: Temperatuur Curve ---
+    # Temperatuur loopt vaak iets achter op de zon (piek rond 15:00 - 16:00)
+    # Basis: 12 graden, Variatie: +/- 6 graden
+    temp_base = 12
+    temp_amp = 6
+    # Sinus golf verschoven zodat piek rond 15u ligt
+    temp_raw = temp_base + temp_amp * np.sin((x - 9) * (np.pi / 12))
+
+    # Ruis op temperatuur
+    temp_noise = np.random.normal(0, 0.2, len(temp_raw))
+    df["outside_temp"] = temp_raw + temp_noise
+
     # Scenario: Wat als er HEEL weinig zon is? (Zet uncomment hieronder om te testen)
     # df["power_corrected"] = df["power_corrected"] * 0.1
 
@@ -54,15 +66,17 @@ def run_simulation():
     df = generate_dummy_data(now)
 
     # 1. Input parameters
-    current_water_temp = 30.0 # Koud water
+    current_water_temp = 20.0 # Koud water
     target_water_temp = 50.0  # Heet water
     outside_temp = 5.0
 
-    # 2. Initialiseer optimizer en BEREKEN HET PROFIEL
-    optimizer = Optimizer(pv_max_kw=4.0)
+    # We pakken de start temperatuur uit de dataframe voor consistentie
+    outside_temp_start = df.iloc[0]["outside_temp"]
 
-    # Dit berekent nu: [1.7, 2.0, 2.3, 2.7, 2.7, ...] afhankelijk van temperatuur
-    profile = optimizer.calculate_profile(current_water_temp, target_water_temp, outside_temp=outside_temp)
+    # 2. Initialiseer optimizer en BEREKEN HET PROFIEL
+    optimizer = Optimizer(pv_max_kw=2.0)
+
+    profile = optimizer.calculate_profile(current_water_temp, target_water_temp, outside_temp=outside_temp_start)
 
     print(f"--- Start Simulatie @ {now} ---")
     print(f"Berekend profiel (kW): {profile}")
@@ -76,13 +90,19 @@ def run_simulation():
         print(f"Geplande start: {context.planned_start}")
         print(f"Verwachte zonne-energie in boiler: {context.energy_best:.2f} kWh")
 
-    # --- PLOTTEN ---
-    plt.figure(figsize=(12, 6))
+    # --- PLOTTEN (AANGEPAST MET DUBBELE AS) ---
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # AS 1 (Links): Vermogen (kW)
+    ax1.set_xlabel("Tijd")
+    ax1.set_ylabel("Vermogen (kW)", color="black")
 
     # 1. Zon
-    plt.plot(df["timestamp"], df["power_corrected"], label="Verwachte PV (kW)", color="orange", alpha=0.7)
+    l1 = ax1.plot(df["timestamp"], df["power_corrected"], label="Verwachte PV (kW)", color="orange", alpha=0.8)
 
     # 2. Het geplande blok
+    l2 = [] # Placeholder voor legend
+    l3 = []
     if context.planned_start:
         # Zoek waar de starttijd zit in de dataframe
         mask = df["timestamp"] == context.planned_start
@@ -105,25 +125,34 @@ def run_simulation():
                 # Plak het berekende profiel (de ramp-up) in de plot array
                 dhw_profile_plot[start_idx : end_idx] = profile
 
-            # Plot de DHW lijn (Blauw stippellijn)
-            plt.plot(df["timestamp"], dhw_profile_plot, label="Geplande DHW Profiel (kW)", color="blue", linewidth=2, linestyle="--")
+            # Plot DHW
+            l2 = ax1.plot(df["timestamp"], dhw_profile_plot, label="Geplande DHW Profiel (kW)", color="blue", linewidth=2, linestyle="--")
 
-            # Vul de oppervlakte in die overlapt met zon (Groen - Gratis energie)
+            # Vul gebieden
             overlap = np.minimum(df["power_corrected"], dhw_profile_plot)
-            plt.fill_between(df["timestamp"], 0, overlap, color="green", alpha=0.3, label="Direct Zonneverbruik")
+            ax1.fill_between(df["timestamp"], 0, overlap, color="green", alpha=0.3, label="Direct Zonneverbruik")
 
-            # Vul de oppervlakte in die Grid is (Rood - Import)
-            # Waar DHW > Zon, moeten we importeren
-            plt.fill_between(df["timestamp"], df["power_corrected"], dhw_profile_plot,
+            ax1.fill_between(df["timestamp"], df["power_corrected"], dhw_profile_plot,
                              where=(dhw_profile_plot > df["power_corrected"]),
                              color="red", alpha=0.3, label="Grid Import")
-        else:
-            print("Waarschuwing: Geplande starttijd valt buiten plot bereik.")
 
-    plt.title("Solar DHW Optimalisatie (CVXPY)")
-    plt.ylabel("Vermogen (kW)")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    ax1.tick_params(axis='y', labelcolor="black")
+    ax1.grid(True, alpha=0.3)
+
+    # --- AS 2 (Rechts): Temperatuur (C) ---
+    ax2 = ax1.twinx()
+    ax2.set_ylabel("Temperatuur (°C)", color="tab:red")
+
+    # Plot Temp
+    l3 = ax2.plot(df["timestamp"], df["outside_temp"], label="Buitentemperatuur (°C)", color="tab:red", linestyle=":", linewidth=2)
+    ax2.tick_params(axis='y', labelcolor="tab:red")
+
+    # Legenda samenvoegen
+    lines = l1 + l2 + l3
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc="upper left")
+
+    plt.title("Solar DHW Optimalisatie (Grid & Temperatuur)")
     plt.show()
 
 if __name__ == "__main__":
