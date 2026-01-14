@@ -184,7 +184,8 @@ class Optimizer:
 
         status = SolarStatus.WAIT
         minutes_to_start = (planned_start - current_time).total_seconds() / 60
-        reason = f"Start gepland om {planned_start.strftime('%H:%M')}"
+        start_local = planned_start.tz_convert(tz=datetime.now().astimezone().tzinfo)
+        reason = f"Start gepland om {start_local.strftime('%H:%M')}"
 
         if minutes_to_start <= 5:
             status = SolarStatus.START
@@ -198,6 +199,6 @@ class Optimizer:
             confidence=1.0,  # CVXPY is zeker van zijn zaak
             action=status,
             reason=reason,
-            planned_start=planned_start,
+            planned_start=start_local,
             load_now=P_load,
         )
