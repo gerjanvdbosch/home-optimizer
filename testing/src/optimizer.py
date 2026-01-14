@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import logging
 
+from datetime import datetime
 from context import SolarStatus, SolarContext
 
 logger = logging.getLogger(__name__)
