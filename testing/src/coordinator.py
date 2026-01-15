@@ -14,6 +14,8 @@ from planner import Planner
 from database import Database
 from dhw import DhwMachine
 from climate import ClimateMachine
+from solar import SolarForecaster
+from load import LoadForecaster
 from webapi import api
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -27,6 +29,8 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 class Coordinator:
     def __init__(self, context: Context, config: Config, collector: Collector):
+        self.solar = SolarForecaster(config, context)
+        self.load = LoadForecaster(config, context)
         self.planner = Planner(context, config)
         self.dhw_machine = DhwMachine(context)
         self.climate_machine = ClimateMachine(context)
@@ -35,9 +39,12 @@ class Coordinator:
         self.collector = collector
 
     def tick(self):
+        self.context.now = datetime.now(timezone.utc)
+
         self.collector.update_sensors()
 
-        self.context.now = datetime.now(timezone.utc).replace(hour=15)
+        self.solar.update(self.context.now, self.context.stable_load)
+        self.load.update(self.context.now, self.context.stable_load)
 
         plan = self.planner.create_plan()
 
@@ -49,7 +56,7 @@ class Coordinator:
         cutoff_date = self.context.now - timedelta(days=730)
         history = self.collector.database.get_forecast_history(cutoff_date)
 
-        self.planner.forecaster.model.train(history, system_max=self.config.pv_max_kw)
+        self.solar.model.train(history, system_max=self.config.pv_max_kw)
 
         logger.info(f"[Coordinator] Trained model with {len(history)} rows of history")
 

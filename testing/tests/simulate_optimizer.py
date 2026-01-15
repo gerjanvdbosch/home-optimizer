@@ -53,7 +53,7 @@ def generate_dummy_data(start_time, hours=24):
 
     # Ruis op temperatuur
     temp_noise = np.random.normal(0, 0.2, len(temp_raw))
-    df["outside_temp"] = temp_raw + temp_noise
+    df["temp"] = temp_raw + temp_noise
 
     # Scenario: Wat als er HEEL weinig zon is? (Zet uncomment hieronder om te testen)
     # df["power_corrected"] = df["power_corrected"] * 0.1
@@ -66,17 +66,17 @@ def run_simulation():
     df = generate_dummy_data(now)
 
     # 1. Input parameters
-    current_water_temp = 20.0 # Koud water
-    target_water_temp = 50.0  # Heet water
-    outside_temp = 5.0
+    current_water_temp = 28.0 # Koud water
+    target_water_temp = 51.5  # Heet water
+    outside_temp = 9.0
 
     # We pakken de start temperatuur uit de dataframe voor consistentie
-    outside_temp_start = df.iloc[0]["outside_temp"]
+    outside_temp_start = df.iloc[0]["temp"]
 
     # 2. Initialiseer optimizer en BEREKEN HET PROFIEL
     optimizer = Optimizer(pv_max_kw=2.0)
 
-    profile = optimizer.calculate_profile(current_water_temp, target_water_temp, outside_temp=outside_temp_start)
+    profile = optimizer.calculate_profile(current_water_temp, target_water_temp, outside_temp=outside_temp)
 
     print(f"--- Start Simulatie @ {now} ---")
     print(f"Berekend profiel (kW): {profile}")
@@ -144,7 +144,7 @@ def run_simulation():
     ax2.set_ylabel("Temperatuur (°C)", color="tab:red")
 
     # Plot Temp
-    l3 = ax2.plot(df["timestamp"], df["outside_temp"], label="Buitentemperatuur (°C)", color="tab:red", linestyle=":", linewidth=2)
+    l3 = ax2.plot(df["timestamp"], df["temp"], label="Buitentemperatuur (°C)", color="tab:red", linestyle=":", linewidth=2)
     ax2.tick_params(axis='y', labelcolor="tab:red")
 
     # Legenda samenvoegen
