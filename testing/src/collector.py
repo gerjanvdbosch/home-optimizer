@@ -71,7 +71,6 @@ class Collector:
         self.client.reload()
 
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv_power)
-        self.context.current_wp = self.client.get_power_sensor(self.config.sensor_wp_power)
         self.context.current_grid = self.client.get_grid_power(self.config.sensor_grid_power)
 
         self.context.stable_pv = self._update_buffer(

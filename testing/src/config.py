@@ -16,7 +16,6 @@ class Config:
 
     sensor_pv_power: str = "sensor.pv_output"
     sensor_grid_power: str = "sensor.p1_meter_power"
-    sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
 
     sensor_pv_energy = "sensor.pv_energie_totaal"
     sensor_wp_energy = "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
