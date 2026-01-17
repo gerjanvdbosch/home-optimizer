@@ -28,8 +28,11 @@ class HAClient:
     def get_room_temp(self):
         return float(self.data.get("room_temp", 19.5))
 
-    def get_dhw_temp(self):
-        return float(self.data.get("dhw_temp", 50.0))
+    def get_dhw_temp(self, entity_id):
+        return float(self.data.get("dhw_temp", 30.0))
+
+    def get_dhw_setpoint(self, entity_id):
+        return float(self.data.get("dhw_setpoint", 50.0))
 
     def get_hvac_mode(self, entity_id):
         return HvacMode(HvacMode.OFF)

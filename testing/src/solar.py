@@ -4,7 +4,7 @@ import joblib
 import shap
 import logging
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -13,7 +13,7 @@ from sklearn.metrics import mean_absolute_error
 from utils import add_cyclic_time_features
 from typing import Dict
 from config import Config
-from context import Context, SolarStatus, SolarContext
+from context import Context
 
 logger = logging.getLogger(__name__)
 
@@ -203,13 +203,25 @@ class SolarModel:
 
 
 class SolarForecaster:
-    def __init__(self, config: Config, context: Context):
+    def __init__(self, config: Config, context: Context, database: 'Database'):
         self.model = SolarModel(Path(config.solar_model_path))
         self.context = context
         self.config = config
+        self.database = database
         self.nowcaster = NowCaster(model_mae=self.model.mae, pv_max_kw=config.pv_max_kw)
 
-    def update(self current_time: datetime, actual_pv: float)
+    def train(self, days_back: int = 730):
+        cutoff = datetime.now() - timedelta(days=days_back)
+
+        df = self.database.get_forecast_history(cutoff_date)
+
+        if df.empty:
+            logger.warning("[Solar] Geen historische data om model te trainen.")
+            return
+
+        self.model.train(df, system_max=self.config.pv_max_kw)
+
+    def update(self, current_time: datetime, actual_pv: float):
         forecast_df = self.context.forecast_df
         df_calc = forecast_df.copy()
 

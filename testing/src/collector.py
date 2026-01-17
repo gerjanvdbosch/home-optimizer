@@ -28,7 +28,7 @@ class Collector:
 
         solcast = self.client.get_forecast(self.config.sensor_solcast)
 
-        now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
+        now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo).replace(month=1, day=14, hour=10)
         start_filter = now_local.replace(
             hour=0, minute=0, second=0, microsecond=0
         ).tz_convert("UTC")
@@ -70,52 +70,86 @@ class Collector:
     def update_sensors(self):
         self.client.reload()
 
-        self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
-        self.context.current_load = self.client.get_load_power(self.config.sensor_load)
+        self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv_power)
+        self.context.current_wp = self.client.get_power_sensor(self.config.sensor_wp_power)
+        self.context.current_grid = self.client.get_grid_power(self.config.sensor_grid_power)
 
         self.context.stable_pv = self._update_buffer(
             self.context.pv_buffer, self.context.current_pv
         )
+
+        current_house_load = (self.context.current_grid + self.context.current_pv)
         self.context.stable_load = self._update_buffer(
-            self.context.load_buffer, self.context.current_load
+            self.context.load_buffer, current_house_load
         )
 
         self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
-        self.context.room_temp = self.client.get_room_temp()
-        self.context.dhw_temp = self.client.get_dhw_temp()
+        self.context.dhw_temp = self.client.get_dhw_temp(self.config.sensor_dhw_temp)
+        self.context.dhw_setpoint = self.client.get_dhw_setpoint(self.config.sensor_dhw_setpoint)
 
         logger.info("[Collector] Sensors updated")
 
-    def update_pv(self):
+    def update_history(self):
+        """
+        Verzamelt samples en schrijft elke 15 minuten naar de database.
+        """
         now = self.context.now
         aggregation_minutes = 15
         slot_minute = (now.minute // aggregation_minutes) * aggregation_minutes
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
-        # Als dit de allereerste sample is
+        # Initialisatie bij start applicatie
         if self.context.current_slot_start is None:
             self.context.current_slot_start = slot_start
 
-        # Als we een nieuw kwartier zijn binnengegaan
+        # Detecteer kwartierwissel
         if slot_start > self.context.current_slot_start:
-            if self.context.slot_samples:
-                avg_pv = float(np.mean(self.context.slot_samples))
-                # Sla het gemiddelde op voor het AFGELOPEN kwartier
-                self.database.update_pv_actual(
-                    self.context.current_slot_start, yield_kw=avg_pv
-                )
-                logger.info(
-                    f"[Collector] Actual yield opgeslagen voor {self.context.current_slot_start.strftime('%H:%M')}: {avg_pv:.2f}kW"
-                )
+            # 1. Bereken gemiddelden (gebruik nanmean voor robuustheid tegen dropouts)
+            avg_pv = float(np.nanmean(self.context.pv_samples)) if self.context.pv_samples else 0.0
+            avg_wp = float(np.nanmean(self.context.wp_samples)) if self.context.wp_samples else 0.0
+            avg_grid_raw = float(np.nanmean(self.context.grid_samples)) if self.context.grid_samples else 0.0
 
-            self.context.slot_samples = []
+            # 2. Splits Grid in Import en Export
+            # Import = Alles boven 0
+            # Export = Alles onder 0 (positief gemaakt)
+            grid_import = max(0.0, avg_grid_raw)
+            grid_export = abs(min(0.0, avg_grid_raw))
+
+            # 3. Sla op in de nieuwe 'Measurements' tabel
+            self.database.save_measurement(
+                ts=timestamp,
+                grid_import=grid_import,
+                grid_export=grid_export,
+                pv_actual=avg_pv,
+                wp_actual=avg_wp
+            )
+
+            logger.info(
+                f"[Collector] History saved {timestamp:%H:%M} | "
+                f"Imp: {grid_import:.2f} | Exp: {grid_export:.2f} | "
+                f"PV: {avg_pv:.2f} | WP: {avg_wp:.2f}"
+            )
+
+            self.context.pv_samples = []
+            self.context.wp_samples = []
+            self.context.grid_samples = []
             self.context.current_slot_start = slot_start
 
-        self.context.slot_samples.append(self.context.current_pv)
+        # Voeg huidige metingen toe aan de buffers (voor gemiddelde berekening later)
+        if self.context.current_pv is not None:
+            self.context.pv_samples.append(self.context.current_pv)
 
-    def log_snapshot(self):
-        pass
+        if self.context.current_wp is not None:
+            self.context.wp_samples.append(self.context.current_wp)
 
-    def _update_buffer(self, buffer: deque, value: float) -> float:
-        buffer.append(value)
+        if self.context.current_grid is not None:
+            self.context.grid_samples.append(self.context.current_grid)
+
+
+    def _update_buffer(self, buffer: deque, value: float):
+        if value is not None:
+            buffer.append(value)
+
+        if not buffer:
+            return 0.0
         return float(np.median(buffer))

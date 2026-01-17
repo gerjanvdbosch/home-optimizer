@@ -23,7 +23,9 @@ class Context:
     hvac_mode: int | None = None
 
     current_pv: float = 0.0
-    current_load: float = 0.0
+    current_wp: float = 0.0
+    current_grid: float = 0.0
+
     stable_pv: float = 0.0
     stable_load: float = 0.0
 
@@ -36,7 +38,10 @@ class Context:
     load_buffer: deque = field(default_factory=lambda: deque(maxlen=2))
 
     current_slot_start: datetime | None = None
-    slot_samples: list[float] = field(default_factory=list)
 
-    room_temp: float = 0.0
+    pv_samples: list[float] = field(default_factory=list)
+    wp_samples: list[float] = field(default_factory=list)
+    grid_samples: list[float] = field(default_factory=list)
+
     dhw_temp: float = 0.0
+    dhw_setpoint: float = 0.0

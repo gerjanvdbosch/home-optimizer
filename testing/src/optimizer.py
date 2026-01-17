@@ -4,7 +4,6 @@ import numpy as np
 import logging
 
 from datetime import datetime
-from context import SolarStatus, SolarContext
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +20,13 @@ class Optimizer:
     def __init__(self, pv_max_kw: float):
         self.pv_max_kw = pv_max_kw
         self.timestep_hours = 0.25  # 15 min
-        self.baseload_kw = 0.15  # Gemiddelde huis load
 
     def calculate_profile(
         self,
         t_start_temp: float,
         t_target: float,
-        volume_liter: float = 200,
         outside_temp: float = 15,
+        volume_liter: float = 200,
     ):
         """
         Simuleert het opwarmproces.
@@ -82,7 +80,7 @@ class Optimizer:
         self, df: pd.DataFrame, current_time: pd.Timestamp, power_profile: np.ndarray
     ):
         if len(power_profile) == 0:
-            return SolarStatus.WAIT, None
+            return 'WAIT', "Boiler al op temperatuur", 0.0, 0.0
 
         duration_steps = len(power_profile)
 
@@ -92,20 +90,17 @@ class Optimizer:
         future = future.iloc[:horizon_steps]
 
         if len(future) < duration_steps:
-            logger.warning("Niet genoeg data (horizon korter dan benodigde duur).")
-            return SolarStatus.WAIT, None
+            logger.warning(f"Niet genoeg data: {len(future)}")
+            return 'WAIT', "Niet genoeg data in horizon", 0.0, 0.0
 
         P_solar = future["power_corrected"].values
         outside_temp = future["temp"].values
-        P_load = 0.12 * np.ones_like(P_solar)  # Stabiele load van 120W
+        P_load = future["load_corrected"].values
         T = len(P_solar)
-        # Veiligheid: als door een foutje de lengte niet klopt
-        if len(P_load) != T:
-             P_load = np.full(T, self.baseload_kw)
 
         num_possible_starts = T - duration_steps + 1
         if num_possible_starts <= 0:
-            return SolarStatus.WAIT, None
+            return 'WAIT', "Niet genoeg tijd voor verwarmen", 0.0, 0.0
 
         start_flags = cp.Variable(num_possible_starts, boolean=True)
         dhw_power_vector = cp.Variable(T)
@@ -139,7 +134,7 @@ class Optimizer:
             problem.solve()
         except Exception as e:
             logger.error(f"Solver failed: {e}")
-            return SolarStatus.WAIT, None
+            return 'WAIT', "Optimalisatie mislukt", 0.0, 0.0
 
         best_start_idx = int(np.argmax(start_flags.value))
         planned_start = future.iloc[best_start_idx]["timestamp"]
@@ -165,20 +160,10 @@ class Optimizer:
         minutes_to_start = (planned_start - current_time).total_seconds() / 60
         start_local = planned_start.tz_convert(datetime.now().astimezone().tzinfo)
 
-        status = SolarStatus.START if minutes_to_start <= 5 else SolarStatus.WAIT
-        reason = "Starttijd bereikt." if status == SolarStatus.START else f"Start gepland om {start_local:%H:%M}"
-
+        status = 'START' if minutes_to_start <= 5 else 'WAIT'
+        reason = "Starttijd bereikt" if status == 'START' else f"Start gepland om {start_local:%H:%M}"
         # Load van NU voor logging (eerste waarde van de vector)
-        current_load_val = P_load[0] if len(P_load) > 0 else self.baseload_kw
+        current_load_val = P_load[0] if len(P_load) > 0 else 0.15
+        solar_usage_kwh = round(boiler_solar_usage * self.timestep_hours, 2)
 
-        return status, SolarContext(
-            actual_pv=0,
-            energy_now=0,
-            energy_best=round(boiler_solar_usage * self.timestep_hours, 2),
-            opportunity_cost=0,
-            confidence=1.0,
-            action=status,
-            reason=reason,
-            planned_start=start_local,
-            load_now=round(current_load_val, 2), # De voorspelde load van dit moment
-        )
+        return status, reason, solar_usage_kwh, current_load_val

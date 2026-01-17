@@ -3,7 +3,7 @@ import os
 
 from client import HAClient
 from dataclasses import dataclass
-
+from utils import safe_float
 
 @dataclass
 class Config:
@@ -14,23 +14,23 @@ class Config:
     pv_tilt: float = 50.0
     pv_max_kw: float = 2.0
 
-    dhw_duration_hours: float = 1.0
+    sensor_pv_power: str = "sensor.pv_output"
+    sensor_grid_power: str = "sensor.p1_meter_power"
+    sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
 
-    min_kwh_threshold: float = 0.2
-    avg_baseload_kw: float = 0.15
-    max_compressor_freq: int = 75
-
-    sensor_pv: str = "sensor.pv_output"
-    sensor_load: str = "sensor.stroomverbruik_base_load"
     sensor_dhw_temp: str = "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+    sensor_dhw_setpoint: str = "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
+
     sensor_solcast: str = "sensor.solcast_pv_forecast_forecast_today"
     sensor_home: str = "zone.home"
 
     database_path: str = "data/database.sqlite"
 
+    load_model_path: str = "data/load_model.joblib"
+
     solar_model_path: str = "data/solar_model.joblib"
-    solar_model_ratio: float = 0.7
+    solar_model_ratio: float = 0
 
     webapi_host: str = "127.0.0.1"
     webapi_port: int = 8000
@@ -43,11 +43,6 @@ class Config:
         if location != (None, None):
             config.latitude, config.longitude = location
 
-        solar = json.loads(os.getenv("SOLAR", "{}"))
-
-        if solar:
-            config.solar_model_ratio = solar.get(
-                "model_ratio", config.solar_model_ratio
-            )
+        config.solar_model_ratio = safe_float(os.getenv("SOLAR_MODEL_RATIO", 0.7))
 
         return config

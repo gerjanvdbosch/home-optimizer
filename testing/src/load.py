@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -14,41 +14,29 @@ from context import Context
 logger = logging.getLogger(__name__)
 
 class NowCaster:
-    def __init__(self, decay_hours: float = 2.0):
+    def __init__(self, decay_hours: float = 1.0):
         self.decay_hours = decay_hours
         self.current_ratio = 0.0
 
     def update(self, actual_kw: float, forecasted_kw: float):
-        """
-        Update de bias met een dynamisch berekende alpha.
-        Dit zorgt voor vloeiende overgangen en filtert pieken wiskundig weg.
-        """
         if actual_kw is None or forecasted_kw is None:
             return
 
-        # Bereken de ruwe fout
         error = actual_kw - forecasted_kw
         alpha = 0.0
 
         if error <= 0:
-            # SCENARIO 1: Load is lager dan verwacht (Apparaat uit)
-            # We volgen dit agressief, want verbruik 'zakt' niet zomaar als ruis.
+            # Load is lager dan verwacht -> Snel aanpassen (agressief)
             alpha = 0.25
-
         else:
-            # SCENARIO 2: Load is hoger dan verwacht (Mogelijk een piek)
-            # We gebruiken een Gaussian Decay formule.
-            # - Bij kleine error (0.1) is exp bijna 1 -> alpha ≈ 0.15
-            # - Bij grote error (2.0) is exp bijna 0 -> alpha ≈ 0.00
-
+            # Load is hoger dan verwacht -> Voorzichtig aanpassen (kan ruis/piek zijn)
+            # Gaussian decay: hoe groter de fout, hoe minder we de bias geloven als structureel
             decay_factor = np.exp(- (error / 1.5) ** 2)
             alpha = 0.15 * decay_factor
-
-            # Zorg dat alpha nooit helemaal 0 wordt (blijf altijd een beetje leren)
             alpha = max(0.01, alpha)
 
-        # Update de bias met de berekende alpha
-        self.current_ratio = (1 - alpha) * self.current_bias_kw + (alpha * error)
+        # Update de bias (Exponential Moving Average)
+        self.current_ratio = (1 - alpha) * self.current_ratio + (alpha * error)
 
     def apply(
         self, df: pd.DataFrame, current_time: datetime, col_name: str
@@ -56,33 +44,33 @@ class NowCaster:
         if df.empty:
             return pd.Series(dtype=float)
 
-        # Tijdsverschil
         delta_hours = (df["timestamp"] - current_time).dt.total_seconds() / 3600.0
         delta_hours = delta_hours.clip(lower=0)
 
-        # Decay: De bias sterft uit naar 0 naarmate we verder in de toekomst kijken
+        # Bias sterft uit in de toekomst
         decay_factors = np.exp(-delta_hours / self.decay_hours)
+        correction_vector = self.current_ratio * decay_factors
 
-        # Correctie vector (Additive)
-        correction_vector = self.current_bias_kw * decay_factors
-
-        # Pas toe op de voorspelling
         corrected_series = df[col_name] + correction_vector
-
-        # Veiligheidsfloor: Verbruik kan nooit negatief zijn.
-        # 0.05 kW (50W) is een redelijke 'huis slaapt' ondergrens.
         return corrected_series.clip(lower=0.05)
 
 class LoadModel:
+    """
+    Het Machine Learning model (HistGradientBoosting).
+    Leert de basislijn van het huis (zonder WP).
+    """
     def __init__(self, path: Path):
         self.path = path
         self.model: Optional[BaseEstimator] = None
         self.is_fitted = False
         self.feature_cols = [
-            "hour_sin", "hour_cos",
-            "dow_sin", "dow_cos",
-            "doy_sin", "doy_cos",
-            "temp"
+            "hour_sin",
+            "hour_cos",
+            "dow_sin",
+            "dow_cos",
+            "doy_sin",
+            "doy_cos",
+            "temp",
         ]
         self._load()
 
@@ -105,14 +93,17 @@ class LoadModel:
 
     def train(self, df_history: pd.DataFrame):
         # Filter rijen waar we geen load of temp data hebben
-        df_train = df_history.dropna(subset=["load_actual"]).copy()
+        df_train = df_history.dropna(subset=["target_load"]).copy()
 
         X = self._prepare_features(df_train)
-        y = df_train["load_actual"]
+        y = df_train["target_load"]
 
-        # HistGradientBoosting is vaak sneller en beter dan RandomForest voor tijdreeksen
+        # AANPASSING: Quantile Regression
+        # We voorspellen het 90e percentiel (bovengrens).
+        # Dit zorgt dat de optimizer "ruimte" houdt voor het huishouden.
         self.model = HistGradientBoostingRegressor(
-            loss="absolute_error",
+            loss="quantile",
+            quantile=0.90,
             learning_rate=0.05,
             max_iter=500,
             max_leaf_nodes=31,
@@ -124,7 +115,7 @@ class LoadModel:
         self.model.fit(X, y)
         joblib.dump({"model": self.model}, self.path)
         self.is_fitted = True
-        logger.info(f"[Load] Model getraind.")
+        logger.info(f"[Load] Model succesvol getraind op {len(df_train)} records.")
 
     def predict(self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15) -> pd.Series:
         if not self.is_fitted:
@@ -132,20 +123,36 @@ class LoadModel:
 
         X = self._prepare_features(df_forecast)
         pred = self.model.predict(X)
-        return np.maximum(pred, 0.05)
+        return np.maximum(pred, 0.1)
 
 
 class LoadForecaster:
-    def __init__(self, config: Config, context: Context):
+    def __init__(self, config: Config, context: Context, database: Database):
         self.config = config
         self.context = context
+        self.database = database
         self.model = LoadModel(Path(config.load_model_path))
-        self.nowcaster = LoadNowCaster(decay_hours=2.0)
+        self.nowcaster = NowCaster()
 
-    def update(self, current_time: datetime, current_load_kw: float) -> pd.DataFrame:
-        """
-        current_load_kw: Bij voorkeur een gemiddelde van de laatste 60-180 seconden!
-        """
+    def train(self, days_back: int = 730):
+        cutoff = datetime.now() - timedelta(days=days_back)
+
+        # 1. Haal samengevoegde data (Measurements + Forecast)
+        df = self.database.get_training_data(cutoff_date=cutoff)
+
+        if df.empty:
+            logger.warning("[Load] Geen data gevonden voor training.")
+            return
+
+        # 2. Bereken de Target Variable: Base Load
+        df["target_load"] = df["load_actual"] - df["wp_actual"]
+        # Clip negatieve waarden (meetfouten/timing issues) en zet minimum
+        df["target_load"] = df["target_load"].clip(lower=0.1)
+
+        self.model.train(df)
+
+
+    def update(self, current_time: datetime, current_load_kw: float):
         forecast_df = self.context.forecast_df
         df_calc = forecast_df.copy()
 
@@ -157,7 +164,7 @@ class LoadForecaster:
         idx_now = df_calc["timestamp"].searchsorted(current_time)
         row_now = df_calc.iloc[min(idx_now, len(df_calc) - 1)]
 
-        predicted_now = df_calc.iloc[idx_now]["load_ml"]
+        predicted_now = row_now["load_ml"]
 
         self.nowcaster.update(actual_kw=current_load_kw, forecasted_kw=predicted_now)
 

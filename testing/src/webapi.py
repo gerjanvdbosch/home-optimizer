@@ -30,7 +30,7 @@ def index(request: Request, explain: str = None):
 
     coordinator = request.app.state.coordinator
     context = coordinator.context
-    forecast = context.forecast
+    forecast = None
 
     details = {}
     explanation = {}
@@ -82,29 +82,12 @@ def trigger_training(request: Request):
     Forceer een hertraining van het model op basis van de laatste 60 dagen.
     """
     coordinator = request.app.state.coordinator
-    forecaster = coordinator.planner.forecaster
-    database = coordinator.collector.database
-    config = coordinator.config
 
-    # 1. Data ophalen
-    # Zorg dat we genoeg data hebben voor een goed model
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=730)
-
-    # We gebruiken de bestaande functie die ook voor de grafiek wordt gebruikt,
-    # maar dan met een datum ver in het verleden.
-    df_hist = database.get_forecast_history(cutoff_date)
-
-    if df_hist.empty or len(df_hist) < 48:  # Minimaal ~12 uur aan kwartier-data
-        return JSONResponse(
-            {"error": "Te weinig data beschikbaar in database (minimaal 1 dag nodig)."},
-            status_code=400,
-        )
-
-    # 2. Train het model
+    # Train het model
     try:
         # Dit blokkeert heel even de server (paar seconden), dat is prima voor thuisgebruik.
-        forecaster.model.train(df_hist, config.pv_max_kw)
-        new_mae = forecaster.model.mae
+        coordinator.train()
+        new_mae = coordinator.model.mae
 
         return {
             "status": "success",
@@ -123,8 +106,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
     """
     coordinator = request.app.state.coordinator
     context = coordinator.context
-    forecaster = coordinator.planner.forecaster
-    forecast = context.forecast
+    forecaster = coordinator.solar
+    forecast = None
     database = coordinator.collector.database
 
     # Check of er data is
@@ -422,7 +405,7 @@ def _get_explanation_data(coordinator) -> dict:
     Wordt gebruikt door zowel de HTML template als de JSON API.
     """
     context = coordinator.context
-    forecaster = coordinator.planner.forecaster
+    forecaster = coordinator.solar
 
     # 1. Validatie
     if (
@@ -543,7 +526,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
     Let op: Dit is rekenintensief, dus we doen dit op een beperkte set.
     """
     coordinator = request.app.state.coordinator
-    forecaster = coordinator.planner.forecaster
+    forecaster = coordinator.solar
     database = coordinator.collector.database
 
     # 1. Check: Is het model getraind?
@@ -640,87 +623,3 @@ def _get_importance_plot_plotly(request: Request) -> str:
     return pio.to_html(
         fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
-
-
-def _get_behavior_plot_plotly(request: Request) -> str:
-    """
-    Genereert Partial Dependence Plots (PDP) voor de belangrijkste fysieke features.
-    """
-    coordinator = request.app.state.coordinator
-    forecaster = coordinator.planner.forecaster
-    database = coordinator.collector.database
-
-    if not forecaster.model.is_fitted:
-        return ""
-
-    # 1. Data ophalen (Laatste 14 dagen is genoeg voor gedrag)
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
-    df_hist = database.get_forecast_history(cutoff_date)
-
-    # Filter op daglicht
-    is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
-    df_day = df_hist[is_daytime].copy()
-
-    if len(df_day) < 50:
-        return "<div class='p-4 text-muted'>Te weinig data voor gedragsanalyse.</div>"
-
-    try:
-        X = forecaster.model._prepare_features(df_day)
-
-        # 2. Kies de features die we willen inspecteren
-        # We pakken hardcoded de 3 interessantste, dat is sneller dan eerst sorteren.
-        features_to_plot = ["pv_estimate10", "uncertainty", "pv_estimate90"]
-        feature_labels = ["Solcast Min (kW)", "Onzekerheid", "Solcast Max (kW)"]
-
-        # 3. Maak Subplots (1 rij, 3 kolommen)
-        fig = make_subplots(
-            rows=1, cols=3, subplot_titles=feature_labels, horizontal_spacing=0.05
-        )
-
-        # 4. Berekenen en tekenen per feature
-        for i, feature in enumerate(features_to_plot):
-            if feature not in X.columns:
-                continue
-
-            # Dit is het zware werk: Sklearn rekent de lijn uit
-            pdp_results = partial_dependence(
-                forecaster.model.model, X, [feature], grid_resolution=20, kind="average"
-            )
-
-            x_vals = pdp_results["grid_values"][0]
-            y_vals = pdp_results["average"][0]
-
-            # Voeg lijn toe aan de subplot
-            fig.add_trace(
-                go.Scatter(
-                    x=x_vals,
-                    y=y_vals,
-                    mode="lines",
-                    name=feature,
-                    line=dict(width=2, color="#4fa8ff"),  # Mooi blauw
-                    showlegend=False,
-                ),
-                row=1,
-                col=i + 1,
-            )
-
-        # 5. Opmaak
-        fig.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="rgb(28, 28, 28)",
-            plot_bgcolor="rgb(28, 28, 28)",
-            margin=dict(l=20, r=20, t=50, b=20),
-            height=300,  # Niet te hoog maken
-            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
-        )
-
-        return pio.to_html(
-            fig,
-            full_html=False,
-            include_plotlyjs=False,
-            config={"displayModeBar": False},
-        )
-
-    except Exception as e:
-        logger.error(f"Fout bij behavior plot: {e}")
-        return "<div class='p-4 text-danger'>Kon gedrag niet analyseren.</div>"

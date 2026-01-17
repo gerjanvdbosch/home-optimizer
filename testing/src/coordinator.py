@@ -3,7 +3,7 @@ import threading
 import logging
 import uvicorn
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from config import Config
@@ -28,9 +28,9 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 class Coordinator:
-    def __init__(self, context: Context, config: Config, collector: Collector):
-        self.solar = SolarForecaster(config, context)
-        self.load = LoadForecaster(config, context)
+    def __init__(self, context: Context, config: Config, database: Database, collector: Collector):
+        self.solar = SolarForecaster(config, context, database)
+        self.load = LoadForecaster(config, context, database)
         self.planner = Planner(context, config)
         self.dhw_machine = DhwMachine(context)
         self.climate_machine = ClimateMachine(context)
@@ -39,11 +39,11 @@ class Coordinator:
         self.collector = collector
 
     def tick(self):
-        self.context.now = datetime.now(timezone.utc)
+        self.context.now = datetime.now(timezone.utc).replace(month=1, day=14, hour=10)
 
         self.collector.update_sensors()
 
-        self.solar.update(self.context.now, self.context.stable_load)
+        self.solar.update(self.context.now, self.context.stable_pv)
         self.load.update(self.context.now, self.context.stable_load)
 
         plan = self.planner.create_plan()
@@ -53,12 +53,8 @@ class Coordinator:
 
 
     def train(self):
-        cutoff_date = self.context.now - timedelta(days=730)
-        history = self.collector.database.get_forecast_history(cutoff_date)
-
-        self.solar.model.train(history, system_max=self.config.pv_max_kw)
-
-        logger.info(f"[Coordinator] Trained model with {len(history)} rows of history")
+        self.solar.train()
+        self.load.train()
 
     def start_api(self):
         api.state.coordinator = self
@@ -81,7 +77,7 @@ if __name__ == "__main__":
         context = Context(now=datetime.now(timezone.utc))
         database = Database(config)
         collector = Collector(client, database, context, config)
-        coordinator = Coordinator(context, config, collector)
+        coordinator = Coordinator(context, config, database, collector)
 
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
@@ -89,7 +85,7 @@ if __name__ == "__main__":
         logger.info("[System] API server started")
 
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
-        scheduler.add_job(collector.update_pv, "interval", seconds=15)
+        scheduler.add_job(collector.update_history, "interval", seconds=15)
 
         scheduler.add_job(coordinator.tick, "interval", seconds=5)
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)

@@ -21,9 +21,6 @@ class SolarForecast(Base):
     pv_estimate10 = Column(Float)
     pv_estimate90 = Column(Float)
 
-    # Werkelijke opbrengst (Home Assistant)
-    pv_actual = Column(Float, nullable=True)
-
     # Weerdata (OpenMeteo)
     temp = Column(Float)
     cloud = Column(Float)
@@ -31,6 +28,17 @@ class SolarForecast(Base):
     radiation = Column(Float)
     diffuse = Column(Float)
     tilted = Column(Float)
+
+
+class Measurement(Base):
+    __tablename__ = "measurement"
+    timestamp = Column(DateTime, primary_key=True, index=True)
+
+    # De harde metingen
+    grid_import = Column(Float)
+    grid_export = Column(Float)
+    pv_actual = Column(Float)
+    wp_actual = Column(Float)
 
 
 class Database:
@@ -73,47 +81,93 @@ class Database:
         finally:
             session.close()
 
-    def update_pv_actual(self, ts: datetime, yield_kw: float):
-        """Update alleen de werkelijke opbrengst voor een specifiek tijdstip."""
+    def save_measurement(
+        self,
+        ts: datetime,
+        grid_import: float = None,
+        grid_export: float = None,
+        pv_actual: float = None,
+        wp_actual: float = None
+    ):
+        """
+        Slaat een meetpunt op of werkt het bij.
+        Accepteert None waarden (die worden dan overgeslagen bij update).
+        """
         session: Session = self.SessionLocal()
         try:
-            # Zoek het record voor dit kwartier
-            record = (
-                session.query(SolarForecast)
-                .where(SolarForecast.timestamp == ts)
-                .first()
-            )
-            if record:
-                record.pv_actual = yield_kw
-                session.commit()
-            else:
-                # Als het record nog niet bestaat (bijv. geen forecast), maken we een leeg record aan
-                new_record = SolarForecast(timestamp=ts, pv_actual=yield_kw)
-                session.add(new_record)
-                session.commit()
+            # 1. Zoek bestaand record
+            record = session.query(Measurement).where(Measurement.timestamp == ts).first()
+
+            if not record:
+                # Nieuw record aanmaken
+                record = Measurement(timestamp=ts)
+                session.add(record)
+
+            # 2. Update velden die zijn meegegeven
+            if grid_import is not None:
+                record.grid_import = grid_import
+            if grid_export is not None:
+                record.grid_export = grid_export
+            if pv_actual is not None:
+                record.pv_actual = pv_actual
+            if wp_actual is not None:
+                record.wp_actual = wp_actual
+
+            session.commit()
         except Exception as e:
             session.rollback()
-            self.logger.error(f"[DB] Fout bij updaten actual yield: {e}")
+            self.logger.error(f"[DB] Fout bij opslaan meting: {e}")
         finally:
             session.close()
 
-    def get_forecast_history(self, cutoff_date: datetime):
-        """Haalt historische data op als Pandas DataFrame voor training."""
+    def get_training_data(self, cutoff_date: datetime):
+        """
+        Haalt data op voor AI Training.
+        VOEGT SAMEN: Measurements (Feiten) + SolarForecast (Features).
+        """
         try:
-            stmt = (
-                select(SolarForecast)
-                .where(SolarForecast.timestamp >= cutoff_date)
-                .where(SolarForecast.pv_actual.isnot(None))
-                .order_by(SolarForecast.timestamp.asc())
-            )
             with self.engine.connect() as conn:
-                df = pd.read_sql(stmt, conn)
+                # 1. Haal metingen (Targets)
+                query_meas = (
+                    select(Measurement)
+                    .where(Measurement.timestamp >= cutoff_date)
+                    .order_by(Measurement.timestamp.asc())
+                )
+                df_meas = pd.read_sql(query_meas, conn)
 
-            # Zorg dat de timestamp kolom ook echt als datetime wordt herkend door Pandas
-            if not df.empty:
-                df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+                # 2. Haal weerdata (Features)
+                query_fore = (
+                    select(SolarForecast)
+                    .where(SolarForecast.timestamp >= cutoff_date)
+                    .order_by(SolarForecast.timestamp.asc())
+                )
+                df_fore = pd.read_sql(query_fore, conn)
 
-            return df
+            if df_meas.empty or df_fore.empty:
+                return pd.DataFrame()
+
+            # Datetime conversie
+            df_meas["timestamp"] = pd.to_datetime(df_meas["timestamp"], utc=True)
+            df_fore["timestamp"] = pd.to_datetime(df_fore["timestamp"], utc=True)
+
+            # 3. Merge (Inner Join)
+            # We willen alleen rijen waar we zowel de meting als het weer van hebben
+            df_combined = pd.merge(
+                df_meas,
+                df_fore,
+                on="timestamp",
+                how="inner"
+            )
+
+            # 4. Bereken 'load_actual' voor gemak in Pandas
+            # Formule: Load = Import - Export + PV
+            # (Dit is de 'bruto' load inclusief WP, voor base load moet WP er later nog af)
+            df_combined["load_actual"] = (
+                df_combined["grid_import"] - df_combined["grid_export"] + df_combined["pv_actual"]
+            ).clip(lower=0.0)
+
+            return df_combined
+
         except Exception as e:
-            self.logger.error(f"[DB] Fout bij ophalen historie: {e}")
+            self.logger.error(f"[DB] Fout bij ophalen training data: {e}")
             return pd.DataFrame()
