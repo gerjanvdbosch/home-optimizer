@@ -91,60 +91,63 @@ class Collector:
 
     def update_history(self):
         """
-        Verzamelt samples en schrijft elke 15 minuten naar de database.
+        Berekent gemiddeld vermogen op basis van tellerstanden.
         """
         now = self.context.now
         aggregation_minutes = 15
         slot_minute = (now.minute // aggregation_minutes) * aggregation_minutes
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
+        # 1. Haal HUIDIGE tellerstanden op
+        curr_pv = self.client.get_state(self.config.sensor_pv_energy)
+        curr_wp = self.client.get_state(self.config.sensor_wp_energy)
+        curr_imp = self.client.get_state(self.config.sensor_grid_import_energy)
+        curr_exp = self.client.get_state(self.config.sensor_grid_export_energy)
+
         # Initialisatie bij start applicatie
         if self.context.current_slot_start is None:
             self.context.current_slot_start = slot_start
 
+            self.context.last_pv_kwh = curr_pv
+            self.context.last_wp_kwh = curr_wp
+            self.context.last_grid_import_kwh = curr_imp
+            self.context.last_grid_export_kwh = curr_exp
+
+            return
+
         # Detecteer kwartierwissel
         if slot_start > self.context.current_slot_start:
-            # 1. Bereken gemiddelden (gebruik nanmean voor robuustheid tegen dropouts)
-            avg_pv = float(np.nanmean(self.context.pv_samples)) if self.context.pv_samples else 0.0
-            avg_wp = float(np.nanmean(self.context.wp_samples)) if self.context.wp_samples else 0.0
-            avg_grid_raw = float(np.nanmean(self.context.grid_samples)) if self.context.grid_samples else 0.0
+            # 2. Bereken vermogens t.o.v. VORIGE keer
+            avg_pv = self._calculate_avg_power(curr_pv, self.context.last_pv_kwh)
+            avg_wp = self._calculate_avg_power(curr_wp, self.context.last_wp_kwh)
+            avg_imp = self._calculate_avg_power(curr_imp, self.context.last_grid_import_kwh)
+            avg_exp = self._calculate_avg_power(curr_exp, self.context.last_grid_export_kwh)
 
-            # 2. Splits Grid in Import en Export
-            # Import = Alles boven 0
-            # Export = Alles onder 0 (positief gemaakt)
-            grid_import = max(0.0, avg_grid_raw)
-            grid_export = abs(min(0.0, avg_grid_raw))
+            # 3. Update de 'last' waarden voor de volgende keer
+            # Alleen updaten als we een geldige meting hebben
+            if curr_pv is not None:
+                self.context.last_pv_kwh = curr_pv
+            if curr_wp is not None:
+                self.context.last_wp_kwh = curr_wp
+            if curr_imp is not None:
+                self.context.last_grid_import_kwh = curr_imp
+            if curr_exp is not None:
+                self.context.last_grid_export_kwh = curr_exp
 
-            # 3. Sla op in de nieuwe 'Measurements' tabel
+            # 4. Opslaan
             self.database.save_measurement(
-                ts=timestamp,
-                grid_import=grid_import,
-                grid_export=grid_export,
+                ts=self.context.current_slot_start
+                grid_import=avg_imp,
+                grid_export=avg_exp,
                 pv_actual=avg_pv,
                 wp_actual=avg_wp
             )
 
-            logger.info(
-                f"[Collector] History saved {timestamp:%H:%M} | "
-                f"Imp: {grid_import:.2f} | Exp: {grid_export:.2f} | "
-                f"PV: {avg_pv:.2f} | WP: {avg_wp:.2f}"
-            )
-
-            self.context.pv_samples = []
-            self.context.wp_samples = []
-            self.context.grid_samples = []
             self.context.current_slot_start = slot_start
 
-        # Voeg huidige metingen toe aan de buffers (voor gemiddelde berekening later)
-        if self.context.current_pv is not None:
-            self.context.pv_samples.append(self.context.current_pv)
-
-        if self.context.current_wp is not None:
-            self.context.wp_samples.append(self.context.current_wp)
-
-        if self.context.current_grid is not None:
-            self.context.grid_samples.append(self.context.current_grid)
-
+            logger.info(
+                f"[Collector] KWh-based Calc: PV:{avg_pv:.2f}kW | WP:{avg_wp:.2f}kW | Grid:{avg_imp:.2f}/{avg_exp:.2f}kW"
+            )
 
     def _update_buffer(self, buffer: deque, value: float):
         if value is not None:
@@ -153,3 +156,17 @@ class Collector:
         if not buffer:
             return 0.0
         return float(np.median(buffer))
+
+    # Helper functie voor de berekening
+    def _calculate_avg_power(current, last):
+        if current is None or last is None:
+            return 0.0
+
+        diff = current - last
+
+        # Reset detectie: Als meter vervangen is of reset naar 0
+        if diff < 0:
+            return 0.0 # Of current * 4 als je aanneemt dat hij bij 0 begon
+
+        # kWh naar kW (bij 15 min interval = maal 4)
+        return diff * 4.0

@@ -120,11 +120,7 @@ class Database:
         finally:
             session.close()
 
-    def get_training_data(self, cutoff_date: datetime):
-        """
-        Haalt data op voor AI Training.
-        VOEGT SAMEN: Measurements (Feiten) + SolarForecast (Features).
-        """
+    def get_history(self, cutoff_date: datetime):
         try:
             with self.engine.connect() as conn:
                 # 1. Haal metingen (Targets)

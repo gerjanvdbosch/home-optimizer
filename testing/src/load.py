@@ -138,7 +138,7 @@ class LoadForecaster:
         cutoff = datetime.now() - timedelta(days=days_back)
 
         # 1. Haal samengevoegde data (Measurements + Forecast)
-        df = self.database.get_training_data(cutoff_date=cutoff)
+        df = self.database.get_history(cutoff_date=cutoff)
 
         if df.empty:
             logger.warning("[Load] Geen data gevonden voor training.")

@@ -213,7 +213,7 @@ class SolarForecaster:
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
 
-        df = self.database.get_forecast_history(cutoff_date)
+        df = self.database.get_history(cutoff_date=cutoff)
 
         if df.empty:
             logger.warning("[Solar] Geen historische data om model te trainen.")

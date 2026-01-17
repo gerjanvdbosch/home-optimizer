@@ -39,9 +39,11 @@ class Context:
 
     current_slot_start: datetime | None = None
 
-    pv_samples: list[float] = field(default_factory=list)
-    wp_samples: list[float] = field(default_factory=list)
-    grid_samples: list[float] = field(default_factory=list)
+    # Voor kWh berekeningen (houdt de stand van vorig kwartier bij)
+    last_pv_kwh: float = None
+    last_wp_kwh: float = None
+    last_grid_import_kwh: float = None
+    last_grid_export_kwh: float = None
 
     dhw_temp: float = 0.0
     dhw_setpoint: float = 0.0

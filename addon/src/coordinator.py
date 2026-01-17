@@ -73,7 +73,7 @@ if __name__ == "__main__":
         logger.info("[System] API server started")
 
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
-        scheduler.add_job(collector.update_pv, "interval", seconds=15)
+        scheduler.add_job(collector.update_pv, "interval", seconds=5)
 
         scheduler.add_job(coordinator.tick, "interval", minutes=1)
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
