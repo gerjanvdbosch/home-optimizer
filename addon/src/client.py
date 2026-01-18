@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class HAClient:
     def __init__(self, config: Config):
+        self.config = config
         self.url = os.environ.get("SUPERVISOR_API", "http://supervisor/core/api")
         self.token = os.environ.get("SUPERVISOR_TOKEN")
         self.headers = {
