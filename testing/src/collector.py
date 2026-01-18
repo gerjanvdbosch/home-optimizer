@@ -171,7 +171,7 @@ class Collector:
         return float(np.median(buffer))
 
     # Helper functie voor de berekening
-    def _calculate_avg_power(current, last):
+    def _calculate_avg_power(self, current, last):
         if current is None or last is None:
             return 0.0
 
