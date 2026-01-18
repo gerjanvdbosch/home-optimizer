@@ -158,9 +158,6 @@ class Optimizer:
         base_solar_usage = np.sum(np.minimum(slice_solar, slice_load))
         boiler_solar_usage = direct_solar_usage - base_solar_usage
 
-        # Als alternatief (simpeler): hoeveel solar dekt de som
-        total_covered = np.sum(np.minimum(slice_solar, slice_dhw + slice_load))
-
         minutes_to_start = (planned_start - current_time).total_seconds() / 60
         start_local = planned_start.tz_convert(datetime.now().astimezone().tzinfo)
 
@@ -174,4 +171,4 @@ class Optimizer:
         current_load_val = P_load[0] if len(P_load) > 0 else 0.15
         solar_usage_kwh = round(boiler_solar_usage * self.timestep_hours, 2)
 
-        return status, reason, solar_usage_kwh, current_load_val, total_covered
+        return status, reason, solar_usage_kwh, current_load_val
