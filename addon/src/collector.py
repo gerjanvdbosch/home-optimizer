@@ -87,9 +87,7 @@ class Collector:
             self.context.load_buffer, base_load
         )
 
-        logger.info(
-            f"[Collector] Load updated: Base={base_load:.2f}kW (Total={total_consumption:.2f} - WP={self.context.current_wp:.2f})"
-        )
+        logger.debug(f"[Collector] Load updated: Base={self.context.stable_load:.2f}kW")
 
     def update_sensors(self):
         location = self.client.get_location()

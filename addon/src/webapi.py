@@ -235,7 +235,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 mode="lines",
                 name="Historie",
                 legendgroup="history",
-                line=dict(color="#ffa500", width=1.5),
+                line=dict(color="#ffa500", width=1.5, shape="hv"),
                 fill="tozeroy",
                 fillcolor="rgba(255, 165, 0, 0.1)",
             )

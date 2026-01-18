@@ -95,8 +95,7 @@ class LoadModel:
         # Filter rijen waar we geen load data hebben
         df_train = df_history.dropna(subset=["target_load"]).copy()
 
-        df_hourly = df_train.set_index("timestamp").resample("1H").mean().reset_index()
-
+        df_hourly = df_train.set_index("timestamp").resample("1h").mean(numeric_only=True).dropna(subset=["target_load"]).reset_index()
         # Target berekenen op de UUR data
         # Dit is veel stabieler dan op kwartierdata
         df_hourly["target_load"] = df_hourly["load_actual"] - df_hourly["wp_actual"]

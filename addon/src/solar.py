@@ -140,7 +140,13 @@ class SolarModel:
 
         # Target berekenen op de UUR data
         # Dit is veel stabieler dan op kwartierdata
-        df_hourly = df_train.set_index("timestamp").resample("1H").mean().reset_index()
+        df_hourly = (
+            df_train.set_index("timestamp")
+            .resample("1h")
+            .mean(numeric_only=True)
+            .dropna(subset=["pv_actual"])
+            .reset_index()
+        )
 
         X = self._prepare_features(df_hourly)
         y = df_hourly["pv_actual"].clip(0, system_max)

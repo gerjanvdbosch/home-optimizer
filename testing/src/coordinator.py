@@ -97,6 +97,7 @@ if __name__ == "__main__":
         collector.update_history()
 
         coordinator.tick()
+        coordinator.train()
 
         scheduler.start()
 
