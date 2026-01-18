@@ -4,12 +4,13 @@ import logging
 
 from utils import safe_float, to_kw
 from context import HvacMode
+from config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class HAClient:
-    def __init__(self):
+    def __init__(self, config: Config):
         self.url = os.environ.get("SUPERVISOR_API", "http://supervisor/core/api")
         self.token = os.environ.get("SUPERVISOR_TOKEN")
         self.headers = {
@@ -17,8 +18,8 @@ class HAClient:
             "Content-Type": "application/json",
         }
 
-    def get_location(self, entity_id):
-        attributes = self._get_attributes(entity_id)
+    def get_location(self):
+        attributes = self._get_attributes(self.config.sensor_home)
         if not attributes:
             return None, None
 
@@ -26,13 +27,13 @@ class HAClient:
         longitude = safe_float(attributes.get("longitude"))
         return latitude, longitude
 
-    def get_pv_power(self, entity_id):
-        return to_kw(self._get_state(entity_id))
+    def get_pv_power(self):
+        return to_kw(self._get_state(self.config.sensor_pv))
 
-    def get_load_power(self, entity_id):
-        return to_kw(self._get_state(entity_id))
+    def get_load_power(self):
+        return to_kw(self._get_state(self.config.sensor_load))
 
-    def get_hvac_mode(self, entity_id):
+    def get_hvac_mode(self):
         hvac = {
             "Uit": HvacMode.OFF,
             "SWW": HvacMode.DHW,
@@ -40,38 +41,38 @@ class HAClient:
             "Koelen": HvacMode.COOLING,
             "Legionellapreventie": HvacMode.LEGIONELLA_PREVENTION,
             "Vorstbescherming": HvacMode.FROST_PROTECTION,
-        }.get(self._get_state(entity_id))
+        }.get(self._get_state(self.config.sensor_hvac))
         return HvacMode(hvac)
 
-    def get_dhw_temp(self, entity_id):
-        return float(self._get_state(entity_id))
+    def get_dhw_temp(self):
+        return float(self._get_state(self.config.sensor_dhw_temp))
 
-    def get_forecast(self, entity_id):
-        attributes = self._get_attributes(entity_id)
+    def get_forecast(self):
+        attributes = self._get_attributes(self.config.sensor_solcast)
         if not attributes:
             return []
         return attributes.get("detailedForecast", [])
 
-    def _get_state(self, entity_id):
+    def _get_state(self):
         return self._get_payload(entity_id).get("state")
 
-    def _get_attributes(self, entity_id):
+    def _get_attributes(self):
         return self._get_payload(entity_id).get("attributes", {})
 
-    def _get_payload(self, entity_id):
+    def _get_payload(self):
         try:
             r = requests.get(
                 f"{self.url}/states/{entity_id}", headers=self.headers, timeout=10
             )
             r.raise_for_status()
             payload = r.json()
-            logger.debug("[Client] Payload %s fetched", entity_id)
+            logger.debug("[Client] Payload %s fetched")
             return payload
         except Exception as e:
-            logger.exception("[Client] Error getting state %s: %s", entity_id, e)
+            logger.exception("[Client] Error getting state %s: %s", e)
             return None
 
-    def _set_state(self, entity_id, state, attributes=None, friendly_name=None):
+    def _set_state(self, state, attributes=None, friendly_name=None):
         if attributes is None:
             attributes = {}
 
