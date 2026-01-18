@@ -137,8 +137,12 @@ class SolarModel:
     def train(self, df_history: pd.DataFrame, system_max: float):
         df_train = df_history.dropna(subset=["pv_actual"]).copy()
 
-        X = self._prepare_features(df_train)
-        y = df_train["pv_actual"].clip(0, system_max)
+        # Target berekenen op de UUR data
+        # Dit is veel stabieler dan op kwartierdata
+        df_hourly = df_train.set_index("timestamp").resample("1H").mean().reset_index()
+
+        X = self._prepare_features(df_hourly)
+        y = df_hourly["pv_actual"].clip(0, system_max)
 
         self.model = HistGradientBoostingRegressor(
             loss="squared_error",
@@ -219,11 +223,7 @@ class SolarForecaster:
             logger.warning("[Solar] Geen historische data om model te trainen.")
             return
 
-        # Target berekenen op de UUR data
-        # Dit is veel stabieler dan op kwartierdata
-        df_hourly = df.set_index("timestamp").resample("1H").mean().reset_index()
-
-        self.model.train(df_hourly, system_max=self.config.pv_max_kw)
+        self.model.train(df, system_max=self.config.pv_max_kw)
 
     def update(self, current_time: datetime, actual_pv: float):
         forecast_df = self.context.forecast_df

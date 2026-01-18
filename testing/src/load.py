@@ -95,8 +95,15 @@ class LoadModel:
         # Filter rijen waar we geen load data hebben
         df_train = df_history.dropna(subset=["target_load"]).copy()
 
-        X = self._prepare_features(df_train)
-        y = df_train["target_load"]
+        df_hourly = df_train.set_index("timestamp").resample("1H").mean().reset_index()
+
+        # Target berekenen op de UUR data
+        # Dit is veel stabieler dan op kwartierdata
+        df_hourly["target_load"] = df_hourly["load_actual"] - df_hourly["wp_actual"]
+        df_hourly["target_load"] = df_hourly["target_load"].clip(lower=0.1)
+
+        X = self._prepare_features(df_hourly)
+        y = df_hourly["target_load"]
 
         # AANPASSING: Quantile Regression
         # We voorspellen het 90e percentiel (bovengrens).
@@ -115,7 +122,7 @@ class LoadModel:
         self.model.fit(X, y)
         joblib.dump({"model": self.model}, self.path)
         self.is_fitted = True
-        logger.info(f"[Load] Model succesvol getraind op {len(df_train)} records.")
+        logger.info(f"[Load] Model succesvol getraind op {len(df_hourly)} records.")
 
     def predict(self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15) -> pd.Series:
         if not self.is_fitted:
@@ -144,14 +151,7 @@ class LoadForecaster:
             logger.warning("[Load] Geen data gevonden voor training.")
             return
 
-        df_hourly = df.set_index("timestamp").resample("1H").mean().reset_index()
-
-        # Target berekenen op de UUR data
-        # Dit is veel stabieler dan op kwartierdata
-        df_hourly["target_load"] = df_hourly["load_actual"] - df_hourly["wp_actual"]
-        df_hourly["target_load"] = df_hourly["target_load"].clip(lower=0.1)
-
-        self.model.train(df_hourly)
+        self.model.train(df)
 
 
     def update(self, current_time: datetime, current_load_kw: float):
