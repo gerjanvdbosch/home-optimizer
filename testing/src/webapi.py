@@ -489,6 +489,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
     # We gebruiken dezelfde logica als bij het trainen/analyseren
     is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
     df_day = df_hist[is_daytime].copy()
+    df_day = df_day.set_index("timestamp").resample("1h").mean(numeric_only=True).dropna(subset=["pv_actual"]).reset_index()
 
     if len(df_day) < 10:
         return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
@@ -496,7 +497,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
     # 4. Features voorbereiden
     try:
         X = forecaster.model._prepare_features(df_day)
-        y = df_day["pv_actual"]
+        y = df_day["pv_actual"].clip(0, coordinator.config.pv_max_kw)
 
         # 5. Bereken Importance (n_repeats=2 houdt het snel genoeg voor een dashboard)
         # Voor wetenschappelijke precisie wil je 10, voor een dashboard is 2-3 prima.
