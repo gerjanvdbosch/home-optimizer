@@ -153,7 +153,7 @@ class Database:
                 df_fore,
                 on="timestamp",
                 how="inner"
-            )
+            ).sort_values("timestamp")
 
             # 4. Bereken 'load_actual' voor gemak in Pandas
             # Formule: Load = Import - Export + PV

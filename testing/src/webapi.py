@@ -157,13 +157,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
             .mean()
         )
 
-#         df_hist["pv_smooth"] = (
-#             df_hist["pv_actual"]
-#             .rolling(window=2, center=True, win_type='gaussian')
-#             .mean(std=1.5) # std bepaalt hoe 'rond' de heuvel is
-#         )
-
-
         df_hist_plot = df_hist.copy()
 
     # --- 3. BEREIK BEPALEN ---
@@ -223,7 +216,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         fig.add_trace(go.Scatter(
             x=df_hist_plot["timestamp_local"], y=df_hist_plot["pv_actual"],
             mode="lines", line=dict(color="#ffa500", width=1, shape="hv"),
-            opacity=0.2, showlegend=False, hoverinfo="skip"
+            opacity=0.3, showlegend=False, hoverinfo="skip"
         ))
 
         # Doe hetzelfde voor Load als je die historisch toont
@@ -295,7 +288,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
     if "load_corrected" in df.columns:
         fig.add_trace(go.Scatter(
             x=df["timestamp_local"], y=df["load_corrected"], mode="lines",
-            name="Load", line=dict(color="#ff5555", width=2),
+            name="Load", line=dict(color="#ff5555", width=1.5),
             opacity=0.8
         ))
 
