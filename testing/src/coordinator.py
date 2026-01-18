@@ -85,6 +85,7 @@ if __name__ == "__main__":
         logger.info("[System] API server started")
 
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
+        scheduler.add_job(collector.update_load, "interval", seconds=15)
         scheduler.add_job(collector.update_history, "interval", seconds=15)
 
         scheduler.add_job(coordinator.tick, "interval", seconds=5)
@@ -93,6 +94,8 @@ if __name__ == "__main__":
         logger.info("[System] Engine running")
 
         collector.update_forecast()
+        collector.update_history()
+
         coordinator.tick()
 
         scheduler.start()

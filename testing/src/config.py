@@ -11,6 +11,7 @@ class Config:
     pv_max_kw: float = 2.0
 
     sensor_pv_power: str = "sensor.pv_output"
+    sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
     sensor_grid_power: str = "sensor.p1_meter_power"
 
     sensor_pv_energy = "sensor.pv_energie_totaal"

@@ -92,7 +92,7 @@ class LoadModel:
 
 
     def train(self, df_history: pd.DataFrame):
-        # Filter rijen waar we geen load of temp data hebben
+        # Filter rijen waar we geen load data hebben
         df_train = df_history.dropna(subset=["target_load"]).copy()
 
         X = self._prepare_features(df_train)
@@ -144,12 +144,14 @@ class LoadForecaster:
             logger.warning("[Load] Geen data gevonden voor training.")
             return
 
-        # 2. Bereken de Target Variable: Base Load
-        df["target_load"] = df["load_actual"] - df["wp_actual"]
-        # Clip negatieve waarden (meetfouten/timing issues) en zet minimum
-        df["target_load"] = df["target_load"].clip(lower=0.1)
+        df_hourly = df.set_index("timestamp").resample("1H").mean().reset_index()
 
-        self.model.train(df)
+        # Target berekenen op de UUR data
+        # Dit is veel stabieler dan op kwartierdata
+        df_hourly["target_load"] = df_hourly["load_actual"] - df_hourly["wp_actual"]
+        df_hourly["target_load"] = df_hourly["target_load"].clip(lower=0.1)
+
+        self.model.train(df_hourly)
 
 
     def update(self, current_time: datetime, current_load_kw: float):

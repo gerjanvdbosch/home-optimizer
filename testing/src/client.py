@@ -23,6 +23,9 @@ class HAClient:
     def get_pv_power(self):
         return float(self.data.get("pv_power", 0.0))
 
+    def get_wp_power(self):
+        return float(self.data.get("wp_power", 0.0))
+
     def get_grid_power(self):
         return float(self.data.get("grid_power", 0.0))
 

@@ -219,7 +219,11 @@ class SolarForecaster:
             logger.warning("[Solar] Geen historische data om model te trainen.")
             return
 
-        self.model.train(df, system_max=self.config.pv_max_kw)
+        # Target berekenen op de UUR data
+        # Dit is veel stabieler dan op kwartierdata
+        df_hourly = df.set_index("timestamp").resample("1H").mean().reset_index()
+
+        self.model.train(df_hourly, system_max=self.config.pv_max_kw)
 
     def update(self, current_time: datetime, actual_pv: float):
         forecast_df = self.context.forecast_df

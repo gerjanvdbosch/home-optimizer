@@ -220,6 +220,16 @@ def _get_solar_forecast_plot(request: Request) -> str:
         )
 
     if not df_hist_plot.empty:
+        #         df_hist["pv_actual"] = df_hist["pv_actual"].fillna(0) # Zekerheidje
+        #
+        #         df_hist["pv_smooth"] = (
+        #             df_hist["pv_actual"]
+        #             .rolling(window=2, center=True, win_type='gaussian')
+        #              .mean(std=1.5) # std bepaalt hoe 'rond' de heuvel is
+        #         )
+
+        # Doe hetzelfde voor Load als je die historisch toont
+        # df_hist["load_smooth"] = df_hist["load_actual"].rolling(window=2, center=True).mean()
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],

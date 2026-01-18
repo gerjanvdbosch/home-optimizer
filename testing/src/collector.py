@@ -67,26 +67,34 @@ class Collector:
 
         logger.info("[Collector] Forecast updated")
 
-    def update_sensors(self):
+    def update_load(self):
         self.client.reload()
 
-        location = self.client.get_location()
-        if location != (None, None):
-            self.context.latitude, self.context.longitude = location
-        else:
-            logger.warning("[Collector] Locatie niet gevonden")
-
         self.context.current_pv = self.client.get_pv_power()
+        self.context.current_wp = self.client.get_wp_power()
         self.context.current_grid = self.client.get_grid_power()
 
         self.context.stable_pv = self._update_buffer(
             self.context.pv_buffer, self.context.current_pv
         )
 
-        current_house_load = (self.context.current_grid + self.context.current_pv)
+        total_consumption = self.context.current_grid + self.context.current_pv   # Totaal wat het huis in gaat
+        base_load = total_consumption - self.context.current_wp  # Trek de grootverbruiker (WP) eraf
+
+        base_load = max(0.1, base_load)
+
         self.context.stable_load = self._update_buffer(
-            self.context.load_buffer, current_house_load
+            self.context.load_buffer, base_load
         )
+
+        logger.info(f"[Collector] Load updated: Base={base_load:.2f}kW (Total={total_consumption:.2f} - WP={self.context.current_wp:.2f})")
+
+    def update_sensors(self):
+        location = self.client.get_location()
+        if location != (None, None):
+            self.context.latitude, self.context.longitude = location
+        else:
+            logger.warning("[Collector] Locatie niet gevonden")
 
         self.context.hvac_mode = self.client.get_hvac_mode()
         self.context.dhw_temp = self.client.get_dhw_temp()
