@@ -128,6 +128,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     for col in [
         "pv_estimate",
+        "pv_actual",
         "pv_smooth",
         "power_ml",
         "power_ml_raw",

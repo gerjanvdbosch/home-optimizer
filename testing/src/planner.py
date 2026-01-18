@@ -23,7 +23,11 @@ class Planner:
     def create_plan(self):
         now = self.context.now
 
-        outside_temp = 9
+        df = self.context.forecast_df
+
+        idx_now = df["timestamp"].searchsorted(now)
+        df_next_2h = df.iloc[idx_now : idx_now + 8]
+        outside_temp = df_next_2h["temp"].median()
 
         dhw_profile = self.optimizer.calculate_profile(self.context.dhw_temp, self.context.dhw_setpoint, outside_temp)
 
