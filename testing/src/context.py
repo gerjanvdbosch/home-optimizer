@@ -20,6 +20,9 @@ class HvacMode(Enum):
 class Context:
     now: datetime
 
+    latitude: float = 0.0
+    longitude: float = 0.0
+
     hvac_mode: int | None = None
 
     current_pv: float = 0.0
@@ -39,10 +42,10 @@ class Context:
     current_slot_start: datetime | None = None
 
     # Voor kWh berekeningen (houdt de stand van vorig kwartier bij)
-    last_pv_kwh: float = None
-    last_wp_kwh: float = None
-    last_grid_import_kwh: float = None
-    last_grid_export_kwh: float = None
+    last_pv: float = None
+    last_wp: float = None
+    last_grid_import: float = None
+    last_grid_export: float = None
 
     dhw_temp: float = 0.0
     dhw_setpoint: float = 0.0

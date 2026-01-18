@@ -29,5 +29,5 @@ class Planner:
 
         status, reason, solar_usage_kwh, current_load_val = self.optimizer.optimize(self.context.forecast_df, now, dhw_profile)
 
-        logger.info(f"[Planner] Status {status}, Reason {reason}, Boiler solar usage {solar_usage_kwh}kWh, Current load {current_load_val}kW")
+        logger.info(f"[Planner] Status={status} Reason={reason} BoilerSolar={solar_usage_kwh}kWh CurrentLoad={current_load_val}kW")
 

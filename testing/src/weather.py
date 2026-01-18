@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class WeatherClient:
-    def __init__(self, client: HAClient):
+    def __init__(self, client: HAClient, context: Context):
         self.client = client
 
     def get_forecast(self):

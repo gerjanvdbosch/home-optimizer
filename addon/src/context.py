@@ -51,8 +51,8 @@ class Context:
     forecast: SolarContext | None = None
     forecast_df: pd.DataFrame | None = None
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=30))
-    load_buffer: deque = field(default_factory=lambda: deque(maxlen=30))
+    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=10))
+    load_buffer: deque = field(default_factory=lambda: deque(maxlen=10))
 
     current_slot_start: datetime | None = None
     slot_samples: list[float] = field(default_factory=list)

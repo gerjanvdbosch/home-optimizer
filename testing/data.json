@@ -1,8 +1,8 @@
 {
   "room_temp": 20.0,
-  "dhw_temp": 50.0,
+  "dhw_temp": 30.0,
   "pv_power": 0.0,
-  "load_power": 0.15,
+  "grid_power": 0.15,
   "solcast": [
     {
       "period_start": "2026-01-14T00:00:00+00:00",

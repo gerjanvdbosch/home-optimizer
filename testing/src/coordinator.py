@@ -72,9 +72,9 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler()
 
     try:
-        client = HAClient()
-        config = Config.load(client)
+        config = Config.load()
         context = Context(now=datetime.now(timezone.utc))
+        client = HAClient(config)
         database = Database(config)
         collector = Collector(client, database, context, config)
         coordinator = Coordinator(context, config, database, collector)
@@ -85,7 +85,7 @@ if __name__ == "__main__":
         logger.info("[System] API server started")
 
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
-        scheduler.add_job(collector.update_history, "interval", seconds=5)
+        scheduler.add_job(collector.update_history, "interval", seconds=15)
 
         scheduler.add_job(coordinator.tick, "interval", seconds=5)
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)

@@ -17,7 +17,7 @@ class Collector:
     def __init__(
         self, client: HAClient, database: Database, context: Context, config: Config
     ):
-        self.weather = WeatherClient(config)
+        self.weather = WeatherClient(config, context)
         self.client = client
         self.database = database
         self.context = context
@@ -66,6 +66,12 @@ class Collector:
         logger.info("[Collector] Forecast updated")
 
     def update_sensors(self):
+        location = self.client.get_location(config.sensor_home)
+        if location != (None, None):
+            self.context.latitude, self.context.longitude = location
+        else:
+            logger.warning("[Collector] Locatie niet gevonden")
+
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
         self.context.current_load = self.client.get_load_power(self.config.sensor_load)
 

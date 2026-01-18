@@ -1,15 +1,11 @@
 import json
 import os
 
-from client import HAClient
 from dataclasses import dataclass
 from utils import safe_float
 
 @dataclass
 class Config:
-    latitude: float = 52.0
-    longitude: float = 5.0
-
     pv_azimuth: float = 148.0
     pv_tilt: float = 50.0
     pv_max_kw: float = 2.0
@@ -34,19 +30,13 @@ class Config:
     load_model_path: str = "data/load_model.joblib"
 
     solar_model_path: str = "data/solar_model.joblib"
-    solar_model_ratio: float = 0
+    solar_model_ratio: float = 0.0
 
     webapi_host: str = "127.0.0.1"
     webapi_port: int = 8000
 
     @staticmethod
-    def load(client: HAClient):
-        config = Config()
-
-        location = client.get_location(config.sensor_home)
-        if location != (None, None):
-            config.latitude, config.longitude = location
-
-        config.solar_model_ratio = safe_float(os.getenv("SOLAR_MODEL_RATIO", 0.7))
-
-        return config
+    def load():
+        return Config(
+            solar_model_ratio=safe_float(os.getenv("SOLAR_MODEL_RATIO", 0.7))
+        )

@@ -17,7 +17,7 @@ class Collector:
     def __init__(
         self, client: HAClient, database: Database, context: Context, config: Config
     ):
-        self.weather = WeatherClient(client)
+        self.weather = WeatherClient(client, context)
         self.client = client
         self.database = database
         self.context = context
@@ -26,7 +26,7 @@ class Collector:
     def update_forecast(self):
         self.client.reload()
 
-        solcast = self.client.get_forecast(self.config.sensor_solcast)
+        solcast = self.client.get_forecast()
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo).replace(month=1, day=14, hour=10)
         start_filter = now_local.replace(
@@ -70,8 +70,14 @@ class Collector:
     def update_sensors(self):
         self.client.reload()
 
-        self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv_power)
-        self.context.current_grid = self.client.get_grid_power(self.config.sensor_grid_power)
+        location = self.client.get_location()
+        if location != (None, None):
+            self.context.latitude, self.context.longitude = location
+        else:
+            logger.warning("[Collector] Locatie niet gevonden")
+
+        self.context.current_pv = self.client.get_pv_power()
+        self.context.current_grid = self.client.get_grid_power()
 
         self.context.stable_pv = self._update_buffer(
             self.context.pv_buffer, self.context.current_pv
@@ -82,9 +88,9 @@ class Collector:
             self.context.load_buffer, current_house_load
         )
 
-        self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
-        self.context.dhw_temp = self.client.get_dhw_temp(self.config.sensor_dhw_temp)
-        self.context.dhw_setpoint = self.client.get_dhw_setpoint(self.config.sensor_dhw_setpoint)
+        self.context.hvac_mode = self.client.get_hvac_mode()
+        self.context.dhw_temp = self.client.get_dhw_temp()
+        self.context.dhw_setpoint = self.client.get_dhw_setpoint()
 
         logger.info("[Collector] Sensors updated")
 
@@ -98,46 +104,46 @@ class Collector:
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
         # 1. Haal HUIDIGE tellerstanden op
-        curr_pv = self.client.get_state(self.config.sensor_pv_energy)
-        curr_wp = self.client.get_state(self.config.sensor_wp_energy)
-        curr_imp = self.client.get_state(self.config.sensor_grid_import_energy)
-        curr_exp = self.client.get_state(self.config.sensor_grid_export_energy)
+        current_pv = self.client.get_pv_energy()
+        current_wp = self.client.get_wp_energy()
+        current_import = self.client.get_grid_import()
+        current_export = self.client.get_grid_export()
 
         # Initialisatie bij start applicatie
         if self.context.current_slot_start is None:
             self.context.current_slot_start = slot_start
 
-            self.context.last_pv_kwh = curr_pv
-            self.context.last_wp_kwh = curr_wp
-            self.context.last_grid_import_kwh = curr_imp
-            self.context.last_grid_export_kwh = curr_exp
+            self.context.last_pv = current_pv
+            self.context.last_wp = current_wp
+            self.context.last_grid_import = current_import
+            self.context.last_grid_export = current_export
 
             return
 
         # Detecteer kwartierwissel
         if slot_start > self.context.current_slot_start:
             # 2. Bereken vermogens t.o.v. VORIGE keer
-            avg_pv = self._calculate_avg_power(curr_pv, self.context.last_pv_kwh)
-            avg_wp = self._calculate_avg_power(curr_wp, self.context.last_wp_kwh)
-            avg_imp = self._calculate_avg_power(curr_imp, self.context.last_grid_import_kwh)
-            avg_exp = self._calculate_avg_power(curr_exp, self.context.last_grid_export_kwh)
+            avg_pv = self._calculate_avg_power(current_pv, self.context.last_pv)
+            avg_wp = self._calculate_avg_power(current_wp, self.context.last_wp)
+            avg_import = self._calculate_avg_power(current_import, self.context.last_grid_import)
+            avg_export = self._calculate_avg_power(current_export, self.context.last_grid_export)
 
             # 3. Update de 'last' waarden voor de volgende keer
             # Alleen updaten als we een geldige meting hebben
-            if curr_pv is not None:
-                self.context.last_pv_kwh = curr_pv
-            if curr_wp is not None:
-                self.context.last_wp_kwh = curr_wp
-            if curr_imp is not None:
-                self.context.last_grid_import_kwh = curr_imp
-            if curr_exp is not None:
-                self.context.last_grid_export_kwh = curr_exp
+            if current_pv is not None:
+                self.context.last_pv = current_pv
+            if current_wp is not None:
+                self.context.last_wp = current_wp
+            if current_import is not None:
+                self.context.last_grid_import = current_import
+            if current_export is not None:
+                self.context.last_grid_export = current_export
 
             # 4. Opslaan
             self.database.save_measurement(
-                ts=self.context.current_slot_start
-                grid_import=avg_imp,
-                grid_export=avg_exp,
+                ts=self.context.current_slot_start,
+                grid_import=avg_import,
+                grid_export=avg_export,
                 pv_actual=avg_pv,
                 wp_actual=avg_wp
             )
@@ -145,7 +151,7 @@ class Collector:
             self.context.current_slot_start = slot_start
 
             logger.info(
-                f"[Collector] KWh-based Calc: PV:{avg_pv:.2f}kW | WP:{avg_wp:.2f}kW | Grid:{avg_imp:.2f}/{avg_exp:.2f}kW"
+                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW"
             )
 
     def _update_buffer(self, buffer: deque, value: float):

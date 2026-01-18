@@ -3,14 +3,15 @@ import pandas as pd
 import logging
 
 from config import Config
+from context import Context
 
 logger = logging.getLogger(__name__)
 
 
 class WeatherClient:
-    def __init__(self, config: Config):
-        self.lat = config.latitude
-        self.lon = config.longitude
+    def __init__(self, config: Config, context: Context):
+        self.lat = context.latitude
+        self.lon = context.longitude
         self.tilt = config.pv_tilt
         self.azimuth = config.pv_azimuth
         self.base_url = "https://api.open-meteo.com/v1/forecast"

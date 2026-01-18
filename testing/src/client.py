@@ -4,40 +4,53 @@ import logging
 import json
 
 from context import HvacMode
+from config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class HAClient:
-    def __init__(self):
+    def __init__(self, config: Config):
         self.data = {}
 
     def reload(self):
         with open("data.json", "r") as f:
             self.data = json.load(f)
 
-    def get_location(self, entity_id):
+    def get_location(self):
         return 51.9, 5.3
 
-    def get_pv_power(self, entity_id):
+    def get_pv_power(self):
         return float(self.data.get("pv_power", 0.0))
 
-    def get_load_power(self, entity_id):
-        return float(self.data.get("load_power", 0.0))
+    def get_grid_power(self):
+        return float(self.data.get("grid_power", 0.0))
+
+    def get_pv_energy(self):
+        return float(self.data.get("pv_energy", 0.0))
+
+    def get_wp_energy(self):
+        return float(self.data.get("wp_energy", 0.0))
+
+    def get_grid_import(self):
+        return float(self.data.get("grid_import", 0.0))
+
+    def get_grid_export(self):
+        return float(self.data.get("grid_export", 0.0))
 
     def get_room_temp(self):
         return float(self.data.get("room_temp", 19.5))
 
-    def get_dhw_temp(self, entity_id):
+    def get_dhw_temp(self):
         return float(self.data.get("dhw_temp", 30.0))
 
-    def get_dhw_setpoint(self, entity_id):
+    def get_dhw_setpoint(self):
         return float(self.data.get("dhw_setpoint", 50.0))
 
-    def get_hvac_mode(self, entity_id):
+    def get_hvac_mode(self):
         return HvacMode(HvacMode.OFF)
 
-    def get_forecast(self, entity_id):
+    def get_forecast(self):
         return self.data.get("solcast", {})
 
     def get_weather(self):
