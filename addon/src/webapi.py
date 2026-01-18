@@ -61,9 +61,9 @@ def index(request: Request, explain: str = None):
 
     # Bias info toevoegen indien beschikbaar
     if hasattr(context, "solar_bias"):
-        details["Solar Bias"] = f"{context.solar_bias:.2f}"
+        details["Solar Bias"] = f"{context.solar_bias:.2f} %"
     if hasattr(context, "load_bias"):
-        details["Load Bias"] = f"{context.load_bias:.2f}"
+        details["Load Bias"] = f"{context.load_bias:.2f} kW"
 
     # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
     explanation = {}
@@ -128,7 +128,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     for col in [
         "pv_estimate",
-        "power_ml",
+        "pv_smooth" "power_ml",
         "power_ml_raw",
         "power_corrected",
         "load_corrected",
@@ -229,6 +229,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 opacity=0.3,
                 showlegend=False,
                 hoverinfo="skip",
+                legendgroup="history",
             )
         )
 
