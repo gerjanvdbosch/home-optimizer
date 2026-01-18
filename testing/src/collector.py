@@ -17,7 +17,7 @@ class Collector:
     def __init__(
         self, client: HAClient, database: Database, context: Context, config: Config
     ):
-        self.weather = WeatherClient(client, context)
+        self.weather = WeatherClient(config, context)
         self.client = client
         self.database = database
         self.context = context

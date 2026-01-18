@@ -28,10 +28,25 @@ class HAClient:
         return latitude, longitude
 
     def get_pv_power(self):
-        return to_kw(self._get_state(self.config.sensor_pv))
+        return to_kw(self._get_state(self.config.sensor_pv_power))
 
-    def get_load_power(self):
-        return to_kw(self._get_state(self.config.sensor_load))
+    def get_wp_power(self):
+        return to_kw(self._get_state(self.config.sensor_wp_power))
+
+    def get_grid_power(self):
+        return to_kw(self._get_state(self.config.sensor_grid_power))
+
+    def get_pv_energy(self):
+        return safe_float(self._get_state(self.config.sensor_pv_energy))
+
+    def get_wp_energy(self):
+        return safe_float(self._get_state(self.config.sensor_wp_energy))
+
+    def get_grid_import(self):
+        return safe_float(self._get_state(self.config.sensor_grid_import_energy))
+
+    def get_grid_export(self):
+        return safe_float(self._get_state(self.config.sensor_grid_export_energy))
 
     def get_hvac_mode(self):
         hvac = {
@@ -53,13 +68,13 @@ class HAClient:
             return []
         return attributes.get("detailedForecast", [])
 
-    def _get_state(self):
+    def _get_state(self, entity_id):
         return self._get_payload(entity_id).get("state")
 
-    def _get_attributes(self):
+    def _get_attributes(self, entity_id):
         return self._get_payload(entity_id).get("attributes", {})
 
-    def _get_payload(self):
+    def _get_payload(self, entity_id):
         try:
             r = requests.get(
                 f"{self.url}/states/{entity_id}", headers=self.headers, timeout=10
@@ -72,7 +87,7 @@ class HAClient:
             logger.exception("[Client] Error getting state %s: %s", e)
             return None
 
-    def _set_state(self, state, attributes=None, friendly_name=None):
+    def _set_state(self, entity_id, state, attributes=None, friendly_name=None):
         if attributes is None:
             attributes = {}
 

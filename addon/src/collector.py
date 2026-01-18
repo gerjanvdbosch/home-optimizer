@@ -24,7 +24,7 @@ class Collector:
         self.config = config
 
     def update_forecast(self):
-        solcast = self.client.get_forecast(self.config.sensor_solcast)
+        solcast = self.client.get_forecast()
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
@@ -65,55 +65,127 @@ class Collector:
 
         logger.info("[Collector] Forecast updated")
 
+    def update_load(self):
+        self.context.current_pv = self.client.get_pv_power()
+        self.context.current_wp = self.client.get_wp_power()
+        self.context.current_grid = self.client.get_grid_power()
+
+        self.context.stable_pv = self._update_buffer(
+            self.context.pv_buffer, self.context.current_pv
+        )
+
+        total_consumption = (
+            self.context.current_grid + self.context.current_pv
+        )  # Totaal wat het huis in gaat
+        base_load = (
+            total_consumption - self.context.current_wp
+        )  # Trek de grootverbruiker (WP) eraf
+
+        base_load = max(0.1, base_load)
+
+        self.context.stable_load = self._update_buffer(
+            self.context.load_buffer, base_load
+        )
+
+        logger.info(
+            f"[Collector] Load updated: Base={base_load:.2f}kW (Total={total_consumption:.2f} - WP={self.context.current_wp:.2f})"
+        )
+
     def update_sensors(self):
-        location = self.client.get_location(config.sensor_home)
+        location = self.client.get_location()
         if location != (None, None):
             self.context.latitude, self.context.longitude = location
         else:
             logger.warning("[Collector] Locatie niet gevonden")
 
-        self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
-        self.context.current_load = self.client.get_load_power(self.config.sensor_load)
-
-        self.context.stable_pv = self._update_buffer(
-            self.context.pv_buffer, self.context.current_pv
-        )
-        self.context.stable_load = self._update_buffer(
-            self.context.load_buffer, self.context.current_load
-        )
-
-        self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
-        self.context.dhw_temp = self.client.get_dhw_temp(self.config.sensor_dhw_temp)
+        self.context.hvac_mode = self.client.get_hvac_mode()
+        self.context.dhw_temp = self.client.get_dhw_temp()
+        self.context.dhw_setpoint = self.client.get_dhw_setpoint()
 
         logger.info("[Collector] Sensors updated")
 
-    def update_pv(self):
+    def update_history(self):
+        """
+        Berekent gemiddeld vermogen op basis van tellerstanden.
+        """
         now = self.context.now
         aggregation_minutes = 15
         slot_minute = (now.minute // aggregation_minutes) * aggregation_minutes
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
-        # Als dit de allereerste sample is
+        # 1. Haal HUIDIGE tellerstanden op
+        current_pv = self.client.get_pv_energy()
+        current_wp = self.client.get_wp_energy()
+        current_import = self.client.get_grid_import()
+        current_export = self.client.get_grid_export()
+
+        # Initialisatie bij start applicatie
         if self.context.current_slot_start is None:
             self.context.current_slot_start = slot_start
 
-        # Als we een nieuw kwartier zijn binnengegaan
-        if slot_start > self.context.current_slot_start:
-            if self.context.slot_samples:
-                avg_pv = float(np.mean(self.context.slot_samples))
-                # Sla het gemiddelde op voor het AFGELOPEN kwartier
-                self.database.update_pv_actual(
-                    self.context.current_slot_start, yield_kw=avg_pv
-                )
-                logger.info(
-                    f"[Collector] Actual yield opgeslagen voor {self.context.current_slot_start.strftime('%H:%M')}: {avg_pv:.2f}kW"
-                )
+            self.context.last_pv = current_pv
+            self.context.last_wp = current_wp
+            self.context.last_grid_import = current_import
+            self.context.last_grid_export = current_export
 
-            self.context.slot_samples = []
+            return
+
+        # Detecteer kwartierwissel
+        if slot_start > self.context.current_slot_start:
+            # 2. Bereken vermogens t.o.v. VORIGE keer
+            avg_pv = self._calculate_avg_power(current_pv, self.context.last_pv)
+            avg_wp = self._calculate_avg_power(current_wp, self.context.last_wp)
+            avg_import = self._calculate_avg_power(
+                current_import, self.context.last_grid_import
+            )
+            avg_export = self._calculate_avg_power(
+                current_export, self.context.last_grid_export
+            )
+
+            # 3. Update de 'last' waarden voor de volgende keer
+            # Alleen updaten als we een geldige meting hebben
+            if current_pv is not None:
+                self.context.last_pv = current_pv
+            if current_wp is not None:
+                self.context.last_wp = current_wp
+            if current_import is not None:
+                self.context.last_grid_import = current_import
+            if current_export is not None:
+                self.context.last_grid_export = current_export
+
+            # 4. Opslaan
+            self.database.save_measurement(
+                ts=self.context.current_slot_start,
+                grid_import=avg_import,
+                grid_export=avg_export,
+                pv_actual=avg_pv,
+                wp_actual=avg_wp,
+            )
+
             self.context.current_slot_start = slot_start
 
-        self.context.slot_samples.append(self.context.current_pv)
+            logger.info(
+                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW"
+            )
 
-    def _update_buffer(self, buffer: deque, value: float) -> float:
-        buffer.append(value)
+    def _update_buffer(self, buffer: deque, value: float):
+        if value is not None:
+            buffer.append(value)
+
+        if not buffer:
+            return 0.0
         return float(np.median(buffer))
+
+    # Helper functie voor de berekening
+    def _calculate_avg_power(current, last):
+        if current is None or last is None:
+            return 0.0
+
+        diff = current - last
+
+        # Reset detectie: Als meter vervangen is of reset naar 0
+        if diff < 0:
+            return 0.0  # Of current * 4 als je aanneemt dat hij bij 0 begon
+
+        # kWh naar kW (bij 15 min interval = maal 4)
+        return diff * 4.0

@@ -4,7 +4,6 @@ import plotly.io as pio
 import pandas as pd
 import numpy as np
 
-from plotly.subplots import make_subplots
 from sklearn.inspection import partial_dependence, permutation_importance
 from operator import itemgetter
 from fastapi.templating import Jinja2Templates

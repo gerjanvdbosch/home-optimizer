@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
 from enum import Enum
-from typing import Optional
 
 
 class HvacMode(Enum):
@@ -16,45 +15,37 @@ class HvacMode(Enum):
     FROST_PROTECTION = 5
 
 
-class SolarStatus(Enum):
-    START = "START"
-    WAIT = "WAIT"
-    LOW_LIGHT = "LOW_LIGHT"
-    DONE = "DONE"
-
-
-@dataclass
-class SolarContext:
-    actual_pv: float
-    load_now: float
-    energy_now: float
-    energy_best: float
-    opportunity_cost: float
-    confidence: float
-    action: SolarStatus
-    reason: str
-    planned_start: Optional[datetime] = None
-    current_bias: float = 1.0
-
-
 @dataclass
 class Context:
     now: datetime
 
+    latitude: float = 0.0
+    longitude: float = 0.0
+
     hvac_mode: int | None = None
 
     current_pv: float = 0.0
-    current_load: float = 0.0
+    current_wp: float = 0.0
+    current_grid: float = 0.0
+
     stable_pv: float = 0.0
     stable_load: float = 0.0
 
-    forecast: SolarContext | None = None
     forecast_df: pd.DataFrame | None = None
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=10))
-    load_buffer: deque = field(default_factory=lambda: deque(maxlen=10))
+    solar_bias: float = 1.0
+    load_bias: float = 1.0
+
+    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=2))
+    load_buffer: deque = field(default_factory=lambda: deque(maxlen=2))
 
     current_slot_start: datetime | None = None
-    slot_samples: list[float] = field(default_factory=list)
+
+    # Voor kWh berekeningen (houdt de stand van vorig kwartier bij)
+    last_pv: float = None
+    last_wp: float = None
+    last_grid_import: float = None
+    last_grid_export: float = None
 
     dhw_temp: float = 0.0
+    dhw_setpoint: float = 0.0

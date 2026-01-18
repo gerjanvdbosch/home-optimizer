@@ -3,7 +3,7 @@ import threading
 import logging
 import uvicorn
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from config import Config
@@ -12,6 +12,8 @@ from collector import Collector
 from client import HAClient
 from planner import Planner
 from database import Database
+from solar import SolarForecaster
+from load import LoadForecaster
 from webapi import api
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -24,25 +26,29 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 class Coordinator:
-    def __init__(self, context: Context, config: Config, collector: Collector):
+    def __init__(
+        self, context: Context, config: Config, database: Database, collector: Collector
+    ):
+        self.solar = SolarForecaster(config, context, database)
+        self.load = LoadForecaster(config, context, database)
         self.planner = Planner(context, config)
         self.context = context
         self.config = config
         self.collector = collector
 
     def tick(self):
+        self.context.now = datetime.now(timezone.utc)
+
         self.collector.update_sensors()
 
-        self.context.now = datetime.now(timezone.utc)
+        self.solar.update(self.context.now, self.context.stable_pv)
+        self.load.update(self.context.now, self.context.stable_load)
+
         self.planner.create_plan()
 
     def train(self):
-        cutoff_date = self.context.now - timedelta(days=730)
-        history = self.collector.database.get_forecast_history(cutoff_date)
-
-        self.planner.forecaster.model.train(history, system_max=self.config.pv_max_kw)
-
-        logger.info(f"[Coordinator] Trained model with {len(history)} rows of history")
+        self.solar.train()
+        self.load.train()
 
     def start_api(self):
         api.state.coordinator = self
@@ -65,7 +71,7 @@ if __name__ == "__main__":
         client = HAClient(config)
         database = Database(config)
         collector = Collector(client, database, context, config)
-        coordinator = Coordinator(context, config, collector)
+        coordinator = Coordinator(context, config, database, collector)
 
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
@@ -73,7 +79,8 @@ if __name__ == "__main__":
         logger.info("[System] API server started")
 
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
-        scheduler.add_job(collector.update_pv, "interval", seconds=15)
+        scheduler.add_job(collector.update_load, "interval", seconds=5)
+        scheduler.add_job(collector.update_history, "interval", minutes=1)
 
         scheduler.add_job(coordinator.tick, "interval", minutes=1)
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
@@ -81,6 +88,8 @@ if __name__ == "__main__":
         logger.info("[System] Engine running")
 
         collector.update_forecast()
+        collector.update_history()
+
         coordinator.tick()
 
         scheduler.start()

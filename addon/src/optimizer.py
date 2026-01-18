@@ -4,86 +4,77 @@ import numpy as np
 import logging
 
 from datetime import datetime
-from context import SolarStatus, SolarContext
 
 logger = logging.getLogger(__name__)
+
+"""
+- Optimizer voor warmtepompboiler voor minimalisatie grid import en maximalisatie zonnegebruik
+-- Gebaseerd op CVXPY is noodzakelijk
+-- Dynamische simulatie van warmtepomp gedrag
+-- Optimalisatie van starttijdstip gebaseerd op hoogste zonneproductie
+-- Fallback verwarmen indien geen zon beschikbaar op moment met hoogste buiten temperatuur
+-- Water moet warm zijn voor 17:00
+-- 1 run per dag
+"""
 
 
 class Optimizer:
     def __init__(self, pv_max_kw: float):
         self.pv_max_kw = pv_max_kw
-        self.timestep_hours = 0.25  # Kwartierwaarden
+        self.timestep_hours = 0.25  # 15 min
 
     def calculate_profile(
         self,
         t_start_temp: float,
         t_target: float,
-        volume_liter: float = 200,
         outside_temp: float = 15,
+        volume_liter: float = 200,
     ):
         """
-        Simuleert het opwarmproces van een warmtepompboiler stap voor stap.
-        Houdt rekening met COP-verlies bij koud weer en heter water.
+        Simuleert het opwarmproces.
+        TODO: train met model voor SWW en verwarmen
         """
         if t_start_temp >= t_target:
             return np.array([])
 
-        # 1. Configuratie van de Warmtepomp (Aanpasbaar aan jouw model)
-        # Elektrisch vermogen curve (optoeren compressor)
-        # Dit is wat hij uit het stopcontact trekt.
-        ramp_up_curve = [1.5, 1.7, 2.0, 2.3, 2.5]
-        max_power_elec = 2.7
+        # Elektrisch vermogen (kW)
+        # Gemiddeld verbruik SW75 tijdens SWW run is vaak rond de 2.2 - 2.8 kW
+        p_rated = 2.5
+        p_max_limit = 3.2
+        p_temp_coeff = 0.015
+        ramp_factors = [0.8, 0.9]
 
-        # 2. Start Simulatie
         current_water_temp = t_start_temp
         actual_profile_elec = []
 
         step_counter = 0
-
-        # We stoppen als het water warm is OF als we absurd lang bezig zijn (beveiliging > 12 uur)
         max_steps = int(12 / self.timestep_hours)
 
         while current_water_temp < t_target and step_counter < max_steps:
+            # 1. Elektrisch profiel
+            p_target = p_rated + (current_water_temp - 40) * p_temp_coeff
+            ramp_factor = (
+                ramp_factors[step_counter] if step_counter < len(ramp_factors) else 1.0
+            )
+            p_elec = p_target * ramp_factor
+            p_elec = max(0.5, min(p_max_limit, p_elec))
 
-            # A. Bepaal elektrisch vermogen voor dit kwartier
-            if step_counter < len(ramp_up_curve):
-                p_elec = ramp_up_curve[step_counter]
-            else:
-                p_elec = max_power_elec
+            lift = current_water_temp - outside_temp
+            estimated_cop = 5.5 - (0.10 * lift)
+            current_cop = np.clip(estimated_cop, 1.5, 4.5)
 
-            # B. Schat de COP (Coefficient of Performance)
-            # Dit is de cruciale stap voor nauwkeurigheid!
-            # Basisregel: COP zakt als buitenlucht koud is, en als water heet is.
-            # Voorbeeld formule voor een moderne WP boiler (R134a/R290):
-            # COP ~ 3.5 bij (Air=15, Water=40).
-            # -0.06 per graad lagere luchttemp
-            # -0.04 per graad hogere watertemp
+            # 3. Thermisch & Temperatuur
+            p_thermal = p_elec * current_cop
 
-            cop_base = 3.5
-            cop_corr_air = (outside_temp - 15) * 0.06  # Kouder buiten = lagere COP
-            cop_corr_water = (
-                current_water_temp - 40
-            ) * -0.04  # Heter water = lagere COP
-
-            current_cop = cop_base + cop_corr_air + cop_corr_water
-
-            # Begrens de COP op realistische waarden (min 1.5, max 5.0)
-            current_cop = max(1.5, min(5.0, current_cop))
-
-            # C. Bereken Thermisch Vermogen (Wat gaat er het vat in?)
-            p_thermal = p_elec * current_cop  # kW
-
-            # D. Bereken temperatuurstijging in dit kwartier (0.25 uur)
-            # Formule: Q (kWh) = m (kg) * c * deltaT / 3600
-            # Dus: deltaT = (kWh_thermisch * 3600) / (m * c)
-            # Soortelijke warmte water (c) is ong 4.18 kJ/kg.K
+            # Als p_thermal te hoog wordt, knijpen we hem af (saturation)
+            if p_thermal > 8.0:
+                p_thermal = 8.0
 
             energy_thermal_kwh = p_thermal * self.timestep_hours
 
             delta_t = (energy_thermal_kwh * 3600) / (volume_liter * 4.18)
-
-            # Update de simulatie
             current_water_temp += delta_t
+
             actual_profile_elec.append(p_elec)
             step_counter += 1
 
@@ -92,20 +83,8 @@ class Optimizer:
     def optimize(
         self, df: pd.DataFrame, current_time: pd.Timestamp, power_profile: np.ndarray
     ):
-        """
-        Vindt het beste startmoment gegeven een specifiek vermogensprofiel.
-        """
         if len(power_profile) == 0:
-            return SolarStatus.WAIT, SolarContext(
-                reason="Water is already hot",
-                energy_best=0,
-                action=SolarStatus.WAIT,
-                actual_pv=0,
-                energy_now=0,
-                opportunity_cost=0,
-                confidence=1.0,
-                load_now=0,
-            )
+            return "WAIT", "Boiler al op temperatuur", 0.0, 0.0
 
         duration_steps = len(power_profile)
 
@@ -115,91 +94,84 @@ class Optimizer:
         future = future.iloc[:horizon_steps]
 
         if len(future) < duration_steps:
-            logger.warning("Niet genoeg data (horizon korter dan benodigde duur).")
-            return SolarStatus.WAIT, None
+            logger.warning(f"Niet genoeg data: {len(future)}")
+            return "WAIT", "Niet genoeg data in horizon", 0.0, 0.0
 
         P_solar = future["power_corrected"].values
-        # Aanname: load is laag/constant
-        P_load = 0.25
-
+        outside_temp = future["temp"].values
+        P_load = future["load_corrected"].values
         T = len(P_solar)
 
-        # Aantal mogelijke startmomenten
         num_possible_starts = T - duration_steps + 1
         if num_possible_starts <= 0:
-            return SolarStatus.WAIT, None
+            return "WAIT", "Niet genoeg tijd voor verwarmen", 0.0, 0.0
 
-        # --- CVXPY MODEL ---
-
-        # 1. Binaire variabele: start op tijdstip t
         start_flags = cp.Variable(num_possible_starts, boolean=True)
-
-        # 2. Variabele: Het daadwerkelijke DHW vermogen op elk tijdstip T
-        # Dit is nu geen simpele boolean meer, maar een float variabele die we construeren
         dhw_power_vector = cp.Variable(T)
 
-        constraints = []
-        constraints.append(cp.sum(start_flags) == 1)  # Moet precies 1x starten
-
-        # CONVOLUTIE / MATRIX OPBOUW
-        # We bouwen de verwachte vermogenscurve op.
-        # Als start_flags[k] == 1, dan wordt op [k...k+duur] het profiel 'geplakt'.
+        constraints = [cp.sum(start_flags) == 1]
 
         profile_expr = 0
         for k in range(num_possible_starts):
-            # Maak een vector van lengte T met overal nullen
             vec = np.zeros(T)
-            # Plaats het power_profile op positie k
             vec[k : k + duration_steps] = power_profile
-
-            # Tel op bij de expressie
             profile_expr += start_flags[k] * vec
 
         constraints.append(dhw_power_vector == profile_expr)
 
-        # 3. Doelfunctie (Grid Minimalisatie)
+        # --- OBJECTIVE ---
         net_load = (P_load + dhw_power_vector) - P_solar
         grid_import = cp.pos(net_load)
 
-        objective = cp.Minimize(cp.sum(grid_import))
+        # secundaire term: warmere buitentemp = lagere straf
+        temp_norm = (outside_temp - np.mean(outside_temp)) / (
+            np.std(outside_temp) + 1e-6
+        )
+        temp_penalty = cp.sum(cp.multiply(dhw_power_vector, -temp_norm))
+
+        lambda_cop = 0.05  # klein: grid blijft dominant
+
+        objective = cp.Minimize(cp.sum(grid_import) + lambda_cop * temp_penalty)
 
         try:
             problem = cp.Problem(objective, constraints)
             problem.solve()
         except Exception as e:
             logger.error(f"Solver failed: {e}")
-            return SolarStatus.WAIT, None
+            return "WAIT", "Optimalisatie mislukt", 0.0, 0.0
 
-        # --- RESULTAAT ---
         best_start_idx = int(np.argmax(start_flags.value))
         planned_start = future.iloc[best_start_idx]["timestamp"]
 
-        # Berekening voor context
         best_end_idx = best_start_idx + duration_steps
         slice_solar = P_solar[best_start_idx:best_end_idx]
-        slice_dhw = power_profile  # Nu gebruiken we het echte profiel
+        slice_dhw = power_profile
+        slice_load = P_load[best_start_idx:best_end_idx]  # Ook load slicen
 
-        # Direct gebruik berekenen
-        # Let op: slice_dhw en slice_solar moeten even lang zijn, dat is hier gegarandeerd
-        direct_solar_usage = np.sum(np.minimum(slice_solar, slice_dhw + P_load))
+        # Hoeveel van de boiler energie komt direct uit zon?
+        # Formule: min(Solar, Boiler + Huis) - min(Solar, Huis)
+        # Of simpeler benaderd voor context:
+        # We kijken naar het totaalverbruik in dat raamwerk
+        total_consumption = slice_dhw + slice_load
+        direct_solar_usage = np.sum(np.minimum(slice_solar, total_consumption))
+        # Maar we willen eigenlijk weten hoeveel *extra* solar de boiler pakt:
+        base_solar_usage = np.sum(np.minimum(slice_solar, slice_load))
+        boiler_solar_usage = direct_solar_usage - base_solar_usage
 
-        status = SolarStatus.WAIT
+        # Als alternatief (simpeler): hoeveel solar dekt de som
+        total_covered = np.sum(np.minimum(slice_solar, slice_dhw + slice_load))
+
         minutes_to_start = (planned_start - current_time).total_seconds() / 60
-        start_local = planned_start.tz_convert(tz=datetime.now().astimezone().tzinfo)
-        reason = f"Start gepland om {start_local.strftime('%H:%M')}"
+        start_local = planned_start.tz_convert(datetime.now().astimezone().tzinfo)
 
-        if minutes_to_start <= 5:
-            status = SolarStatus.START
-            reason = "Starttijd bereikt. Optimalisatie voltooid."
-
-        return status, SolarContext(
-            actual_pv=0,  # In simulatie niet relevant
-            energy_now=0,
-            energy_best=round(direct_solar_usage * self.timestep_hours, 2),
-            opportunity_cost=0,
-            confidence=1.0,  # CVXPY is zeker van zijn zaak
-            action=status,
-            reason=reason,
-            planned_start=start_local,
-            load_now=P_load,
+        status = "START" if minutes_to_start <= 5 else "WAIT"
+        reason = (
+            "Starttijd bereikt"
+            if status == "START"
+            else f"Start gepland om {start_local:%H:%M}"
         )
+        # Load van NU voor logging (eerste waarde van de vector)
+        current_load_val = P_load[0] if len(P_load) > 0 else 0.15
+        solar_usage_kwh = round(boiler_solar_usage * self.timestep_hours, 2)
+
+        return status, reason, solar_usage_kwh, current_load_val, total_covered

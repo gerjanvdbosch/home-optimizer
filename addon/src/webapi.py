@@ -22,43 +22,54 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 @api.get("/", response_class=HTMLResponse)
 def index(request: Request, explain: str = None):
-    # Haal de HTML div string op in plaats van een plaatje
+    """
+    Dashboard Home. Leest status direct uit Context.
+    """
+    coordinator = request.app.state.coordinator
+    context = coordinator.context
+
+    # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request)
     importance_html = ""
 
-    coordinator = request.app.state.coordinator
-    context = coordinator.context
-    forecast = context.forecast
+    # Formatteer starttijd
+    start_str = "-"
+    planned_start = getattr(context, "planned_start", None)
+    if planned_start and isinstance(planned_start, datetime):
+        local_tz = datetime.now().astimezone().tzinfo
+        local_start = planned_start.astimezone(local_tz)
+        start_str = local_start.strftime("%H:%M")
 
-    details = {}
+    # Formatteer status (kan een Enum zijn of string)
+    action_val = getattr(context, "action", "Onbekend")
+    if hasattr(action_val, "value"):  # Als het een Enum is
+        action_val = action_val.value
+
+    details = {
+        "Status": action_val,
+        "Reden": getattr(context, "reason", "-"),
+        "Geplande Start": start_str,
+        "PV Huidig": (
+            f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
+        ),
+        "Load Huidig": (
+            f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-"
+        ),
+        "Boiler Solar": f"{getattr(context, 'boiler_solar_kwh', 0.0):.2f} kWh",
+        "Verwachte Load": f"{getattr(context, 'predicted_load_now', 0.0):.2f} kW",
+    }
+
+    # Bias info toevoegen indien beschikbaar
+    if hasattr(context, "solar_bias"):
+        details["Solar Bias"] = f"{context.solar_bias:.2f}"
+    if hasattr(context, "load_bias"):
+        details["Load Bias"] = f"{context.load_bias:.2f}"
+
+    # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
     explanation = {}
-
-    if hasattr(context, "forecast") and context.forecast is not None:
-        # Helper voor veilige datum weergave
-        start_str = "-"
-        if forecast.planned_start:
-            # Converteer naar lokale tijd voor weergave
-            local_tz = datetime.now().astimezone().tzinfo
-            local_start = forecast.planned_start.astimezone(local_tz)
-            start_str = local_start.strftime("%H:%M")
-
-        details = {
-            "Status": forecast.action.value,
-            "Reden": forecast.reason,
-            "PV Huidig": f"{forecast.actual_pv:.2f} kW",
-            "Load Huidig": f"{forecast.load_now:.2f} kW",
-            "Prognose Nu": f"{forecast.energy_now:.2f} kWh",
-            "Prognose Beste": f"{forecast.energy_best:.2f} kWh",
-            "Kans kosten": f"{forecast.opportunity_cost * 100:.1f} %",
-            "Betrouwbaarheid": f"{forecast.confidence * 100:.1f} %",
-            "Bias": f"{forecast.current_bias * 100:.1f} %",
-            "Geplande Start": start_str,
-        }
-
-        # 3. Explain Genereren (Gedeelde Functie)
-        if explain == "1":
-            explanation = _get_explanation_data(coordinator)
-            importance_html = _get_importance_plot_plotly(request)
+    if explain == "1":
+        explanation = _get_explanation_data(coordinator)
+        importance_html = _get_importance_plot_plotly(request)
 
     return templates.TemplateResponse(
         "index.html",
@@ -75,37 +86,17 @@ def index(request: Request, explain: str = None):
 @api.post("/solar/train", response_class=JSONResponse)
 def trigger_training(request: Request):
     """
-    Forceer een hertraining van het model op basis van de laatste 60 dagen.
+    Forceer een hertraining van het model.
     """
     coordinator = request.app.state.coordinator
-    forecaster = coordinator.planner.forecaster
-    database = coordinator.collector.database
-    config = coordinator.config
 
-    # 1. Data ophalen
-    # Zorg dat we genoeg data hebben voor een goed model
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=730)
-
-    # We gebruiken de bestaande functie die ook voor de grafiek wordt gebruikt,
-    # maar dan met een datum ver in het verleden.
-    df_hist = database.get_forecast_history(cutoff_date)
-
-    if df_hist.empty or len(df_hist) < 48:  # Minimaal ~12 uur aan kwartier-data
-        return JSONResponse(
-            {"error": "Te weinig data beschikbaar in database (minimaal 1 dag nodig)."},
-            status_code=400,
-        )
-
-    # 2. Train het model
     try:
-        # Dit blokkeert heel even de server (paar seconden), dat is prima voor thuisgebruik.
-        forecaster.model.train(df_hist, config.pv_max_kw)
-        new_mae = forecaster.model.mae
+        coordinator.solar.train()
+        new_mae = coordinator.solar.model.mae
 
         return {
             "status": "success",
-            "message": f"Model getraind op {len(df_hist)} datapunten.",
-            "new_mae": round(new_mae, 3),
+            "message": f"Model getraind. Nieuwe MAE: {new_mae:.3f} kW",
         }
 
     except Exception as e:
@@ -115,74 +106,64 @@ def trigger_training(request: Request):
 
 def _get_solar_forecast_plot(request: Request) -> str:
     """
-    Genereert een interactieve Plotly grafiek en retourneert deze als HTML string (div).
+    Genereert de interactieve Plotly grafiek.
+    Past smoothing toe op historische data voor mooie weergave.
     """
     coordinator = request.app.state.coordinator
     context = coordinator.context
-    forecaster = coordinator.planner.forecaster
-    forecast = context.forecast
     database = coordinator.collector.database
 
     # Check of er data is
-    if not hasattr(context, "forecast") or context.forecast is None:
-        return ""
+    if not hasattr(context, "forecast_df") or context.forecast_df is None:
+        return "<div class='p-4 text-muted'>Geen forecast data beschikbaar.</div>"
 
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
 
-    # --- 1. DATA VOORBEREIDING (Identiek aan origineel) ---
+    # --- 1. FORECAST DATA VOORBEREIDING ---
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
-    is_night = df["timestamp_local"].dt.hour.isin([23, 0, 1, 2, 3, 4])
+    is_night = df["timestamp_local"].dt.hour.isin([23, 0, 1, 2, 3, 4, 5])
 
     for col in ["pv_estimate", "power_ml", "power_ml_raw", "power_corrected"]:
         if col in df.columns:
             df[col] = df[col].round(2)
             df.loc[is_night, col] = 0.0
 
-    # Load & Net Power projectie
-    baseload = forecaster.optimizer.avg_baseload
-    df["consumption"] = baseload
-
-    future_mask = df["timestamp_local"] >= local_now
-    future_indices = df.index[future_mask].copy()
-    decay_steps = 2
-    for i, idx in enumerate(future_indices[: decay_steps + 1]):
-        factor = 1.0 - (i / decay_steps)
-        blended_load = (context.stable_load * factor) + (baseload * (1 - factor))
-        df.at[idx, "consumption"] = max(blended_load, baseload)
-
-    df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
-
-    if "power_corrected" in df.columns:
-        df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
-    else:
-        df["net_power"] = 0.0
-
     if df.empty:
         return ""
 
-    # --- 2. PLOT GENERATIE (PLOTLY) ---
+    # --- 2. HISTORIE OPHALEN & SMOOTHEN ---
     cutoff_date = (
         local_now.replace(hour=0, minute=0, second=0, microsecond=0)
         .replace(tzinfo=local_tz)
         .astimezone(timezone.utc)
     )
 
-    df_hist = database.get_forecast_history(cutoff_date)
+    df_hist = database.get_history(cutoff_date)
     df_hist_plot = pd.DataFrame()
 
     if not df_hist.empty:
         df_hist["timestamp_local"] = (
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
-        df_hist["pv_actual"] = df_hist["pv_actual"].round(2)
+
+        # === SMOOTHING VOOR GRAFIEK ===
+        # De database bevat "blokken" (Average kW per 15m).
+        df_hist["pv_smooth"] = (
+            df_hist["pv_actual"]
+            .fillna(0)
+            .rolling(window=4, center=True, min_periods=1)
+            .mean()
+        )
+
         df_hist_plot = df_hist.copy()
 
+    # --- 3. BEREIK BEPALEN ---
     active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
     zon_uren = df[df[active_col] > 0]
-    if not zon_uren.empty:
+    if not zon_uren.empty and not df_hist_plot.empty:
         x_start = zon_uren["timestamp_local"].min() - timedelta(hours=2)
         x_end = max(
             zon_uren["timestamp_local"].max(), df_hist_plot["timestamp_local"].max()
@@ -228,7 +209,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 name="Model",
                 line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
                 opacity=0.6,
-                # visible="legendonly",
+                visible="legendonly",
             )
         )
 
@@ -238,7 +219,21 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=df_hist_plot["timestamp_local"],
                 y=df_hist_plot["pv_actual"],
                 mode="lines",
-                name="PV history",
+                line=dict(color="#ffa500", width=1, shape="hv"),
+                opacity=0.3,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+        # Doe hetzelfde voor Load als je die historisch toont
+        # df_hist["load_smooth"] = df_hist["load_actual"].rolling(window=2, center=True).mean()
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["pv_smooth"],
+                mode="lines",
+                name="Historie",
                 legendgroup="history",
                 line=dict(color="#ffa500", width=1.5),
                 fill="tozeroy",
@@ -296,87 +291,51 @@ def _get_solar_forecast_plot(request: Request) -> str:
             )
         )
 
-    # E. Load Projection (Rood, Step)
-    #     fig.add_trace(
-    #         go.Scatter(
-    #             x=df["timestamp_local"],
-    #             y=df["consumption"],
-    #             mode="lines",
-    #             name="Load Projection",
-    #             line=dict(color="#ff5555", width=2, shape="hv"),  # shape='hv' is step-post
-    #         )
-    #     )
+    # E. Load Forecast (Rood)
+    if "load_corrected" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df["timestamp_local"],
+                y=df["load_corrected"],
+                mode="lines",
+                name="Load",
+                line=dict(color="#ff5555", width=1.5),
+                opacity=0.8,
+            )
+        )
 
-    # F. Netto Solar (Filled Area)
-    # In Plotly is fill='tozeroy' makkelijk, maar om specifiek netto te kleuren gebruiken we de berekende kolom
-    # if "net_power" in df.columns and df["net_power"].max() > 0:
-    #     fig.add_trace(
-    #         go.Scatter(
-    #             x=df["timestamp_local"],
-    #             y=df["net_power"],
-    #             mode="lines",  # Geen markers
-    #             name="Netto Solar",
-    #             showlegend=False,
-    #             line=dict(width=0),  # Geen rand
-    #             fill="tozeroy",
-    #             fillcolor="rgba(255, 165, 0, 0.3)",
-    #             hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
-    #         )
-    #     )
+    # F. Boiler Start Lijn (Direct uit Context)
+    planned_start = getattr(context, "planned_start", None)
+    if planned_start and isinstance(planned_start, datetime):
+        local_start = planned_start.astimezone(local_tz).replace(tzinfo=None)
 
-    # --- LAYOUT & SHAPES ---
-
-    # Verticale lijn voor NU
-    fig.add_vline(
-        x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
-    )
-
-    # Start Window Logic
-    if forecast and forecast.planned_start:
-        local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
-
-        if local_start >= df["timestamp_local"].min():
-            y_top = max(
-                df[["power_corrected", "pv_estimate"]].max().max(),
-                df_hist_plot["pv_actual"].max() if not df_hist_plot.empty else 0,
+        # Check of starttijd in de grafiek past
+        if local_start >= x_start and local_start <= x_end + timedelta(hours=12):
+            fig.add_vline(
+                x=local_start,
+                line_width=2,
+                line_dash="dot",
+                line_color="#2ca02c",
+                annotation_text="Start",
+                annotation_position="top right",
             )
 
-            duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
-
-            # 2. TRACE A: De verticale stippellijn + Tekst
-            fig.add_trace(
-                go.Scatter(
-                    x=[local_start, local_start],
-                    y=[0, y_top],
-                    mode="lines+text",
-                    name="Start",  # Dit komt in de legenda
-                    legendgroup="start",  # Koppelnaam
-                    line=dict(color="#2ca02c", width=2),
-                    text=["", "Start"],  # Tekst alleen bij het bovenste punt
-                    textposition="top right",  # Rechts van de lijn
-                    textfont=dict(color="#2ca02c"),
-                )
-            )
-
-            # 3. TRACE B: Het gearceerde vlak
-            # We tekenen een onzichtbare lijn rondom het gebied en vullen die in ("toself")
-            fig.add_trace(
-                go.Scatter(
-                    x=[local_start, duration_end, duration_end, local_start],
-                    y=[0, 0, y_top, y_top],
-                    fill="toself",
-                    fillcolor="rgba(44, 160, 44, 0.15)",
-                    mode="lines",
-                    line=dict(width=0),  # Geen rand
-                    name="Start",  # Zelfde naam
-                    legendgroup="start",  # Zelfde groep!
-                    showlegend=False,  # Niet dubbel in de lijst tonen
-                    hoverinfo="skip",
-                )
-            )
-
-    # Algemene Layout
-    # y_max = max(df["pv_estimate"].max(), df["pv_actual"].max()) * 1.25
+    #             # 3. TRACE B: Het gearceerde vlak
+    #             # We tekenen een onzichtbare lijn rondom het gebied en vullen die in ("toself")
+    #             fig.add_trace(
+    #                 go.Scatter(
+    #                     x=[local_start, duration_end, duration_end, local_start],
+    #                     y=[0, 0, y_top, y_top],
+    #                     fill="toself",
+    #                     fillcolor="rgba(44, 160, 44, 0.15)",
+    #                     mode="lines",
+    #                     line=dict(width=0),  # Geen rand
+    #                     name="Start",  # Zelfde naam
+    #                     legendgroup="start",  # Zelfde groep!
+    #                     showlegend=False,  # Niet dubbel in de lijst tonen
+    #                     hoverinfo="skip",
+    #                 )
+    #             )
 
     fig.update_layout(
         template="plotly_dark",
@@ -413,19 +372,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
 
 def _get_explanation_data(coordinator) -> dict:
-    """
-    CENTRALE FUNCTIE: Bereidt de SHAP data voor.
-    Wordt gebruikt door zowel de HTML template als de JSON API.
-    """
+    """Bereidt SHAP data voor."""
     context = coordinator.context
-    forecaster = coordinator.planner.forecaster
+    forecaster = coordinator.solar
 
-    # 1. Validatie
-    if (
-        not hasattr(context, "forecast_df")
-        or context.forecast_df is None
-        or context.forecast_df.empty
-    ):
+    if not hasattr(context, "forecast_df") or context.forecast_df is None:
         return None
 
     if not forecaster.model.is_fitted:
@@ -434,11 +385,8 @@ def _get_explanation_data(coordinator) -> dict:
     try:
         local_tz = datetime.now().astimezone().tzinfo
         current_time = datetime.now(local_tz)
-
-        # Werk op een kopie
         df = context.forecast_df.copy()
 
-        # 2. Bepaal kolom: 'power_ml_raw' heeft voorkeur (want dat legt SHAP uit)
         target_col = "power_ml_raw"
 
         # 3. Zoek 'Nu'
@@ -539,7 +487,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
     Let op: Dit is rekenintensief, dus we doen dit op een beperkte set.
     """
     coordinator = request.app.state.coordinator
-    forecaster = coordinator.planner.forecaster
+    forecaster = coordinator.solar
     database = coordinator.collector.database
 
     # 1. Check: Is het model getraind?
@@ -548,7 +496,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
 
     # 2. Data ophalen (Beperk tot laatste 14 dagen voor snelheid)
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
-    df_hist = database.get_forecast_history(cutoff_date)
+    df_hist = database.get_history(cutoff_date)
 
     if df_hist.empty:
         return "<div class='p-4 text-muted'>Onvoldoende data voor analyse.</div>"
