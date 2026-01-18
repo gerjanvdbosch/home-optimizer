@@ -96,23 +96,33 @@ class LoadModel:
 
     def train(self, df_history: pd.DataFrame):
         # Filter rijen waar we geen load data hebben
-        df_train = df_history.dropna(subset=["target_load"]).copy()
-
-        df_hourly = (
-            df_train.set_index("timestamp")
-            .resample("1h")
-            .mean(numeric_only=True)
-            .dropna(subset=["target_load"])
-            .reset_index()
+        df_train = df_history.copy()
+        df_train = df_train.dropna(
+            subset=["grid_import", "grid_export", "pv_actual", "wp_actual"]
         )
 
         # Target berekenen op de UUR data
         # Dit is veel stabieler dan op kwartierdata
-        df_hourly["target_load"] = df_hourly["load_actual"] - df_hourly["wp_actual"]
-        df_hourly["target_load"] = df_hourly["target_load"].clip(lower=0.1)
+        df_train = (
+            df_train.set_index("timestamp")
+            .resample("1h")
+            .mean(numeric_only=True)
+            .reset_index()
+        )
 
-        X = self._prepare_features(df_hourly)
-        y = df_hourly["target_load"]
+        if len(df_train) < 100:
+            logger.warning("[Load] Niet genoeg data om model te trainen.")
+            return
+
+        grid_import = df_train["grid_import"]
+        grid_export = df_train["grid_export"]
+        pv_actual = df_train["pv_actual"]
+        wp_actual = df_train["wp_actual"]
+
+        # Base Load berekening
+        df_train["base_load"] = (
+            (grid_import - grid_export) + pv_actual - wp_actual
+        ).clip(lower=0.1)
 
         # AANPASSING: Quantile Regression
         # We voorspellen het 90e percentiel (bovengrens).
@@ -128,10 +138,13 @@ class LoadModel:
             random_state=42,
         )
 
+        X = self._prepare_features(df_train)
+        y = df_train["base_load"]
+
         self.model.fit(X, y)
         joblib.dump({"model": self.model}, self.path)
         self.is_fitted = True
-        logger.info(f"[Load] Model succesvol getraind op {len(df_hourly)} records.")
+        logger.info(f"[Load] Model succesvol getraind op {len(df_train)} records.")
 
     def predict(
         self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15

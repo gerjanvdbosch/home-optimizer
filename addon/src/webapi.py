@@ -235,7 +235,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 mode="lines",
                 name="Historie",
                 legendgroup="history",
-                line=dict(color="#ffa500", width=1.5, shape="hv"),
+                line=dict(color="#ffa500", width=1.5),
                 fill="tozeroy",
                 fillcolor="rgba(255, 165, 0, 0.1)",
             )
@@ -299,7 +299,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=df["load_corrected"],
                 mode="lines",
                 name="Load",
-                line=dict(color="#ff5555", width=1.5),
+                line=dict(color="#ff5555", width=1.5, shape="hv"),
                 opacity=0.8,
             )
         )
