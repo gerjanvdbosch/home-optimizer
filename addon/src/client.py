@@ -63,6 +63,9 @@ class HAClient:
     def get_dhw_temp(self):
         return float(self._get_state(self.config.sensor_dhw_temp))
 
+    def get_dhw_setpoint(self):
+        return float(self._get_state(self.config.sensor_dhw_setpoint))
+
     def get_forecast(self):
         attributes = self._get_attributes(self.config.sensor_solcast)
         if not attributes:
