@@ -159,18 +159,14 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
         # === SMOOTHING VOOR GRAFIEK ===
         # De database bevat "blokken" (Average kW per 15m).
-        #         df_hist["pv_smooth"] = (
-        #             df_hist["pv_actual"]
-        #             .fillna(0)
-        #             .rolling(window=4, center=True, min_periods=1)
-        #             .mean()
-        #         )
+        df_hist["pv_actual_filled"] = (
+            df_hist["pv_actual"].interpolate(method="linear").fillna(0)
+        )
 
         df_hist["pv_smooth"] = (
-            df_hist["pv_actual"]
-            .fillna(0)  # Of direct 0 vullen als je gaten als 0 wilt zien
+            df_hist["pv_actual_filled"]
             .rolling(window=4, win_type="gaussian", center=True, min_periods=1)
-            .mean(std=2)  # std bepaalt hoe 'rond' de bocht is
+            .mean(std=2)
         )
 
         if not df_hist.empty:
@@ -202,6 +198,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Solcast",
             line=dict(color="#888888", dash="dash", width=1),
             opacity=0.7,
+            hoverinfo="skip",
         )
     )
 
@@ -216,6 +213,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line=dict(color="#4fa8ff", dash="dot", width=1),
                 opacity=0.8,
                 visible="legendonly",
+                hoverinfo="skip",
             )
         )
 
@@ -229,6 +227,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
                 opacity=0.6,
                 visible="legendonly",
+                hoverinfo="skip",
             )
         )
 
@@ -238,7 +237,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=df_hist_plot["timestamp_local"],
                 y=df_hist_plot["pv_actual"],
                 mode="lines",
-                line=dict(color="#ffa500", width=1, shape="hv"),
+                line=dict(color="#FFFFFF", width=0.5, shape="hv"),
                 opacity=0.3,
                 showlegend=False,
                 hoverinfo="skip",
@@ -255,9 +254,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 mode="lines",
                 name="Historie",
                 legendgroup="history",
-                line=dict(color="#ffa500", width=1.5),
+                line=dict(color="#FF9100", width=1.5),
                 fill="tozeroy",
-                fillcolor="rgba(255, 165, 0, 0.1)",
+                fillcolor="rgba(255, 145, 0, 0.07)",
+                hoverinfo="skip",
             )
         )
 
@@ -266,9 +266,9 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
                 y=[df_hist_plot["pv_smooth"].iloc[-1], context.stable_pv],
                 mode="lines",
-                line=dict(color="#ffa500", dash="dash", width=1.5),  # Wit en gestippeld
+                line=dict(color="#FF9100", dash="dash", width=1.5),
                 fill="tozeroy",
-                fillcolor="rgba(255, 165, 0, 0.1)",
+                fillcolor="rgba(255, 145, 0, 0.07)",
                 showlegend=False,  # We hoeven deze niet apart in de legenda
                 hoverinfo="skip",  # Geen popup als je over het lijntje muist
                 legendgroup="history",
@@ -284,8 +284,9 @@ def _get_solar_forecast_plot(request: Request) -> str:
             mode="markers",
             name="Now",
             showlegend=False,
-            marker=dict(color="#ffa500", size=12, line=dict(color="white", width=2)),
+            marker=dict(color="#FF9100", size=12, line=dict(color="white", width=2)),
             zorder=10,
+            hoverinfo="skip",
         )
     )
 
@@ -304,10 +305,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=y_future,
                 mode="lines",
                 name="Forecast",
-                line=dict(color="#ffffff", dash="dash", width=2),
+                line=dict(color="#ffffff", dash="dash", width=1.5),
                 fill="tozeroy",  # Vul tot aan de X-as (0)
                 fillcolor="rgba(255, 255, 255, 0.05)",
                 opacity=0.8,
+                hoverinfo="skip",
             )
         )
 
@@ -319,8 +321,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=df["load_corrected"],
                 mode="lines",
                 name="Load",
-                line=dict(color="#ff5555", width=1.5, shape="hv"),
+                line=dict(color="#F50057", width=1.5, shape="hv"),
                 opacity=0.8,
+                hoverinfo="skip",
+                visible="legendonly",
             )
         )
 
@@ -342,6 +346,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line_color="#2ca02c",
                 annotation_text="Start",
                 annotation_position="top right",
+                hoverinfo="skip",
             )
 
     #             # 3. TRACE B: Het gearceerde vlak
