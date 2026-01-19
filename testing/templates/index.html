@@ -113,6 +113,12 @@
             margin-top: 20px;
         }
 
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px; /* Ruimte tussen de knoppen */
+        }
+
         .explain-btn {
             background: transparent;
             border: 1px solid var(--border-color);
@@ -121,7 +127,7 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 0.8rem;
-            margin-left: 10px;
+            margin-left: 4px;
             transition: all 0.2s;
         }
 
@@ -215,7 +221,10 @@
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Solar Forecast</h3>
-            <button class="explain-btn" onclick="toggleExplain()">Explain</button>
+            <div class="header-actions">
+                <button class="explain-btn" onclick="toggle('train')">Train</button>
+                <button class="explain-btn" onclick="toggle('explain')">Explain</button>
+            </div>
         </div>
         <div class="chart-container">
             {{ forecast_plot | safe }}
@@ -304,7 +313,7 @@
 </div>
 
 <script>
-    function toggleExplain() {
+    function toggle(name) {
         // 1. Toon de loader direct
         const loader = document.getElementById('loading-overlay');
         if (loader) {
@@ -316,10 +325,10 @@
             const url = new URL(window.location.href);
 
             // Toggle logic
-            if (url.searchParams.get('explain') === '1') {
-                url.searchParams.delete('explain');
+            if (url.searchParams.get(name) === '1') {
+                url.searchParams.delete(name);
             } else {
-                url.searchParams.set('explain', '1');
+                url.searchParams.set(name, '1');
             }
 
             // Herlaad de pagina

@@ -7,7 +7,7 @@ from sklearn.inspection import permutation_importance
 from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
@@ -21,7 +21,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @api.get("/", response_class=HTMLResponse)
-def index(request: Request, explain: str = None):
+def index(request: Request, explain: str = None, train: str = None):
     """
     Dashboard Home. Leest status direct uit Context.
     """
@@ -72,6 +72,15 @@ def index(request: Request, explain: str = None):
         explanation = _get_explanation_data(coordinator)
         importance_html = _get_importance_plot_plotly(request)
 
+    if train == "1":
+        try:
+            coordinator.solar.train()
+            coordinator.load.train()
+
+            return RedirectResponse(url=str(request.url.remove_query_params("train")), status_code=302)
+        except Exception as e:
+            logger.error(f"Fout bij trainen van modellen: {e}")
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -82,27 +91,6 @@ def index(request: Request, explain: str = None):
             "explanation": explanation,
         },
     )
-
-
-@api.post("/solar/train", response_class=JSONResponse)
-def trigger_training(request: Request):
-    """
-    Forceer een hertraining van het model.
-    """
-    coordinator = request.app.state.coordinator
-
-    try:
-        coordinator.solar.train()
-        new_mae = coordinator.solar.model.mae
-
-        return {
-            "status": "success",
-            "message": f"Model getraind. Nieuwe MAE: {new_mae:.3f} kW",
-        }
-
-    except Exception as e:
-        logger.error(f"[API] Training mislukt: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 def _get_solar_forecast_plot(request: Request) -> str:
