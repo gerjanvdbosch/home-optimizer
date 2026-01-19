@@ -7,7 +7,7 @@ from sklearn.inspection import permutation_importance
 from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
@@ -70,15 +70,12 @@ def index(request: Request, explain: str = None, train: str = None):
     if explain == "1":
         explanation = _get_explanation_data(coordinator)
         importance_html = _get_importance_plot_plotly(request)
+        train = "0"
 
     if train == "1":
         try:
             coordinator.solar.train()
             coordinator.load.train()
-
-            return RedirectResponse(
-                url=str(request.url.remove_query_params("train")), status_code=302
-            )
         except Exception as e:
             logger.error(f"Fout bij trainen van modellen: {e}")
 
