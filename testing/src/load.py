@@ -104,13 +104,9 @@ class LoadModel:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
             return
 
-        grid_import = df_train["grid_import"]
-        grid_export = df_train["grid_export"]
-        pv_actual = df_train["pv_actual"]
-        wp_actual = df_train["wp_actual"]
-
         # Base Load berekening
-        df_train["base_load"] = ((grid_import - grid_export) + pv_actual - wp_actual).clip(lower=0.1)
+        df_train["target_load"] = df_train["load_actual"] - df_train["wp_actual"]
+        df_train["target_load"] = df_train["target_load"].clip(lower=0.1)
 
         # AANPASSING: Quantile Regression
         # We voorspellen het 90e percentiel (bovengrens).
@@ -127,7 +123,7 @@ class LoadModel:
         )
 
         X = self._prepare_features(df_train)
-        y = df_train["base_load"]
+        y = df_train["target_load"]
 
         self.model.fit(X, y)
         joblib.dump({"model": self.model}, self.path)
