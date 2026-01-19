@@ -159,12 +159,23 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
         # === SMOOTHING VOOR GRAFIEK ===
         # De database bevat "blokken" (Average kW per 15m).
+        #         df_hist["pv_smooth"] = (
+        #             df_hist["pv_actual"]
+        #             .fillna(0)
+        #             .rolling(window=4, center=True, min_periods=1)
+        #             .mean()
+        #         )
+
         df_hist["pv_smooth"] = (
             df_hist["pv_actual"]
-            .fillna(0)
-            .rolling(window=4, center=True, min_periods=1)
-            .mean()
+            .fillna(0)  # Of direct 0 vullen als je gaten als 0 wilt zien
+            .rolling(window=4, win_type="gaussian", center=True, min_periods=1)
+            .mean(std=2)  # std bepaalt hoe 'rond' de bocht is
         )
+
+        if not df_hist.empty:
+            last_idx = df_hist.index[-1]
+            df_hist.loc[last_idx, "pv_smooth"] = df_hist.loc[last_idx, "pv_actual"]
 
         df_hist_plot = df_hist.copy()
 
@@ -253,7 +264,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         fig.add_trace(
             go.Scatter(
                 x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
-                y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
+                y=[df_hist_plot["pv_smooth"].iloc[-1], context.stable_pv],
                 mode="lines",
                 line=dict(color="#ffa500", dash="dash", width=1.5),  # Wit en gestippeld
                 fill="tozeroy",
@@ -312,6 +323,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 opacity=0.8,
             )
         )
+
+    fig.add_vline(
+        x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
+    )
 
     # F. Boiler Start Lijn (Direct uit Context)
     planned_start = getattr(context, "planned_start", None)

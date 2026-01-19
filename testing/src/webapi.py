@@ -2,9 +2,8 @@ import logging
 import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
-import numpy as np
 
-from sklearn.inspection import partial_dependence, permutation_importance
+from sklearn.inspection import permutation_importance
 from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
@@ -44,24 +43,28 @@ def index(request: Request, explain: str = None):
 
     # Formatteer status (kan een Enum zijn of string)
     action_val = getattr(context, "action", "Onbekend")
-    if hasattr(action_val, "value"): # Als het een Enum is
+    if hasattr(action_val, "value"):  # Als het een Enum is
         action_val = action_val.value
 
     details = {
         "Status": action_val,
         "Reden": getattr(context, "reason", "-"),
         "Geplande Start": start_str,
-        "PV Huidig": f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-",
-        "Load Huidig": f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-",
+        "PV Huidig": (
+            f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
+        ),
+        "Load Huidig": (
+            f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-"
+        ),
         "Boiler Solar": f"{getattr(context, 'boiler_solar_kwh', 0.0):.2f} kWh",
         "Verwachte Load": f"{getattr(context, 'predicted_load_now', 0.0):.2f} kW",
     }
 
     # Bias info toevoegen indien beschikbaar
     if hasattr(context, "solar_bias"):
-        details["Solar Bias"] = f"{context.solar_bias:.2f}"
+        details["Solar Bias"] = f"{context.solar_bias:.2f} %"
     if hasattr(context, "load_bias"):
-        details["Load Bias"] = f"{context.load_bias:.2f}"
+        details["Load Bias"] = f"{context.load_bias:.2f} kW"
 
     # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
     explanation = {}
@@ -124,7 +127,15 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     is_night = df["timestamp_local"].dt.hour.isin([23, 0, 1, 2, 3, 4, 5])
 
-    for col in ["pv_estimate", "power_ml", "power_ml_raw", "power_corrected"]:
+    for col in [
+        "pv_estimate",
+        "pv_actual",
+        "pv_smooth",
+        "power_ml",
+        "power_ml_raw",
+        "power_corrected",
+        "load_corrected",
+    ]:
         if col in df.columns:
             df[col] = df[col].round(2)
             df.loc[is_night, col] = 0.0
@@ -149,12 +160,23 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
         # === SMOOTHING VOOR GRAFIEK ===
         # De database bevat "blokken" (Average kW per 15m).
+#         df_hist["pv_smooth"] = (
+#             df_hist["pv_actual"]
+#             .fillna(0)
+#             .rolling(window=4, center=True, min_periods=1)
+#             .mean()
+#         )
+
         df_hist["pv_smooth"] = (
             df_hist["pv_actual"]
-            .fillna(0)
-            .rolling(window=4, center=True, min_periods=1)
-            .mean()
+            .fillna(0)  # Of direct 0 vullen als je gaten als 0 wilt zien
+            .rolling(window=4, win_type="gaussian", center=True, min_periods=1)
+            .mean(std=2)  # std bepaalt hoe 'rond' de bocht is
         )
+
+        if not df_hist.empty:
+            last_idx = df_hist.index[-1]
+            df_hist.loc[last_idx, "pv_smooth"] = df_hist.loc[last_idx, "pv_actual"]
 
         df_hist_plot = df_hist.copy()
 
@@ -212,11 +234,18 @@ def _get_solar_forecast_plot(request: Request) -> str:
         )
 
     if not df_hist_plot.empty:
-        fig.add_trace(go.Scatter(
-            x=df_hist_plot["timestamp_local"], y=df_hist_plot["pv_actual"],
-            mode="lines", line=dict(color="#ffa500", width=1, shape="hv"),
-            opacity=0.3, showlegend=False, hoverinfo="skip"
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["pv_actual"],
+                mode="lines",
+                line=dict(color="#ffa500", width=1, shape="hv"),
+                opacity=0.3,
+                showlegend=False,
+                hoverinfo="skip",
+                legendgroup="history",
+            )
+        )
 
         # Doe hetzelfde voor Load als je die historisch toont
         # df_hist["load_smooth"] = df_hist["load_actual"].rolling(window=2, center=True).mean()
@@ -236,7 +265,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         fig.add_trace(
             go.Scatter(
                 x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
-                y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
+                y=[df_hist_plot["pv_smooth"].iloc[-1], context.stable_pv],
                 mode="lines",
                 line=dict(color="#ffa500", dash="dash", width=1.5),  # Wit en gestippeld
                 fill="tozeroy",
@@ -285,11 +314,20 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # E. Load Forecast (Rood)
     if "load_corrected" in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df["timestamp_local"], y=df["load_corrected"], mode="lines",
-            name="Load", line=dict(color="#ff5555", width=1.5),
-            opacity=0.8
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df["timestamp_local"],
+                y=df["load_corrected"],
+                mode="lines",
+                name="Load",
+                line=dict(color="#ff5555", width=1.5, shape="hv"),
+                opacity=0.8,
+            )
+        )
+
+    fig.add_vline(
+        x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
+    )
 
     # F. Boiler Start Lijn (Direct uit Context)
     planned_start = getattr(context, "planned_start", None)
@@ -300,26 +338,29 @@ def _get_solar_forecast_plot(request: Request) -> str:
         if local_start >= x_start and local_start <= x_end + timedelta(hours=12):
             fig.add_vline(
                 x=local_start,
-                line_width=2, line_dash="dot", line_color="#2ca02c",
-                annotation_text="Start", annotation_position="top right"
+                line_width=2,
+                line_dash="dot",
+                line_color="#2ca02c",
+                annotation_text="Start",
+                annotation_position="top right",
             )
 
-            # 3. TRACE B: Het gearceerde vlak
-            # We tekenen een onzichtbare lijn rondom het gebied en vullen die in ("toself")
-            fig.add_trace(
-                go.Scatter(
-                    x=[local_start, duration_end, duration_end, local_start],
-                    y=[0, 0, y_top, y_top],
-                    fill="toself",
-                    fillcolor="rgba(44, 160, 44, 0.15)",
-                    mode="lines",
-                    line=dict(width=0),  # Geen rand
-                    name="Start",  # Zelfde naam
-                    legendgroup="start",  # Zelfde groep!
-                    showlegend=False,  # Niet dubbel in de lijst tonen
-                    hoverinfo="skip",
-                )
-            )
+    #             # 3. TRACE B: Het gearceerde vlak
+    #             # We tekenen een onzichtbare lijn rondom het gebied en vullen die in ("toself")
+    #             fig.add_trace(
+    #                 go.Scatter(
+    #                     x=[local_start, duration_end, duration_end, local_start],
+    #                     y=[0, 0, y_top, y_top],
+    #                     fill="toself",
+    #                     fillcolor="rgba(44, 160, 44, 0.15)",
+    #                     mode="lines",
+    #                     line=dict(width=0),  # Geen rand
+    #                     name="Start",  # Zelfde naam
+    #                     legendgroup="start",  # Zelfde groep!
+    #                     showlegend=False,  # Niet dubbel in de lijst tonen
+    #                     hoverinfo="skip",
+    #                 )
+    #             )
 
     fig.update_layout(
         template="plotly_dark",
@@ -356,7 +397,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
 
 def _get_explanation_data(coordinator) -> dict:
-    """ Bereidt SHAP data voor. """
+    """Bereidt SHAP data voor."""
     context = coordinator.context
     forecaster = coordinator.solar
 
@@ -489,7 +530,13 @@ def _get_importance_plot_plotly(request: Request) -> str:
     # We gebruiken dezelfde logica als bij het trainen/analyseren
     is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
     df_day = df_hist[is_daytime].copy()
-    df_day = df_day.set_index("timestamp").resample("1h").mean(numeric_only=True).dropna(subset=["pv_actual"]).reset_index()
+    df_day = (
+        df_day.set_index("timestamp")
+        .resample("1h")
+        .mean(numeric_only=True)
+        .dropna(subset=["pv_actual"])
+        .reset_index()
+    )
 
     if len(df_day) < 10:
         return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
