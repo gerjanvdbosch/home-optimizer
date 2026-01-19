@@ -133,7 +133,7 @@ class LoadModel:
         )
 
         X = self._prepare_features(df_train)
-        y = df_train["base_load"]
+        y = df_train["target_load"]
 
         self.model.fit(X, y)
         joblib.dump({"model": self.model}, self.path)
