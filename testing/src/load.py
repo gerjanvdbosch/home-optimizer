@@ -4,7 +4,7 @@ import joblib
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.base import BaseEstimator
 from utils import add_cyclic_time_features
@@ -90,15 +90,19 @@ class LoadModel:
 
         return X.apply(pd.to_numeric, errors="coerce")
 
-
     def train(self, df_history: pd.DataFrame):
         # Filter rijen waar we geen load data hebben
         df_train = df_history.copy()
-        df_train = df_train.dropna(subset=["grid_import", "grid_export", "pv_actual", "wp_actual"])
 
-        # Target berekenen op de UUR data
-        # Dit is veel stabieler dan op kwartierdata
-        df_train = df_train.set_index("timestamp").resample("1h").mean(numeric_only=True).reset_index()
+        df_train = (
+            df_train.set_index("timestamp")
+            .resample("15min")
+            .mean(numeric_only=True)
+            .dropna(
+                subset=["grid_import", "grid_export", "pv_actual", "wp_actual"]
+            )
+            .reset_index()
+        )
 
         if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
@@ -112,14 +116,13 @@ class LoadModel:
         # We voorspellen het 90e percentiel (bovengrens).
         # Dit zorgt dat de optimizer "ruimte" houdt voor het huishouden.
         self.model = HistGradientBoostingRegressor(
-            loss="quantile",
-            quantile=0.90,
+            loss="squared_error",
             learning_rate=0.05,
             max_iter=500,
             max_leaf_nodes=31,
             l2_regularization=0.5,
             early_stopping=True,
-            random_state=42
+            random_state=42,
         )
 
         X = self._prepare_features(df_train)
@@ -130,7 +133,9 @@ class LoadModel:
         self.is_fitted = True
         logger.info(f"[Load] Model succesvol getraind op {len(df_train)} records.")
 
-    def predict(self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15) -> pd.Series:
+    def predict(
+        self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15
+    ) -> pd.Series:
         if not self.is_fitted:
             return pd.Series(fallback_kw, index=df_forecast.index)
 
@@ -158,7 +163,6 @@ class LoadForecaster:
             return
 
         self.model.train(df)
-
 
     def update(self, current_time: datetime, current_load_kw: float):
         forecast_df = self.context.forecast_df
