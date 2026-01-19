@@ -110,7 +110,7 @@ class LoadModel:
             .reset_index()
         )
 
-        if len(df_train) < 100:
+        if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
             return
 

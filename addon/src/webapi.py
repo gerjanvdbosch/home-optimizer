@@ -70,7 +70,6 @@ def index(request: Request, explain: str = None, train: str = None):
     if explain == "1":
         explanation = _get_explanation_data(coordinator)
         importance_html = _get_importance_plot_plotly(request)
-        train = "0"
 
     if train == "1":
         try:

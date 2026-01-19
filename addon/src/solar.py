@@ -148,6 +148,10 @@ class SolarModel:
             .reset_index()
         )
 
+        if len(df_train) < 10:
+            logger.warning("[Solar] Niet genoeg data om model te trainen.")
+            return
+
         X = self._prepare_features(df_train)
         y = df_train["pv_actual"].clip(0, system_max)
 

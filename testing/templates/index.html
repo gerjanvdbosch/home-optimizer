@@ -222,7 +222,6 @@
         <div class="header">
             <h3 style="margin: 0;">Solar Forecast</h3>
             <div class="header-actions">
-                <button class="explain-btn" onclick="toggle('train')">Train</button>
                 <button class="explain-btn" onclick="toggle('explain')">Explain</button>
             </div>
         </div>
@@ -290,6 +289,9 @@
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Importance</h3>
+            <div class="header-actions">
+                <button class="explain-btn" onclick="toggle('train')">Train</button>
+            </div>
         </div>
         <div class="chart-container">
             {{ importance_plot | safe }}
@@ -300,7 +302,7 @@
 
 <div id="loading-overlay" class="loading-overlay">
     <div class="spinner"></div>
-    <div class="loading-text">Model analyseren...</div>
+    <div class="loading-text">Laden...</div>
 </div>
 
 <script>
@@ -311,18 +313,19 @@
             loader.style.display = 'flex';
         }
 
-        // 2. Korte vertraging om de browser tijd te geven de loader te tekenen
         setTimeout(() => {
             const url = new URL(window.location.href);
 
-            // Toggle logic
-            if (url.searchParams.get(name) === '1') {
-                url.searchParams.delete(name);
-            } else {
+            // Onthoud of de huidige knop al aan stond
+            const wasActive = url.searchParams.get(name) === '1';
+
+            url.search = '';
+
+            // 2. Zet de gekozen knop aan (tenzij hij al aan stond, dan blijft hij uit na de reset)
+            if (!wasActive) {
                 url.searchParams.set(name, '1');
             }
 
-            // Herlaad de pagina
             window.location.href = url.toString();
         }, 10);
     }

@@ -100,7 +100,7 @@ class LoadModel:
         # Dit is veel stabieler dan op kwartierdata
         df_train = df_train.set_index("timestamp").resample("1h").mean(numeric_only=True).reset_index()
 
-        if len(df_train) < 100:
+        if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
             return
 
