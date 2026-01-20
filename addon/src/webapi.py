@@ -189,24 +189,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Solcast",
             line=dict(color="#888888", dash="dash", width=1),
             opacity=0.7,
+            hovertemplate="%{y:.2f} kW<extra></extra>",
             # hoverinfo="skip",
         )
     )
-
-    # B. Model Correction (Blauw, dot)
-    if "power_ml" in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp_local"],
-                y=df["power_ml"],
-                mode="lines",
-                name="Blended",
-                line=dict(color="#4fa8ff", dash="dot", width=1),
-                opacity=0.8,
-                visible="legendonly",
-                # hoverinfo="skip",
-            )
-        )
 
     if "power_ml_raw" in df.columns:
         fig.add_trace(
@@ -215,9 +201,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=df["power_ml_raw"],
                 mode="lines",
                 name="Model",
-                line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
+                line=dict(color="#4fa8ff", dash="dot", width=1.5),  # Paars stippel
                 opacity=0.6,
                 visible="legendonly",
+                hovertemplate="%{y:.2f} kW<extra></extra>",
                 # hoverinfo="skip",
             )
         )
@@ -233,6 +220,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line=dict(color="#FF9100", width=1.5, shape="linear"),
                 fill="tozeroy",
                 fillcolor="rgba(255, 145, 0, 0.07)",
+                hovertemplate="%{y:.2f} kW<extra></extra>",
             )
         )
 
@@ -284,6 +272,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 fill="tozeroy",  # Vul tot aan de X-as (0)
                 fillcolor="rgba(255, 255, 255, 0.05)",
                 opacity=0.8,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
                 # hoverinfo="skip",
             )
         )
@@ -298,6 +287,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 name="Load",
                 line=dict(color="#F50057", width=1.5, shape="hv"),
                 opacity=0.8,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
                 # hoverinfo="skip",
                 # visible="legendonly",
             )
@@ -321,6 +311,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line_color="#2ca02c",
                 annotation_text="Start",
                 annotation_position="top right",
+                hovertemplate="%{y:.2f} kW<extra></extra>",
                 # hoverinfo="skip",
             )
 
