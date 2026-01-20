@@ -227,7 +227,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line=dict(color="#FFFFFF", width=0.5, shape="hv"),
                 opacity=0.3,
                 showlegend=False,
-                # hoverinfo="skip",
+                hoverinfo="skip",
                 legendgroup="history",
             )
         )
