@@ -123,7 +123,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
     ]:
         if col in df.columns:
             df[col] = df[col].round(2)
-            df.loc[is_night, col] = 0.0
+            if col.startswith("power"):
+                df.loc[is_night, col] = 0.0
 
     if df.empty:
         return ""
@@ -139,25 +140,30 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df_hist_plot = pd.DataFrame()
 
     if not df_hist.empty:
-        df_hist["timestamp_local"] = (
-            df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+        # Zorg voor LOCAL time voor de grafiek
+        df_hist["timestamp_local"] = df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+
+        # === ESSENTIEEL: Resample historie naar 15min ===
+        # Dit zorgt dat historie en forecast (model) dezelfde visuele taal spreken.
+        # Geen 'kriebelige' lijntjes meer door seconden-data.
+        df_hist_resampled = (
+            df_hist.set_index("timestamp_local")
+            .resample("15min", label="left", closed="left")
+            .mean(numeric_only=True)
+            .reset_index()
         )
 
-        # === SMOOTHING VOOR GRAFIEK ===
-        # De database bevat "blokken" (Average kW per 15m).
-        df_hist["pv_actual_filled"] = df_hist["pv_actual"].interpolate(method='linear').fillna(0)
-
-        df_hist["pv_smooth"] = (
-            df_hist["pv_actual_filled"]
-            .rolling(window=4, win_type="gaussian", center=True, min_periods=1)
-            .mean(std=2)
+        # Kleine smoothing om meetfouten vlak te strijken (minder agressief dan Gaussian)
+        df_hist_resampled["pv_smooth"] = (
+            df_hist_resampled["pv_actual"]
+            .rolling(window=2, center=False, min_periods=1)
+            .mean()
         )
 
-        if not df_hist.empty:
-            last_idx = df_hist.index[-1]
-            df_hist.loc[last_idx, "pv_smooth"] = df_hist.loc[last_idx, "pv_actual"]
+        # Vul gaten (nulls) op met 0 als er geen data was (bv stroomuitval of nacht zonder data)
+        df_hist_resampled["pv_smooth"] = df_hist_resampled["pv_smooth"].fillna(0)
 
-        df_hist_plot = df_hist.copy()
+        df_hist_plot = df_hist_resampled.copy()
 
     # --- 3. BEREIK BEPALEN ---
     active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
@@ -182,36 +188,22 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Solcast",
             line=dict(color="#888888", dash="dash", width=1),
             opacity=0.7,
-            hoverinfo="skip",
+            hoverinfo="name+y",
         )
     )
 
-    # B. Model Correction (Blauw, dot)
-    if "power_ml" in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp_local"],
-                y=df["power_ml"],
-                mode="lines",
-                name="Blended",
-                line=dict(color="#4fa8ff", dash="dot", width=1),
-                opacity=0.8,
-                visible="legendonly",
-                hoverinfo="skip",
-            )
-        )
-
+    # B. Model Raw (Paars, dot) - Wat de ML denkt zonder correctie
     if "power_ml_raw" in df.columns:
         fig.add_trace(
             go.Scatter(
                 x=df["timestamp_local"],
                 y=df["power_ml_raw"],
                 mode="lines",
-                name="Model",
-                line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
+                name="Model (Raw)",
+                line=dict(color="#9467bd", dash="dot", width=1),
                 opacity=0.6,
                 visible="legendonly",
-                hoverinfo="skip",
+                hoverinfo="name+y",
             )
         )
 
@@ -219,67 +211,55 @@ def _get_solar_forecast_plot(request: Request) -> str:
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],
-                y=df_hist_plot["pv_actual"],
-                mode="lines",
-                line=dict(color="#FFFFFF", width=0.5, shape="hv"),
-                opacity=0.3,
-                showlegend=False,
-                hoverinfo="skip",
-                legendgroup="history",
-            )
-        )
-
-        # Doe hetzelfde voor Load als je die historisch toont
-        # df_hist["load_smooth"] = df_hist["load_actual"].rolling(window=2, center=True).mean()
-        fig.add_trace(
-            go.Scatter(
-                x=df_hist_plot["timestamp_local"],
                 y=df_hist_plot["pv_smooth"],
                 mode="lines",
                 name="Historie",
                 legendgroup="history",
-                line=dict(color="#FF9100", width=1.5),
+                line=dict(color="#FF9100", width=2),
                 fill="tozeroy",
                 fillcolor="rgba(255, 145, 0, 0.07)",
-                hoverinfo="skip",
+                hoverinfo="name+y",
             )
         )
 
-        fig.add_trace(
-            go.Scatter(
-                x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
-                y=[df_hist_plot["pv_smooth"].iloc[-1], context.stable_pv],
-                mode="lines",
-                line=dict(color="#FF9100", dash="dash", width=1.5),
-                fill="tozeroy",
-                fillcolor="rgba(255, 145, 0, 0.07)",
-                showlegend=False,  # We hoeven deze niet apart in de legenda
-                hoverinfo="skip",  # Geen popup als je over het lijntje muist
-                legendgroup="history",
-            )
-        )
+        # Bruggetje: Verbind einde historie met het NU punt (stippellijn)
+        # Dit laat visueel zien: "Gemiddelde historie" -> "Instant power nu"
+        last_hist_time = df_hist_plot["timestamp_local"].iloc[-1]
+        last_hist_val = df_hist_plot["pv_smooth"].iloc[-1]
 
-    # C. Actuele PV Meting (Stip)
-    # We tekenen alleen de stip, de horizontale stippellijn doen we via shapes of een losse trace als je wilt
+        if last_hist_time < local_now:
+            fig.add_trace(
+                go.Scatter(
+                    x=[last_hist_time, local_now],
+                    y=[last_hist_val, context.stable_pv],
+                    mode="lines",
+                    line=dict(color="#FF9100", dash="dot", width=1),
+                    showlegend=False,
+                    hoverinfo="skip",
+                    legendgroup="history",
+                )
+            )
+
+    # D. Het "NU" punt (Felle stip)
     fig.add_trace(
         go.Scatter(
             x=[local_now],
             y=[context.stable_pv],
             mode="markers",
-            name="Now",
-            showlegend=False,
-            marker=dict(color="#FF9100", size=12, line=dict(color="white", width=2)),
+            name="Actueel",
+            marker=dict(color="#FF9100", size=10, line=dict(color="white", width=2)),
             zorder=10,
+            showlegend=False,
             hoverinfo="skip",
         )
     )
 
+    # E. Corrected Forecast (De "NowCast")
     if "power_corrected" in df.columns:
-        # D. Corrected Solar
-        df_future = df[df["timestamp_local"] >= local_now]
+        # Filter: Pak alleen punten in de toekomst (> nu) om dubbele lijnen te voorkomen
+        df_future = df[df["timestamp_local"] > local_now].copy()
 
-        # Om de lijn visueel aan het 'Huidig PV' bolletje te knopen,
-        # plakken we het huidige punt vooraan de lijst.
+        # Plak het NU punt vooraan voor een dichte lijn
         x_future = [local_now] + df_future["timestamp_local"].tolist()
         y_future = [context.stable_pv] + df_future["power_corrected"].tolist()
 
@@ -288,27 +268,25 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=x_future,
                 y=y_future,
                 mode="lines",
-                name="Forecast",
-                line=dict(color="#ffffff", dash="dash", width=1.5),
-                fill="tozeroy",  # Vul tot aan de X-as (0)
+                name="Verwachting",
+                line=dict(color="#ffffff", dash="dash", width=2),
+                fill="tozeroy",
                 fillcolor="rgba(255, 255, 255, 0.05)",
-                opacity=0.8,
-                hoverinfo="skip",
+                hoverinfo="name+y",
             )
         )
 
-    # E. Load Forecast (Rood)
+    # F. Load Forecast (Rood)
     if "load_corrected" in df.columns:
         fig.add_trace(
             go.Scatter(
                 x=df["timestamp_local"],
                 y=df["load_corrected"],
                 mode="lines",
-                name="Load",
-                line=dict(color="#F50057", width=1.5, shape="hv"),
+                name="Verbruik",
+                line=dict(color="#F50057", width=1.5, shape="hv"), # hv shape is beter voor load blocks
                 opacity=0.8,
-                hoverinfo="skip",
-                visible="legendonly",
+                hoverinfo="name+y",
             )
         )
 
@@ -316,55 +294,38 @@ def _get_solar_forecast_plot(request: Request) -> str:
         x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
     )
 
-    # F. Boiler Start Lijn (Direct uit Context)
+    # G. Boiler Start Lijn
     planned_start = getattr(context, "planned_start", None)
     if planned_start and isinstance(planned_start, datetime):
         local_start = planned_start.astimezone(local_tz).replace(tzinfo=None)
 
-        # Check of starttijd in de grafiek past
-        if local_start >= x_start and local_start <= x_end + timedelta(hours=12):
+        if x_start <= local_start <= x_end + timedelta(hours=12):
             fig.add_vline(
                 x=local_start,
                 line_width=2,
                 line_dash="dot",
                 line_color="#2ca02c",
-                annotation_text="Start",
+                annotation_text="Start Boiler",
                 annotation_position="top right",
-                hoverinfo="skip",
+                hoverinfo="name+y",
             )
-
-    #             # 3. TRACE B: Het gearceerde vlak
-    #             # We tekenen een onzichtbare lijn rondom het gebied en vullen die in ("toself")
-    #             fig.add_trace(
-    #                 go.Scatter(
-    #                     x=[local_start, duration_end, duration_end, local_start],
-    #                     y=[0, 0, y_top, y_top],
-    #                     fill="toself",
-    #                     fillcolor="rgba(44, 160, 44, 0.15)",
-    #                     mode="lines",
-    #                     line=dict(width=0),  # Geen rand
-    #                     name="Start",  # Zelfde naam
-    #                     legendgroup="start",  # Zelfde groep!
-    #                     showlegend=False,  # Niet dubbel in de lijst tonen
-    #                     hoverinfo="skip",
-    #                 )
-    #             )
 
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
         plot_bgcolor="rgb(28, 28, 28)",
         xaxis=dict(
-            title="Tijd",
+            title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
             range=[x_start, x_end],
+            fixedrange=False, # Sta zoomen toe
         ),
         yaxis=dict(
             title="Vermogen (kW)",
-            # range=[0, y_max],
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
+            fixedrange=True, # Y-as vast
         ),
         legend=dict(
             orientation="h",
@@ -372,11 +333,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=1.02,
             xanchor="right",
             x=1,
-            itemdoubleclick=False,
         ),
-        margin=dict(l=40, r=20, t=80, b=40),
-        height=500,
-        hovermode="x unified",  # Laat alle waardes zien op 1 verticale lijn
+        margin=dict(l=40, r=20, t=60, b=40),
+        height=450,
+        hovermode="x unified",
     )
 
     return pio.to_html(
