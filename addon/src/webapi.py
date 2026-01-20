@@ -115,7 +115,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
     for col in [
         "pv_estimate",
         "pv_actual",
-        "pv_smooth",
         "power_ml",
         "power_ml_raw",
         "power_corrected",
@@ -144,23 +143,28 @@ def _get_solar_forecast_plot(request: Request) -> str:
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
 
-        # === SMOOTHING VOOR GRAFIEK ===
-        # De database bevat "blokken" (Average kW per 15m).
-        df_hist["pv_actual_filled"] = (
-            df_hist["pv_actual"].interpolate(method="linear").fillna(0)
+        # --- A. HISTORIE: VLOEIENDE LIJN (FIX VOOR HET STUITEREN) ---
+        # 1. Zet index
+        df_hist_smooth = df_hist.set_index("timestamp_local").sort_index()
+
+        # 2. VEILIG UPSAMPLEN
+        # Eerst lineair (rechte lijnen), dat voorkomt de rare pieken en dalen
+        df_hist_smooth = df_hist_smooth.resample("5min").interpolate(method="linear")
+
+        # 3. ROND MAKEN (SCHUURPAPIER)
+        # We pakken het gemiddelde van de omliggende punten.
+        # window=7 (35 min) geeft een mooie zachte curve.
+        # center=True zorgt dat de grafiek niet naar rechts verschuift.
+        df_hist_smooth["pv_actual"] = (
+            df_hist_smooth["pv_actual"]
+            .rolling(window=7, center=True, min_periods=1)
+            .mean()
         )
 
-        df_hist["pv_smooth"] = (
-            df_hist["pv_actual_filled"]
-            .rolling(window=4, win_type="gaussian", center=True, min_periods=1)
-            .mean(std=2)
-        )
+        # 4. Laatste check op negatieve waarden
+        df_hist_smooth["pv_actual"] = df_hist_smooth["pv_actual"].clip(lower=0).round(2)
 
-        if not df_hist.empty:
-            last_idx = df_hist.index[-1]
-            df_hist.loc[last_idx, "pv_smooth"] = df_hist.loc[last_idx, "pv_actual"]
-
-        df_hist_plot = df_hist.copy()
+        df_hist_plot = df_hist_smooth.reset_index()
 
     # --- 3. BEREIK BEPALEN ---
     active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
@@ -223,35 +227,19 @@ def _get_solar_forecast_plot(request: Request) -> str:
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],
                 y=df_hist_plot["pv_actual"],
-                mode="lines",
-                line=dict(color="#FFFFFF", width=0.5, shape="hv"),
-                opacity=0.3,
-                showlegend=False,
-                hoverinfo="skip",
-                legendgroup="history",
-            )
-        )
-
-        # Doe hetzelfde voor Load als je die historisch toont
-        # df_hist["load_smooth"] = df_hist["load_actual"].rolling(window=2, center=True).mean()
-        fig.add_trace(
-            go.Scatter(
-                x=df_hist_plot["timestamp_local"],
-                y=df_hist_plot["pv_smooth"],
-                mode="lines",
                 name="Historie",
+                mode="lines",
                 legendgroup="history",
-                line=dict(color="#FF9100", width=1.5),
+                line=dict(color="#FF9100", width=1.5, shape="linear"),
                 fill="tozeroy",
                 fillcolor="rgba(255, 145, 0, 0.07)",
-                # hoverinfo="skip",
             )
         )
 
         fig.add_trace(
             go.Scatter(
                 x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
-                y=[df_hist_plot["pv_smooth"].iloc[-1], context.stable_pv],
+                y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
                 mode="lines",
                 line=dict(color="#FF9100", dash="dash", width=1.5),
                 fill="tozeroy",
