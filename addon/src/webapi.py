@@ -310,7 +310,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 name="Load",
                 line=dict(color="#F50057", width=1.5, shape="hv"),
                 opacity=0.8,
-                hoverinfo="skip",
+                # hoverinfo="skip",
                 # visible="legendonly",
             )
         )
