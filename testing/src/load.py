@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import Optional
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.base import BaseEstimator
+from sklearn.metrics import mean_absolute_error
 from utils import add_cyclic_time_features
 from config import Config
 from context import Context
+from database import Database
 
 logger = logging.getLogger(__name__)
+
 
 class NowCaster:
     def __init__(self, decay_hours: float = 1.0):
@@ -31,7 +34,7 @@ class NowCaster:
         else:
             # Load is hoger dan verwacht -> Voorzichtig aanpassen (kan ruis/piek zijn)
             # Gaussian decay: hoe groter de fout, hoe minder we de bias geloven als structureel
-            decay_factor = np.exp(- (error / 1.5) ** 2)
+            decay_factor = np.exp(-((error / 1.5) ** 2))
             alpha = 0.15 * decay_factor
             alpha = max(0.01, alpha)
 
@@ -53,6 +56,7 @@ class NowCaster:
 
         corrected_series = df[col_name] + correction_vector
         return corrected_series.clip(lower=0.05)
+
 
 class LoadModel:
     """
@@ -98,9 +102,7 @@ class LoadModel:
             df_train.set_index("timestamp")
             .resample("15min")
             .mean(numeric_only=True)
-            .dropna(
-                subset=["grid_import", "grid_export", "pv_actual", "wp_actual"]
-            )
+            .dropna(subset=["grid_import", "grid_export", "pv_actual", "wp_actual"])
             .reset_index()
         )
 
@@ -130,9 +132,11 @@ class LoadModel:
         y = df_train["target_load"]
 
         self.model.fit(X, y)
-        joblib.dump({"model": self.model}, self.path)
+        self.mae = mean_absolute_error(y, self.model.predict(X))
+        joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
-        logger.info(f"[Load] Model succesvol getraind op {len(df_train)} records.")
+
+        logger.info(f"[Load] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW")
 
     def predict(
         self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15

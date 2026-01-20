@@ -66,28 +66,38 @@ class Collector:
         logger.info("[Collector] Forecast updated")
 
     def update_load(self):
-        self.context.current_pv = self.client.get_pv_power()
-        self.context.current_wp = self.client.get_wp_power()
-        self.context.current_grid = self.client.get_grid_power()
+        # 1. Haal ruwe waarden op
+        raw_pv = self.client.get_pv_power()  # Zorg dat dit altijd >= 0 is
+        raw_wp = self.client.get_wp_power()  # Zorg dat dit altijd >= 0 is
+        raw_grid = (
+            self.client.get_grid_power()
+        )  # BELANGRIJK: Import - Export (kan negatief zijn)
 
-        self.context.stable_pv = self._update_buffer(
-            self.context.pv_buffer, self.context.current_pv
+        # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
+        # We slaan de 'stable' waarden ook op in context voor debugging/UI
+        self.context.current_pv = self._update_buffer(self.context.pv_buffer, raw_pv)
+        self.context.current_wp = self._update_buffer(self.context.wp_buffer, raw_wp)
+        self.context.current_grid = self._update_buffer(
+            self.context.grid_buffer, raw_grid
         )
 
-        total_consumption = (
-            self.context.current_grid + self.context.current_pv
-        )  # Totaal wat het huis in gaat
-        base_load = (
-            total_consumption - self.context.current_wp
-        )  # Trek de grootverbruiker (WP) eraf
+        # 3. Berekening met gestabiliseerde waarden
+        # Formule: Huisverbruik = (Netto Grid + PV Productie) - Warmtepomp
+        total_consumption = self.context.current_grid + self.context.current_pv
 
-        base_load = max(0.1, base_load)
+        # Soms meten sensoren net iets anders (kalibratie).
+        # Als WP zegt 2000W en Huis zegt 1950W, wordt base_load -50.
+        base_load = total_consumption - self.context.current_wp
 
-        self.context.stable_load = self._update_buffer(
-            self.context.load_buffer, base_load
+        # 4. Intelligente fallback
+        # Als base_load negatief is, is de meting van de WP waarschijnlijk hoger dan de P1/PV meten.
+        # In dat geval is het 'restverbruik' van het huis waarschijnlijk minimaal.
+        self.context.stable_load = max(0.1, base_load)
+
+        logger.info(
+            f"[Collector] Load: Base={base_load:.2f}kW | "
+            f"Calc: (Grid {self.context.current_grid:.2f} + PV {self.context.current_pv:.2f}) - WP {self.context.current_wp:.2f}"
         )
-
-        logger.debug(f"[Collector] Load updated: Base={self.context.stable_load:.2f}kW")
 
     def update_sensors(self):
         location = self.client.get_location()

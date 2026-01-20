@@ -345,13 +345,13 @@ def _get_solar_forecast_plot(request: Request) -> str:
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
             range=[x_start, x_end],
-            fixedrange=False, # Sta zoomen toe
+            fixedrange=False,  # Sta zoomen toe
         ),
         yaxis=dict(
             title="Vermogen (kW)",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
-            fixedrange=True, # Y-as vast
+            fixedrange=True,  # Y-as vast
         ),
         legend=dict(
             orientation="h",

@@ -173,7 +173,9 @@ class SolarModel:
         joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
 
-        logger.info(f"[Solar] Model getraind met MAE: {self.mae:.3f} kW")
+        logger.info(
+            f"[Solar] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW"
+        )
 
     def predict(self, df_forecast: pd.DataFrame, model_ratio: float = 0.7):
         raw_solcast = df_forecast["pv_estimate"].fillna(0)

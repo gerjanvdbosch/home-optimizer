@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.base import BaseEstimator
+from sklearn.metrics import mean_absolute_error
 from utils import add_cyclic_time_features
 from config import Config
 from context import Context
@@ -132,9 +133,13 @@ class LoadModel:
         y = df_train["target_load"]
 
         self.model.fit(X, y)
-        joblib.dump({"model": self.model}, self.path)
+        self.mae = mean_absolute_error(y, self.model.predict(X))
+        joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
-        logger.info(f"[Load] Model succesvol getraind op {len(df_train)} records.")
+
+        logger.info(
+            f"[Load] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW"
+        )
 
     def predict(
         self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15

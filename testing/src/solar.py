@@ -14,6 +14,7 @@ from utils import add_cyclic_time_features
 from typing import Dict
 from config import Config
 from context import Context
+from database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,17 @@ class SolarModel:
 
         # Target berekenen op de UUR data
         # Dit is veel stabieler dan op kwartierdata
-        df_train = df_train.set_index("timestamp").resample("1h").mean(numeric_only=True).dropna(subset=["pv_actual"]).reset_index()
+        df_train = (
+            df_train.set_index("timestamp")
+            .resample("1h")
+            .mean(numeric_only=True)
+            .dropna(subset=["pv_actual"])
+            .reset_index()
+        )
+
+        if len(df_train) < 10:
+            logger.warning("[Solar] Niet genoeg data om model te trainen.")
+            return
 
         X = self._prepare_features(df_train)
         y = df_train["pv_actual"].clip(0, system_max)
@@ -162,7 +173,7 @@ class SolarModel:
         joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
 
-        logger.info(f"[Solar] Model getraind met MAE: {self.mae:.3f} kW")
+        logger.info(f"[Solar] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW")
 
     def predict(self, df_forecast: pd.DataFrame, model_ratio: float = 0.7):
         raw_solcast = df_forecast["pv_estimate"].fillna(0)
@@ -207,7 +218,7 @@ class SolarModel:
 
 
 class SolarForecaster:
-    def __init__(self, config: Config, context: Context, database: 'Database'):
+    def __init__(self, config: Config, context: Context, database: "Database"):
         self.model = SolarModel(Path(config.solar_model_path))
         self.context = context
         self.config = config
