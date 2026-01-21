@@ -99,13 +99,23 @@ class LoadModel:
         # Filter rijen waar we geen load data hebben
         df_train = df_history.copy()
 
+        cols_to_smooth = ["wp_actual", "pv_actual", "grid_import", "grid_export"]
+
         df_train = (
             df_train.set_index("timestamp")
             .resample("15min")
             .mean(numeric_only=True)
-            .dropna(subset=["grid_import", "grid_export", "pv_actual", "wp_actual"])
+            .dropna(subset=cols_to_smooth)
             .reset_index()
         )
+
+        df_train[cols_to_smooth] = (
+            df_train[cols_to_smooth]
+            .rolling(window=4, center=True, min_periods=1)
+            .mean()
+        )
+
+        df_train = df_train.reset_index()
 
         if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
