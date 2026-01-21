@@ -36,9 +36,9 @@ class Context:
     solar_bias: float = 1.0
     load_bias: float = 1.0
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
-    wp_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
-    grid_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
+    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
+    wp_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
+    grid_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
 
     current_slot_start: datetime | None = None
 
