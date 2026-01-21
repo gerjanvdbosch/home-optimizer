@@ -40,6 +40,17 @@ class Measurement(Base):
     pv_actual = Column(Float)
     wp_actual = Column(Float)
 
+class ThermalState(Base):
+    """NIEUW: Thermische data voor het trainen van HVAC/DHW modellen"""
+    __tablename__ = "thermal_state"
+    timestamp = Column(DateTime, primary_key=True, index=True)
+
+    inside_temp = Column(Float)      # Woonkamer temp
+    dhw_temp = Column(Float)         # Boiler temp
+    dhw_setpoint = Column(Float)     # Doel temp boiler
+    supply_temp = Column(Float)      # Aanvoerwater temp WP
+    compressor_freq = Column(Float)  # Hz of % vermogen
+    hvac_mode = Column(Integer)      # 1 = Verwarmen, 0 = Uit/Koelen
 
 class Database:
     def __init__(self, config: Config):
@@ -119,6 +130,31 @@ class Database:
             self.logger.error(f"[DB] Fout bij opslaan meting: {e}")
         finally:
             session.close()
+
+    def save_thermal(self, ts: datetime, inside_temp=None, dhw_temp=None, dhw_setpoint=None,
+                     supply_temp=None, compressor_freq=None, hvac_mode=None):
+        """Slaat thermische staat op."""
+        session: Session = self.SessionLocal()
+        try:
+            record = session.query(ThermalState).where(ThermalState.timestamp == ts).first()
+            if not record:
+                record = ThermalState(timestamp=ts)
+                session.add(record)
+
+            if inside_temp is not None: record.inside_temp = inside_temp
+            if dhw_temp is not None: record.dhw_temp = dhw_temp
+            if dhw_setpoint is not None: record.dhw_setpoint = dhw_setpoint
+            if supply_temp is not None: record.supply_temp = supply_temp
+            if compressor_freq is not None: record.compressor_freq = compressor_freq
+            if hvac_mode is not None: record.hvac_mode = int(hvac_mode)
+
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"[DB] Fout opslaan thermal: {e}")
+        finally:
+            session.close()
+
 
     def get_history(self, cutoff_date: datetime):
         try:

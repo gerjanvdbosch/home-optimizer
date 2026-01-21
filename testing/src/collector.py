@@ -23,6 +23,23 @@ class Collector:
         self.context = context
         self.config = config
 
+        self.current_slot_start = None
+
+        self.pv_buffer = deque(maxlen=15)
+        self.wp_buffer = deque(maxlen=15)
+        self.grid_buffer = deque(maxlen=15)
+
+        self.pv_slots = []
+        self.wp_slots = []
+        self.grid_slots = []
+        self.freq_slots = []
+        self.supply_slots = []
+
+        self.last_pv = None
+        self.last_wp = None
+        self.last_grid_import = None
+        self.last_grid_export = None
+
     def update_forecast(self):
         self.client.reload()
 
@@ -144,6 +161,13 @@ class Collector:
 
         # Detecteer kwartierwissel
         if slot_start > self.context.current_slot_start:
+            if self.context.slot_samples:
+                avg_pv = float(np.mean(self.context.slot_samples))
+                # Sla het gemiddelde op voor het AFGELOPEN kwartier
+                self.database.update_pv_actual(
+                    self.context.current_slot_start, yield_kw=avg_pv
+                )
+
             # 2. Bereken vermogens t.o.v. VORIGE keer
             avg_pv = self._calculate_avg_power(current_pv, self.context.last_pv)
             avg_wp = self._calculate_avg_power(current_wp, self.context.last_wp)
@@ -170,11 +194,24 @@ class Collector:
                 wp_actual=avg_wp
             )
 
+            self.database.save_thermal(
+                ts=self.context.current_slot_start,
+                inside_temp=self.context.current_temp,
+                dhw_temp=self.context.dhw_temp,
+                dhw_setpoint=self.context.dhw_setpoint,
+                supply_temp=self.context.stable_supply,
+                compressor_freq=self.context.stable_freq,
+                hvac_mode=self.context.hvac_mode
+            )
+
+            self.context.slot_samples = []
             self.context.current_slot_start = slot_start
 
             logger.info(
                 f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW"
             )
+
+         self.context.slot_samples.append(self.context.current_pv)
 
     def _update_buffer(self, buffer: deque, value: float):
         if value is not None:

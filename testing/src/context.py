@@ -34,17 +34,7 @@ class Context:
     solar_bias: float = 1.0
     load_bias: float = 1.0
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
-    wp_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
-    grid_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
-
-    current_slot_start: datetime | None = None
-
-    # Voor kWh berekeningen (houdt de stand van vorig kwartier bij)
-    last_pv: float = None
-    last_wp: float = None
-    last_grid_import: float = None
-    last_grid_export: float = None
+    room_temp: float = 0.0
 
     dhw_temp: float = 0.0
     dhw_setpoint: float = 0.0
