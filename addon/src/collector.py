@@ -75,28 +75,28 @@ class Collector:
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
-        self.context.current_pv = self._update_buffer(self.context.pv_buffer, raw_pv)
-        self.context.current_wp = self._update_buffer(self.context.wp_buffer, raw_wp)
-        self.context.current_grid = self._update_buffer(
+        self.context.stable_pv = self._update_buffer(self.context.pv_buffer, raw_pv)
+        self.context.stable_wp = self._update_buffer(self.context.wp_buffer, raw_wp)
+        self.context.stable_grid = self._update_buffer(
             self.context.grid_buffer, raw_grid
         )
 
         # 3. Berekening met gestabiliseerde waarden
         # Formule: Huisverbruik = (Netto Grid + PV Productie) - Warmtepomp
-        total_consumption = self.context.current_grid + self.context.current_pv
+        total_consumption = self.context.stable_grid + self.context.stable_pv
 
         # Soms meten sensoren net iets anders (kalibratie).
         # Als WP zegt 2000W en Huis zegt 1950W, wordt base_load -50.
-        base_load = total_consumption - self.context.current_wp
+        base_load = total_consumption - self.context.stable_wp
 
         # 4. Intelligente fallback
         # Als base_load negatief is, is de meting van de WP waarschijnlijk hoger dan de P1/PV meten.
         # In dat geval is het 'restverbruik' van het huis waarschijnlijk minimaal.
-        self.context.stable_load = max(0.1, base_load)
+        self.context.stable_load = max(0.05, base_load)
 
         logger.debug(
             f"[Collector] Load: Base={base_load:.2f}kW | "
-            f"Calc: (Grid {self.context.current_grid:.2f} + PV {self.context.current_pv:.2f}) - WP {self.context.current_wp:.2f}"
+            f"Calc: (Grid {self.context.stable_grid:.2f} + PV {self.context.stable_pv:.2f}) - WP {self.context.stable_wp:.2f}"
         )
 
     def update_sensors(self):

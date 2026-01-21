@@ -21,7 +21,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @api.get("/", response_class=HTMLResponse)
-def index(request: Request, explain: str = None, train: str = None):
+def index(request: Request, explain: str = None, train: str = None, view: str = "hour"):
     """
     Dashboard Home. Leest status direct uit Context.
     """
@@ -30,6 +30,8 @@ def index(request: Request, explain: str = None, train: str = None):
 
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request)
+    view_mode = "15min" if view == "15min" else "hour"
+    measurements_data = _get_energy_table(request, view_mode)
     importance_html = ""
 
     # Formatteer starttijd
@@ -86,6 +88,8 @@ def index(request: Request, explain: str = None, train: str = None):
             "importance_plot": importance_html,
             "details": details,
             "explanation": explanation,
+            "measurements": measurements_data,
+            "current_view": view_mode,
         },
     )
 
@@ -482,28 +486,40 @@ def _get_importance_plot_plotly(request: Request) -> str:
 
     # 3. Filter op daglicht (cruciaal, anders klopt de importance niet)
     # We gebruiken dezelfde logica als bij het trainen/analyseren
+    df_hist = df_hist.copy()
     is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
-    df_day = df_hist[is_daytime].copy()
-    df_day = (
-        df_day.set_index("timestamp")
-        .resample("1h")
-        .mean(numeric_only=True)
-        .dropna(subset=["pv_actual"])
-        .reset_index()
+    df_train = df_hist[is_daytime].copy()
+
+    # 1. Voorbereiden: Sorteren en Indexeren
+    df_train = df_train.sort_values("timestamp").set_index("timestamp")
+
+    # 2. Resample: Garandeer 15-minuten grid
+    # Dit vult gaten op met NaNs, zodat rolling correct werkt over de tijd
+    df_train = df_train.resample("15min").mean(numeric_only=True)
+
+    # 3. Smoothing: Alleen terugkijken (center=False)
+    # window=4 (1 uur) middelt de 0.1 kWh stappen uit
+    cols_to_smooth = ["pv_actual"]
+
+    df_train[cols_to_smooth] = (
+        df_train[cols_to_smooth].rolling(window=2, center=False, min_periods=1).mean()
     )
 
-    if len(df_day) < 10:
+    # 4. Opschonen: Nu pas rijen met NaN verwijderen en index herstellen
+    df_train = df_train.dropna(subset=cols_to_smooth).reset_index()
+
+    if len(df_train) < 10:
         return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
 
     # 4. Features voorbereiden
     try:
-        X = forecaster.model._prepare_features(df_day)
-        y = df_day["pv_actual"].clip(0, coordinator.config.pv_max_kw)
+        X = forecaster.model._prepare_features(df_train)
+        y = df_train["pv_actual"].clip(0, coordinator.config.pv_max_kw)
 
         # 5. Bereken Importance (n_repeats=2 houdt het snel genoeg voor een dashboard)
         # Voor wetenschappelijke precisie wil je 10, voor een dashboard is 2-3 prima.
         result = permutation_importance(
-            forecaster.model.model, X, y, n_repeats=2, random_state=42, n_jobs=-1
+            forecaster.model.model, X, y, n_repeats=3, random_state=42, n_jobs=-1
         )
     except Exception as e:
         logger.error(f"Fout bij berekenen importance: {e}")
@@ -570,3 +586,86 @@ def _get_importance_plot_plotly(request: Request) -> str:
     return pio.to_html(
         fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
+
+
+def _get_energy_table(request: Request, view_mode: str = "15min"):
+    """
+    Haalt data op en verwerkt deze op basis van de modus:
+    - "15min": Toont vermogen (kW) met smoothing.
+    - "hour":  Toont energie (kWh) per uur (sommatie).
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+
+    # 1. Algemene Data Fetch (Gedeeld)
+    local_tz = datetime.now().astimezone().tzinfo
+    now_local = datetime.now(local_tz)
+    start_of_day_utc = now_local.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).astimezone(timezone.utc)
+
+    # Let op: dit haalt ook weerdata (temp, cloud, etc) op, maar dat negeren we gewoon.
+    df = database.get_history(start_of_day_utc)
+
+    if df.empty:
+        return []
+
+    # Zet tijdzone goed en indexeer
+    df["timestamp"] = df["timestamp"].dt.tz_convert(local_tz)
+    df = df.set_index("timestamp").sort_index()
+
+    # Kolommen die we gaan bewerken
+    process_cols = ["grid_import", "grid_export", "pv_actual", "wp_actual"]
+    # Zorg dat kolommen bestaan (voorkom key errors)
+    process_cols = [c for c in df.columns if c in process_cols]
+
+    # --- SPLITSING IN LOGICA ---
+    if view_mode == "hour":
+        # A. UUR-MODUS (kWh)
+        df = df.fillna(0.0)
+
+        # 1. kW naar kWh (delen door 4)
+        df[process_cols] = df[process_cols] * 0.25
+
+        # 2. Sommeer per uur
+        df = df.resample("1h", label="left").sum(numeric_only=True)
+
+        # 3. Filter toekomst weg (anders heb je lege rijen voor vanavond)
+        current_hour = now_local.replace(minute=0, second=0, microsecond=0)
+        df = df[df.index <= current_hour]
+
+    else:
+        process_cols = ["pv_actual", "wp_actual"]
+        # B. KWARTIER-MODUS (kW)
+        # 1. Smoothing toepassen
+        df[process_cols] = df[process_cols].rolling(window=2, min_periods=1).mean()
+
+    # --- EINDE SPLITSING ---
+
+    # 2. Bereken Totalen (Gedeelde logica)
+    # De wiskunde is nu voor beide gelijk (of het nu kW of kWh is)
+    df["total_calc"] = (df["grid_import"] - df["grid_export"] + df["pv_actual"]).clip(
+        lower=0.0
+    )
+
+    df["base_calc"] = (df["total_calc"] - df["wp_actual"]).clip(lower=0.0)
+
+    # 3. Formatteren voor output
+    df = df.reset_index().sort_values("timestamp", ascending=False)
+
+    table_data = []
+    for _, row in df.iterrows():
+        table_data.append(
+            {
+                "time": row["timestamp"].strftime("%H:%M"),
+                # We gebruiken dezelfde keys, de template past de eenheid aan
+                "pv": f"{row['pv_actual']:.2f}",
+                "wp": f"{row['wp_actual']:.2f}",
+                "import": f"{row['grid_import']:.2f}",
+                "export": f"{row['grid_export']:.2f}",
+                "total": f"{row['total_calc']:.2f}",
+                "base": f"{row['base_calc']:.2f}",
+            }
+        )
+
+    return table_data

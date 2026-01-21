@@ -168,7 +168,7 @@ class Optimizer:
             else f"Start gepland om {start_local:%H:%M}"
         )
         # Load van NU voor logging (eerste waarde van de vector)
-        current_load_val = P_load[0] if len(P_load) > 0 else 0.15
+        current_load_val = P_load[0] if len(P_load) > 0 else 0.05
         solar_usage_kwh = round(boiler_solar_usage * self.timestep_hours, 2)
 
         return status, reason, solar_usage_kwh, current_load_val

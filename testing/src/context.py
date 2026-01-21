@@ -25,11 +25,8 @@ class Context:
 
     hvac_mode: int | None = None
 
-    current_pv: float = 0.0
-    current_wp: float = 0.0
-    current_grid: float = 0.0
-
     stable_pv: float = 0.0
+    stable_wp: float = 0.0
     stable_load: float = 0.0
 
     forecast_df: pd.DataFrame | None = None

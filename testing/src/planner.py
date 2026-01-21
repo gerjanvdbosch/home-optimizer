@@ -29,7 +29,11 @@ class Planner:
         df_next_2h = df.iloc[idx_now : idx_now + 8]
         outside_temp = df_next_2h["temp"].median()
 
+        # todo: ml leren van dhw profiel, hoelang duurt het om te verwarmen, hoeveel energie is er nodig
         dhw_profile = self.optimizer.calculate_profile(self.context.dhw_temp, self.context.dhw_setpoint, outside_temp)
+
+        # todo: ml leren hoelang het duurt om te verwarmen, hoeveel energie is er nodig en hoe snel het afkoelt
+        # inplannen van dhw en verwarmen op optimale momenten, voor wanneer het warm moet zijn bijv 17:00
 
         status, reason, solar_usage_kwh, current_load_val = self.optimizer.optimize(self.context.forecast_df, now, dhw_profile)
 

@@ -151,7 +151,7 @@ class Database:
             # 3. Merge (Inner Join)
             # We willen alleen rijen waar we zowel de meting als het weer van hebben
             df_combined = pd.merge(
-                df_meas, df_fore, on="timestamp", how="inner"
+                df_meas, df_fore, on="timestamp", how="left"
             ).sort_values("timestamp")
 
             # 4. Bereken 'load_actual' voor gemak in Pandas

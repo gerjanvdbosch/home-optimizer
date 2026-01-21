@@ -152,7 +152,7 @@ class Database:
                 df_meas,
                 df_fore,
                 on="timestamp",
-                how="inner"
+                how="left"
             ).sort_values("timestamp")
 
             # 4. Bereken 'load_actual' voor gemak in Pandas

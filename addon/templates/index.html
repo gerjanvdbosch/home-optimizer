@@ -208,6 +208,80 @@
             font-weight: 500;
         }
 
+        /* TABEL STYLING */
+        .table-container {
+            max-height: 400px; /* Scrollbaar als de dag lang is */
+            overflow-y: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            color: var(--text-color);
+        }
+
+        .data-table th, .data-table td {
+            padding: 10px;
+            text-align: right; /* Getallen rechts uitlijnen */
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .data-table th {
+            text-align: right;
+            position: sticky;
+            top: 0;
+            background-color: var(--card-bg); /* Zodat header over data heen schuift */
+            font-weight: 600;
+            color: var(--text-muted);
+            z-index: 1;
+        }
+
+        /* Eerste kolom (Tijd) links uitlijnen */
+        .data-table th:first-child, .data-table td:first-child {
+            text-align: left;
+        }
+
+        .data-table tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .col-highlight {
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+
+        /* Toggle Switch Styling */
+        .toggle-container {
+            display: flex;
+            background-color: rgba(255,255,255,0.05);
+            border-radius: 6px;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .toggle-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 4px 10px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-radius: 4px;
+            text-decoration: none; /* Het wordt een <a> tag */
+            display: block;
+        }
+
+        .toggle-btn:hover {
+            color: var(--text-color);
+        }
+
+        .toggle-btn.active {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 500;
+        }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -242,6 +316,65 @@
     {% else %}
     <div class="empty-msg">Wachten op data...</div>
     {% endif %}
+
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">
+                Energiebalans
+                <!-- Dynamische titel -->
+                {% if current_view == 'hour' %}(kWh){% else %}(kW){% endif %}
+            </h3>
+
+            <!-- DE TOGGLE KNOPPEN -->
+            <div class="toggle-container">
+                <!-- We behouden andere parameters (zoals explain) niet simpel in href,
+                     maar voor een dashboard is een harde link vaak prima. -->
+                <a href="?view=15min"
+                   class="toggle-btn {% if current_view == '15min' %}active{% endif %}">
+                    15m
+                </a>
+                <a href="?view=hour"
+                   class="toggle-btn {% if current_view == 'hour' %}active{% endif %}">
+                    1h
+                </a>
+            </div>
+        </div>
+
+        <div class="table-container">
+            {% if measurements %}
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <!-- Dynamische headers op basis van view -->
+                    {% set unit = 'kWh' if current_view == 'hour' else 'kW' %}
+                    <th>Tijd</th>
+                    <th>PV ({{ unit }})</th>
+                    <th>Import ({{ unit }})</th>
+                    <th>Export ({{ unit }})</th>
+                    <th>Totaal ({{ unit }})</th>
+                    <th>WP ({{ unit }})</th>
+                    <th>Base ({{ unit }})</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for row in measurements %}
+                <tr>
+                    <td>{{ row.time }}</td>
+                    <td style="color: #ffb74d;">{{ row.pv }}</td>
+                    <td>{{ row.import }}</td>
+                    <td>{{ row.export }}</td>
+                    <td style="font-weight: bold;">{{ row.total }}</td>
+                    <td style="color: #90caf9;">{{ row.wp }}</td>
+                    <td class="col-highlight">{{ row.base }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-msg">Nog geen metingen beschikbaar.</div>
+            {% endif %}
+        </div>
+    </div>
 
     {% if explanation %}
     <div class="explain-container">

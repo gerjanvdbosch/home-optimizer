@@ -47,12 +47,23 @@ class NowCaster:
         if df.empty:
             return pd.Series(dtype=float)
 
+        # 1. Bereken verschil in uren
         delta_hours = (df["timestamp"] - current_time).dt.total_seconds() / 3600.0
-        delta_hours = delta_hours.clip(lower=0)
 
-        # Bias sterft uit in de toekomst
-        decay_factors = np.exp(-delta_hours / self.decay_hours)
+        # 2. Bepaal wat toekomst is (voor stap 3)
+        is_future = df["timestamp"] >= current_time
+
+        # 3. Decay berekenen
+        # We clippen hier wel op 0 om math errors (overflow) te voorkomen bij oude data,
+        # maar we lossen het toepassen op het verleden op in de volgende stap.
+        # (Voor het verleden wordt de factor hier 1.0, maar die zetten we zo op 0)
+        delta_hours_math = delta_hours.clip(lower=0)
+        decay_factors = np.exp(-delta_hours_math / self.decay_hours)
+
         correction_vector = self.current_ratio * decay_factors
+
+        # 4. FIX: Zet correctie op 0.0 voor alles wat NIET in de toekomst ligt
+        correction_vector = correction_vector.where(is_future, 0.0)
 
         corrected_series = df[col_name] + correction_vector
         return corrected_series.clip(lower=0.05)
@@ -96,26 +107,27 @@ class LoadModel:
         return X.apply(pd.to_numeric, errors="coerce")
 
     def train(self, df_history: pd.DataFrame):
-        # Filter rijen waar we geen load data hebben
         df_train = df_history.copy()
 
-        cols_to_smooth = ["wp_actual", "pv_actual", "grid_import", "grid_export"]
+        # 1. Voorbereiden: Sorteren en Indexeren
+        df_train = df_train.sort_values("timestamp").set_index("timestamp")
 
-        df_train = (
-            df_train.set_index("timestamp")
-            .resample("15min")
-            .mean(numeric_only=True)
-            .dropna(subset=cols_to_smooth)
-            .reset_index()
-        )
+        # 2. Resample: Garandeer 15-minuten grid
+        # Dit vult gaten op met NaNs, zodat rolling correct werkt over de tijd
+        df_train = df_train.resample("15min").mean(numeric_only=True)
+
+        # 3. Smoothing: Alleen terugkijken (center=False)
+        # window=4 (1 uur) middelt de 0.1 kWh stappen uit
+        cols_to_smooth = ["wp_actual", "pv_actual"]
 
         df_train[cols_to_smooth] = (
             df_train[cols_to_smooth]
-            .rolling(window=4, center=True, min_periods=1)
+            .rolling(window=4, center=False, min_periods=1)
             .mean()
         )
 
-        df_train = df_train.reset_index()
+        # 4. Opschonen: Nu pas rijen met NaN verwijderen en index herstellen
+        df_train = df_train.dropna(subset=cols_to_smooth).reset_index()
 
         if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
@@ -123,7 +135,9 @@ class LoadModel:
 
         # Base Load berekening
         df_train["target_load"] = df_train["load_actual"] - df_train["wp_actual"]
-        df_train["target_load"] = df_train["target_load"].clip(lower=0.1)
+        df_train["target_load"] = df_train["target_load"].clip(lower=0.05)
+
+        df_train = df_train.dropna(subset=["target_load"]).reset_index()
 
         # AANPASSING: Quantile Regression
         # We voorspellen het 90e percentiel (bovengrens).
@@ -152,14 +166,14 @@ class LoadModel:
         )
 
     def predict(
-        self, df_forecast: pd.DataFrame, fallback_kw: float = 0.15
+        self, df_forecast: pd.DataFrame, fallback_kw: float = 0.05
     ) -> pd.Series:
         if not self.is_fitted:
             return pd.Series(fallback_kw, index=df_forecast.index)
 
         X = self._prepare_features(df_forecast)
         pred = self.model.predict(X)
-        return np.maximum(pred, 0.1)
+        return np.maximum(pred, 0.05)
 
 
 class LoadForecaster:
