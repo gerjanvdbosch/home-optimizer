@@ -1,6 +1,6 @@
 {
-  "room_temp": 20.0,
-  "dhw_temp": 30.0,
+  "room_temp": 19.0,
+  "dhw_temp": 50.0,
   "pv_power": 0.0,
   "grid_power": 0.43,
   "solcast": [

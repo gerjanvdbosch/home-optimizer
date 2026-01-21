@@ -48,7 +48,8 @@ class ThermalModel:
         # 5. solar: Zoninstraling (W/m2)
         # 6. wind: Windkracht (m/s)
         # 7. prev_delta: Momentum van de vloer
-        self.features = ["inside", "outside", "compressor_freq", "supply_temp", "solar", "wind", "prev_delta"]
+        # 8. hvac_mode: Verwarmen / SWW / Uit
+        self.features = ["inside", "outside", "compressor_freq", "supply_temp", "solar", "wind", "prev_delta", "hvac_mode"]
         self._load()
 
     def _load(self):
@@ -83,9 +84,9 @@ class ThermalModel:
         y = df['target_delta']
 
         # Constraints (Natuurwetten afdwingen):
-        # inside(-), outside(+), freq(+), supply(+), solar(+), wind(-), prev(+)
+        # inside(-), outside(+), freq(+), supply(+), solar(+), wind(-), prev(+), hvac(+)
         # inside is min, want hoe warmer binnen, hoe moeilijker het is om NOG warmer te worden
-        monotonic_cst = [-1, 1, 1, 1, 1, -1, 1]
+        monotonic_cst = [-1, 1, 1, 1, 1, -1, 1, 1]
 
         self.model = HistGradientBoostingRegressor(
             loss="squared_error",
@@ -100,20 +101,15 @@ class ThermalModel:
         self.is_fitted = True
         logger.info(f"[Thermal] Model getraind op {len(df)} samples.")
 
-    def predict_step(self, inside, outside, freq, supply_temp, solar, wind, prev_delta):
+    def predict_step(self, inside, outside, freq, supply_temp, solar, wind, prev_delta, hvac_mode=1):
         """Voorspelt de temperatuurverandering in 15 minuten."""
         if not self.is_fitted:
             # Fallback Physics (Isolatiewaarde gok)
             loss = (inside - outside) * 0.015
-            # Gain is afhankelijk van frequentie en aanvoer
-            power_factor = freq / 100.0
-            gain = 0.35 * power_factor
+            gain = (freq / 100.0) * 0.35 * hvac_mode
             return (gain - loss) + (0.0001 * solar)
 
-        X = pd.DataFrame(
-            [[inside, outside, float(freq), float(supply_temp), solar, wind, prev_delta]],
-            columns=self.features
-        )
+        X = pd.DataFrame([[inside, outside, float(freq), float(supply_temp), solar, wind, prev_delta, int(hvac_mode)]], columns=self.features)
         return self.model.predict(X)[0]
 
 # =========================================================
@@ -138,70 +134,85 @@ class ThermalPlanner:
         start_time = deadline - timedelta(minutes=minutes_needed)
         return start_time, minutes_needed
 
-    def calculate_time_to_heat(self,
-                               start_temp: float,
-                               target_temp: float,
-                               df_forecast: pd.DataFrame,
-                               max_minutes: int = 300) -> int:
+    def calculate_run_profile(self,
+                              start_temp: float,
+                              target_temp: float,
+                              df_forecast: pd.DataFrame,
+                              is_dhw: bool = False) -> tuple[int, np.ndarray]:
         """
-        Simuleert: Hoe lang duurt het om van A naar B te komen?
-        Houdt rekening met de huidige NowCaster bias!
+        COMBINATIE FUNCTIE:
+        Simuleert het verloop van A naar B met behulp van Machine Learning.
+
+        Returns:
+            duration (int): Aantal minuten
+            profile (np.array): Array met kW verbruik per kwartier (voor de Optimizer)
         """
         if start_temp >= target_temp:
-            return 0
+            return 0, np.array([])
 
         sim_temp = start_temp
-
-        # HIER GEBRUIKEN WE DE NOWCASTER
-        # We starten met de huidige afwijking (bijv. tocht)
         bias = self.nowcaster.bias
+        curr_prev_delta = 0.0
 
-        curr_prev_delta = 0.0 # Start vanuit stilstand aanname
-        minutes_needed = 0
+        # We bouwen het profiel op terwijl we simuleren
+        power_profile = []
 
-        # We simuleren kwartier voor kwartier
-        steps = int(max_minutes / 15)
+        # Maximaal 5 uur simuleren (beveiliging)
+        max_steps = int(300 / 15)
 
-        for i in range(steps):
-            # Pak weerdata voor dit tijdstip in de toekomst
+        for i in range(max_steps):
+            # 1. Haal weerdata
             idx = min(i, len(df_forecast)-1)
             row = df_forecast.iloc[idx]
+            outside_t = row.get('temp', 10)
 
-            # --- BOOST LOGICA ---
-            # Als we moeten inhalen, doen we dat op hoog vermogen.
-            # Hoe kouder buiten, hoe hoger de benodigde aanvoer (stooklijn).
-            # Dit is een simpele stooklijn-gok voor de simulatie:
-            boost_freq = 75.0 # Hz
-            boost_supply = 40.0 if row.get('temp', 0) < 5 else 35.0
+            # 2. Bepaal Power Strategie (Boost curve)
+            # Professioneel: COP is afhankelijk van temperatuurverschil (Lift)
+            # Dit maakt de schatting van het elektriciteitsverbruik (kW) nauwkeuriger.
+            if is_dhw:
+                # Boiler: Hoe warmer het water, hoe lager de COP, hoe meer stroom nodig voor zelfde warmte
+                # Simpele curve: begint op 2.2kW, eindigt op 3.0kW
+                progress = min(1.0, (sim_temp - 40) / (target_temp - 40)) if target_temp > 40 else 0
+                kw_input = 2.2 + (0.8 * progress)
 
-            # Vraag het model: Wat gebeurt er als we VOL GAS geven?
+                # Vertaal kW naar Frequency (schatting voor ML model input)
+                # Stel 3.5kW = 100Hz
+                boost_freq = min(100.0, (kw_input / 3.5) * 100.0)
+                boost_supply = 55.0 # Boiler stookt altijd heet
+            else:
+                # Vloer: Stooklijn afhankelijk van buiten
+                kw_input = 1.5 # Vloer is vaak stabieler vermogen
+                boost_supply = 40.0 if outside_t < 5 else 30.0
+                boost_freq = 60.0
+
+            # 3. Voorspel Temperatuur Delta (ML Model)
             delta = self.model.predict_step(
                 inside=sim_temp,
-                outside=row.get('temp', 0),
+                outside=outside_t,
                 freq=boost_freq,
                 supply_temp=boost_supply,
                 solar=row.get('pv_estimate', 0),
                 wind=row.get('wind', 0),
-                prev_delta=curr_prev_delta
+                prev_delta=curr_prev_delta,
+                hvac_mode=1
             )
 
-            # Update simulatie
-            # We tellen de bias (het open raam) erbij op
+            # 4. Update Simulatie State
             sim_temp += (delta + bias)
             curr_prev_delta = delta
-
-            # De bias dooft langzaam uit.
-            # We gaan ervan uit dat je dat open raam straks wel dicht doet.
             bias *= self.nowcaster.decay
 
-            minutes_needed += 15
+            # Voeg berekend vermogen toe aan profiel
+            power_profile.append(kw_input)
 
+            # 5. Check of we er zijn
             if sim_temp >= target_temp:
-                return minutes_needed
+                break
 
-        return max_minutes # Niet gelukt binnen de tijd
+        # Converteer lijst naar numpy array voor CVXPY optimizer
+        return len(power_profile) * 15, np.array(power_profile)
 
-    def can_pause_heating(self, current_temp, min_temp, duration_minutes, df_forecast) -> bool:
+    def simulate_cooldown(self, current_temp, min_temp, duration_minutes, df_forecast) -> bool:
         """
         Simuleert: Als de WP uit gaat (voor boiler), zakt de temp dan onder het minimum?
         """
@@ -223,7 +234,8 @@ class ThermalPlanner:
                 supply_temp=20.0, # Kamertemperatuur water
                 solar=row.get('pv_estimate', 0),
                 wind=row.get('wind', 0),
-                prev_delta=curr_prev_delta
+                prev_delta=curr_prev_delta,
+                hvac_mode=0
             )
 
             sim_temp += (delta + bias)
@@ -231,6 +243,6 @@ class ThermalPlanner:
             bias *= self.nowcaster.decay
 
             if sim_temp < min_temp:
-                return False # Nee, huis koelt te snel af
+                return False # Gefaald: te koud
 
-        return True # Ja, pauzeren is veilig
+        return True # Geslaagd: warm genoeg gebleven
