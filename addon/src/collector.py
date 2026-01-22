@@ -25,9 +25,9 @@ class Collector:
 
         self.current_slot_start = None
 
-        self.pv_buffer = deque(maxlen=15)
-        self.wp_buffer = deque(maxlen=15)
-        self.grid_buffer = deque(maxlen=15)
+        self.pv_buffer = deque(maxlen=7)
+        self.wp_buffer = deque(maxlen=7)
+        self.grid_buffer = deque(maxlen=7)
 
         self.pv_slots = []
         self.wp_slots = []
@@ -160,8 +160,10 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = float(np.mean(self.pv_slots))
             avg_wp = float(np.mean(self.wp_slots))
-            avg_import = float(np.mean([v for v in self.grid_slots if v >= 0]))
-            avg_export = float(np.mean([v for v in self.grid_slots if v < 0])) * -1.0
+            avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
+            avg_export = (
+                sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
+            ) * -1.0
 
             self.pv_slots = []
             self.wp_slots = []
