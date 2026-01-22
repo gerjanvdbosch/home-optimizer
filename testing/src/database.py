@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Float, DateTime, select
+from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from config import Config

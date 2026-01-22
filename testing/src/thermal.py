@@ -211,38 +211,3 @@ class ThermalPlanner:
 
         # Converteer lijst naar numpy array voor CVXPY optimizer
         return len(power_profile) * 15, np.array(power_profile)
-
-    def simulate_cooldown(self, current_temp, min_temp, duration_minutes, df_forecast) -> bool:
-        """
-        Simuleert: Als de WP uit gaat (voor boiler), zakt de temp dan onder het minimum?
-        """
-        sim_temp = current_temp
-        bias = self.nowcaster.bias # Ook hier bias gebruiken!
-        curr_prev_delta = 0.0
-        steps = int(duration_minutes / 15)
-
-        for i in range(steps):
-            idx = min(i, len(df_forecast)-1)
-            row = df_forecast.iloc[idx]
-
-            # Simuleer met UIT (freq=0)
-            # Supply temp zakt langzaam, maar voor model simulatie: laag houden
-            delta = self.model.predict_step(
-                inside=sim_temp,
-                outside=row.get('temp', 0),
-                freq=0.0,
-                supply_temp=20.0, # Kamertemperatuur water
-                solar=row.get('pv_estimate', 0),
-                wind=row.get('wind', 0),
-                prev_delta=curr_prev_delta,
-                hvac_mode=0
-            )
-
-            sim_temp += (delta + bias)
-            curr_prev_delta = delta
-            bias *= self.nowcaster.decay
-
-            if sim_temp < min_temp:
-                return False # Gefaald: te koud
-
-        return True # Geslaagd: warm genoeg gebleven

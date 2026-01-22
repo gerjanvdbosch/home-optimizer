@@ -1,8 +1,7 @@
 import pandas as pd
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from collections import deque
 from enum import Enum
 
 
@@ -26,6 +25,7 @@ class Context:
 
     stable_pv: float = 0.0
     stable_wp: float = 0.0
+    stable_grid: float = 0.0
     stable_load: float = 0.0
 
     forecast_df: pd.DataFrame | None = None
@@ -33,17 +33,7 @@ class Context:
     solar_bias: float = 1.0
     load_bias: float = 1.0
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
-    wp_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
-    grid_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
-
-    current_slot_start: datetime | None = None
-
-    # Voor kWh berekeningen (houdt de stand van vorig kwartier bij)
-    last_pv: float = None
-    last_wp: float = None
-    last_grid_import: float = None
-    last_grid_export: float = None
+    room_temp: float = 0.0
 
     dhw_temp: float = 0.0
     dhw_setpoint: float = 0.0

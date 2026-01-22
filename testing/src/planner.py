@@ -131,16 +131,16 @@ class Planner:
             # Snijd forecast voor de cooldown periode
             df_cooldown = df[df['timestamp'] >= finish_time]
 
-            is_warm_enough = self.dhw_planner.simulate_cooldown(
-                current_temp=target_temp, # Aanname: we halen de target
-                min_temp=min_allowed_temp,
-                duration_minutes=cooldown_duration,
-                df_forecast=df_cooldown
-            )
-
-            if not is_warm_enough:
-                # OVERRULE: Zon is leuk, maar koud douchen niet.
-                return "WAIT", f"Zon genegeerd: te veel afkoeling ({int(cooldown_duration)} min)"
+#             is_warm_enough = self.dhw_planner.simulate_cooldown(
+#                 current_temp=target_temp, # Aanname: we halen de target
+#                 min_temp=min_allowed_temp,
+#                 duration_minutes=cooldown_duration,
+#                 df_forecast=df_cooldown
+#             )
+#
+#             if not is_warm_enough:
+#                 # OVERRULE: Zon is leuk, maar koud douchen niet.
+#                 return "WAIT", f"Zon genegeerd: te veel afkoeling ({int(cooldown_duration)} min)"
 
         # Alles OK: Starten maar
         return "START", f"Optimalisatie: {opt_reason}"
@@ -189,14 +189,14 @@ class Planner:
             min_allowed_temp = target_temp - 0.5
             df_cooldown = df[df['timestamp'] >= finish_time]
 
-            is_warm_enough = self.hvac_planner.simulate_cooldown(
-                current_temp=target_temp,
-                min_temp=min_allowed_temp,
-                duration_minutes=cooldown_duration,
-                df_forecast=df_cooldown
-            )
-
-            if not is_warm_enough:
-                return "WAIT", "Verwarming uitgesteld: huis koelt te snel af"
+#             is_warm_enough = self.hvac_planner.simulate_cooldown(
+#                 current_temp=target_temp,
+#                 min_temp=min_allowed_temp,
+#                 duration_minutes=cooldown_duration,
+#                 df_forecast=df_cooldown
+#             )
+#
+#             if not is_warm_enough:
+#                 return "WAIT", "Verwarming uitgesteld: huis koelt te snel af"
 
         return "START", f"Verwarming Solar: {opt_reason}"
