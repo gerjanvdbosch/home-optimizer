@@ -150,20 +150,20 @@ def _get_solar_forecast_plot(request: Request) -> str:
         # --- A. HISTORIE: VLOEIENDE LIJN (FIX VOOR HET STUITEREN) ---
         # 1. Zet index
         df_hist_smooth = df_hist.set_index("timestamp_local").sort_index()
-
-        # 2. VEILIG UPSAMPLEN
-        # Eerst lineair (rechte lijnen), dat voorkomt de rare pieken en dalen
-        df_hist_smooth = df_hist_smooth.resample("5min").interpolate(method="linear")
+#
+#         # 2. VEILIG UPSAMPLEN
+#         # Eerst lineair (rechte lijnen), dat voorkomt de rare pieken en dalen
+#         df_hist_smooth = df_hist_smooth.resample("5min").interpolate(method="linear")
 
         # 3. ROND MAKEN (SCHUURPAPIER)
         # We pakken het gemiddelde van de omliggende punten.
         # window=7 (35 min) geeft een mooie zachte curve.
         # center=True zorgt dat de grafiek niet naar rechts verschuift.
-        df_hist_smooth["pv_actual"] = (
-            df_hist_smooth["pv_actual"]
-            .rolling(window=7, center=True, min_periods=1)
-            .mean()
-        )
+#         df_hist_smooth["pv_actual"] = (
+#             df_hist_smooth["pv_actual"]
+#             .rolling(window=7, center=True, min_periods=1)
+#             .mean()
+#         )
 
         # 4. Laatste check op negatieve waarden
         df_hist_smooth["pv_actual"] = df_hist_smooth["pv_actual"].clip(lower=0).round(2)
@@ -491,32 +491,32 @@ def _get_importance_plot_plotly(request: Request) -> str:
     df_train = df_hist[is_daytime].copy()
 
     # 1. Voorbereiden: Sorteren en Indexeren
-    df_train = (
-        df_train
-        .sort_values("timestamp")
-        .set_index("timestamp")
-    )
-
-    # 2. Resample: Garandeer 15-minuten grid
-    # Dit vult gaten op met NaNs, zodat rolling correct werkt over de tijd
-    df_train = df_train.resample("15min").mean(numeric_only=True)
-
-    # 3. Smoothing: Alleen terugkijken (center=False)
-    # window=4 (1 uur) middelt de 0.1 kWh stappen uit
-    cols_to_smooth = ["pv_actual"]
-
-    df_train[cols_to_smooth] = (
-        df_train[cols_to_smooth]
-        .rolling(window=2, center=False, min_periods=1)
-        .mean()
-    )
-
-    # 4. Opschonen: Nu pas rijen met NaN verwijderen en index herstellen
-    df_train = (
-        df_train
-        .dropna(subset=cols_to_smooth)
-        .reset_index()
-    )
+#     df_train = (
+#         df_train
+#         .sort_values("timestamp")
+#         .set_index("timestamp")
+#     )
+#
+#     # 2. Resample: Garandeer 15-minuten grid
+#     # Dit vult gaten op met NaNs, zodat rolling correct werkt over de tijd
+#     df_train = df_train.resample("15min").mean(numeric_only=True)
+#
+#     # 3. Smoothing: Alleen terugkijken (center=False)
+#     # window=4 (1 uur) middelt de 0.1 kWh stappen uit
+#     cols_to_smooth = ["pv_actual"]
+#
+#     df_train[cols_to_smooth] = (
+#         df_train[cols_to_smooth]
+#         .rolling(window=2, center=False, min_periods=1)
+#         .mean()
+#     )
+#
+#     # 4. Opschonen: Nu pas rijen met NaN verwijderen en index herstellen
+#     df_train = (
+#         df_train
+#         .dropna(subset=cols_to_smooth)
+#         .reset_index()
+#     )
 
     if len(df_train) < 10:
         return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
