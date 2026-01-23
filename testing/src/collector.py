@@ -45,7 +45,7 @@ class Collector:
 
         solcast = self.client.get_forecast()
 
-        now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo).replace(month=1, day=14, hour=10)
+        now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
             hour=0, minute=0, second=0, microsecond=0
         ).tz_convert("UTC")

@@ -39,7 +39,8 @@ class Coordinator:
         self.collector = collector
 
     def tick(self):
-        self.context.now = datetime.now(timezone.utc).replace(month=1, day=14, hour=10)
+        #self.context.now = datetime.now(timezone.utc).replace(month=1, day=14, hour=10)
+        self.context.now = datetime.now(timezone.utc).replace(month=1, day=23, hour=20)
 
         self.collector.update_sensors()
 

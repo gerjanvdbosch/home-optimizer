@@ -150,6 +150,13 @@ def _get_solar_forecast_plot(request: Request) -> str:
         # --- A. HISTORIE: VLOEIENDE LIJN (FIX VOOR HET STUITEREN) ---
         # 1. Zet index
         df_hist_smooth = df_hist.set_index("timestamp_local").sort_index()
+
+        df_hist_smooth["base_load"] = (
+            df_hist_smooth["grid_import"]
+            - df_hist_smooth["grid_export"]
+            + df_hist_smooth["pv_actual"]
+            - df_hist_smooth.get("wp_actual")
+        ).clip(lower=0)
         #
         #         # 2. VEILIG UPSAMPLEN
         #         # Eerst lineair (rechte lijnen), dat voorkomt de rare pieken en dalen
@@ -217,11 +224,38 @@ def _get_solar_forecast_plot(request: Request) -> str:
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],
-                y=df_hist_plot["pv_actual"],
-                name="Historie",
+                y=df_hist_plot["base_load"],
+                name="Base load",
                 mode="lines",
-                legendgroup="history",
-                line=dict(color="#FF9100", width=1.5, shape="linear"),
+                legendgroup="load",
+                line=dict(color="#F50057", width=1, shape="hv"),
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                opacity=0.8,
+            )
+        )
+
+        # Verbind historie met 'nu' punt
+        fig.add_trace(
+            go.Scatter(
+                x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
+                y=[df_hist_plot["base_load"].iloc[-1], context.stable_load],
+                mode="lines",
+                line=dict(color="#F50057", width=1, shape="hv"),
+                showlegend=False,
+                legendgroup="load",
+                hoverinfo="skip",
+                opacity=0.8,
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["pv_actual"],
+                name="Solar",
+                mode="lines",
+                legendgroup="solar",
+                line=dict(color="#FF9100", width=1.5),
                 fill="tozeroy",
                 fillcolor="rgba(255, 145, 0, 0.07)",
                 hovertemplate="%{y:.2f} kW<extra></extra>",
@@ -233,12 +267,12 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
                 y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
                 mode="lines",
-                line=dict(color="#FF9100", dash="dash", width=1.5),
+                line=dict(color="#FF9100", width=1.5),
                 fill="tozeroy",
                 fillcolor="rgba(255, 145, 0, 0.07)",
                 showlegend=False,  # We hoeven deze niet apart in de legenda
                 hoverinfo="skip",  # Geen popup als je over het lijntje muist
-                legendgroup="history",
+                legendgroup="solar",
             )
         )
 
@@ -251,7 +285,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             mode="markers",
             name="Now",
             showlegend=False,
-            marker=dict(color="#FF9100", size=12, line=dict(color="white", width=2)),
+            marker=dict(color="#FF9100", size=12, line=dict(color="white", width=1)),
             zorder=10,
             hoverinfo="skip",
         )
@@ -271,7 +305,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=x_future,
                 y=y_future,
                 mode="lines",
-                name="Forecast",
+                showlegend=False,
+                legendgroup="solar",
                 line=dict(color="#ffffff", dash="dash", width=1.5),
                 fill="tozeroy",  # Vul tot aan de X-as (0)
                 fillcolor="rgba(255, 255, 255, 0.05)",
@@ -283,17 +318,26 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # E. Load Forecast (Rood)
     if "load_corrected" in df.columns:
+        df_future_load = df[df["timestamp_local"] >= local_now]
+
+        # Verbind 'nu' met de toekomst
+        x_load_future = [local_now] + df_future_load["timestamp_local"].tolist()
+        y_load_future = [context.stable_load] + df_future_load[
+            "load_corrected"
+        ].tolist()
+
         fig.add_trace(
             go.Scatter(
-                x=df["timestamp_local"],
-                y=df["load_corrected"],
+                x=x_load_future,
+                y=y_load_future,
                 mode="lines",
-                name="Load",
-                line=dict(color="#F50057", width=1.5, shape="hv"),
-                opacity=0.8,
+                name="Base load",
+                showlegend=False,
+                legendgroup="load",
+                # Dash voor toekomst, solid voor historie
+                line=dict(color="#F50057", width=1, shape="hv"),
                 hovertemplate="%{y:.2f} kW<extra></extra>",
-                # hoverinfo="skip",
-                # visible="legendonly",
+                opacity=0.8,
             )
         )
 
