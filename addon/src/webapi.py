@@ -212,11 +212,25 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=df["power_ml_raw"],
                 mode="lines",
                 name="Model",
-                line=dict(color="#4fa8ff", dash="dot", width=1.5),  # Paars stippel
+                line=dict(color="#FF9100", dash="dot", width=1),
                 opacity=0.6,
                 visible="legendonly",
+                legendgroup="model",
                 hovertemplate="%{y:.2f} kW<extra></extra>",
-                # hoverinfo="skip",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=df["timestamp_local"],
+                y=df["load_ml"],
+                mode="lines",
+                line=dict(color="#F50057", dash="dot", width=1, shape="hv"),
+                showlegend=False,
+                visible="legendonly",
+                legendgroup="model",
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                opacity=0.6,
             )
         )
 
