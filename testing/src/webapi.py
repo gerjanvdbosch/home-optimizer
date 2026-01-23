@@ -488,7 +488,9 @@ def _get_importance_plot_plotly(request: Request) -> str:
     # We gebruiken dezelfde logica als bij het trainen/analyseren
     df_hist = df_hist.copy()
     is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
+
     df_train = df_hist[is_daytime].copy()
+    df_train = df_train.dropna(subset=["pv_actual", "pv_estimate"])
 
     # 1. Voorbereiden: Sorteren en Indexeren
 #     df_train = (
@@ -639,16 +641,6 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
         # 3. Filter toekomst weg (anders heb je lege rijen voor vanavond)
         current_hour = now_local.replace(minute=0, second=0, microsecond=0)
         df = df[df.index <= current_hour]
-
-    else:
-        process_cols = ["pv_actual", "wp_actual"]
-        # B. KWARTIER-MODUS (kW)
-        # 1. Smoothing toepassen
-        df[process_cols] = (
-            df[process_cols]
-            .rolling(window=2, min_periods=1)
-            .mean()
-        )
 
     # --- EINDE SPLITSING ---
 
