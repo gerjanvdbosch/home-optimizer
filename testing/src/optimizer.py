@@ -166,4 +166,4 @@ class Optimizer:
         current_load_val = P_load[0] if len(P_load) > 0 else 0.05
         solar_usage_kwh = round(boiler_solar_usage * self.timestep_hours, 2)
 
-        return status, reason, solar_usage_kwh, current_load_val
+        return status, reason, solar_usage_kwh, current_load_val, start_local

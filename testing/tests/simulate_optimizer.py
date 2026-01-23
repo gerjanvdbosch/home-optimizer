@@ -42,6 +42,7 @@ def generate_dummy_data(start_time, hours=24):
     # Voeg wat ruis toe
     noise = np.random.normal(0, 0.1, len(pv_raw))
     df["power_corrected"] = (pv_raw + noise).clip(0)
+    df["load_corrected"] = 0.15
 
     # --- TOEVOEGING: Temperatuur Curve ---
     # Temperatuur loopt vaak iets achter op de zon (piek rond 15:00 - 16:00)
@@ -82,13 +83,13 @@ def run_simulation():
     print(f"Berekend profiel (kW): {profile}")
     print(f"Totale duur: {len(profile) * 15} minuten")
 
-    status, context = optimizer.optimize(df, now, profile)
+    status, reason, solar_usage_kwh, _, planned_start = optimizer.optimize(df, now, profile)
 
     print(f"Besluit: {status}")
-    print(f"Reden: {context.reason}")
-    if context.planned_start:
-        print(f"Geplande start: {context.planned_start}")
-        print(f"Verwachte zonne-energie in boiler: {context.energy_best:.2f} kWh")
+    print(f"Reden: {reason}")
+    if planned_start:
+        print(f"Geplande start: {planned_start}")
+        print(f"Verwachte zonne-energie in boiler: {solar_usage_kwh:.2f} kWh")
 
     # --- PLOTTEN (AANGEPAST MET DUBBELE AS) ---
     fig, ax1 = plt.subplots(figsize=(12, 6))
@@ -103,9 +104,9 @@ def run_simulation():
     # 2. Het geplande blok
     l2 = [] # Placeholder voor legend
     l3 = []
-    if context.planned_start:
+    if planned_start:
         # Zoek waar de starttijd zit in de dataframe
-        mask = df["timestamp"] == context.planned_start
+        mask = df["timestamp"] == planned_start
         if mask.any():
             start_idx = df[mask].index[0]
 

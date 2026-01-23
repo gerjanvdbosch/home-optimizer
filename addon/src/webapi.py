@@ -350,7 +350,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 legendgroup="load",
                 # Dash voor toekomst, solid voor historie
                 line=dict(color="#F50057", width=1, shape="hv"),
-                hovertemplate="%{y:.2f} kW<extra></extra>",
+                hoverinfo="skip",
                 opacity=0.8,
             )
         )
