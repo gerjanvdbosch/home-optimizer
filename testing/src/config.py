@@ -14,12 +14,8 @@ class Config:
     sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
     sensor_grid_power: str = "sensor.p1_meter_power"
 
-    sensor_pv_energy = "sensor.pv_energie_totaal"
-    sensor_wp_energy = "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
-    sensor_grid_import_energy = "sensor.p1_meter_energy_import"
-    sensor_grid_export_energy = "sensor.p1_meter_energy_export"
-
-    sensor_dhw_temp: str = "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+    sensor_dhw_top: str = "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
+    sensor_dhw_bottom: str = "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
     sensor_dhw_setpoint: str = "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 

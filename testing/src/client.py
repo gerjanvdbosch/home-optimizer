@@ -29,18 +29,6 @@ class HAClient:
     def get_grid_power(self):
         return float(self.data.get("grid_power", 0.0))
 
-    def get_pv_energy(self):
-        return float(self.data.get("pv_energy", 0.0))
-
-    def get_wp_energy(self):
-        return float(self.data.get("wp_energy", 0.0))
-
-    def get_grid_import(self):
-        return float(self.data.get("grid_import", 0.0))
-
-    def get_grid_export(self):
-        return float(self.data.get("grid_export", 0.0))
-
     def get_room_temp(self):
         return float(self.data.get("room_temp", 19.5))
 

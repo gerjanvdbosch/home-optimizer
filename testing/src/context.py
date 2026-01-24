@@ -37,5 +37,6 @@ class Context:
 
     room_temp: float = 0.0
 
-    dhw_temp: float = 0.0
+    dhw_top: float = 0.0
+    dhw_bottom: float = 0.0
     dhw_setpoint: float = 0.0

@@ -32,13 +32,8 @@ class Collector:
         self.pv_slots = []
         self.wp_slots = []
         self.grid_slots = []
-#         self.freq_slots = []
-#         self.supply_slots = []
-
-#         self.last_pv = None
-#         self.last_wp = None
-#         self.last_grid_import = None
-#         self.last_grid_export = None
+        self.compressor_slots = []
+        self.supply_slots = []
 
     def update_forecast(self):
         self.client.reload()
@@ -146,20 +141,9 @@ class Collector:
         slot_minute = (now.minute // aggregation_minutes) * aggregation_minutes
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
-        # 1. Haal HUIDIGE tellerstanden op
-#         current_pv = self.client.get_pv_energy()
-#         current_wp = self.client.get_wp_energy()
-#         current_import = self.client.get_grid_import()
-#         current_export = self.client.get_grid_export()
-
         # Initialisatie bij start applicatie
         if self.current_slot_start is None:
             self.current_slot_start = slot_start
-
-#             self.context.last_pv = current_pv
-#             self.context.last_wp = current_wp
-#             self.context.last_grid_import = current_import
-#             self.context.last_grid_export = current_export
 
             return
 
@@ -173,23 +157,8 @@ class Collector:
             self.pv_slots = []
             self.wp_slots = []
             self.grid_slots = []
-
-            # 2. Bereken vermogens t.o.v. VORIGE keer
-#             avg_pv = self._calculate_avg_power(current_pv, self.context.last_pv)
-#             avg_wp = self._calculate_avg_power(current_wp, self.context.last_wp)
-#             avg_import = self._calculate_avg_power(current_import, self.context.last_grid_import)
-#             avg_export = self._calculate_avg_power(current_export, self.context.last_grid_export)
-#
-#             # 3. Update de 'last' waarden voor de volgende keer
-#             # Alleen updaten als we een geldige meting hebben
-#             if current_pv is not None:
-#                 self.context.last_pv = current_pv
-#             if current_wp is not None:
-#                 self.context.last_wp = current_wp
-#             if current_import is not None:
-#                 self.context.last_grid_import = current_import
-#             if current_export is not None:
-#                 self.context.last_grid_export = current_export
+            self.compressor_slots = []
+            self.supply_slots = []
 
             # 4. Opslaan
             self.database.save_measurement(
@@ -199,16 +168,6 @@ class Collector:
                 pv_actual=avg_pv,
                 wp_actual=avg_wp
             )
-
-#             self.database.save_thermal(
-#                 ts=self.context.current_slot_start,
-#                 inside_temp=self.context.current_temp,
-#                 dhw_temp=self.context.dhw_temp,
-#                 dhw_setpoint=self.context.dhw_setpoint,
-#                 supply_temp=self.context.stable_supply,
-#                 compressor_freq=self.context.stable_freq,
-#                 hvac_mode=self.context.hvac_mode
-#             )
 
             self.current_slot_start = slot_start
 
