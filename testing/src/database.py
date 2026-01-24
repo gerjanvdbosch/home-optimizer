@@ -40,17 +40,11 @@ class Measurement(Base):
     pv_actual = Column(Float)
     wp_actual = Column(Float)
 
-class ThermalState(Base):
-    """NIEUW: Thermische data voor het trainen van HVAC/DHW modellen"""
-    __tablename__ = "thermal_state"
-    timestamp = Column(DateTime, primary_key=True, index=True)
-
-    inside_temp = Column(Float)      # Woonkamer temp
-    dhw_temp = Column(Float)         # Boiler temp
-    dhw_setpoint = Column(Float)     # Doel temp boiler
-    supply_temp = Column(Float)      # Aanvoerwater temp WP
-    compressor_freq = Column(Float)  # Hz of % vermogen
-    hvac_mode = Column(Integer)      # 1 = Verwarmen, 0 = Uit/Koelen
+    room_temp = Column(Float)
+    dhw_temp = Column(Float)
+    supply_temp = Column(Float)
+    compressor_freq = Column(Float)
+    hvac_mode = Column(Integer)
 
 class Database:
     def __init__(self, config: Config):
