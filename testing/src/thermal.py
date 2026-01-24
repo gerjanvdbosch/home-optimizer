@@ -43,8 +43,8 @@ class ThermalModel:
         # FEATURES:
         # 1. inside: Hoe warmer binnen, hoe langzamer het opwarmt (Newton's cooling law)
         # 2. outside: Hoe kouder buiten, hoe groter het verlies
-        # 3. compressor_freq: Hoe hard werkt de warmtepomp? (0 - 100 Hz)
-        # 4. supply_temp: Hoe warm is het water? (30 - 50 °C)
+        # 3. compressor_freq: Hoe hard werkt de warmtepomp? (0 - 75 Hz)
+        # 4. supply_temp: Hoe warm is het water? (24 - 28 °C)
         # 5. solar: Zoninstraling (W/m2)
         # 6. wind: Windkracht (m/s)
         # 7. prev_delta: Momentum van de vloer
@@ -125,89 +125,68 @@ class ThermalPlanner:
                              target_temp: float,
                              deadline: datetime,
                              df_forecast: pd.DataFrame) -> tuple[datetime, int]:
-        """
-        Wrappertje: Berekent hoe laat je moet beginnen om de deadline te halen.
-        """
         minutes_needed = self.calculate_time_to_heat(
             current_temp, target_temp, df_forecast
         )
         start_time = deadline - timedelta(minutes=minutes_needed)
         return start_time, minutes_needed
 
-    def calculate_run_profile(self,
-                              start_temp: float,
-                              target_temp: float,
-                              df_forecast: pd.DataFrame,
-                              is_dhw: bool = False) -> tuple[int, np.ndarray]:
+    def calculate_time_to_heat(self,
+                               start_temp: float,
+                               target_temp: float,
+                               df_forecast: pd.DataFrame,
+                               max_minutes: int = 300) -> int:
         """
-        COMBINATIE FUNCTIE:
-        Simuleert het verloop van A naar B met behulp van Machine Learning.
-
-        Returns:
-            duration (int): Aantal minuten
-            profile (np.array): Array met kW verbruik per kwartier (voor de Optimizer)
+        Simuleert: Hoe lang duurt het om van A naar B te komen?
+        Houdt rekening met de huidige NowCaster bias!
         """
         if start_temp >= target_temp:
-            return 0, np.array([])
+            return 0
 
         sim_temp = start_temp
+
+        # HIER GEBRUIKEN WE DE NOWCASTER
+        # We starten met de huidige afwijking (bijv. tocht)
         bias = self.nowcaster.bias
-        curr_prev_delta = 0.0
 
-        # We bouwen het profiel op terwijl we simuleren
-        power_profile = []
+        curr_prev_delta = 0.0 # Start vanuit stilstand aanname
+        minutes_needed = 0
 
-        # Maximaal 5 uur simuleren (beveiliging)
-        max_steps = int(300 / 15)
+        # We simuleren kwartier voor kwartier
+        steps = int(max_minutes / 15)
 
-        for i in range(max_steps):
-            # 1. Haal weerdata
+        for i in range(steps):
+            # Pak weerdata voor dit tijdstip in de toekomst
             idx = min(i, len(df_forecast)-1)
             row = df_forecast.iloc[idx]
-            outside_t = row.get('temp', 10)
 
-            # 2. Bepaal Power Strategie (Boost curve)
-            # Professioneel: COP is afhankelijk van temperatuurverschil (Lift)
-            # Dit maakt de schatting van het elektriciteitsverbruik (kW) nauwkeuriger.
-            if is_dhw:
-                # Boiler: Hoe warmer het water, hoe lager de COP, hoe meer stroom nodig voor zelfde warmte
-                # Simpele curve: begint op 2.2kW, eindigt op 3.0kW
-                progress = min(1.0, (sim_temp - 40) / (target_temp - 40)) if target_temp > 40 else 0
-                kw_input = 2.2 + (0.8 * progress)
+            # --- BOOST LOGICA ---
+            boost_freq = 50.0 # Hz
+            boost_supply = 40.0 if row.get('temp', 0) < 5 else 35.0
 
-                # Vertaal kW naar Frequency (schatting voor ML model input)
-                # Stel 3.5kW = 100Hz
-                boost_freq = min(100.0, (kw_input / 3.5) * 100.0)
-                boost_supply = 55.0 # Boiler stookt altijd heet
-            else:
-                # Vloer: Stooklijn afhankelijk van buiten
-                kw_input = 1.5 # Vloer is vaak stabieler vermogen
-                boost_supply = 40.0 if outside_t < 5 else 30.0
-                boost_freq = 60.0
-
-            # 3. Voorspel Temperatuur Delta (ML Model)
+            # Vraag het model: Wat gebeurt er als we VOL GAS geven?
             delta = self.model.predict_step(
                 inside=sim_temp,
-                outside=outside_t,
+                outside=row.get('temp', 0),
                 freq=boost_freq,
                 supply_temp=boost_supply,
                 solar=row.get('pv_estimate', 0),
                 wind=row.get('wind', 0),
-                prev_delta=curr_prev_delta,
-                hvac_mode=1
+                prev_delta=curr_prev_delta
             )
 
-            # 4. Update Simulatie State
+            # Update simulatie
+            # We tellen de bias (het open raam) erbij op
             sim_temp += (delta + bias)
             curr_prev_delta = delta
+
+            # De bias dooft langzaam uit.
+            # We gaan ervan uit dat je dat open raam straks wel dicht doet.
             bias *= self.nowcaster.decay
 
-            # Voeg berekend vermogen toe aan profiel
-            power_profile.append(kw_input)
+            minutes_needed += 15
 
-            # 5. Check of we er zijn
             if sim_temp >= target_temp:
-                break
+                return minutes_needed
 
-        # Converteer lijst naar numpy array voor CVXPY optimizer
-        return len(power_profile) * 15, np.array(power_profile)
+        return max_minutes # Niet gelukt binnen de tijd
