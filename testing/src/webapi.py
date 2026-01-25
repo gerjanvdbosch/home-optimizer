@@ -152,22 +152,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df_hist_smooth = df_hist.set_index("timestamp_local").sort_index()
 
         df_hist_smooth["base_load"] = (
-            df_hist_smooth["grid_import"] - df_hist_smooth["grid_export"] + df_hist_smooth["pv_actual"] - df_hist_smooth.get("wp_actual")
+            df_hist_smooth["grid_import"]
+            - df_hist_smooth["grid_export"]
+            + df_hist_smooth["pv_actual"]
+            - df_hist_smooth.get("wp_actual")
         ).clip(lower=0)
-#
-#         # 2. VEILIG UPSAMPLEN
-#         # Eerst lineair (rechte lijnen), dat voorkomt de rare pieken en dalen
-#         df_hist_smooth = df_hist_smooth.resample("5min").interpolate(method="linear")
-
-        # 3. ROND MAKEN (SCHUURPAPIER)
-        # We pakken het gemiddelde van de omliggende punten.
-        # window=7 (35 min) geeft een mooie zachte curve.
-        # center=True zorgt dat de grafiek niet naar rechts verschuift.
-#         df_hist_smooth["pv_actual"] = (
-#             df_hist_smooth["pv_actual"]
-#             .rolling(window=7, center=True, min_periods=1)
-#             .mean()
-#         )
 
         # 4. Laatste check op negatieve waarden
         df_hist_smooth["pv_actual"] = df_hist_smooth["pv_actual"].clip(lower=0).round(2)
@@ -259,7 +248,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
             )
         )
 
-
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],
@@ -334,7 +322,9 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
         # Verbind 'nu' met de toekomst
         x_load_future = [local_now] + df_future_load["timestamp_local"].tolist()
-        y_load_future = [context.stable_load] + df_future_load["load_corrected"].tolist()
+        y_load_future = [context.stable_load] + df_future_load[
+            "load_corrected"
+        ].tolist()
 
         fig.add_trace(
             go.Scatter(
@@ -382,13 +372,13 @@ def _get_solar_forecast_plot(request: Request) -> str:
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
             range=[x_start, x_end],
-            fixedrange=False, # Sta zoomen toe
+            fixedrange=False,  # Sta zoomen toe
         ),
         yaxis=dict(
             title="Vermogen (kW)",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
-            fixedrange=True, # Y-as vast
+            fixedrange=True,  # Y-as vast
         ),
         legend=dict(
             orientation="h",
@@ -546,34 +536,6 @@ def _get_importance_plot_plotly(request: Request) -> str:
     df_train = df_hist[is_daytime].copy()
     df_train = df_train.dropna(subset=["pv_actual", "pv_estimate"])
 
-    # 1. Voorbereiden: Sorteren en Indexeren
-#     df_train = (
-#         df_train
-#         .sort_values("timestamp")
-#         .set_index("timestamp")
-#     )
-#
-#     # 2. Resample: Garandeer 15-minuten grid
-#     # Dit vult gaten op met NaNs, zodat rolling correct werkt over de tijd
-#     df_train = df_train.resample("15min").mean(numeric_only=True)
-#
-#     # 3. Smoothing: Alleen terugkijken (center=False)
-#     # window=4 (1 uur) middelt de 0.1 kWh stappen uit
-#     cols_to_smooth = ["pv_actual"]
-#
-#     df_train[cols_to_smooth] = (
-#         df_train[cols_to_smooth]
-#         .rolling(window=2, center=False, min_periods=1)
-#         .mean()
-#     )
-#
-#     # 4. Opschonen: Nu pas rijen met NaN verwijderen en index herstellen
-#     df_train = (
-#         df_train
-#         .dropna(subset=cols_to_smooth)
-#         .reset_index()
-#     )
-
     if len(df_train) < 10:
         return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
 
@@ -653,6 +615,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
         fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
 
+
 def _get_energy_table(request: Request, view_mode: str = "15min"):
     """
     Haalt data op en verwerkt deze op basis van de modus:
@@ -665,8 +628,11 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
     # 1. Algemene Data Fetch (Gedeeld)
     local_tz = datetime.now().astimezone().tzinfo
     now_local = datetime.now(local_tz)
-    start_of_day_utc = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    start_of_day_utc = now_local.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).astimezone(timezone.utc)
 
+    # Let op: dit haalt ook weerdata (temp, cloud, etc) op, maar dat negeren we gewoon.
     df = database.get_history(start_of_day_utc)
 
     if df.empty:
@@ -684,7 +650,8 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
     # --- SPLITSING IN LOGICA ---
     if view_mode == "hour":
         # A. UUR-MODUS (kWh)
-        df = df.fillna(0.0)
+        df[process_cols] = df[process_cols].apply(pd.to_numeric, errors='coerce')
+        df = df.fillna(0.0).infer_objects(copy=False)
 
         # 1. kW naar kWh (delen door 4)
         df[process_cols] = df[process_cols] * 0.25
@@ -700,28 +667,28 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
 
     # 2. Bereken Totalen (Gedeelde logica)
     # De wiskunde is nu voor beide gelijk (of het nu kW of kWh is)
-    df["total_calc"] = (
-        df["grid_import"] - df["grid_export"] + df["pv_actual"]
-    ).clip(lower=0.0)
+    df["total_calc"] = (df["grid_import"] - df["grid_export"] + df["pv_actual"]).clip(
+        lower=0.0
+    )
 
-    df["base_calc"] = (
-        df["total_calc"] - df["wp_actual"]
-    ).clip(lower=0.0)
+    df["base_calc"] = (df["total_calc"] - df["wp_actual"]).clip(lower=0.0)
 
     # 3. Formatteren voor output
     df = df.reset_index().sort_values("timestamp", ascending=False)
 
     table_data = []
     for _, row in df.iterrows():
-        table_data.append({
-            "time": row["timestamp"].strftime("%H:%M"),
-            # We gebruiken dezelfde keys, de template past de eenheid aan
-            "pv": f"{row['pv_actual']:.2f}",
-            "wp": f"{row['wp_actual']:.2f}",
-            "import": f"{row['grid_import']:.2f}",
-            "export": f"{row['grid_export']:.2f}",
-            "total": f"{row['total_calc']:.2f}",
-            "base": f"{row['base_calc']:.2f}",
-        })
+        table_data.append(
+            {
+                "time": row["timestamp"].strftime("%H:%M"),
+                # We gebruiken dezelfde keys, de template past de eenheid aan
+                "pv": f"{row['pv_actual']:.2f}",
+                "wp": f"{row['wp_actual']:.2f}",
+                "import": f"{row['grid_import']:.2f}",
+                "export": f"{row['grid_export']:.2f}",
+                "total": f"{row['total_calc']:.2f}",
+                "base": f"{row['base_calc']:.2f}",
+            }
+        )
 
     return table_data
