@@ -651,7 +651,7 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
     if view_mode == "hour":
         # A. UUR-MODUS (kWh)
         df[process_cols] = df[process_cols].apply(pd.to_numeric, errors="coerce")
-        df = df.fillna(0.0).infer_objects(copy=False)
+        df[process_cols] = df[process_cols].fillna(0.0)
 
         # 1. kW naar kWh (delen door 4)
         df[process_cols] = df[process_cols] * 0.25
