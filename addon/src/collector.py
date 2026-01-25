@@ -189,7 +189,7 @@ class Collector:
                 dhw_bottom=avg_dhw_bottom,
                 supply_temp=avg_supply,
                 compressor_freq=avg_compressor_freq,
-                hvac_mode=int(self.context.hvac_mode),
+                hvac_mode=int(self.context.hvac_mode.value),
             )
 
             self.current_slot_start = slot_start
