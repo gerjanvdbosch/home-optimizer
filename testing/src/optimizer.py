@@ -57,7 +57,9 @@ class SystemIdentificator:
         self.R = 1.0 / (inv_RC * self.C)
 
         self.is_calibrated = True
-        logger.info(f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
+        logger.info(
+            f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
+        )
 
 
 # =========================================================
@@ -173,7 +175,8 @@ class ThermalMPC:
         self.cop_dhw = cop_dhw
         self.horizon = 48
         self.p_el_max = 3.5
-        self.target_dhw = 50.0
+        self.dhw_target = 50.0
+        self.dhw_min = 35.0
 
     def solve(self, state, forecast_df, prices, vwv_residuals, dhw_residuals):
         """
@@ -253,7 +256,7 @@ class ThermalMPC:
             # --- COMFORT GRENZEN (Soft) ---
             # t_room + slack >= 19.5 (Als t_room 19.0 is, wordt slack 0.5 en betaal je een boete)
             constraints += [t_room[t] + slack_room_low[t] >= 19.5]
-            constraints += [t_dhw[t] + slack_dhw_low[t] >= 35.0]
+            constraints += [t_dhw[t] + slack_dhw_low[t] >= self.dhw_min]
 
             # Harde grenzen (Veiligheid)
             constraints += [t_room[t] <= 24.0, t_dhw[t] <= 60.0]
@@ -282,7 +285,7 @@ class ThermalMPC:
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
         violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
 
-        dhw_comfort = cp.abs(t_dhw[T] - self.target_dhw) * 5.0
+        dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
 
         # Urgentie bonus voor DHW (als top sensor koud is, verdien je een "korting" door te verwarmen)
         # Dit is de zachte vervanger van de harde u_dhw[0] == 1 constraint
@@ -326,15 +329,21 @@ class ThermalMPC:
         )
         current_p_el = float(p_el_vwv.value[0] + p_el_dhw.value[0])
 
-        # State of Charge (SoC) berekening voor logging
-        soc = (t_dhw.value[0] - 35) / (55 - 35)
+        dhw_avg = (state["dhw_top"] + state["dhw_bottom"]) / 2
+
+        # Bereken SoC
+        soc = (dhw_avg - self.dhw_min) / (self.dhw_target - self.dhw_min)
+
+        # kWh berekenen voor de optimizer
+        dhw_energy_kwh = max(0.0, (dhw_avg - self.dhw_min) * boiler_mass_factor)
 
         return {
             "mode": mode,
             "target_power": round(current_p_el, 3),
             "planned_room": t_room.value.tolist(),
             "planned_dhw": t_dhw.value.tolist(),
-            "soc_dhw": max(0, min(1, soc)),
+            "dhw_soc": max(0, min(1, soc)),
+            "dhw_energy_kwh": dhw_energy_kwh,
             "status": problem.status,
         }
 
@@ -342,7 +351,7 @@ class ThermalMPC:
 # =========================================================
 # 5. EMS
 # =========================================================
-class EnergyManagementSystem:
+class Optimizer:
     def __init__(self, vwv_path="model_vwv.joblib", dhw_path="model_dhw.joblib"):
         self.ident = SystemIdentificator()
 
@@ -358,7 +367,7 @@ class EnergyManagementSystem:
 
         self.mpc = ThermalMPC(self.ident, self.cop_vwv, self.cop_dhw)
 
-    def step(self, state, history_df, forecast_df, prices):
+    def resolve(self, state, history_df, forecast_df, prices):
         if not self.ident.is_calibrated:
             self.ident.calibrate(history_df)
 
@@ -384,19 +393,20 @@ if __name__ == "__main__":
     )
     prices = np.random.uniform(0.10, 0.35, 48)  # Dynamische prijzen
 
-    ems = EnergyManagementSystem()
+    ems = Optimizer()
 
-    metingen = {"room_temp": 23.0, "dhw_top": 45.0, "dhw_bottom": 43.0}
+    metingen = {"room_temp": 23.0, "dhw_top": 40.0, "dhw_bottom": 39.0}
 
     # In een echte situatie zou history_df uit je database komen
     history_mock = pd.DataFrame(
         columns=["timestamp", "room_temp", "outside", "wp_actual", "solar"]
     )
 
-    besluit = ems.step(metingen, history_mock, forecast, prices)
+    besluit = ems.resolve(metingen, history_mock, forecast, prices)
     print(f"Besluit {besluit['status']}:")
     print(f"Besluit van de MPC: {besluit['mode']} op {besluit['target_power']:.2f} kW")
-    print(f"Huidige Boiler SoC: {besluit['soc_dhw']*100:.1f}%")
+    print(f"Huidige Boiler SoC: {besluit['dhw_soc']*100:.1f}%")
+    print(f"Boiler Energie-inhoud: {besluit['dhw_energy_kwh']:.2f} kWh")
 
     print("Gepland kamerverloop (komende 2 uur):")
     # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
