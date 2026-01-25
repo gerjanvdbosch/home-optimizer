@@ -3,6 +3,7 @@ import numpy as np
 import cvxpy as cp
 import joblib
 import logging
+from utils import add_cyclic_time_features
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -12,6 +13,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 # =========================================================
 logger = logging.getLogger(__name__)
 
+
 # =========================================================
 # 1. SYSTEEM IDENTIFICATIE (RC, COP-vrij)
 # =========================================================
@@ -20,9 +22,10 @@ class SystemIdentificator:
     Identificeert R en C uitsluitend uit afkoelfases (WP uit).
     Geen COP nodig.
     """
+
     def __init__(self):
-        self.R = 15.0   # K/kW
-        self.C = 30.0   # kWh/K
+        self.R = 15.0  # K/kW
+        self.C = 30.0  # kWh/K
         self.is_calibrated = False
 
     def calibrate(self, df: pd.DataFrame):
@@ -54,7 +57,8 @@ class SystemIdentificator:
         self.R = 1.0 / (inv_RC * self.C)
 
         self.is_calibrated = True
-        logger.info(f"Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
+        logger.info(f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
+
 
 # =========================================================
 # 2. COP-MODEL (GEEN HARDCODED CONSTANT)
@@ -65,6 +69,7 @@ class COPModel:
     COP = a + b * T_out
     begrensd.
     """
+
     def __init__(self, a=2.5, b=0.08, cop_min=2.0, cop_max=5.0):
         self.a = a
         self.b = b
@@ -74,59 +79,101 @@ class COPModel:
     def cop(self, T_out):
         return np.clip(self.a + self.b * T_out, self.cop_min, self.cop_max)
 
+
 # =========================================================
 # 3. ML RESIDUAL MODEL
 # =========================================================
 class MLResidualPredictor:
-    """
-    Leert rest-dT per stap (K/15min) bovenop RC-model.
-    """
-    def __init__(self, path: str, target_name: str):
+    def __init__(self, path: str):
         self.path = Path(path)
-        self.target_name = target_name
         self.model = None
+        # Definieer vaste feature-sets om mismatches te voorkomen
+        self.features_vwv = [
+            "temp",
+            "solar",
+            "wind",
+            "hour_sin",
+            "hour_cos",
+            "doy_sin",
+            "doy_cos",
+        ]
+        self.features_dhw = ["temp", "hour_sin", "hour_cos", "doy_sin", "doy_cos"]
+
         if self.path.exists():
             self.model = joblib.load(self.path)
 
-    def train(self, df: pd.DataFrame, R, C, cop_model: COPModel, is_dhw=False):
+    def train(self, df: pd.DataFrame, R, C, cop_model, is_dhw=False):
+        df = df.copy().sort_values("timestamp")
         dt = 0.25
-        # RC voorspelling (zonder ML)
-        cop = cop_model.cop(df["outside"])
+        boiler_mass_factor = 0.232
+
+        # Voeg 'hour' toe aan de bron-dataframe
+        df = add_cyclic_time_features(df, col_name="timestamp")
+
+        # 1. Bereken de theoretische RC-delta (Physics Baseline)
+        outside = df["temp"]
+        wp = df["wp_actual"]
+        cop = cop_model.cop(outside)
 
         if not is_dhw:
-            # Kamer: winst - verlies
-            dT_rc = ((df["wp_actual"] * cop) - (df["room_temp"] - df["outside"]) / R) * dt / C
-            target_val = df["room_temp"]
+            temp = df["room_temp"]
+            dT_rc = ((wp * cop) - (temp - outside) / R) * dt / C
+            y_actual = df["room_temp"].shift(-1) - df["room_temp"]
+            feature_cols = self.features_vwv
         else:
-            # Boiler: alleen winst (verlies is minimaal/verwerkt in residuals)
-            dT_rc = (df["wp_actual"] * cop * dt) / 10.0
-            target_val = df["dhw_temp"]
+            dT_rc = (wp * cop * dt) / boiler_mass_factor
+            y_actual = df["dhw_temp"].shift(-1) - df["dhw_temp"]
+            feature_cols = self.features_dhw
 
-        y = target_val.diff() - dT_rc
-        X = df[["solar", "wind", "outside"]].fillna(0)
+        target_series = (y_actual - dT_rc).rename("target_residual")
 
-        self.model = HistGradientBoostingRegressor()
-        self.model.fit(X.iloc[1:], y.iloc[1:])
-        joblib.dump(self.model, self.path)
-        logger.info(f"ML Model {self.target_name} getraind.")
+        X = df[feature_cols]
+        train_df = pd.concat([X, target_series], axis=1).dropna()
 
-    def predict(self, forecast_df):
+        if len(train_df) > 100:
+            X_train = train_df[feature_cols]
+            y_train = train_df["target_residual"]
+
+            self.model = HistGradientBoostingRegressor()
+            self.model.fit(X_train, y_train)
+            joblib.dump(self.model, self.path)
+            logger.info(
+                f"[Optimizer] Model {self.path} getraind op {len(X_train)} samples."
+            )
+
+    def predict(self, forecast_df, is_dhw=False):
+        """
+        Voorspelt residuals voor de horizon.
+        LET OP: forecast_df moet de juiste kolomnamen bevatten.
+        """
         if self.model is None:
             return np.zeros(len(forecast_df))
-        return self.model.predict(
-            forecast_df[["solar", "wind", "temp"]].fillna(0)
-        )
+
+        # 1. Voorbereiden van de features
+        df_input = forecast_df.copy()
+        df_input = add_cyclic_time_features(df_input, col_name="timestamp")
+
+        # 2. Selecteer de juiste features voor het model
+        feature_cols = self.features_dhw if is_dhw else self.features_vwv
+
+        # 3. Voorspel
+        X_predict = df_input[feature_cols].fillna(0)
+        return self.model.predict(X_predict)
+
 
 # =========================================================
 # 4. MPC
 # =========================================================
 class ThermalMPC:
-    def __init__(self, ident: SystemIdentificator, cop_vwv: COPModel, cop_dhw: COPModel):
+    def __init__(
+        self, ident: SystemIdentificator, cop_vwv: COPModel, cop_dhw: COPModel
+    ):
         self.ident = ident
         self.cop_vwv = cop_vwv
         self.cop_dhw = cop_dhw
         self.horizon = 48
         self.p_el_max = 3.5
+        self.target_dhw = 50.0
 
     def solve(self, state, forecast_df, prices, vwv_residuals, dhw_residuals):
         """
@@ -137,7 +184,7 @@ class ThermalMPC:
         dhw_residuals: lijst met ML correcties voor de boiler (bijv. verbruik)
         """
         T = self.horizon
-        dt = 0.25 # Kwartier
+        dt = 0.25  # Kwartier
 
         # Fysische Parameters uit de identificatie
         R, C = self.ident.R, self.ident.C
@@ -146,13 +193,13 @@ class ThermalMPC:
         # Energie om 200L water 1 graad te verwarmen is ~0.232 kWh
         # We gebruiken dit als deler voor de temperatuurstijging.
         boiler_mass_factor = 0.232
-        dhw_standby_loss = 0.04 # Graden verlies per kwartier (isolatievat)
+        dhw_standby_loss = 0.04  # Graden verlies per kwartier (isolatievat)
 
         # 1. VARIABELEN (Lineair & Binair)
         u_vwv = cp.Variable(T, boolean=True)  # Modus VWV
         u_dhw = cp.Variable(T, boolean=True)  # Modus DHW
-        p_el_vwv = cp.Variable(T, nonneg=True) # Elektrisch vermogen voor vloer
-        p_el_dhw = cp.Variable(T, nonneg=True) # Elektrisch vermogen voor boiler
+        p_el_vwv = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor vloer
+        p_el_dhw = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor boiler
 
         t_room = cp.Variable(T + 1)
         t_dhw = cp.Variable(T + 1)
@@ -164,10 +211,8 @@ class ThermalMPC:
         # 2. CONSTRAINTS
         constraints = [
             t_room[0] == state["room_temp"],
-            t_dhw[0] == (state["dhw_top"] + state["dhw_bottom"]) / 2
+            t_dhw[0] == (state["dhw_top"] + state["dhw_bottom"]) / 2,
         ]
-
-        target_dhw=50.0
 
         for t in range(T):
             # Exclusiviteit: WP kan niet tegelijkertijd VWV en DHW doen (driewegklep)
@@ -190,14 +235,19 @@ class ThermalMPC:
             loss = (t_room[t] - forecast_df["temp"].iloc[t]) / R
             # Nieuwe temp = huidige + (winst - verlies) + ML_correctie
             constraints += [
-                t_room[t+1] == t_room[t] + (p_th_room - loss) * dt / C + vwv_residuals[t]
+                t_room[t + 1]
+                == t_room[t] + (p_th_room - loss) * dt / C + vwv_residuals[t]
             ]
 
             # --- BOILER DYNAMICA ---
             p_th_dhw = p_el_dhw[t] * c_dhw
             # Nieuwe temp = huidige + (winst / massa) - stilstandsverlies + ML_correctie (verbruik)
             constraints += [
-                t_dhw[t+1] == t_dhw[t] + (p_th_dhw * dt) / boiler_mass_factor - dhw_standby_loss + dhw_residuals[t]
+                t_dhw[t + 1]
+                == t_dhw[t]
+                + (p_th_dhw * dt) / boiler_mass_factor
+                - dhw_standby_loss
+                + dhw_residuals[t]
             ]
 
             # --- COMFORT GRENZEN (Soft) ---
@@ -213,11 +263,18 @@ class ThermalMPC:
 
         # 3. OBJECTIVE (Kosten + Slijtage + Comfort + Boetes)
         # Netto import (Import - Export wordt meegerekend via de positieve kant van de balans)
-        net_load = (p_el_vwv + p_el_dhw + forecast_df["house_load"].values - forecast_df["pv_forecast"].values)
+        net_load = (
+            p_el_vwv
+            + p_el_dhw
+            + forecast_df["house_load"].values
+            - forecast_df["pv_forecast"].values
+        )
         cost = cp.sum(cp.multiply(cp.pos(net_load), prices))
 
         # Anti-pendel: Straf het omschakelen of aan/uit gaan (MILP switches)
-        switches = cp.sum(cp.abs(u_vwv[1:] - u_vwv[:-1])) + cp.sum(cp.abs(u_dhw[1:] - u_dhw[:-1]))
+        switches = cp.sum(cp.abs(u_vwv[1:] - u_vwv[:-1])) + cp.sum(
+            cp.abs(u_dhw[1:] - u_dhw[:-1])
+        )
 
         # Comfort: probeer de kamer op 20.5 graden te houden
         comfort_tracking = cp.sum(cp.abs(t_room - 20.5)) * 0.1
@@ -225,7 +282,7 @@ class ThermalMPC:
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
         violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
 
-        dhw_comfort = cp.abs(t_dhw[T] - target_dhw) * 5.0
+        dhw_comfort = cp.abs(t_dhw[T] - self.target_dhw) * 5.0
 
         # Urgentie bonus voor DHW (als top sensor koud is, verdien je een "korting" door te verwarmen)
         # Dit is de zachte vervanger van de harde u_dhw[0] == 1 constraint
@@ -234,7 +291,14 @@ class ThermalMPC:
             dhw_urgent_bonus = u_dhw[0] * -100.0
 
         # Totaal te minimaliseren
-        objective = cp.Minimize(cost + 0.5 * switches + comfort_tracking + violation_penalty + dhw_comfort + dhw_urgent_bonus)
+        objective = cp.Minimize(
+            cost
+            + 0.5 * switches
+            + comfort_tracking
+            + violation_penalty
+            + dhw_comfort
+            + dhw_urgent_bonus
+        )
 
         # 4. SOLVE
         problem = cp.Problem(objective, constraints)
@@ -242,18 +306,24 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(solver=cp.CBC, verbose=False)
-        except:
-            logger.warning("CBC solver niet beschikbaar, probeer andere MILP solvers.")
+        except Exception as e:
+            logger.warning(
+                f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
+            )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
             problem.solve()
 
         # Foutafhandeling
         if u_vwv.value is None:
-            logger.error(f"Solver Status: {problem.status}")
-            raise RuntimeError(f"MILP solver kon geen oplossing vinden. Status: {problem.status}")
+            logger.error(f"[Optimizer] Solver Status: {problem.status}")
+            raise RuntimeError(
+                f"[Optimizer] MILP solver kon geen oplossing vinden. Status: {problem.status}"
+            )
 
         # 5. RESULTATEN VERWERKEN
-        mode = "DHW" if u_dhw.value[0] > 0.5 else "VWV" if u_vwv.value[0] > 0.5 else "OFF"
+        mode = (
+            "DHW" if u_dhw.value[0] > 0.5 else "VWV" if u_vwv.value[0] > 0.5 else "OFF"
+        )
         current_p_el = float(p_el_vwv.value[0] + p_el_dhw.value[0])
 
         # State of Charge (SoC) berekening voor logging
@@ -265,14 +335,15 @@ class ThermalMPC:
             "planned_room": t_room.value.tolist(),
             "planned_dhw": t_dhw.value.tolist(),
             "soc_dhw": max(0, min(1, soc)),
-            "status": problem.status
+            "status": problem.status,
         }
+
 
 # =========================================================
 # 5. EMS
 # =========================================================
 class EnergyManagementSystem:
-    def __init__(self):
+    def __init__(self, vwv_path="model_vwv.joblib", dhw_path="model_dhw.joblib"):
         self.ident = SystemIdentificator()
 
         # Voor Vloerverwarming (Lage temperatuur = Hoge efficiëntie)
@@ -282,8 +353,8 @@ class EnergyManagementSystem:
         self.cop_dhw = COPModel(a=2.0, b=0.06, cop_min=1.5, cop_max=3.0)
 
         # APARTE ML MODELLEN
-        self.vwv_res = MLResidualPredictor("res_vwv.pkl", "Kamer")
-        self.dhw_res = MLResidualPredictor("res_dhw.pkl", "Boiler")
+        self.vwv_res = MLResidualPredictor(vwv_path)
+        self.dhw_res = MLResidualPredictor(dhw_path)
 
         self.mpc = ThermalMPC(self.ident, self.cop_vwv, self.cop_dhw)
 
@@ -297,41 +368,42 @@ class EnergyManagementSystem:
 
         return self.mpc.solve(state, forecast_df, prices, vwv_residuals, dhw_residuals)
 
+
 # =========================================================
 # VOORBEELD VAN GEBRUIK (MOCK DATA)
 # =========================================================
 if __name__ == "__main__":
     # Mock data voor 48 kwartieren (12 uur)
-    forecast = pd.DataFrame({
-        'temp': np.linspace(5, 10, 48),
-        'pv_forecast': np.maximum(0, np.sin(np.linspace(0, np.pi, 48)) * 4.0),
-        'wind': np.random.uniform(2, 8, 48),
-        'house_load': np.full(48, 0.4)
-    })
-    prices = np.random.uniform(0.10, 0.35, 48) # Dynamische prijzen
+    forecast = pd.DataFrame(
+        {
+            "temp": np.linspace(5, 10, 48),
+            "pv_forecast": np.maximum(0, np.sin(np.linspace(0, np.pi, 48)) * 4.0),
+            "wind": np.random.uniform(2, 8, 48),
+            "house_load": np.full(48, 0.4),
+        }
+    )
+    prices = np.random.uniform(0.10, 0.35, 48)  # Dynamische prijzen
 
     ems = EnergyManagementSystem()
 
-    metingen = {
-        'room_temp': 23.0,
-        'dhw_top': 45.0,
-        'dhw_bottom': 43.0
-    }
+    metingen = {"room_temp": 23.0, "dhw_top": 45.0, "dhw_bottom": 43.0}
 
     # In een echte situatie zou history_df uit je database komen
-    history_mock = pd.DataFrame(columns=['timestamp', 'room_temp', 'outside', 'wp_actual', 'solar'])
+    history_mock = pd.DataFrame(
+        columns=["timestamp", "room_temp", "outside", "wp_actual", "solar"]
+    )
 
     besluit = ems.step(metingen, history_mock, forecast, prices)
     print(f"Besluit {besluit['status']}:")
     print(f"Besluit van de MPC: {besluit['mode']} op {besluit['target_power']:.2f} kW")
     print(f"Huidige Boiler SoC: {besluit['soc_dhw']*100:.1f}%")
 
-    print(f"Gepland kamerverloop (komende 2 uur):")
+    print("Gepland kamerverloop (komende 2 uur):")
     # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
-    for i, temp in enumerate(besluit['planned_room'][:9]):
+    for i, temp in enumerate(besluit["planned_room"][:9]):
         print(f"  T + {i*15}m: {temp:.2f} °C")
 
-    print(f"Gepland boiler (komende 2 uur):")
+    print("Gepland boiler (komende 2 uur):")
     # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
-    for i, temp in enumerate(besluit['planned_dhw'][:9]):
+    for i, temp in enumerate(besluit["planned_dhw"][:9]):
         print(f"  T + {i*15}m: {temp:.2f} °C")

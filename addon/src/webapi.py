@@ -63,7 +63,7 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
 
     # Bias info toevoegen indien beschikbaar
     if hasattr(context, "solar_bias"):
-        details["Solar Bias"] = f"{context.solar_bias:.2f} %"
+        details["Solar Bias"] = f"{context.solar_bias * 100:.2f} %"
     if hasattr(context, "load_bias"):
         details["Load Bias"] = f"{context.load_bias:.2f} kW"
 

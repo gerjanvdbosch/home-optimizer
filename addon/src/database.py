@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Float, DateTime, select
+from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from config import Config
@@ -39,6 +39,13 @@ class Measurement(Base):
     grid_export = Column(Float)
     pv_actual = Column(Float)
     wp_actual = Column(Float)
+
+    room_temp = Column(Float)
+    dhw_top = Column(Float)
+    dhw_bottom = Column(Float)
+    supply_temp = Column(Float)
+    compressor_freq = Column(Float)
+    hvac_mode = Column(Integer)
 
 
 class Database:
@@ -88,6 +95,12 @@ class Database:
         grid_export: float = None,
         pv_actual: float = None,
         wp_actual: float = None,
+        room_temp: float = None,
+        dhw_top: float = None,
+        dhw_bottom: float = None,
+        supply_temp: float = None,
+        compressor_freq: float = None,
+        hvac_mode: int = None,
     ):
         """
         Slaat een meetpunt op of werkt het bij.
@@ -114,6 +127,18 @@ class Database:
                 record.pv_actual = pv_actual
             if wp_actual is not None:
                 record.wp_actual = wp_actual
+            if room_temp is not None:
+                record.room_temp = room_temp
+            if dhw_top is not None:
+                record.dhw_top = dhw_top
+            if dhw_bottom is not None:
+                record.dhw_bottom = dhw_bottom
+            if supply_temp is not None:
+                record.supply_temp = supply_temp
+            if compressor_freq is not None:
+                record.compressor_freq = compressor_freq
+            if hvac_mode is not None:
+                record.hvac_mode = int(hvac_mode)
 
             session.commit()
         except Exception as e:

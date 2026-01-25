@@ -110,34 +110,6 @@ class LoadModel:
         df_train = df_history.copy()
         df_train = df_train.dropna(subset=["pv_actual", "wp_actual"])
 
-        # 1. Voorbereiden: Sorteren en Indexeren
-        #         df_train = (
-        #             df_train
-        #             .sort_values("timestamp")
-        #             .set_index("timestamp")
-        #         )
-        #
-        #         # 2. Resample: Garandeer 15-minuten grid
-        #         # Dit vult gaten op met NaNs, zodat rolling correct werkt over de tijd
-        #         df_train = df_train.resample("15min").mean(numeric_only=True)
-        #
-        #         # 3. Smoothing: Alleen terugkijken (center=False)
-        #         # window=4 (1 uur) middelt de 0.1 kWh stappen uit
-        #         cols_to_smooth = ["wp_actual", "pv_actual"]
-        #
-        #         df_train[cols_to_smooth] = (
-        #             df_train[cols_to_smooth]
-        #             .rolling(window=4, center=False, min_periods=1)
-        #             .mean()
-        #         )
-        #
-        #         # 4. Opschonen: Nu pas rijen met NaN verwijderen en index herstellen
-        #         df_train = (
-        #             df_train
-        #             .dropna(subset=cols_to_smooth)
-        #             .reset_index()
-        #         )
-
         if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
             return

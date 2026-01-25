@@ -32,11 +32,20 @@ class HAClient:
     def get_room_temp(self):
         return float(self.data.get("room_temp", 19.5))
 
-    def get_dhw_temp(self):
-        return float(self.data.get("dhw_temp", 30.0))
+    def get_dhw_top(self):
+        return float(self.data.get("dhw_top", 30.0))
+
+    def get_dhw_bottom(self):
+        return float(self.data.get("dhw_bottom", 25.0))
 
     def get_dhw_setpoint(self):
         return float(self.data.get("dhw_setpoint", 50.0))
+
+    def get_compressor_freq(self):
+        return self.data.get("compressor_freq", 0.0)
+
+    def get_supply_temp(self):
+        return self.data.get("supply_temp", 0.0)
 
     def get_hvac_mode(self):
         return HvacMode(HvacMode.OFF)

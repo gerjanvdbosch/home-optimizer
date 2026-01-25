@@ -10,7 +10,6 @@ from config import Config
 from context import Context
 from collector import Collector
 from client import HAClient
-from planner import Planner
 from database import Database
 from solar import SolarForecaster
 from load import LoadForecaster
@@ -31,7 +30,6 @@ class Coordinator:
     ):
         self.solar = SolarForecaster(config, context, database)
         self.load = LoadForecaster(config, context, database)
-        self.planner = Planner(context, config)
         self.context = context
         self.config = config
         self.collector = collector
@@ -43,8 +41,6 @@ class Coordinator:
 
         self.solar.update(self.context.now, self.context.stable_pv)
         self.load.update(self.context.now, self.context.stable_load)
-
-        self.planner.create_plan()
 
     def train(self):
         self.solar.train()

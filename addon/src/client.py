@@ -37,17 +37,23 @@ class HAClient:
     def get_grid_power(self):
         return to_kw(self._get_state(self.config.sensor_grid_power))
 
-    def get_pv_energy(self):
-        return safe_float(self._get_state(self.config.sensor_pv_energy))
+    def get_room_temp(self):
+        return float(self._get_state(self.config.sensor_room_temp))
 
-    def get_wp_energy(self):
-        return safe_float(self._get_state(self.config.sensor_wp_energy))
+    def get_dhw_top(self):
+        return float(self._get_state(self.config.sensor_dhw_top))
 
-    def get_grid_import(self):
-        return safe_float(self._get_state(self.config.sensor_grid_import_energy))
+    def get_dhw_bottom(self):
+        return float(self._get_state(self.config.sensor_dhw_bottom))
 
-    def get_grid_export(self):
-        return safe_float(self._get_state(self.config.sensor_grid_export_energy))
+    def get_dhw_setpoint(self):
+        return float(self._get_state(self.config.sensor_dhw_setpoint))
+
+    def get_compressor_freq(self):
+        return float(self._get_state(self.config.sensor_compressor_freq))
+
+    def get_supply_temp(self):
+        return float(self._get_state(self.config.sensor_supply_temp))
 
     def get_hvac_mode(self):
         hvac = {
@@ -59,12 +65,6 @@ class HAClient:
             "Vorstbescherming": HvacMode.FROST_PROTECTION,
         }.get(self._get_state(self.config.sensor_hvac))
         return HvacMode(hvac)
-
-    def get_dhw_temp(self):
-        return float(self._get_state(self.config.sensor_dhw_temp))
-
-    def get_dhw_setpoint(self):
-        return float(self._get_state(self.config.sensor_dhw_setpoint))
 
     def get_forecast(self):
         attributes = self._get_attributes(self.config.sensor_solcast)

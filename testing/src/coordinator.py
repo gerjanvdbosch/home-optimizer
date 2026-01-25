@@ -10,10 +10,7 @@ from config import Config
 from context import Context
 from collector import Collector
 from client import HAClient
-from planner import Planner
 from database import Database
-from dhw import DhwMachine
-from climate import ClimateMachine
 from solar import SolarForecaster
 from load import LoadForecaster
 from webapi import api
@@ -31,9 +28,6 @@ class Coordinator:
     def __init__(self, context: Context, config: Config, database: Database, collector: Collector):
         self.solar = SolarForecaster(config, context, database)
         self.load = LoadForecaster(config, context, database)
-        self.planner = Planner(context, config)
-        self.dhw_machine = DhwMachine(context)
-        self.climate_machine = ClimateMachine(context)
         self.context = context
         self.config = config
         self.collector = collector
@@ -46,11 +40,6 @@ class Coordinator:
 
         self.solar.update(self.context.now, self.context.stable_pv)
         self.load.update(self.context.now, self.context.stable_load)
-
-        plan = self.planner.create_plan()
-
-        self.dhw_machine.process(plan)
-        self.climate_machine.process(plan)
 
 
     def train(self):

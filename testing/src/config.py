@@ -17,6 +17,10 @@ class Config:
     sensor_dhw_top: str = "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
     sensor_dhw_bottom: str = "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
     sensor_dhw_setpoint: str = "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde"
+
+    sensor_room_temp: str = "sensor.danfoss_15_temperature"
+    sensor_compressor_freq: str = "sensor.ecodan_heatpump_compressor_frequentie"
+    sensor_supply_temp: str = "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 
     sensor_solcast: str = "sensor.solcast_pv_forecast_forecast_today"
@@ -24,9 +28,11 @@ class Config:
 
     database_path: str = "data/database.sqlite"
 
+    floor_model_path: str = "data/floor_model.joblib"
+    dhw_model_path: str = "data/dhw_model.joblib"
     load_model_path: str = "data/load_model.joblib"
-
     solar_model_path: str = "data/solar_model.joblib"
+
     solar_model_ratio: float = 0.0
 
     webapi_host: str = "127.0.0.1"

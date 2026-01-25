@@ -41,7 +41,8 @@ class Measurement(Base):
     wp_actual = Column(Float)
 
     room_temp = Column(Float)
-    dhw_temp = Column(Float)
+    dhw_top = Column(Float)
+    dhw_bottom = Column(Float)
     supply_temp = Column(Float)
     compressor_freq = Column(Float)
     hvac_mode = Column(Integer)
@@ -92,7 +93,13 @@ class Database:
         grid_import: float = None,
         grid_export: float = None,
         pv_actual: float = None,
-        wp_actual: float = None
+        wp_actual: float = None,
+        room_temp: float = None,
+        dhw_top: float = None,
+        dhw_bottom: float = None,
+        supply_temp: float = None,
+        compressor_freq: float = None,
+        hvac_mode: int = None,
     ):
         """
         Slaat een meetpunt op of werkt het bij.
@@ -117,35 +124,23 @@ class Database:
                 record.pv_actual = pv_actual
             if wp_actual is not None:
                 record.wp_actual = wp_actual
+            if room_temp is not None:
+                record.room_temp = room_temp
+            if dhw_top is not None:
+                record.dhw_top = dhw_top
+            if dhw_bottom is not None:
+                record.dhw_bottom = dhw_bottom
+            if supply_temp is not None:
+                record.supply_temp = supply_temp
+            if compressor_freq is not None:
+                record.compressor_freq = compressor_freq
+            if hvac_mode is not None:
+                record.hvac_mode = int(hvac_mode)
 
             session.commit()
         except Exception as e:
             session.rollback()
             self.logger.error(f"[DB] Fout bij opslaan meting: {e}")
-        finally:
-            session.close()
-
-    def save_thermal(self, ts: datetime, inside_temp=None, dhw_temp=None, dhw_setpoint=None,
-                     supply_temp=None, compressor_freq=None, hvac_mode=None):
-        """Slaat thermische staat op."""
-        session: Session = self.SessionLocal()
-        try:
-            record = session.query(ThermalState).where(ThermalState.timestamp == ts).first()
-            if not record:
-                record = ThermalState(timestamp=ts)
-                session.add(record)
-
-            if inside_temp is not None: record.inside_temp = inside_temp
-            if dhw_temp is not None: record.dhw_temp = dhw_temp
-            if dhw_setpoint is not None: record.dhw_setpoint = dhw_setpoint
-            if supply_temp is not None: record.supply_temp = supply_temp
-            if compressor_freq is not None: record.compressor_freq = compressor_freq
-            if hvac_mode is not None: record.hvac_mode = int(hvac_mode)
-
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"[DB] Fout opslaan thermal: {e}")
         finally:
             session.close()
 

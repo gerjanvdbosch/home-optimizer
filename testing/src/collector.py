@@ -25,15 +25,18 @@ class Collector:
 
         self.current_slot_start = None
 
-        self.pv_buffer = deque(maxlen=15)
-        self.wp_buffer = deque(maxlen=15)
-        self.grid_buffer = deque(maxlen=15)
+        self.pv_buffer = deque(maxlen=7)
+        self.wp_buffer = deque(maxlen=7)
+        self.grid_buffer = deque(maxlen=7)
 
         self.pv_slots = []
         self.wp_slots = []
         self.grid_slots = []
         self.compressor_slots = []
         self.supply_slots = []
+        self.room_slots = []
+        self.dhw_top_slots = []
+        self.dhw_bottom_slots = []
 
     def update_forecast(self):
         self.client.reload()
@@ -85,9 +88,7 @@ class Collector:
         # 1. Haal ruwe waarden op
         raw_pv = self.client.get_pv_power()
         raw_wp = self.client.get_wp_power()
-        raw_grid = (
-            self.client.get_grid_power()
-        )
+        raw_grid = self.client.get_grid_power()
 
         self.pv_slots.append(raw_pv)
         self.wp_slots.append(raw_wp)
@@ -126,9 +127,21 @@ class Collector:
         else:
             logger.warning("[Collector] Locatie niet gevonden")
 
+        raw_room = self.client.get_room_temp()
+        raw_dhw_top = self.client.get_dhw_top()
+        raw_dhw_bottom = self.client.get_dhw_bottom()
+
+        self.context.room_temp = raw_room
+        self.context.dhw_top = raw_dhw_top
+        self.context.dhw_bottom = raw_dhw_bottom
         self.context.hvac_mode = self.client.get_hvac_mode()
-        self.context.dhw_temp = self.client.get_dhw_temp()
-        self.context.dhw_setpoint = self.client.get_dhw_setpoint()
+
+        self.room_slots.append(raw_room)
+        self.dhw_top_slots.append(raw_dhw_top)
+        self.dhw_bottom_slots.append(raw_dhw_bottom)
+
+        self.compressor_slots.append(self.client.get_compressor_freq())
+        self.supply_slots.append(self.client.get_supply_temp())
 
         logger.info("[Collector] Sensors updated")
 
@@ -151,6 +164,11 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = float(np.mean(self.pv_slots))
             avg_wp = float(np.mean(self.wp_slots))
+            avg_compressor_freq = float(np.mean(self.compressor_slots))
+            avg_supply = float(np.mean(self.supply_slots))
+            avg_room = float(np.mean(self.room_slots))
+            avg_dhw_top = float(np.mean(self.dhw_top_slots))
+            avg_dhw_bottom = float(np.mean(self.dhw_bottom_slots))
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)) * -1.0
 
@@ -159,6 +177,9 @@ class Collector:
             self.grid_slots = []
             self.compressor_slots = []
             self.supply_slots = []
+            self.room_slots = []
+            self.dhw_top_slots = []
+            self.dhw_bottom_slots = []
 
             # 4. Opslaan
             self.database.save_measurement(
@@ -166,7 +187,13 @@ class Collector:
                 grid_import=avg_import,
                 grid_export=avg_export,
                 pv_actual=avg_pv,
-                wp_actual=avg_wp
+                wp_actual=avg_wp,
+                room_temp=avg_room,
+                dhw_top=avg_dhw_top,
+                dhw_bottom=avg_dhw_bottom,
+                supply_temp=avg_supply,
+                compressor_freq=avg_compressor_freq,
+                hvac_mode=int(self.context.hvac_mode),
             )
 
             self.current_slot_start = slot_start
