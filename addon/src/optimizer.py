@@ -3,6 +3,11 @@ import numpy as np
 import cvxpy as cp
 import joblib
 import logging
+
+from datetime import datetime, timedelta
+from config import Config
+from context import Context
+from database import Database
 from utils import add_cyclic_time_features
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
@@ -23,25 +28,46 @@ class SystemIdentificator:
     Geen COP nodig.
     """
 
-    def __init__(self):
+    def __init__(self, path):
         self.R = 15.0  # K/kW
         self.C = 30.0  # kWh/K
-        self.is_calibrated = False
+        self.feature_cols = ["room_temp", "temp", "wp_actual", "pv_actual"]
+        self.path = Path(path)
+        self.is_fitted = False
+        self._load()
 
-    def calibrate(self, df: pd.DataFrame):
+    def _load(self):
+        if self.path.exists():
+            try:
+                data = joblib.load(self.path)
+                self.R = data["R"]
+                self.C = data["C"]
+                self.is_fitted = True
+                logger.info(
+                    f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
+                )
+            except Exception:
+                logger.error("[Optimizer] Model corrupt.")
+
+    def train(self, df: pd.DataFrame):
         if len(df) < 500:
             return
 
         df = df.sort_values("timestamp").copy()
         dt = 0.25
 
+        for col in self.feature_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.dropna(subset=self.feature_cols)
+
         # Alleen natuurlijke afkoeling
-        cool = df[(df["wp_actual"] < 0.1) & (df["solar"] < 10)].copy()
+        cool = df[(df["wp_actual"] < 0.1) & (df["pv_actual"] < 10)].copy()
         if len(cool) < 200:
             return
 
         cool["dT"] = cool["room_temp"].diff()
-        cool["dT_io"] = (cool["room_temp"] - cool["outside"]) * dt
+        cool["dT_io"] = (cool["room_temp"] - cool["temp"]) * dt
 
         X = cool[["dT_io"]].dropna()
         y = cool["dT"].loc[X.index]
@@ -56,7 +82,8 @@ class SystemIdentificator:
         self.C = np.clip(self.C, 15, 80)
         self.R = 1.0 / (inv_RC * self.C)
 
-        self.is_calibrated = True
+        self.is_fitted = True
+        joblib.dump({"R": self.R, "C": self.C}, self.path)
         logger.info(
             f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
         )
@@ -92,7 +119,7 @@ class MLResidualPredictor:
         # Definieer vaste feature-sets om mismatches te voorkomen
         self.features_vwv = [
             "temp",
-            "solar",
+            "pv_actual",
             "wind",
             "hour_sin",
             "hour_cos",
@@ -181,7 +208,7 @@ class ThermalMPC:
     def solve(self, state, forecast_df, prices, vwv_residuals, dhw_residuals):
         """
         state: {'room_temp', 'dhw_top', 'dhw_bottom'}
-        forecast_df: DF met 'temp', 'pv_forecast', 'house_load'
+        forecast_df: DF met 'temp', 'power_corrected', 'load_corrected'
         prices: array van energieprijzen
         vwv_residuals: lijst met ML correcties voor de kamer
         dhw_residuals: lijst met ML correcties voor de boiler (bijv. verbruik)
@@ -269,8 +296,8 @@ class ThermalMPC:
         net_load = (
             p_el_vwv
             + p_el_dhw
-            + forecast_df["house_load"].values
-            - forecast_df["pv_forecast"].values
+            + forecast_df["load_corrected"].values
+            - forecast_df["power_corrected"].values
         )
         cost = cp.sum(cp.multiply(cp.pos(net_load), prices))
 
@@ -308,7 +335,7 @@ class ThermalMPC:
 
         try:
             # CBC via CyLP is de aanbevolen MILP solver
-            problem.solve(solver=cp.CBC, verbose=False)
+            problem.solve(solver=cp.CBC, verbose=False, maximumSeconds=10)
         except Exception as e:
             logger.warning(
                 f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
@@ -318,10 +345,11 @@ class ThermalMPC:
 
         # Foutafhandeling
         if u_vwv.value is None:
-            logger.error(f"[Optimizer] Solver Status: {problem.status}")
-            raise RuntimeError(
-                f"[Optimizer] MILP solver kon geen oplossing vinden. Status: {problem.status}"
+            logger.error(
+                f"[Optimizer] MILP solver kon geen oplossing vinden (status={problem.status})"
             )
+
+            return
 
         # 5. RESULTATEN VERWERKEN
         mode = (
@@ -352,8 +380,9 @@ class ThermalMPC:
 # 5. EMS
 # =========================================================
 class Optimizer:
-    def __init__(self, vwv_path="model_vwv.joblib", dhw_path="model_dhw.joblib"):
-        self.ident = SystemIdentificator()
+    def __init__(self, config: Config, database: Database):
+        self.database = database
+        self.ident = SystemIdentificator(config.rc_model_path)
 
         # Voor Vloerverwarming (Lage temperatuur = Hoge efficiëntie)
         self.cop_vwv = COPModel(a=3.0, b=0.08, cop_min=2.0, cop_max=5)
@@ -362,58 +391,105 @@ class Optimizer:
         self.cop_dhw = COPModel(a=2.0, b=0.06, cop_min=1.5, cop_max=3.0)
 
         # APARTE ML MODELLEN
-        self.vwv_res = MLResidualPredictor(vwv_path)
-        self.dhw_res = MLResidualPredictor(dhw_path)
+        self.vwv_res = MLResidualPredictor(config.floor_model_path)
+        self.dhw_res = MLResidualPredictor(config.dhw_model_path)
 
         self.mpc = ThermalMPC(self.ident, self.cop_vwv, self.cop_dhw)
 
-    def resolve(self, state, history_df, forecast_df, prices):
-        if not self.ident.is_calibrated:
-            self.ident.calibrate(history_df)
+    def resolve(self, context: Context):
+        horizon_df = context.forecast_df.iloc[: self.mpc.horizon].copy()
 
         # Voorspel voor beide systemen de residuals
-        vwv_residuals = self.vwv_res.predict(forecast_df)
-        dhw_residuals = self.dhw_res.predict(forecast_df)
+        vwv_residuals = self.vwv_res.predict(horizon_df)
+        dhw_residuals = self.dhw_res.predict(horizon_df)
 
-        return self.mpc.solve(state, forecast_df, prices, vwv_residuals, dhw_residuals)
+        state = {
+            "room_temp": context.room_temp,
+            "dhw_top": context.dhw_top,
+            "dhw_bottom": context.dhw_bottom,
+        }
+
+        # Vaste prijs voor testdoeleinden
+        prices = [0.21] * len(horizon_df)
+
+        return self.mpc.solve(state, horizon_df, prices, vwv_residuals, dhw_residuals)
+
+    def train(self, days_back: int = 730):
+        cutoff = datetime.now() - timedelta(days=days_back)
+
+        # Haal samengevoegde data (Measurements + Forecast)
+        history_df = self.database.get_history(cutoff_date=cutoff)
+
+        self.ident.train(history_df)
+
+        # Train ML modellen
+        self.vwv_res.train(history_df, self.ident.R, self.ident.C, self.cop_vwv)
+        self.dhw_res.train(
+            history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
+        )
 
 
 # =========================================================
 # VOORBEELD VAN GEBRUIK (MOCK DATA)
 # =========================================================
 if __name__ == "__main__":
-    # Mock data voor 48 kwartieren (12 uur)
+    # 1. Setup Mock Config (nodig voor paden naar modellen)
+    class MockConfig:
+        rc_model_path = "rc_model.joblib"
+        floor_model_path = "floor_model.joblib"
+        dhw_model_path = "dhw_model.joblib"
+
+    config = MockConfig()
+    database = None  # Niet nodig voor resolve()
+
+    # 2. Maak de Optimizer aan
+    ems = Optimizer(config, database)
+
+    # 3. Mock Forecast Data (48 kwartieren / 12 uur)
+    # Belangrijk: 'timestamp' is nodig voor de ML cyclic features!
+    start_time = datetime.now()
+    timestamps = [start_time + timedelta(minutes=15 * i) for i in range(48)]
+
     forecast = pd.DataFrame(
         {
-            "temp": np.linspace(5, 10, 48),
-            "pv_forecast": np.maximum(0, np.sin(np.linspace(0, np.pi, 48)) * 4.0),
+            "timestamp": timestamps,
+            "temp": np.linspace(5, 10, 48),  # Buitentemperatuur
+            "power_corrected": np.maximum(
+                0, np.sin(np.linspace(0, np.pi, 48)) * 4.0
+            ),  # PV
             "wind": np.random.uniform(2, 8, 48),
-            "house_load": np.full(48, 0.4),
+            "load_corrected": np.full(48, 0.4),  # Verbruik huis
+            "price": np.random.uniform(0.10, 0.35, 48),  # Dynamische prijzen
         }
     )
-    prices = np.random.uniform(0.10, 0.35, 48)  # Dynamische prijzen
 
-    ems = Optimizer()
+    # 4. Vul het Context object (zoals de Coordinator dat zou doen)
+    context = Context(now=start_time)
+    context.room_temp = 19.8
+    context.dhw_top = 45.0
+    context.dhw_bottom = 42.0
+    context.forecast_df = forecast
 
-    metingen = {"room_temp": 23.0, "dhw_top": 40.0, "dhw_bottom": 39.0}
+    # 5. Voer de berekening uit
+    # Let op: resolve() accepteert nu alleen het 'context' object
+    besluit = ems.resolve(context)
 
-    # In een echte situatie zou history_df uit je database komen
-    history_mock = pd.DataFrame(
-        columns=["timestamp", "room_temp", "outside", "wp_actual", "solar"]
-    )
+    if besluit:
+        print("\n--- MPC RESULTAAT ---")
+        print(f"Status: {besluit['status']}")
+        print(f"Modus:  {besluit['mode']}")
+        print(f"Target: {besluit['target_power']:.2f} kW")
+        print(
+            f"Boiler SoC: {besluit['dhw_soc']*100:.1f}% ({besluit['dhw_energy_kwh']:.2f} kWh)"
+        )
 
-    besluit = ems.resolve(metingen, history_mock, forecast, prices)
-    print(f"Besluit {besluit['status']}:")
-    print(f"Besluit van de MPC: {besluit['mode']} op {besluit['target_power']:.2f} kW")
-    print(f"Huidige Boiler SoC: {besluit['dhw_soc']*100:.1f}%")
-    print(f"Boiler Energie-inhoud: {besluit['dhw_energy_kwh']:.2f} kWh")
+        print("\nGepland kamerverloop (komende 2 uur):")
+        # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
+        for i, temp in enumerate(besluit["planned_room"][:9]):
+            print(f"  T + {i*15:02}m: {temp:.2f} °C")
 
-    print("Gepland kamerverloop (komende 2 uur):")
-    # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
-    for i, temp in enumerate(besluit["planned_room"][:9]):
-        print(f"  T + {i*15}m: {temp:.2f} °C")
-
-    print("Gepland boiler (komende 2 uur):")
-    # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
-    for i, temp in enumerate(besluit["planned_dhw"][:9]):
-        print(f"  T + {i*15}m: {temp:.2f} °C")
+        print("\nGepland boilerverloop (komende 2 uur):")
+        for i, temp in enumerate(besluit["planned_dhw"][:9]):
+            print(f"  T + {i*15:02}m: {temp:.2f} °C")
+    else:
+        print("MPC kon geen oplossing vinden.")

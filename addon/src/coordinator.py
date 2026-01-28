@@ -13,6 +13,7 @@ from client import HAClient
 from database import Database
 from solar import SolarForecaster
 from load import LoadForecaster
+from optimizer import Optimizer
 from webapi import api
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -30,6 +31,7 @@ class Coordinator:
     ):
         self.solar = SolarForecaster(config, context, database)
         self.load = LoadForecaster(config, context, database)
+        self.optimizer = Optimizer(config, database)
         self.context = context
         self.config = config
         self.collector = collector
@@ -42,9 +44,16 @@ class Coordinator:
         self.solar.update(self.context.now, self.context.stable_pv)
         self.load.update(self.context.now, self.context.stable_load)
 
+    def optimize(self):
+        result = self.optimizer.resolve(self.context)
+
+        if result is not None:
+            logger.info(f"[Coordinator] {result}")
+
     def train(self):
         self.solar.train()
         self.load.train()
+        self.optimizer.train()
 
     def start_api(self):
         api.state.coordinator = self
@@ -79,6 +88,7 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_history, "interval", minutes=1)
 
         scheduler.add_job(coordinator.tick, "interval", minutes=1)
+        scheduler.add_job(coordinator.optimize, "interval", minutes=1)
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
 
         logger.info("[System] Engine running")

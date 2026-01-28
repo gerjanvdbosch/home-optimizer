@@ -173,6 +173,8 @@ class Database:
             df_meas["timestamp"] = pd.to_datetime(df_meas["timestamp"], utc=True)
             df_fore["timestamp"] = pd.to_datetime(df_fore["timestamp"], utc=True)
 
+            df_meas["dhw_temp"] = (df_meas["dhw_top"] + df_meas["dhw_bottom"]) / 2
+
             # 3. Merge (Inner Join)
             # We willen alleen rijen waar we zowel de meting als het weer van hebben
             df_combined = pd.merge(

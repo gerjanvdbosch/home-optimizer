@@ -30,6 +30,7 @@ class Config:
 
     floor_model_path: str = "data/floor_model.joblib"
     dhw_model_path: str = "data/dhw_model.joblib"
+    rc_model_path: str = "data/rc_model.joblib"
     load_model_path: str = "data/load_model.joblib"
     solar_model_path: str = "data/solar_model.joblib"
 
