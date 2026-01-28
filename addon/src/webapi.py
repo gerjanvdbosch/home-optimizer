@@ -11,7 +11,6 @@ from fastapi.responses import HTMLResponse
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
-
 logger = logging.getLogger(__name__)
 
 api = FastAPI(title="Home Optimizer API")
