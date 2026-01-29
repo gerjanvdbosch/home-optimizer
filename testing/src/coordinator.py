@@ -44,12 +44,12 @@ class Coordinator:
         self.load.update(self.context.now, self.context.stable_load)
 
     def optimize(self):
-        status = self.optimizer.resolve(self.context)
+        result = self.optimizer.resolve(self.context)
 
-        if status is not None:
-            self.context.status = status
+        if result is not None:
+            self.context.result = result
 
-            logger.info(f"[Coordinator] {status}")
+            logger.info(f"[Coordinator] {result}")
 
     def train(self):
         self.solar.train()

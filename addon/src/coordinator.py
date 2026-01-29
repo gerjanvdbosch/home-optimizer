@@ -48,6 +48,8 @@ class Coordinator:
         result = self.optimizer.resolve(self.context)
 
         if result is not None:
+            self.context.result = result
+
             logger.info(f"[Coordinator] {result}")
 
     def train(self):
