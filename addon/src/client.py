@@ -63,7 +63,7 @@ class HAClient:
             "Koelen": HvacMode.COOLING,
             "Legionellapreventie": HvacMode.LEGIONELLA_PREVENTION,
             "Vorstbescherming": HvacMode.FROST_PROTECTION,
-        }.get(self._get_state(self.config.sensor_hvac))
+        }.get(self._get_state(self.config.sensor_hvac), HvacMode.OFF)
         return HvacMode(hvac)
 
     def get_forecast(self):
