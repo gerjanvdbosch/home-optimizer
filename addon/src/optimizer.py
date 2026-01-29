@@ -50,9 +50,6 @@ class SystemIdentificator:
                 logger.error("[Optimizer] Model corrupt.")
 
     def train(self, df: pd.DataFrame):
-        if len(df) < 500:
-            return
-
         df = df.sort_values("timestamp").copy()
         dt = 0.25
 
@@ -63,7 +60,7 @@ class SystemIdentificator:
 
         # Alleen natuurlijke afkoeling
         cool = df[(df["wp_actual"] < 0.1) & (df["pv_actual"] < 10)].copy()
-        if len(cool) < 200:
+        if len(cool) < 100:
             return
 
         cool["dT"] = cool["room_temp"].diff()

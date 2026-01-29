@@ -34,29 +34,20 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
     measurements_data = _get_energy_table(request, view_mode)
     importance_html = ""
 
-    # Formatteer starttijd
-    start_str = "-"
-    planned_start = getattr(context, "planned_start", None)
-    if planned_start and isinstance(planned_start, datetime):
-        local_tz = datetime.now().astimezone().tzinfo
-        local_start = planned_start.astimezone(local_tz)
-        start_str = local_start.strftime("%H:%M")
-
-    # Formatteer status (kan een Enum zijn of string)
-    action_val = getattr(context, "action", "Onbekend")
-    if hasattr(action_val, "value"):  # Als het een Enum is
-        action_val = action_val.value
+    result = context.result if hasattr(context, "result") else None
 
     details = {
-        "Status": action_val,
-        "Reden": getattr(context, "reason", "-"),
-        "Geplande Start": start_str,
+        "Status": result.status if result else "-",
+        "Mode": result.mode if result else "-",
+        "Target power": result.target_power if result else "-",
         "PV Huidig": (
             f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
         ),
         "Load Huidig": (
             f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-"
         ),
+        "Boiler SoC": f"{getattr(context, 'dhw_soc', 0.0)*100:.1f} %",
+        "Boiler Energy": f"{getattr(context, 'dhw_energy_kwh', 0.0):.2f} kWh",
         "Boiler Solar": f"{getattr(context, 'boiler_solar_kwh', 0.0):.2f} kWh",
         "Verwachte Load": f"{getattr(context, 'predicted_load_now', 0.0):.2f} kW",
     }

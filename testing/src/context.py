@@ -32,6 +32,8 @@ class Context:
 
     forecast_df: pd.DataFrame | None = None
 
+    result = None
+
     solar_bias: float = 1.0
     load_bias: float = 1.0
 
