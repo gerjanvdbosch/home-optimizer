@@ -45,8 +45,12 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
         "Load Huidig": (
             f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-"
         ),
-        "Boiler SoC": f"{getattr(context, 'dhw_soc', 0.0)*100:.1f} %",
-        "Boiler Energy": f"{getattr(context, 'dhw_energy_kwh', 0.0):.2f} kWh",
+        "Boiler SoC": (
+            f"{result['dhw_soc']*100:.1f} %" if result is not None else "0.0 %"
+        ),
+        "Boiler Energy": (
+            f"{result['dhw_energy_kwh']:.2f} kWh" if result is not None else "0.00 kWh"
+        ),
         "Boiler Solar": f"{getattr(context, 'boiler_solar_kwh', 0.0):.2f} kWh",
         "Verwachte Load": f"{getattr(context, 'predicted_load_now', 0.0):.2f} kW",
     }

@@ -336,7 +336,7 @@ class ThermalMPC:
                 f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve()
+            problem.solve(verbose=False, maximumSeconds=10)
 
         # Foutafhandeling
         if u_vwv.value is None:
