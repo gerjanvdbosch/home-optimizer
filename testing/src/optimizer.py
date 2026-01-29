@@ -49,39 +49,55 @@ class SystemIdentificator:
 
     def train(self, df: pd.DataFrame):
         df = df.sort_values("timestamp").copy()
-        dt = 0.25
+        dt = 0.25 # Kwartier
 
         for col in self.feature_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        df = df.dropna(subset=self.feature_cols)
+        # WP uit, Zon uit, Binnen warmer dan Buiten
+        cool = df[
+            (df["hvac_mode"] == 0) &
+            (df["pv_actual"] < 0.05) &
+            (df["room_temp"] > df["temp"])
+        ].copy()
 
-        # Alleen natuurlijke afkoeling
-        cool = df[(df["wp_actual"] < 0.1) & (df["pv_actual"] < 10)].copy()
-        if len(cool) < 100:
-            return
-
+        # 2. FEATURE ENGINEERING
         cool["dT"] = cool["room_temp"].diff()
+
+        # We stoppen dt al in X
         cool["dT_io"] = (cool["room_temp"] - cool["temp"]) * dt
 
-        X = cool[["dT_io"]].dropna()
-        y = cool["dT"].loc[X.index]
+        # Verwijder NaN en positieve dT (opwarming door interne winst negeren)
+        train_data = cool[["dT_io", "dT"]].dropna()
+        train_data = train_data[train_data["dT"] < 0]
+
+        if len(train_data) < 50:
+            return
+
+        X = train_data[["dT_io"]]
+        y = train_data["dT"]
 
         model = LinearRegression(fit_intercept=False)
         model.fit(X, y)
 
-        # dT = -(dt/(R*C)) * (Tin-Tout)
-        inv_RC = -model.coef_[0] / dt
+        coef = model.coef_[0]
 
-        # schaal C conservatief, los R op
-        self.C = np.clip(self.C, 15, 80)
-        self.R = 1.0 / (inv_RC * self.C)
+        # 3. BEREKENING R (Correcte formule)
+        # Formule: coef = -1 / (R * C)
+        # Dus: R = -1 / (coef * C)
 
-        self.is_fitted = True
-        joblib.dump({"R": self.R, "C": self.C}, self.path)
-        logger.info(
-            f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
-        )
+        # Check of coefficient logisch is (moet negatief zijn voor afkoeling)
+        if coef >= 0:
+            return
+
+        calculated_R = -1.0 / (coef * self.C)
+
+        # 4. CHECKS & OPSLAAN
+        if 2.0 < calculated_R < 100.0:
+            self.R = calculated_R
+            self.is_fitted = True
+            joblib.dump({"R": self.R, "C": self.C}, self.path)
+            logger.info(f"[Ident] R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
 
 
 # =========================================================
