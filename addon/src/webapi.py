@@ -36,9 +36,9 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
     result = context.result if hasattr(context, "result") else None
 
     details = {
-        "Status": result.status if result else "-",
-        "Mode": result.mode if result else "-",
-        "Target power": result.target_power if result else "-",
+        "Status": result["status"] if result is not None else "-",
+        "Mode": result["mode"] if result is not None else "-",
+        "Target power": result["target_power"] if result is not None else "-",
         "PV Huidig": (
             f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
         ),
