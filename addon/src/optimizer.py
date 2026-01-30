@@ -58,7 +58,7 @@ class SystemIdentificator:
 
         # WP uit, Zon uit, Binnen warmer dan Buiten
         cool = df[
-            (df["pv_actual"] < 0.05)
+            (df["wp_actual"] < 0.1)
             & (df["pv_actual"] < 0.05)
             & (df["room_temp"] > df["temp"])
         ].copy()
@@ -421,8 +421,8 @@ class Optimizer:
         horizon_df = context.forecast_df.iloc[: self.mpc.horizon].copy()
 
         # Voorspel voor beide systemen de residuals
-        ufh_residuals = self.ufh_res.predict(horizon_df)
-        dhw_residuals = self.dhw_res.predict(horizon_df)
+        ufh_residuals = self.ufh_res.predict(horizon_df, is_dhw=False)
+        dhw_residuals = self.dhw_res.predict(horizon_df, is_dhw=True)
 
         state = {
             "room_temp": context.room_temp,
@@ -444,7 +444,9 @@ class Optimizer:
         self.ident.train(history_df)
 
         # Train ML modellen
-        self.ufh_res.train(history_df, self.ident.R, self.ident.C, self.cop_ufh)
+        self.ufh_res.train(
+            history_df, self.ident.R, self.ident.C, self.cop_ufh, is_dhw=False
+        )
         self.dhw_res.train(
             history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
         )
