@@ -135,7 +135,7 @@ class MLResidualPredictor:
         # Definieer vaste feature-sets om mismatches te voorkomen
         self.features_ufh = [
             "temp",
-            "pv_actual",
+            "solar",
             "wind",
             "hour_sin",
             "hour_cos",
@@ -161,6 +161,7 @@ class MLResidualPredictor:
         cop = cop_model.cop(outside)
 
         if not is_dhw:
+            df["solar"] = df["pv_actual"]
             temp = df["room_temp"]
             dT_rc = ((wp * cop) - (temp - outside) / R) * dt / C
             y_actual = df["room_temp"].shift(-1) - df["room_temp"]
@@ -196,13 +197,15 @@ class MLResidualPredictor:
 
         # 1. Voorbereiden van de features
         df_input = forecast_df.copy()
+        df_input["solar"] = df_input["power_corrected"]
         df_input = add_cyclic_time_features(df_input, col_name="timestamp")
 
         # 2. Selecteer de juiste features voor het model
         feature_cols = self.features_dhw if is_dhw else self.features_ufh
 
         # 3. Voorspel
-        X_predict = df_input[feature_cols].fillna(0)
+        X_predict = df_input.reindex(columns=feature_cols, fill_value=0.0)
+
         return self.model.predict(X_predict)
 
 
