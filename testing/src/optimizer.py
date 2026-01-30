@@ -73,7 +73,10 @@ class SystemIdentificator:
         train_data = cool[["dT_io", "dT"]].dropna()
         train_data = train_data[train_data["dT"] < 0]
 
-        if len(train_data) < 50:
+        if len(train_data) < 25:
+            logger.info(
+                f"[Optimizer] Niet genoeg data voor identificatie ({len(train_data)} samples)."
+            )
             return
 
         X = train_data[["dT_io"]]
@@ -99,7 +102,7 @@ class SystemIdentificator:
             self.R = calculated_R
             self.is_fitted = True
             joblib.dump({"R": self.R, "C": self.C}, self.path)
-            logger.info(f"[Ident] R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
+            logger.info(f"[Optimizer] R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
 
 
 # =========================================================
