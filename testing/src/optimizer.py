@@ -173,7 +173,7 @@ class MLResidualPredictor:
 
         target_series = (y_actual - dT_rc).rename("target_residual")
 
-        X = df[feature_cols]
+        X = df.reindex(columns=feature_cols)
         train_df = pd.concat([X, target_series], axis=1).dropna()
 
         if len(train_df) > 50:
