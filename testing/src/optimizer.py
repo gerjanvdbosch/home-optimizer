@@ -43,22 +43,24 @@ class SystemIdentificator:
                 self.R = data["R"]
                 self.C = data["C"]
                 self.is_fitted = True
-                logger.info(f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K")
+                logger.info(
+                    f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
+                )
             except Exception:
                 logger.error("[Optimizer] Model corrupt.")
 
     def train(self, df: pd.DataFrame):
         df = df.sort_values("timestamp").copy()
-        dt = 0.25 # Kwartier
+        dt = 0.25  # Kwartier
 
         for col in self.feature_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
         # WP uit, Zon uit, Binnen warmer dan Buiten
         cool = df[
-            (df["wp_actual"] == 0) &
-            (df["pv_actual"] < 0.05) &
-            (df["room_temp"] > df["temp"])
+            (df["pv_actual"] < 0.05)
+            & (df["pv_actual"] < 0.05)
+            & (df["room_temp"] > df["temp"])
         ].copy()
 
         # 2. FEATURE ENGINEERING
@@ -170,7 +172,7 @@ class MLResidualPredictor:
         X = df[feature_cols]
         train_df = pd.concat([X, target_series], axis=1).dropna()
 
-        if len(train_df) > 100:
+        if len(train_df) > 50:
             X_train = train_df[feature_cols]
             y_train = train_df["target_residual"]
 
@@ -356,7 +358,9 @@ class ThermalMPC:
 
         # Foutafhandeling
         if u_vwv.value is None:
-            logger.error(f"[Optimizer] MILP solver kon geen oplossing vinden (status={problem.status})")
+            logger.error(
+                f"[Optimizer] MILP solver kon geen oplossing vinden (status={problem.status})"
+            )
 
             return
 
@@ -406,7 +410,7 @@ class Optimizer:
         self.mpc = ThermalMPC(self.ident, self.cop_vwv, self.cop_dhw)
 
     def resolve(self, context: Context):
-        horizon_df = context.forecast_df.iloc[:self.mpc.horizon].copy()
+        horizon_df = context.forecast_df.iloc[: self.mpc.horizon].copy()
 
         # Voorspel voor beide systemen de residuals
         vwv_residuals = self.vwv_res.predict(horizon_df)
@@ -423,7 +427,6 @@ class Optimizer:
 
         return self.mpc.solve(state, horizon_df, prices, vwv_residuals, dhw_residuals)
 
-
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
 
@@ -437,6 +440,7 @@ class Optimizer:
         self.dhw_res.train(
             history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
         )
+
 
 # =========================================================
 # VOORBEELD VAN GEBRUIK (MOCK DATA)
@@ -459,14 +463,18 @@ if __name__ == "__main__":
     start_time = datetime.now()
     timestamps = [start_time + timedelta(minutes=15 * i) for i in range(48)]
 
-    forecast = pd.DataFrame({
-        "timestamp": timestamps,
-        "temp": np.linspace(5, 10, 48),            # Buitentemperatuur
-        "power_corrected": np.maximum(0, np.sin(np.linspace(0, np.pi, 48)) * 4.0), # PV
-        "wind": np.random.uniform(2, 8, 48),
-        "load_corrected": np.full(48, 0.4),       # Verbruik huis
-        "price": np.random.uniform(0.10, 0.35, 48) # Dynamische prijzen
-    })
+    forecast = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "temp": np.linspace(5, 10, 48),  # Buitentemperatuur
+            "power_corrected": np.maximum(
+                0, np.sin(np.linspace(0, np.pi, 48)) * 4.0
+            ),  # PV
+            "wind": np.random.uniform(2, 8, 48),
+            "load_corrected": np.full(48, 0.4),  # Verbruik huis
+            "price": np.random.uniform(0.10, 0.35, 48),  # Dynamische prijzen
+        }
+    )
 
     # 4. Vul het Context object (zoals de Coordinator dat zou doen)
     context = Context(now=start_time)
@@ -484,7 +492,9 @@ if __name__ == "__main__":
         print(f"Status: {besluit['status']}")
         print(f"Modus:  {besluit['mode']}")
         print(f"Target: {besluit['target_power']:.2f} kW")
-        print(f"Boiler SoC: {besluit['dhw_soc']*100:.1f}% ({besluit['dhw_energy_kwh']:.2f} kWh)")
+        print(
+            f"Boiler SoC: {besluit['dhw_soc']*100:.1f}% ({besluit['dhw_energy_kwh']:.2f} kWh)"
+        )
 
         print("\nGepland kamerverloop (komende 2 uur):")
         # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
