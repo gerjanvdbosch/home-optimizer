@@ -21,6 +21,8 @@ class HAClient:
 
     def get_location(self):
         attributes = self._get_attributes(self.config.sensor_home)
+        logger.debug(f"[Client] Location attributes: {attributes}")
+
         if not attributes:
             return None, None
 

@@ -39,6 +39,12 @@ class Collector:
         self.dhw_bottom_slots = []
 
     def update_forecast(self):
+        location = self.client.get_location()
+        if location != (None, None):
+            self.context.latitude, self.context.longitude = location
+        else:
+            logger.warning("[Collector] Locatie niet gevonden")
+
         solcast = self.client.get_forecast()
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
@@ -115,12 +121,6 @@ class Collector:
         )
 
     def update_sensors(self):
-        location = self.client.get_location()
-        if location != (None, None):
-            self.context.latitude, self.context.longitude = location
-        else:
-            logger.warning("[Collector] Locatie niet gevonden")
-
         raw_room = self.client.get_room_temp()
         raw_dhw_top = self.client.get_dhw_top()
         raw_dhw_bottom = self.client.get_dhw_bottom()
