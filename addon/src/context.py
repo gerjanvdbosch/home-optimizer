@@ -18,8 +18,8 @@ class HvacMode(Enum):
 class Context:
     now: datetime
 
-    latitude: float = 0.0
-    longitude: float = 0.0
+    latitude: float | None = None
+    longitude: float | None = None
 
     hvac_mode: int | None = None
 

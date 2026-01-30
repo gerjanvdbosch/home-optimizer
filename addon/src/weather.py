@@ -10,11 +10,8 @@ logger = logging.getLogger(__name__)
 
 class WeatherClient:
     def __init__(self, config: Config, context: Context):
-        self.lat = context.latitude
-        self.lon = context.longitude
-        self.tilt = config.pv_tilt
-        self.azimuth = config.pv_azimuth
-        self.base_url = "https://api.open-meteo.com/v1/forecast"
+        self.config = config
+        self.context = context
 
     def get_forecast(self):
         sensors = {
@@ -25,11 +22,16 @@ class WeatherClient:
             "diffuse_radiation_instant",
             "global_tilted_irradiance_instant",
         }
+
+        if self.context.latitude is None or self.context.longitude is None:
+            logger.error("[Weather] Geen locatiegegevens beschikbaar")
+            return pd.DataFrame()
+
         params = {
-            "latitude": self.lat,
-            "longitude": self.lon,
-            "tilt": self.tilt,
-            "azimuth": self.azimuth,
+            "latitude": self.context.latitude,
+            "longitude": self.context.longitude,
+            "tilt": self.config.pv_tilt,
+            "azimuth": self.config.pv_azimuth,
             "minutely_15": ",".join(sensors),
             "timezone": "UTC",
             "forecast_days": 2,
@@ -37,7 +39,9 @@ class WeatherClient:
         }
 
         try:
-            response = requests.get(self.base_url, params=params, timeout=10)
+            response = requests.get(
+                "https://api.open-meteo.com/v1/forecast", params=params, timeout=10
+            )
             response.raise_for_status()
             data = response.json()
             minutely = data.get("minutely_15", {})
