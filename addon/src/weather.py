@@ -58,7 +58,7 @@ class WeatherClient:
                 }
             )
 
-            logger.debug("[Weather] API-update succesvol")
+            logger.debug(f"[Weather] API-update succesvol: {df}")
             return df
 
         except Exception as e:
