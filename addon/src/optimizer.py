@@ -389,6 +389,7 @@ class ThermalMPC:
             "planned_dhw": t_dhw.value.tolist(),
             "dhw_soc": max(0, min(1, soc)),
             "dhw_energy_kwh": dhw_energy_kwh,
+            "cost_projected": float(cost.value),
             "status": problem.status,
         }
 
@@ -495,6 +496,7 @@ if __name__ == "__main__":
         print("\n--- MPC RESULTAAT ---")
         print(f"Status: {besluit['status']}")
         print(f"Modus:  {besluit['mode']}")
+        print(f"Kosten (geprojecteerd): €{besluit['cost_projected']:.2f}")
         print(f"Target: {besluit['target_power']:.2f} kW")
         print(
             f"Boiler SoC: {besluit['dhw_soc']*100:.1f}% ({besluit['dhw_energy_kwh']:.2f} kWh)"

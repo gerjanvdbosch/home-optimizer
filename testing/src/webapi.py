@@ -40,6 +40,7 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
         "Status": result['status'] if result is not None else "-",
         "Mode": result['mode'] if result is not None else "-",
         "Target power": f"{result['target_power']:.2f} kW" if result is not None else "0.00 kW",
+        "Kosten:": f"€ {result['cost_projected']:.2f}" if result is not None else "€ 0.00",
         "PV Huidig": (
             f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
         ),
