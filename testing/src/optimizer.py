@@ -56,7 +56,7 @@ class SystemIdentificator:
 
         # WP uit, Zon uit, Binnen warmer dan Buiten
         cool = df[
-            (df["hvac_mode"] == 0) &
+            (df["wp_actual"] == 0) &
             (df["pv_actual"] < 0.05) &
             (df["room_temp"] > df["temp"])
         ].copy()
