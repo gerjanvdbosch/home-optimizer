@@ -217,7 +217,7 @@ class ThermalMPC:
         self.p_el_max = 3.5
         self.dhw_target = 50.0
         self.dhw_min = 35.0
-        self.cold_water = 15.0
+        self.cold_water = 10.0
 
     def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals):
         """
