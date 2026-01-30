@@ -71,8 +71,7 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
 
     if train == "1":
         try:
-            coordinator.solar.train()
-            coordinator.load.train()
+            coordinator.train()
         except Exception as e:
             logger.error(f"Fout bij trainen van modellen: {e}")
 
