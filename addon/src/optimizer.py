@@ -130,7 +130,7 @@ class MLResidualPredictor:
         self.path = Path(path)
         self.model = None
         # Definieer vaste feature-sets om mismatches te voorkomen
-        self.features_vwv = [
+        self.features_ufh = [
             "temp",
             "pv_actual",
             "wind",
@@ -161,7 +161,7 @@ class MLResidualPredictor:
             temp = df["room_temp"]
             dT_rc = ((wp * cop) - (temp - outside) / R) * dt / C
             y_actual = df["room_temp"].shift(-1) - df["room_temp"]
-            feature_cols = self.features_vwv
+            feature_cols = self.features_ufh
         else:
             dT_rc = (wp * cop * dt) / boiler_mass_factor
             y_actual = df["dhw_temp"].shift(-1) - df["dhw_temp"]
@@ -196,7 +196,7 @@ class MLResidualPredictor:
         df_input = add_cyclic_time_features(df_input, col_name="timestamp")
 
         # 2. Selecteer de juiste features voor het model
-        feature_cols = self.features_dhw if is_dhw else self.features_vwv
+        feature_cols = self.features_dhw if is_dhw else self.features_ufh
 
         # 3. Voorspel
         X_predict = df_input[feature_cols].fillna(0)
@@ -208,22 +208,23 @@ class MLResidualPredictor:
 # =========================================================
 class ThermalMPC:
     def __init__(
-        self, ident: SystemIdentificator, cop_vwv: COPModel, cop_dhw: COPModel
+        self, ident: SystemIdentificator, cop_ufh: COPModel, cop_dhw: COPModel
     ):
         self.ident = ident
-        self.cop_vwv = cop_vwv
+        self.cop_ufh = cop_ufh
         self.cop_dhw = cop_dhw
         self.horizon = 48
         self.p_el_max = 3.5
         self.dhw_target = 50.0
         self.dhw_min = 35.0
+        self.water_temp = 13.0
 
-    def solve(self, state, forecast_df, prices, vwv_residuals, dhw_residuals):
+    def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals):
         """
         state: {'room_temp', 'dhw_top', 'dhw_bottom'}
         forecast_df: DF met 'temp', 'power_corrected', 'load_corrected'
         prices: array van energieprijzen
-        vwv_residuals: lijst met ML correcties voor de kamer
+        ufh_residuals: lijst met ML correcties voor de kamer
         dhw_residuals: lijst met ML correcties voor de boiler (bijv. verbruik)
         """
         T = self.horizon
@@ -239,9 +240,9 @@ class ThermalMPC:
         dhw_standby_loss = 0.04  # Graden verlies per kwartier (isolatievat)
 
         # 1. VARIABELEN (Lineair & Binair)
-        u_vwv = cp.Variable(T, boolean=True)  # Modus VWV
+        u_ufh = cp.Variable(T, boolean=True)  # Modus UFH
         u_dhw = cp.Variable(T, boolean=True)  # Modus DHW
-        p_el_vwv = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor vloer
+        p_el_ufh = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor vloer
         p_el_dhw = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor boiler
 
         t_room = cp.Variable(T + 1)
@@ -258,28 +259,28 @@ class ThermalMPC:
         ]
 
         for t in range(T):
-            # Exclusiviteit: WP kan niet tegelijkertijd VWV en DHW doen (driewegklep)
-            constraints += [u_vwv[t] + u_dhw[t] <= 1]
+            # Exclusiviteit: WP kan niet tegelijkertijd ufh en DHW doen (driewegklep)
+            constraints += [u_ufh[t] + u_dhw[t] <= 1]
 
             # Vermogensbegrenzing gekoppeld aan binaire status
-            constraints += [p_el_vwv[t] <= self.p_el_max * u_vwv[t]]
+            constraints += [p_el_ufh[t] <= self.p_el_max * u_ufh[t]]
             constraints += [p_el_dhw[t] <= self.p_el_max * u_dhw[t]]
 
             # Minimale vermogens (50% van max bij aan)
-            constraints += [p_el_vwv[t] >= 0.5 * u_vwv[t]]
+            constraints += [p_el_ufh[t] >= 0.5 * u_ufh[t]]
             constraints += [p_el_dhw[t] >= 0.5 * u_dhw[t]]
 
             # Haal COP op voor dit tijdstip (temperatuurafhankelijk)
-            c_vwv = self.cop_vwv.cop(forecast_df["temp"].iloc[t])
+            c_ufh = self.cop_ufh.cop(forecast_df["temp"].iloc[t])
             c_dhw = self.cop_dhw.cop(forecast_df["temp"].iloc[t])
 
             # --- KAMER DYNAMICA ---
-            p_th_room = p_el_vwv[t] * c_vwv
+            p_th_room = p_el_ufh[t] * c_ufh
             loss = (t_room[t] - forecast_df["temp"].iloc[t]) / R
             # Nieuwe temp = huidige + (winst - verlies) + ML_correctie
             constraints += [
                 t_room[t + 1]
-                == t_room[t] + (p_th_room - loss) * dt / C + vwv_residuals[t]
+                == t_room[t] + (p_th_room - loss) * dt / C + ufh_residuals[t]
             ]
 
             # --- BOILER DYNAMICA ---
@@ -302,12 +303,12 @@ class ThermalMPC:
             constraints += [t_room[t] <= 24.0, t_dhw[t] <= 60.0]
 
             # Supply temperature proxy: voorkom dat de vloer te heet wordt (max vermogen bij lage kamer-T)
-            constraints += [t_room[t] + p_el_vwv[t] * 3.0 <= 40]
+            constraints += [t_room[t] + p_el_ufh[t] * 3.0 <= 40]
 
         # 3. OBJECTIVE (Kosten + Slijtage + Comfort + Boetes)
         # Netto import (Import - Export wordt meegerekend via de positieve kant van de balans)
         net_load = (
-            p_el_vwv
+            p_el_ufh
             + p_el_dhw
             + forecast_df["load_corrected"].values
             - forecast_df["power_corrected"].values
@@ -315,7 +316,7 @@ class ThermalMPC:
         cost = cp.sum(cp.multiply(cp.pos(net_load), prices))
 
         # Anti-pendel: Straf het omschakelen of aan/uit gaan (MILP switches)
-        switches = cp.sum(cp.abs(u_vwv[1:] - u_vwv[:-1])) + cp.sum(
+        switches = cp.sum(cp.abs(u_ufh[1:] - u_ufh[:-1])) + cp.sum(
             cp.abs(u_dhw[1:] - u_dhw[:-1])
         )
 
@@ -357,7 +358,7 @@ class ThermalMPC:
             problem.solve(verbose=False, maximumSeconds=10)
 
         # Foutafhandeling
-        if u_vwv.value is None:
+        if u_ufh.value is None:
             logger.error(
                 f"[Optimizer] MILP solver kon geen oplossing vinden (status={problem.status})"
             )
@@ -366,17 +367,17 @@ class ThermalMPC:
 
         # 5. RESULTATEN VERWERKEN
         mode = (
-            "DHW" if u_dhw.value[0] > 0.5 else "VWV" if u_vwv.value[0] > 0.5 else "OFF"
+            "DHW" if u_dhw.value[0] > 0.5 else "UFH" if u_ufh.value[0] > 0.5 else "OFF"
         )
-        current_p_el = float(p_el_vwv.value[0] + p_el_dhw.value[0])
+        current_p_el = float(p_el_ufh.value[0] + p_el_dhw.value[0])
 
         dhw_avg = (state["dhw_top"] + state["dhw_bottom"]) / 2
 
         # Bereken SoC
-        soc = (dhw_avg - self.dhw_min) / (self.dhw_target - self.dhw_min)
+        soc = (dhw_avg - self.water_temp) / (self.dhw_target - self.water_temp)
 
         # kWh berekenen voor de optimizer
-        dhw_energy_kwh = max(0.0, (dhw_avg - self.dhw_min) * boiler_mass_factor)
+        dhw_energy_kwh = max(0.0, (dhw_avg - self.water_temp) * boiler_mass_factor)
 
         return {
             "mode": mode,
@@ -398,22 +399,22 @@ class Optimizer:
         self.ident = SystemIdentificator(config.rc_model_path)
 
         # Voor Vloerverwarming (Lage temperatuur = Hoge efficiëntie)
-        self.cop_vwv = COPModel(a=3.0, b=0.08, cop_min=2.0, cop_max=5)
+        self.cop_ufh = COPModel(a=3.0, b=0.08, cop_min=2.0, cop_max=5)
 
         # Voor Warm Water (Hoge temperatuur = Lage efficiëntie)
         self.cop_dhw = COPModel(a=2.0, b=0.06, cop_min=1.5, cop_max=3.0)
 
         # APARTE ML MODELLEN
-        self.vwv_res = MLResidualPredictor(config.floor_model_path)
+        self.ufh_res = MLResidualPredictor(config.ufh_model_path)
         self.dhw_res = MLResidualPredictor(config.dhw_model_path)
 
-        self.mpc = ThermalMPC(self.ident, self.cop_vwv, self.cop_dhw)
+        self.mpc = ThermalMPC(self.ident, self.cop_ufh, self.cop_dhw)
 
     def resolve(self, context: Context):
         horizon_df = context.forecast_df.iloc[: self.mpc.horizon].copy()
 
         # Voorspel voor beide systemen de residuals
-        vwv_residuals = self.vwv_res.predict(horizon_df)
+        ufh_residuals = self.ufh_res.predict(horizon_df)
         dhw_residuals = self.dhw_res.predict(horizon_df)
 
         state = {
@@ -425,7 +426,7 @@ class Optimizer:
         # Vaste prijs voor testdoeleinden
         prices = [0.21] * len(horizon_df)
 
-        return self.mpc.solve(state, horizon_df, prices, vwv_residuals, dhw_residuals)
+        return self.mpc.solve(state, horizon_df, prices, ufh_residuals, dhw_residuals)
 
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
@@ -436,7 +437,7 @@ class Optimizer:
         self.ident.train(history_df)
 
         # Train ML modellen
-        self.vwv_res.train(history_df, self.ident.R, self.ident.C, self.cop_vwv)
+        self.ufh_res.train(history_df, self.ident.R, self.ident.C, self.cop_ufh)
         self.dhw_res.train(
             history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
         )
@@ -449,7 +450,7 @@ if __name__ == "__main__":
     # 1. Setup Mock Config (nodig voor paden naar modellen)
     class MockConfig:
         rc_model_path = "rc_model.joblib"
-        floor_model_path = "floor_model.joblib"
+        ufh_model_path = "ufh_model.joblib"
         dhw_model_path = "dhw_model.joblib"
 
     config = MockConfig()

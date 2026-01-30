@@ -28,7 +28,7 @@ class Config:
 
     database_path: str = "/config/db/database.sqlite"
 
-    floor_model_path: str = "/config/models/floor_model.joblib"
+    ufh_model_path: str = "/config/models/ufh_model.joblib"
     dhw_model_path: str = "/config/models/dhw_model.joblib"
     rc_model_path: str = "/config/models/rc_model.joblib"
     load_model_path: str = "/config/models/load_model.joblib"
