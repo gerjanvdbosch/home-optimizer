@@ -217,7 +217,7 @@ class ThermalMPC:
         self.p_el_max = 3.5
         self.dhw_target = 50.0
         self.dhw_min = 35.0
-        self.water_temp = 13.0
+        self.cold_water = 15.0
 
     def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals):
         """
@@ -374,10 +374,10 @@ class ThermalMPC:
         dhw_avg = (state["dhw_top"] + state["dhw_bottom"]) / 2
 
         # Bereken SoC
-        soc = (dhw_avg - self.water_temp) / (self.dhw_target - self.water_temp)
+        soc = (dhw_avg - self.cold_water) / (self.dhw_target - self.cold_water)
 
         # kWh berekenen voor de optimizer
-        dhw_energy_kwh = max(0.0, (dhw_avg - self.water_temp) * boiler_mass_factor)
+        dhw_energy_kwh = max(0.0, (dhw_avg - self.cold_water) * boiler_mass_factor)
 
         return {
             "mode": mode,
