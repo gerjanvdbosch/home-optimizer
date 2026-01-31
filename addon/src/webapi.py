@@ -29,7 +29,6 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
 
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request)
-    thermal_plot_html = _get_thermal_plan_plot(request)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode)
     importance_html = ""
@@ -82,94 +81,12 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
         {
             "request": request,
             "forecast_plot": plot_html,
-            "thermal_plot": thermal_plot_html,
             "importance_plot": importance_html,
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
             "current_view": view_mode,
         },
-    )
-
-
-def _get_thermal_plan_plot(request: Request) -> str:
-    coordinator = request.app.state.coordinator
-    context = coordinator.context
-
-    # Check of er een resultaat is van de optimizer
-    result = getattr(context, "result", None)
-    if not result or "planned_room" not in result:
-        return "<div class='p-4 text-muted'>Geen thermische planning beschikbaar.</div>"
-
-    # Tijdsas voorbereiden (48 kwartieren vanaf nu)
-    local_tz = datetime.now().astimezone().tzinfo
-    start_time = context.now.astimezone(local_tz)
-    times = [
-        start_time + timedelta(minutes=15 * i)
-        for i in range(len(result["planned_room"]))
-    ]
-
-    fig = go.Figure()
-
-    # --- 1. Kamer Temperatuur (Linker Y-as) ---
-    fig.add_trace(
-        go.Scatter(
-            x=times,
-            y=result["planned_room"],
-            name="Kamer Temp",
-            line=dict(color="#F50057", width=3),
-            yaxis="y1",
-            hovertemplate="%{y:.2f} °C",
-        )
-    )
-
-    # --- 2. Boiler Temperatuur (Rechter Y-as) ---
-    fig.add_trace(
-        go.Scatter(
-            x=times,
-            y=result["planned_dhw"],
-            name="Boiler Temp",
-            line=dict(color="#00E5FF", width=3),
-            yaxis="y2",
-            hovertemplate="%{y:.2f} °C",
-        )
-    )
-
-    # --- 3. Layout met twee assen ---
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgb(28, 28, 28)",
-        plot_bgcolor="rgb(28, 28, 28)",
-        height=350,
-        margin=dict(l=50, r=50, t=30, b=40),
-        hovermode="x unified",
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
-        # Linker Y-as (Kamer)
-        yaxis=dict(
-            title="Kamer (°C)",
-            titlefont=dict(color="#F50057"),
-            tickfont=dict(color="#F50057"),
-            gridcolor="rgba(255,255,255,0.05)",
-            range=[18, 22],  # Zoom in op comfort range
-        ),
-        # Rechter Y-as (Boiler)
-        yaxis2=dict(
-            title="Boiler (°C)",
-            titlefont=dict(color="#00E5FF"),
-            tickfont=dict(color="#00E5FF"),
-            overlaying="y",
-            side="right",
-            gridcolor="rgba(255,255,255,0.05)",
-            range=[20, 60],
-        ),
-    )
-
-    # Optioneel: Voeg een 'shade' toe voor de huidige mode (DHW of UFH)
-    # Dit maakt in één oogopslag duidelijk waarom de temp stijgt
-    return pio.to_html(
-        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
 
 

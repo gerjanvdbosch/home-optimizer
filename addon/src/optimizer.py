@@ -350,7 +350,13 @@ class ThermalMPC:
 
         try:
             # CBC via CyLP is de aanbevolen MILP solver
-            problem.solve(solver=cp.CBC, verbose=False, maximumSeconds=10)
+            problem.solve(
+                solver=cp.CBC,
+                verbose=False,
+                maximumSeconds=10,
+                allowableGap=0.01,
+                allowablePercentage=1,
+            )
         except Exception as e:
             logger.warning(
                 f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
@@ -446,70 +452,3 @@ class Optimizer:
         self.dhw_res.train(
             history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
         )
-
-
-# =========================================================
-# VOORBEELD VAN GEBRUIK (MOCK DATA)
-# =========================================================
-if __name__ == "__main__":
-    # 1. Setup Mock Config (nodig voor paden naar modellen)
-    class MockConfig:
-        rc_model_path = "rc_model.joblib"
-        ufh_model_path = "ufh_model.joblib"
-        dhw_model_path = "dhw_model.joblib"
-
-    config = MockConfig()
-    database = None  # Niet nodig voor resolve()
-
-    # 2. Maak de Optimizer aan
-    ems = Optimizer(config, database)
-
-    # 3. Mock Forecast Data (48 kwartieren / 12 uur)
-    # Belangrijk: 'timestamp' is nodig voor de ML cyclic features!
-    start_time = datetime.now()
-    timestamps = [start_time + timedelta(minutes=15 * i) for i in range(48)]
-
-    forecast = pd.DataFrame(
-        {
-            "timestamp": timestamps,
-            "temp": np.linspace(5, 10, 48),  # Buitentemperatuur
-            "power_corrected": np.maximum(
-                0, np.sin(np.linspace(0, np.pi, 48)) * 4.0
-            ),  # PV
-            "wind": np.random.uniform(2, 8, 48),
-            "load_corrected": np.full(48, 0.4),  # Verbruik huis
-            "price": np.random.uniform(0.10, 0.35, 48),  # Dynamische prijzen
-        }
-    )
-
-    # 4. Vul het Context object (zoals de Coordinator dat zou doen)
-    context = Context(now=start_time)
-    context.room_temp = 19.8
-    context.dhw_top = 45.0
-    context.dhw_bottom = 42.0
-    context.forecast_df = forecast
-
-    # 5. Voer de berekening uit
-    # Let op: resolve() accepteert nu alleen het 'context' object
-    besluit = ems.resolve(context)
-
-    if besluit:
-        print("\n--- MPC RESULTAAT ---")
-        print(f"Status: {besluit['status']}")
-        print(f"Modus:  {besluit['mode']}")
-        print(f"Kosten (geprojecteerd): €{besluit['cost_projected']:.2f}")
-        print(f"Target: {besluit['target_power']:.2f} kW")
-        print(
-            f"Boiler SoC: {besluit['dhw_soc']*100:.1f}% ({besluit['dhw_energy_kwh']:.2f} kWh)"
-        )
-
-        print("\nGepland kamerverloop (komende 2 uur):")
-        # t_room heeft T+1 waarden, dus index 0 t/m 8 zijn de eerste 2 uur (8 kwartieren)
-        for i, temp in enumerate(besluit["planned_room"][:9]):
-            print(f"  T + {i*15:02}m: {temp:.2f} °C")
-
-        print("\nGepland boilerverloop (komende 2 uur):")
-        for i, temp in enumerate(besluit["planned_dhw"][:9]):
-            print(f"  T + {i*15:02}m: {temp:.2f} °C")
-    else:
-        print("MPC kon geen oplossing vinden.")

@@ -137,17 +137,21 @@ def _get_thermal_plan_plot(request: Request) -> str:
 
         # Linker Y-as (Kamer)
         yaxis=dict(
-            title="Kamer (°C)",
-            titlefont=dict(color="#F50057"),
+            title=dict(
+                text="Kamer (°C)",
+                font=dict(color="#F50057")
+            ),
             tickfont=dict(color="#F50057"),
             gridcolor="rgba(255,255,255,0.05)",
-            range=[18, 22] # Zoom in op comfort range
+            range=[18, 22]
         ),
 
         # Rechter Y-as (Boiler)
         yaxis2=dict(
-            title="Boiler (°C)",
-            titlefont=dict(color="#00E5FF"),
+            title=dict(
+                text="Boiler (°C)",
+                font=dict(color="#00E5FF")
+            ),
             tickfont=dict(color="#00E5FF"),
             overlaying="y",
             side="right",
