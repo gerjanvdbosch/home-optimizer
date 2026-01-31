@@ -46,11 +46,11 @@ class Coordinator:
 
     def optimize(self):
         result = self.optimizer.resolve(self.context)
+        logger.info(f"[Coordinator] {result}")
 
         if result is not None:
             self.context.result = result
 
-            logger.info(f"[Coordinator] {result}")
 
     def train(self):
         self.solar.train()
