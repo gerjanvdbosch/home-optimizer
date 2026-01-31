@@ -226,7 +226,7 @@ class ThermalMPC:
         self.p_el_max = 3.5
         self.dhw_target = 50.0
         self.dhw_min = 35.0
-        self.cold_water = 10.0
+        self.cold_water = 15.0
 
     def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals):
         """
@@ -264,7 +264,7 @@ class ThermalMPC:
         # 2. CONSTRAINTS
         constraints = [
             t_room[0] == state["room_temp"],
-            t_dhw[0] == (state["dhw_top"] + state["dhw_bottom"]) / 2,
+            t_dhw[0] == (state["dhw_top"] * 0.7 + state["dhw_bottom"] * 0.3),
         ]
 
         for t in range(T):
@@ -303,6 +303,9 @@ class ThermalMPC:
                 + dhw_residuals[t]
             ]
 
+            # Max 4 graden per kwartier (voorkomt raket-boiler)
+            constraints += [t_dhw[t + 1] - t_dhw[t] <= 4.0]
+
             # --- COMFORT GRENZEN (Soft) ---
             # t_room + slack >= 19.5 (Als t_room 19.0 is, wordt slack 0.5 en betaal je een boete)
             constraints += [t_room[t] + slack_room_low[t] >= 19.5]
@@ -337,20 +340,9 @@ class ThermalMPC:
 
         dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
 
-        # Urgentie bonus voor DHW (als top sensor koud is, verdien je een "korting" door te verwarmen)
-        # Dit is de zachte vervanger van de harde u_dhw[0] == 1 constraint
-        dhw_urgent_bonus = 0
-        if state["dhw_top"] < 30:
-            dhw_urgent_bonus = u_dhw[0] * -100.0
-
         # Totaal te minimaliseren
         objective = cp.Minimize(
-            cost
-            + 0.5 * switches
-            + comfort_tracking
-            + violation_penalty
-            + dhw_comfort
-            + dhw_urgent_bonus
+            cost + 0.5 * switches + comfort_tracking + violation_penalty + dhw_comfort
         )
 
         # 4. SOLVE
@@ -412,7 +404,7 @@ class Optimizer:
             t_supply_target=27.0, efficiency=0.50, cop_min=2.5, cop_max=5.0
         )
         self.cop_dhw = COPModel(
-            t_supply_target=52.0, efficiency=0.45, cop_min=1.5, cop_max=3.0
+            t_supply_target=55.0, efficiency=0.45, cop_min=1.5, cop_max=3.0
         )
 
         # APARTE ML MODELLEN
