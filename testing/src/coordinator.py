@@ -46,7 +46,7 @@ class Coordinator:
 
     def optimize(self):
         #result = self.optimizer.resolve(self.context)
-        result = self.optimizer.debug(room_start=19.5, dhw_top_start=40.0)
+        result = self.optimizer.debug(room_start=19.0, dhw_top_start=45.0)
         logger.info(f"[Coordinator] {result}")
 
         if result is not None:
@@ -93,7 +93,7 @@ if __name__ == "__main__":
         scheduler.add_job(coordinator.tick, "interval", seconds=5)
 
         background.add_job(coordinator.train, "cron", hour=2, minute=5)
-        background.add_job(coordinator.optimize, "interval", seconds=5)
+        scheduler.add_job(coordinator.optimize, "interval", seconds=5)
 
         logger.info("[System] Engine running")
 

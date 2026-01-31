@@ -351,11 +351,7 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(
-                solver=cp.CBC,
-                verbose=False,
-                maximumSeconds=10,
-                allowableGap=0.01,
-                allowablePercentage=1,
+                solver=cp.CBC, verbose=False, maximumSeconds=10, allowableGap=0.01
             )
         except Exception as e:
             logger.warning(
