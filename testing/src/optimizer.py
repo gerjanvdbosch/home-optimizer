@@ -412,7 +412,7 @@ class Optimizer:
             t_supply_target=27.0, efficiency=0.50, cop_min=2.5, cop_max=5.0
         )
         self.cop_dhw = COPModel(
-            t_supply_target=55.0, efficiency=0.45, cop_min=1.5, cop_max=3.0
+            t_supply_target=52.0, efficiency=0.45, cop_min=1.5, cop_max=3.0
         )
 
         # APARTE ML MODELLEN
