@@ -106,23 +106,26 @@ class SystemIdentificator:
 
 
 # =========================================================
-# 2. COP-MODEL (GEEN HARDCODED CONSTANT)
+# 2. COP-MODEL
 # =========================================================
 class COPModel:
-    """
-    Eenvoudig fysisch model:
-    COP = a + b * T_out
-    begrensd.
-    """
-
-    def __init__(self, a=2.5, b=0.08, cop_min=2.0, cop_max=5.0):
-        self.a = a
-        self.b = b
+    def __init__(self, t_supply_target, efficiency=0.50, cop_min=1.0, cop_max=5.0):
+        self.t_supply = t_supply_target
+        self.eta = efficiency
         self.cop_min = cop_min
         self.cop_max = cop_max
 
     def cop(self, T_out):
-        return np.clip(self.a + self.b * T_out, self.cop_min, self.cop_max)
+        # Voorkom divide by zero als T_out == T_supply (onwaarschijnlijk maar toch)
+        delta_t = np.maximum(self.t_supply - T_out, 5.0)
+
+        # T in Kelvin
+        t_h_kelvin = self.t_supply + 273.15
+
+        cop_theoretical = t_h_kelvin / delta_t
+        cop_real = cop_theoretical * self.eta
+
+        return np.clip(cop_real, self.cop_min, self.cop_max)
 
 
 # =========================================================
@@ -405,11 +408,12 @@ class Optimizer:
         self.database = database
         self.ident = SystemIdentificator(config.rc_model_path)
 
-        # Voor Vloerverwarming (Lage temperatuur = Hoge efficiëntie)
-        self.cop_ufh = COPModel(a=3.0, b=0.08, cop_min=2.0, cop_max=5)
-
-        # Voor Warm Water (Hoge temperatuur = Lage efficiëntie)
-        self.cop_dhw = COPModel(a=2.0, b=0.06, cop_min=1.5, cop_max=3.0)
+        self.cop_ufh = COPModel(
+            t_supply_target=27.0, efficiency=0.50, cop_min=2.5, cop_max=5.0
+        )
+        self.cop_dhw = COPModel(
+            t_supply_target=55.0, efficiency=0.45, cop_min=1.5, cop_max=3.0
+        )
 
         # APARTE ML MODELLEN
         self.ufh_res = MLResidualPredictor(config.ufh_model_path)
