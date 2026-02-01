@@ -45,8 +45,7 @@ class Coordinator:
         self.load.update(self.context.now, self.context.stable_load)
 
     def optimize(self):
-        #result = self.optimizer.resolve(self.context)
-        result = self.optimizer.debug(room_start=19.0, dhw_top_start=45.0)
+        result = self.optimizer.resolve(self.context)
         logger.info(f"[Coordinator] {result}")
 
         if result is not None:

@@ -3,7 +3,6 @@ import numpy as np
 import cvxpy as cp
 import joblib
 import logging
-import os
 
 from datetime import datetime, timedelta
 from config import Config
@@ -13,8 +12,6 @@ from utils import add_cyclic_time_features
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import HistGradientBoostingRegressor
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # =========================================================
 # LOGGING
@@ -342,16 +339,16 @@ class ThermalMPC:
         )
 
         # Comfort: probeer de kamer op 20.5 graden te houden
-        comfort_tracking = cp.sum(cp.square(t_room - 20.5)) * 0.05
+        comfort_tracking = cp.sum(cp.abs(t_room - 20.5)) * 0.1
 
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
         violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
 
-        dhw_low_penalty = cp.sum(cp.pos(self.dhw_target - t_dhw)) * 0.5
+        dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
 
         # Totaal te minimaliseren
         objective = cp.Minimize(
-            cost + 0.8 * switches + comfort_tracking + violation_penalty + dhw_low_penalty
+            cost + 0.5 * switches + comfort_tracking + violation_penalty + dhw_comfort
         )
 
         # 4. SOLVE
@@ -360,14 +357,14 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(
-                solver=cp.SCIP, verbose=LOG_LEVEL == "DEBUG"
+                solver=cp.CBC, verbose=False, maximumSeconds=10
             )
         except Exception as e:
             logger.warning(
-                f"[Optimizer] SCIP solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
+                f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve(verbose=LOG_LEVEL == "DEBUG")
+            problem.solve(verbose=False, maximumSeconds=10)
 
         # Foutafhandeling
         if u_ufh.value is None:
@@ -400,8 +397,6 @@ class ThermalMPC:
             "dhw_energy_kwh": dhw_energy_kwh,
             "cost_projected": float(cost.value),
             "status": problem.status,
-            "planned_p_el_ufh": p_el_ufh.value.tolist(),
-            "planned_p_el_dhw": p_el_dhw.value.tolist(),
         }
 
 
@@ -459,74 +454,3 @@ class Optimizer:
         self.dhw_res.train(
             history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
         )
-
-    def debug(self, room_start=19.8, dhw_top_start=45.0, dhw_bottom_start=42.0, ambient_temp=5.0):
-        """
-        Draait een gesimuleerd scenario om de optimizer te testen zonder database connectie.
-        """
-        print(f"\n=== DEBUG SCENARIO START (Buiten: {ambient_temp}°C) ===")
-
-        # 1. Mock Config & Init
-        class MockConfig:
-            rc_model_path = "rc_model.joblib"
-            ufh_model_path = "ufh_model.joblib"
-            dhw_model_path = "dhw_model.joblib"
-
-        config = MockConfig()
-        # Maak optimizer aan (database=None werkt omdat we alleen resolve() doen)
-        ems = Optimizer(config, database=None)
-
-        # 2. Genereer tijd en weersverwachting (12 uur horizon)
-        start_time = datetime.now()
-        timestamps = [start_time + timedelta(minutes=15 * i) for i in range(48)]
-
-        # We simuleren een dagverloop: temperatuur stijgt een beetje, zon schijnt tussen 10:00 en 15:00
-        forecast = pd.DataFrame({
-            "timestamp": timestamps,
-            "temp": np.linspace(ambient_temp, ambient_temp + 5, 48),
-            "power_corrected": np.maximum(0, np.sin(np.linspace(-1, 2, 48)) * 3.5), # PV curve
-            "wind": np.random.uniform(2, 5, 48),
-            "load_corrected": np.full(48, 0.4), # Basisverbruik huis
-            "price": np.random.uniform(0.15, 0.30, 48), # Willekeurige prijzen
-        })
-
-        # 3. Vul de Context (Huidige staat van het huis)
-        context = Context(now=start_time)
-        context.room_temp = room_start
-        context.dhw_top = dhw_top_start
-        context.dhw_bottom = dhw_bottom_start
-        context.forecast_df = forecast
-
-        # 4. Voer de berekening uit
-        besluit = ems.resolve(context)
-
-        # 5. Resultaten Printen
-        if besluit:
-            print(f"Status:  {besluit['status']}")
-            print(f"Modus:   {besluit['mode']} (Vermogen: {besluit['target_power']:.2f} kW)")
-            print(f"Kosten:  €{besluit['cost_projected']:.2f}")
-            print(f"Boiler:  {besluit['dhw_soc']*100:.1f}% SoC")
-
-            # Laat het verloop zien van de eerste 2 uur (8 kwartieren)
-            print("\nVerloop komende 2 uur:")
-            for i in range(9):
-                r_t = besluit['planned_room'][i]
-                d_t = besluit['planned_dhw'][i]
-                print(f"  T + {i*15:02}m | Kamer: {r_t:.2f}°C | Boiler: {d_t:.2f}°C")
-        else:
-            print("FOUT: Optimizer kon geen oplossing vinden.")
-
-        return besluit
-
-if __name__ == "__main__":
-    # Voor directe testdoeleinden
-    optimizer = Optimizer(
-        config=Config(),
-        database=None  # Geen database connectie nodig voor debug
-    )
-    optimizer.debug(
-        room_start=20.0,
-        dhw_top_start=48.0,
-        dhw_bottom_start=45.0,
-        ambient_temp=10.0
-    )
