@@ -357,14 +357,14 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(
-                solver=cp.CBC, verbose=True, maximumSeconds=10
+                solver=cp.CBC, verbose=True
             )
         except Exception as e:
             logger.warning(
                 f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve(verbose=True, maximumSeconds=10)
+            problem.solve(verbose=True)
 
         # Foutafhandeling
         if u_ufh.value is None:
