@@ -321,7 +321,7 @@ class ThermalMPC:
             constraints += [t_room[t] <= 24.0, t_dhw[t] <= 60.0]
 
             # Supply temperature proxy: voorkom dat de vloer te heet wordt (max vermogen bij lage kamer-T)
-            constraints += [t_room[t] + p_el_ufh[t] * 3.0 <= 40]
+            constraints += [t_room[t] + p_el_ufh[t] * 4.0 <= 40]
 
         # 3. OBJECTIVE (Kosten + Slijtage + Comfort + Boetes)
         # Netto import (Import - Export wordt meegerekend via de positieve kant van de balans)
