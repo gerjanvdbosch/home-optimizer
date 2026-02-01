@@ -50,7 +50,10 @@ class SystemIdentificator:
                 logger.error("[Optimizer] Model corrupt.")
 
     def train(self, df: pd.DataFrame):
-        df = df.sort_values("timestamp").copy()
+        df = df.copy()
+        df = df.set_index("timestamp")
+        df = df.sort_index()
+        df = df.resample("15min").asfreq()
         dt = 0.25  # Kwartier
 
         for col in self.feature_cols:
