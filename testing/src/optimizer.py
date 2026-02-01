@@ -51,9 +51,9 @@ class SystemIdentificator:
 
     def train(self, df: pd.DataFrame):
         df = df.copy()
-        df = df.set_index('timestamp')
+        df = df.set_index("timestamp")
         df = df.sort_index()
-        df = df.resample('15min').asfreq()
+        df = df.resample("15min").asfreq()
         dt = 0.25  # Kwartier
 
         for col in self.feature_cols:
@@ -155,9 +155,9 @@ class MLResidualPredictor:
 
     def train(self, df: pd.DataFrame, R, C, cop_model, is_dhw=False):
         df = df.copy()
-        df = df.set_index('timestamp')
+        df = df.set_index("timestamp")
         df = df.sort_index()
-        df = df.resample('15min').asfreq()
+        df = df.resample("15min").asfreq()
         dt = 0.25
         boiler_mass_factor = 0.232
 
@@ -230,43 +230,42 @@ class ThermalMPC:
         self.cop_dhw = cop_dhw
         self.horizon = 48
         self.p_el_max = 3.5
-
-        # Temperaturen
-        self.dhw_target = 50.0  # Stop-criterium boiler
-        self.dhw_min = 35.0     # Minimum grens
+        self.dhw_target = 50.0
+        self.dhw_min = 35.0
         self.cold_water = 15.0
 
-        self.temp_day = 20.5
-        self.temp_night = 19.5
-
-        # Hysteresis voor vloerverwarming (doorschieten)
-        # Stoppen mag pas als temp > setpoint + 0.2
-        self.ufh_hysteresis = 0.2
-
-    def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals, current_time):
+    def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals):
+        """
+        state: {'room_temp', 'dhw_top', 'dhw_bottom'}
+        forecast_df: DF met 'temp', 'power_corrected', 'load_corrected'
+        prices: array van energieprijzen
+        ufh_residuals: lijst met ML correcties voor de kamer
+        dhw_residuals: lijst met ML correcties voor de boiler (bijv. verbruik)
+        """
         T = self.horizon
-        dt = 0.25
+        dt = 0.25  # Kwartier
 
+        # Fysische Parameters uit de identificatie
         R, C = self.ident.R, self.ident.C
+
+        # --- BOILER CONSTANTEN (200 Liter) ---
+        # Energie om 200L water 1 graad te verwarmen is ~0.232 kWh
+        # We gebruiken dit als deler voor de temperatuurstijging.
         boiler_mass_factor = 0.232
-        dhw_standby_loss = 0.04
+        dhw_standby_loss = 0.04  # Graden verlies per kwartier (isolatievat)
 
-        # 1. VARIABELEN
-        u_ufh = cp.Variable(T, boolean=True)
-        u_dhw = cp.Variable(T, boolean=True)
-
-        p_el_ufh = cp.Variable(T, nonneg=True)
-        p_el_dhw = cp.Variable(T, nonneg=True)
+        # 1. VARIABELEN (Lineair & Binair)
+        u_ufh = cp.Variable(T, boolean=True)  # Modus UFH
+        u_dhw = cp.Variable(T, boolean=True)  # Modus DHW
+        p_el_ufh = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor vloer
+        p_el_dhw = cp.Variable(T, nonneg=True)  # Elektrisch vermogen voor boiler
 
         t_room = cp.Variable(T + 1)
         t_dhw = cp.Variable(T + 1)
 
-        slack_room = cp.Variable(T, nonneg=True)
-        slack_dhw = cp.Variable(T, nonneg=True)
-
-        # Vorige status ophalen
-        prev_u_ufh_val = state.get('prev_u_ufh', 0)
-        prev_u_dhw_val = state.get('prev_u_dhw', 0)
+        # Slack variabelen (Voorkomen 'Infeasible' fouten bij grensoverschrijding)
+        slack_room_low = cp.Variable(T, nonneg=True)
+        slack_dhw_low = cp.Variable(T, nonneg=True)
 
         # 2. CONSTRAINTS
         constraints = [
@@ -275,96 +274,110 @@ class ThermalMPC:
         ]
 
         for t in range(T):
-            step_time = current_time + timedelta(minutes=15 * t)
-
-            # --- A. NACHTVERLAGING & COMFORT ---
-            is_night = (step_time.hour >= 23) or (step_time.hour < 6)
-            target_temp_now = self.temp_night if is_night else self.temp_day
-
-            # Minimum grens (Soft constraint)
-            constraints += [t_room[t] + slack_room[t] >= target_temp_now]
-
-            # --- B. DHW DEADLINE (18:00) ---
-            if step_time.hour == 18 and step_time.minute == 0:
-                constraints += [t_dhw[t] >= self.dhw_target]
-
-            # --- C. BASIS LOGICA ---
+            # Exclusiviteit: WP kan niet tegelijkertijd ufh en DHW doen (driewegklep)
             constraints += [u_ufh[t] + u_dhw[t] <= 1]
 
+            # Vermogensbegrenzing gekoppeld aan binaire status
             constraints += [p_el_ufh[t] <= self.p_el_max * u_ufh[t]]
             constraints += [p_el_dhw[t] <= self.p_el_max * u_dhw[t]]
-            constraints += [p_el_ufh[t] >= 0.5 * u_ufh[t]] # Minimaal moduleren
+
+            # Minimale vermogens (50% van max bij aan)
+            constraints += [p_el_ufh[t] >= 0.5 * u_ufh[t]]
             constraints += [p_el_dhw[t] >= 0.5 * u_dhw[t]]
 
-            # --- D. SLIMME "AFMAKEN" CONSTRAINT (Temperatuur gestuurd) ---
+            # Haal COP op voor dit tijdstip (temperatuurafhankelijk)
+            c_ufh = self.cop_ufh.cop(forecast_df["temp"].iloc[t])
+            c_dhw = self.cop_dhw.cop(forecast_df["temp"].iloc[t])
 
-            # Bepaal de vorige status (voor t=0 uit state, anders uit variabele)
-            u_prev_dhw = prev_u_dhw_val if t == 0 else u_dhw[t-1]
-            u_prev_ufh = prev_u_ufh_val if t == 0 else u_ufh[t-1]
-
-            # REGEL: Als DHW aan was, mag hij pas uit als Temp >= Target
-            # Wiskundig: t_dhw[t] >= Target * (u_prev - u_curr)
-            # Als u_prev=1 en u_curr=0 (stoppen), wordt rechts Target.
-            # Dan MOET t_dhw[t] >= Target zijn, anders is de oplossing ongeldig.
-            constraints += [t_dhw[t] >= self.dhw_target * (u_prev_dhw - u_dhw[t])]
-
-            # REGEL VOOR UFH: Mag pas uit als Temp >= Target + Hysteresis
-            # Dit voorkomt klapperen rondom 20.5 graden.
-            stop_temp_ufh = target_temp_now + self.ufh_hysteresis
-            constraints += [t_room[t] >= stop_temp_ufh * (u_prev_ufh - u_ufh[t])]
-
-            # --- E. FYSICA ---
-            temp_out = forecast_df["temp"].iloc[t]
-            c_ufh = self.cop_ufh.cop(temp_out)
-            c_dhw = self.cop_dhw.cop(temp_out)
-
-            # Room
+            # --- KAMER DYNAMICA ---
             p_th_room = p_el_ufh[t] * c_ufh
-            loss = (t_room[t] - temp_out) / R
-            constraints += [t_room[t+1] == t_room[t] + (p_th_room - loss) * dt / C + ufh_residuals[t]]
-
-            # DHW
-            p_th_dhw = p_el_dhw[t] * c_dhw
+            loss = (t_room[t] - forecast_df["temp"].iloc[t]) / R
+            # Nieuwe temp = huidige + (winst - verlies) + ML_correctie
             constraints += [
-                t_dhw[t+1] == t_dhw[t] + (p_th_dhw * dt) / boiler_mass_factor - dhw_standby_loss + dhw_residuals[t]
+                t_room[t + 1]
+                == t_room[t] + (p_th_room - loss) * dt / C + ufh_residuals[t]
             ]
 
-            # Veiligheid
-            constraints += [t_dhw[t+1] - t_dhw[t] <= 4.0]
+            # --- BOILER DYNAMICA ---
+            p_th_dhw = p_el_dhw[t] * c_dhw
+            # Nieuwe temp = huidige + (winst / massa) - stilstandsverlies + ML_correctie (verbruik)
+            constraints += [
+                t_dhw[t + 1]
+                == t_dhw[t]
+                + (p_th_dhw * dt) / boiler_mass_factor
+                - dhw_standby_loss
+                + dhw_residuals[t]
+            ]
+
+            # Max 4 graden per kwartier (voorkomt raket-boiler)
+            constraints += [t_dhw[t + 1] - t_dhw[t] <= 4.0]
+
+            # --- COMFORT GRENZEN (Soft) ---
+            # t_room + slack >= 19.5 (Als t_room 19.0 is, wordt slack 0.5 en betaal je een boete)
+            constraints += [t_room[t] + slack_room_low[t] >= 19.5]
+            constraints += [t_dhw[t] + slack_dhw_low[t] >= self.dhw_min]
+
+            # Harde grenzen (Veiligheid)
             constraints += [t_room[t] <= 24.0, t_dhw[t] <= 60.0]
-            constraints += [t_dhw[t] + slack_dhw[t] >= self.dhw_min]
-            constraints += [t_room[t] + p_el_ufh[t] * 4.0 <= 40]
 
-        # 3. OBJECTIVE
-        net_load = (p_el_ufh + p_el_dhw +
-                    forecast_df["load_corrected"].values -
-                    forecast_df["power_corrected"].values)
+            # Supply temperature proxy: voorkom dat de vloer te heet wordt (max vermogen bij lage kamer-T)
+            constraints += [t_room[t] + p_el_ufh[t] * 3.0 <= 40]
 
+        # 3. OBJECTIVE (Kosten + Slijtage + Comfort + Boetes)
+        # Netto import (Import - Export wordt meegerekend via de positieve kant van de balans)
+        net_load = (
+            p_el_ufh
+            + p_el_dhw
+            + forecast_df["load_corrected"].values
+            - forecast_df["power_corrected"].values
+        )
         cost = cp.sum(cp.multiply(cp.pos(net_load), prices)) * dt
 
-        # Penalties:
-        # We hoeven minder hard te straffen op switches, want de temperatuur-constraint
-        # dwingt al lange runs af. Toch een kleine penalty om 'twijfelen' te voorkomen.
-        switches = cp.sum(cp.abs(u_ufh[1:] - u_ufh[:-1])) + cp.sum(cp.abs(u_dhw[1:] - u_dhw[:-1]))
-
-        violation = cp.sum(slack_room) * 200.0 + cp.sum(slack_dhw) * 200.0
-
-        objective = cp.Minimize(
-            cost
-            + 1.0 * switches
-            + violation
-            + 0.05 * cp.sum(p_el_dhw) # Lichte voorkeur voor efficiëntie
+        # Anti-pendel: Straf het omschakelen of aan/uit gaan (MILP switches)
+        switches = cp.sum(cp.abs(u_ufh[1:] - u_ufh[:-1])) + cp.sum(
+            cp.abs(u_dhw[1:] - u_dhw[:-1])
         )
 
+        # Comfort: probeer de kamer op 20.5 graden te houden
+        comfort_tracking = cp.sum(cp.abs(t_room - 20.5)) * 0.1
+
+        # Slack boete: Zeer hoog om comfortgrenzen te bewaken
+        violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
+
+        dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
+
+        # Totaal te minimaliseren
+        objective = cp.Minimize(
+            cost + 0.5 * switches + comfort_tracking + violation_penalty + dhw_comfort
+        )
+
+        # 4. SOLVE
         problem = cp.Problem(objective, constraints)
-        problem.solve(solver=cp.CBC, verbose=False, maximumSeconds=15)
 
+        try:
+            # CBC via CyLP is de aanbevolen MILP solver
+            problem.solve(
+                solver=cp.CBC, verbose=False, maximumSeconds=10, allowableGap=0.01
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
+            )
+            # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
+            problem.solve(verbose=False, maximumSeconds=10)
+
+        # Foutafhandeling
         if u_ufh.value is None:
-            logger.error("[Optimizer] Geen oplossing gevonden.")
-            return None
+            logger.error(
+                f"[Optimizer] MILP solver kon geen oplossing vinden (status={problem.status})"
+            )
 
-        # Resultaat verwerken
-        mode = "DHW" if u_dhw.value[0] > 0.5 else "UFH" if u_ufh.value[0] > 0.5 else "OFF"
+            return
+
+        # 5. RESULTATEN VERWERKEN
+        mode = (
+            "DHW" if u_dhw.value[0] > 0.5 else "UFH" if u_ufh.value[0] > 0.5 else "OFF"
+        )
         current_p_el = float(p_el_ufh.value[0] + p_el_dhw.value[0])
 
         dhw_avg = (state["dhw_top"] + state["dhw_bottom"]) / 2
@@ -424,7 +437,7 @@ class Optimizer:
         # Vaste prijs voor testdoeleinden
         prices = [0.21] * len(horizon_df)
 
-        return self.mpc.solve(state, horizon_df, prices, ufh_residuals, dhw_residuals, context.now)
+        return self.mpc.solve(state, horizon_df, prices, ufh_residuals, dhw_residuals)
 
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
@@ -499,3 +512,16 @@ class Optimizer:
             print("FOUT: Optimizer kon geen oplossing vinden.")
 
         return besluit
+
+if __name__ == "__main__":
+    # Voor directe testdoeleinden
+    optimizer = Optimizer(
+        config=Config(),
+        database=None  # Geen database connectie nodig voor debug
+    )
+    optimizer.debug(
+        room_start=20.0,
+        dhw_top_start=48.0,
+        dhw_bottom_start=45.0,
+        ambient_temp=10.0
+    )
