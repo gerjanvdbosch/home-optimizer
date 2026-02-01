@@ -342,7 +342,7 @@ class ThermalMPC:
             constraints += [t_dhw[t + 1] - t_dhw[t] <= 4.0]
             constraints += [t_room[t] <= 24.0, t_dhw[t] <= 60.0]
             constraints += [t_dhw[t] + slack_dhw[t] >= self.dhw_min]
-            constraints += [t_room[t] + p_el_ufh[t] * 3.0 <= 40]
+            constraints += [t_room[t] + p_el_ufh[t] * 4.0 <= 40]
 
         # 3. OBJECTIVE
         net_load = (
