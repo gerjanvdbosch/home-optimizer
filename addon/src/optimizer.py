@@ -3,7 +3,6 @@ import numpy as np
 import cvxpy as cp
 import joblib
 import logging
-import os
 
 from datetime import datetime, timedelta
 from config import Config
@@ -13,8 +12,6 @@ from utils import add_cyclic_time_features
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import HistGradientBoostingRegressor
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # =========================================================
 # LOGGING
@@ -341,17 +338,21 @@ class ThermalMPC:
             cp.abs(u_dhw[1:] - u_dhw[:-1])
         )
 
-        # Comfort: probeer de kamer op 20.5 graden te houden
-        comfort_tracking = cp.sum(cp.abs(t_room - 20.5)) * 0.1
+        # Comfort: probeer de kamer op 20.0 graden te houden
+        comfort_tracking = cp.sum(cp.square(t_room - 20.0)) * 0.05
 
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
         violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
 
-        dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
+        dhw_low_penalty = cp.sum(cp.pos(self.dhw_target - t_dhw)) * 0.5
 
         # Totaal te minimaliseren
         objective = cp.Minimize(
-            cost + 0.5 * switches + comfort_tracking + violation_penalty + dhw_comfort
+            cost
+            + 0.8 * switches
+            + comfort_tracking
+            + violation_penalty
+            + dhw_low_penalty
         )
 
         # 4. SOLVE
@@ -359,15 +360,13 @@ class ThermalMPC:
 
         try:
             # CBC via CyLP is de aanbevolen MILP solver
-            problem.solve(
-                solver=cp.CBC, verbose=LOG_LEVEL == "DEBUG", maximumSeconds=15
-            )
+            problem.solve(solver=cp.SCIP, verbose=False)
         except Exception as e:
             logger.warning(
-                f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
+                f"[Optimizer] SCIP solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve(verbose=LOG_LEVEL == "DEBUG", maximumSeconds=15)
+            problem.solve(verbose=False)
 
         # Foutafhandeling
         if u_ufh.value is None:

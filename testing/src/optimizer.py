@@ -342,16 +342,16 @@ class ThermalMPC:
         )
 
         # Comfort: probeer de kamer op 20.5 graden te houden
-        comfort_tracking = cp.sum(cp.abs(t_room - 20.5)) * 0.1
+        comfort_tracking = cp.sum(cp.square(t_room - 20.5)) * 0.05
 
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
         violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
 
-        dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
+        dhw_low_penalty = cp.sum(cp.pos(self.dhw_target - t_dhw)) * 0.5
 
         # Totaal te minimaliseren
         objective = cp.Minimize(
-            cost + 0.5 * switches + comfort_tracking + violation_penalty + dhw_comfort
+            cost + 0.8 * switches + comfort_tracking + violation_penalty + dhw_low_penalty
         )
 
         # 4. SOLVE
@@ -360,14 +360,14 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(
-                solver=cp.CBC, verbose=LOG_LEVEL == "DEBUG", maximumSeconds=15
+                solver=cp.SCIP, verbose=LOG_LEVEL == "DEBUG"
             )
         except Exception as e:
             logger.warning(
-                f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
+                f"[Optimizer] SCIP solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve(verbose=LOG_LEVEL == "DEBUG", maximumSeconds=15)
+            problem.solve(verbose=LOG_LEVEL == "DEBUG")
 
         # Foutafhandeling
         if u_ufh.value is None:
@@ -400,6 +400,8 @@ class ThermalMPC:
             "dhw_energy_kwh": dhw_energy_kwh,
             "cost_projected": float(cost.value),
             "status": problem.status,
+            "planned_p_el_ufh": p_el_ufh.value.tolist(),
+            "planned_p_el_dhw": p_el_dhw.value.tolist(),
         }
 
 
