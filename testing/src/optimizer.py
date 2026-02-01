@@ -147,6 +147,7 @@ class MLResidualPredictor:
         boiler_mass_factor = 0.232
 
         # Voeg 'hour' toe aan de bron-dataframe
+        df = df.reset_index()
         df = add_cyclic_time_features(df, col_name="timestamp")
 
         # 1. Bereken de theoretische RC-delta (Physics Baseline)
@@ -166,6 +167,10 @@ class MLResidualPredictor:
             feature_cols = self.features_dhw
 
         target_series = (y_actual - dT_rc).rename("target_residual")
+
+        if is_dhw:
+            # Dit voorkomt dat het model de douche als een constante leksnelheid ziet.
+            target_series = target_series.clip(lower=-0.3, upper=0.2)
 
         X = df.reindex(columns=feature_cols)
         train_df = pd.concat([X, target_series], axis=1).dropna()
