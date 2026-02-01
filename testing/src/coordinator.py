@@ -3,7 +3,7 @@ import threading
 import logging
 import uvicorn
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -34,12 +34,15 @@ class Coordinator:
         self.context = context
         self.config = config
         self.collector = collector
+        self.database = database
 
     def tick(self):
-        #self.context.now = datetime.now(timezone.utc).replace(month=1, day=14, hour=10)
-        self.context.now = datetime.now(timezone.utc).replace(month=1, day=23, hour=20)
+        self.context.now = datetime.now(timezone.utc)
 
         self.collector.update_sensors()
+        cutoff = self.context.now - timedelta(days=1)
+
+        self.context.forecast_df = self.database.get_history(cutoff_date=cutoff)
 
         self.solar.update(self.context.now, self.context.stable_pv)
         self.load.update(self.context.now, self.context.stable_load)
@@ -92,7 +95,7 @@ if __name__ == "__main__":
         scheduler.add_job(coordinator.tick, "interval", seconds=5)
 
         background.add_job(coordinator.train, "cron", hour=2, minute=5)
-        scheduler.add_job(coordinator.optimize, "interval", seconds=5)
+        #scheduler.add_job(coordinator.optimize, "interval", seconds=10)
 
         logger.info("[System] Engine running")
 
@@ -101,6 +104,7 @@ if __name__ == "__main__":
 
         coordinator.tick()
         coordinator.train()
+        coordinator.optimize()
 
         scheduler.start()
         background.start()
