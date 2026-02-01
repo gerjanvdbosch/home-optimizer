@@ -50,7 +50,18 @@ class Coordinator:
         if result is not None:
             self.context.result = result
 
-            logger.info(f"[Coordinator] {result}")
+            print(f"Status:  {result['status']}")
+            print(
+                f"Modus:   {result['mode']} (Vermogen: {result['target_power']:.2f} kW)"
+            )
+            print(f"Kosten:  €{result['cost_projected']:.2f}")
+            print(f"Boiler:  {result['dhw_soc']*100:.1f}% SoC")
+
+            print("\nVerloop komende 12 uur:")
+            for i in range(48):
+                r_t = result["planned_room"][i]
+                d_t = result["planned_dhw"][i]
+                print(f"  T + {i*15:02}m | Kamer: {r_t:.2f}°C | Boiler: {d_t:.2f}°C")
 
     def train(self):
         self.solar.train()

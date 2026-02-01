@@ -3,6 +3,7 @@ import numpy as np
 import cvxpy as cp
 import joblib
 import logging
+import os
 
 from datetime import datetime, timedelta
 from config import Config
@@ -12,6 +13,8 @@ from utils import add_cyclic_time_features
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import HistGradientBoostingRegressor
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # =========================================================
 # LOGGING
@@ -357,14 +360,14 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(
-                solver=cp.CBC, verbose=False, maximumSeconds=10, allowableGap=0.01
+                solver=cp.CBC, verbose=LOG_LEVEL == "DEBUG", maximumSeconds=15
             )
         except Exception as e:
             logger.warning(
                 f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve(verbose=False, maximumSeconds=10)
+            problem.solve(verbose=LOG_LEVEL == "DEBUG", maximumSeconds=15)
 
         # Foutafhandeling
         if u_ufh.value is None:
