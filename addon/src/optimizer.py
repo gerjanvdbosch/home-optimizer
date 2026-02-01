@@ -338,11 +338,11 @@ class ThermalMPC:
             cp.abs(u_dhw[1:] - u_dhw[:-1])
         )
 
-        # Comfort: probeer de kamer op 20.5 graden te houden
-        comfort_tracking = cp.sum(cp.abs(t_room - 20.5)) * 0.1
+        # Comfort: probeer de kamer op 20.0 graden te houden
+        comfort_tracking = cp.sum(cp.abs(t_room - 20.0)) * 0.1
 
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
-        violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 150.0
+        violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 25.0
 
         dhw_comfort = cp.abs(t_dhw[T] - self.dhw_target) * 5.0
 
@@ -357,14 +357,14 @@ class ThermalMPC:
         try:
             # CBC via CyLP is de aanbevolen MILP solver
             problem.solve(
-                solver=cp.CBC, verbose=False, maximumSeconds=10
+                solver=cp.CBC, verbose=True, maximumSeconds=10
             )
         except Exception as e:
             logger.warning(
                 f"[Optimizer] CBC solver niet beschikbaar, probeer andere MILP solvers. Fout: {e}"
             )
             # Fallback naar andere beschikbare MILP solvers (GLPK, SCIP)
-            problem.solve(verbose=False, maximumSeconds=10)
+            problem.solve(verbose=True, maximumSeconds=10)
 
         # Foutafhandeling
         if u_ufh.value is None:
