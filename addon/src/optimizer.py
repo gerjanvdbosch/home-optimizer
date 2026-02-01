@@ -151,7 +151,10 @@ class MLResidualPredictor:
             self.model = joblib.load(self.path)
 
     def train(self, df: pd.DataFrame, R, C, cop_model, is_dhw=False):
-        df = df.copy().sort_values("timestamp")
+        df = df.copy()
+        df = df.set_index("timestamp")
+        df = df.sort_index()
+        df = df.resample("15min").asfreq()
         dt = 0.25
         boiler_mass_factor = 0.232
 
@@ -325,7 +328,7 @@ class ThermalMPC:
             + forecast_df["load_corrected"].values
             - forecast_df["power_corrected"].values
         )
-        cost = cp.sum(cp.multiply(cp.pos(net_load), prices))
+        cost = cp.sum(cp.multiply(cp.pos(net_load), prices)) * dt
 
         # Anti-pendel: Straf het omschakelen of aan/uit gaan (MILP switches)
         switches = cp.sum(cp.abs(u_ufh[1:] - u_ufh[:-1])) + cp.sum(
