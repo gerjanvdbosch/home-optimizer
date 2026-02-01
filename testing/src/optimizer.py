@@ -80,16 +80,12 @@ class SystemIdentificator:
         model.fit(X, y)
         coef_loss, coef_gain = model.coef_
 
-        # Fysieke begrenzing en berekening (C tussen 20-120, R tussen 5-30)
-        c_gain_clamped = np.clip(coef_gain, 1.0 / 120.0, 1.0 / 20.0)
-        calc_C = 1.0 / c_gain_clamped
+        # Fysieke begrenzing en berekening (C tussen 10-100, R tussen 5-30)
+        c_gain_clamped = np.clip(coef_gain, 1.0 / 100.0, 1.0 / 10.0)
+        self.C = 1.0 / c_gain_clamped
 
-        r_loss_clamped = np.clip(coef_loss, 1.0 / (30.0 * calc_C), 1.0 / (5.0 * calc_C))
-        calc_R = 1.0 / (r_loss_clamped * calc_C)
-
-        # Inwassen van nieuwe waarden (Smoothing)
-        self.R = (self.R * 0.7) + (calc_R * 0.3)
-        self.C = (self.C * 0.7) + (calc_C * 0.3)
+        r_loss_clamped = np.clip(coef_loss, 1.0 / (30.0 * self.C), 1.0 / (5.0 * self.C))
+        self.R = 1.0 / (r_loss_clamped * self.C)
 
         self.is_fitted = True
         joblib.dump({"R": self.R, "C": self.C}, self.path)
@@ -433,9 +429,6 @@ class Optimizer:
         # Voorspel voor beide systemen de residuals
         ufh_residuals = self.ufh_res.predict(horizon_df, is_dhw=False)
         dhw_residuals = self.dhw_res.predict(horizon_df, is_dhw=True)
-
-        # Beperk de residuals om doucheverbruik en onrealistische waarden te voorkomen
-        dhw_residuals = np.clip(dhw_residuals, -0.1, 0.05)
 
         logger.debug(f"[Optimizer] UFH residuals: {ufh_residuals}")
         logger.debug(f"[Optimizer] DHW residuals: {dhw_residuals}")
