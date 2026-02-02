@@ -343,7 +343,7 @@ class ThermalMPC:
         )
 
         # Comfort: probeer de kamer op 20.0 graden te houden
-        comfort_tracking = cp.sum(cp.abs(t_room - 20.0)) * 0.1
+        comfort_tracking = cp.sum(cp.abs(t_room - 20.0)) * 0.05
 
         # Slack boete: Zeer hoog om comfortgrenzen te bewaken
         violation_penalty = cp.sum(slack_room_low + slack_dhw_low) * 25.0
@@ -354,7 +354,7 @@ class ThermalMPC:
         objective = cp.Minimize(
             cost  # Minimaliseer rekening van de leverancier
             - solar_bonus  # Maximaliseer gebruik van eigen zon
-            + 2.0 * switches  # Voorkom pendelen (anti-slijtage)
+            + 5.0 * switches  # Voorkom pendelen (anti-slijtage)
             + comfort_tracking  # Houd de kamer op 20 graden
             + violation_penalty  # Nooit onder de 35 graden in de boiler
             + dhw_comfort  # Houd de boiler rond de target aan het einde
