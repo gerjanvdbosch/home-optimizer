@@ -87,7 +87,7 @@ class HAClient:
             )
             r.raise_for_status()
             payload = r.json()
-            logger.debug("[Client] Payload %s fetched")
+            logger.debug("[Client] Payload for %s: %s", entity_id, payload)
             return payload
         except Exception as e:
             logger.exception("[Client] Error getting state %s: %s", e)
