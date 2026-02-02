@@ -77,7 +77,7 @@ class Collector:
             .sort_values("timestamp")
         )
 
-        self.context.forecast_df = df_today
+        self.context.forecast_df_raw = df_today
         self.database.save_forecast(df_today)
 
         logger.info("[Collector] Forecast updated")

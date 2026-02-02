@@ -178,28 +178,26 @@ class LoadForecaster:
 
         self.model.train(df)
 
-    def update(self, current_time: datetime, current_load_kw: float):
-        forecast_df = self.context.forecast_df
-        df_calc = forecast_df.copy()
+    def update(self, df):
+        current_time = self.context.now
 
         # 1. Base Prediction (Machine Learning)
-        df_calc["load_ml"] = self.model.predict(df_calc)
+        df["load_ml"] = self.model.predict(df)
 
         # 2. Update NowCaster state (Bias berekenen)
         # We halen de voorspelling voor 'nu' op om de error te bepalen
-        idx_now = df_calc["timestamp"].searchsorted(current_time)
-        row_now = df_calc.iloc[min(idx_now, len(df_calc) - 1)]
+        idx_now = df["timestamp"].searchsorted(current_time)
+        row_now = df.iloc[min(idx_now, len(df) - 1)]
 
         predicted_now = row_now["load_ml"]
 
-        self.nowcaster.update(actual_kw=current_load_kw, forecasted_kw=predicted_now)
+        self.nowcaster.update(actual_kw=self.context.stable_load, forecasted_kw=predicted_now)
 
         # 3. Apply NowCaster (Correctie projecteren over de tijd)
-        df_calc["load_corrected"] = self.nowcaster.apply(
-            df_calc, current_time, "load_ml"
+        df["load_corrected"] = self.nowcaster.apply(
+            df, current_time, "load_ml"
         )
 
         self.context.load_bias = round(self.nowcaster.current_ratio, 3)
-        self.context.forecast_df = df_calc
 
-        return df_calc
+        return df

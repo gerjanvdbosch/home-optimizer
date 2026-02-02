@@ -1,10 +1,8 @@
 import pandas as pd
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from collections import deque
 from enum import Enum
-from typing import Optional
 
 
 class HvacMode(Enum):
@@ -20,8 +18,8 @@ class HvacMode(Enum):
 class Context:
     now: datetime
 
-    latitude: float = 0.0
-    longitude: float = 0.0
+    latitude: float | None = None
+    longitude: float | None = None
 
     hvac_mode: int | None = None
 
@@ -30,6 +28,7 @@ class Context:
     stable_grid: float = 0.0
     stable_load: float = 0.0
 
+    forecast_df_raw: pd.DataFrame | None = None
     forecast_df: pd.DataFrame | None = None
 
     result = None

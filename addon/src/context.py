@@ -28,6 +28,7 @@ class Context:
     stable_grid: float = 0.0
     stable_load: float = 0.0
 
+    forecast_df_raw: pd.DataFrame | None = None
     forecast_df: pd.DataFrame | None = None
 
     result = None

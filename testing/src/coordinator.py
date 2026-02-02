@@ -40,12 +40,12 @@ class Coordinator:
         self.context.now = datetime.now(timezone.utc)
 
         self.collector.update_sensors()
-        cutoff = self.context.now - timedelta(days=1)
 
-        self.context.forecast_df = self.database.get_history(cutoff_date=cutoff)
+        df = self.context.forecast_df_raw.copy()
+        df = self.solar.update(df)
+        df = self.load.update(df)
 
-        self.solar.update(self.context.now, self.context.stable_pv)
-        self.load.update(self.context.now, self.context.stable_load)
+        self.context.forecast_df = df
 
     def optimize(self):
         result = self.optimizer.resolve(self.context)
@@ -102,10 +102,10 @@ if __name__ == "__main__":
 
         logger.info("[System] API server started")
 
-        scheduler.add_job(collector.update_forecast, "interval", minutes=15)
+        scheduler.add_job(collector.update_forecast, "interval", seconds=15)
         scheduler.add_job(collector.update_load, "interval", seconds=15)
         scheduler.add_job(collector.update_history, "interval", seconds=15)
-        scheduler.add_job(coordinator.tick, "interval", seconds=5)
+        scheduler.add_job(coordinator.tick, "interval", seconds=15)
 
         background.add_job(coordinator.train, "cron", hour=2, minute=5)
         #scheduler.add_job(coordinator.optimize, "interval", seconds=10)
@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
         coordinator.tick()
         coordinator.train()
-        coordinator.optimize()
+        #coordinator.optimize()
 
         scheduler.start()
         background.start()

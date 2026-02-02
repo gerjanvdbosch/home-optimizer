@@ -294,6 +294,12 @@
       "pv_estimate": 0,
       "pv_estimate10": 0,
       "pv_estimate90": 0
+    },
+    {
+      "period_start": "2026-02-02T22:00:00+00:00",
+      "pv_estimate": 1,
+      "pv_estimate10": 0,
+      "pv_estimate90": 0
     }
   ],
   "weather": {

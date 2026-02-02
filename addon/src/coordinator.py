@@ -41,8 +41,11 @@ class Coordinator:
 
         self.collector.update_sensors()
 
-        self.solar.update(self.context.now, self.context.stable_pv)
-        self.load.update(self.context.now, self.context.stable_load)
+        df = self.context.forecast_df_raw.copy()
+        df = self.solar.update(df)
+        df = self.load.update(df)
+
+        self.context.forecast_df = df
 
     def optimize(self):
         result = self.optimizer.resolve(self.context)

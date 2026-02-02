@@ -227,29 +227,27 @@ class SolarForecaster:
 
         self.model.train(df, system_max=self.config.pv_max_kw)
 
-    def update(self, current_time: datetime, actual_pv: float):
-        forecast_df = self.context.forecast_df
-        df_calc = forecast_df.copy()
+    def update(self, df):
+        current_time = self.context.now
 
-        preds = self.model.predict(df_calc, self.config.solar_model_ratio)
+        preds = self.model.predict(df, self.config.solar_model_ratio)
 
-        df_calc["power_ml"] = preds["prediction"]
-        df_calc["power_ml_raw"] = preds["prediction_raw"]
+        df["power_ml"] = preds["prediction"]
+        df["power_ml_raw"] = preds["prediction_raw"]
 
         # Bias ankerpunt (nu)
-        idx_now = df_calc["timestamp"].searchsorted(current_time)
-        row_now = df_calc.iloc[min(idx_now, len(df_calc) - 1)]
+        idx_now = df["timestamp"].searchsorted(current_time)
+        row_now = df.iloc[min(idx_now, len(df) - 1)]
 
         self.nowcaster.update(self.context.stable_pv, row_now["power_ml"])
 
-        df_calc["power_corrected"] = self.nowcaster.apply(
-            df_calc, current_time, "power_ml", actual_pv=self.context.stable_pv
+        df["power_corrected"] = self.nowcaster.apply(
+            df, current_time, "power_ml", actual_pv=self.context.stable_pv
         )
-        df_calc["power_corrected"] = df_calc["power_corrected"].clip(
+        df["power_corrected"] = df["power_corrected"].clip(
             0, self.config.pv_max_kw
         )
 
         self.context.solar_bias = round(self.nowcaster.current_ratio, 3)
-        self.context.forecast_df = df_calc
 
-        return df_calc
+        return df
