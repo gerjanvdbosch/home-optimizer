@@ -354,7 +354,7 @@ class ThermalMPC:
         objective = cp.Minimize(
             cost  # Minimaliseer rekening van de leverancier
             - solar_bonus  # Maximaliseer gebruik van eigen zon
-            + 5.0 * switches  # Voorkom pendelen (anti-slijtage)
+            + 1.0 * switches  # Voorkom pendelen (anti-slijtage)
             + comfort_tracking  # Houd de kamer op 20 graden
             + violation_penalty  # Nooit onder de 35 graden in de boiler
             + dhw_comfort  # Houd de boiler rond de target aan het einde
