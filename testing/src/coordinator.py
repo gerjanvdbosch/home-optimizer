@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
         coordinator.tick()
         coordinator.train()
-        #coordinator.optimize()
+        coordinator.optimize()
 
         scheduler.start()
         background.start()

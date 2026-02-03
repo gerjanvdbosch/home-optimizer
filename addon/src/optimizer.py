@@ -317,7 +317,7 @@ class ThermalMPC:
             constraints += [t_dhw[t] + slack_dhw_low[t] >= self.dhw_min]
 
             # Harde grenzen (Veiligheid)
-            constraints += [t_room[t] <= 24.0, t_dhw[t] <= 60.0]
+            constraints += [t_room[t] <= 21.0, t_dhw[t] <= 55.0]
 
             # Supply temperature proxy: voorkom dat de vloer te heet wordt (max vermogen bij lage kamer-T)
             constraints += [t_room[t] + p_el_ufh[t] * 4.0 <= 40]
