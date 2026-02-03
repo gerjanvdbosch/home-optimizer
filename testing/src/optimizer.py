@@ -457,11 +457,11 @@ class ThermalMPC:
         # 3. SOLVE
         try:
             # CBC is de beste open-source MILP solver
-            self.problem.solve(solver=cp.CBC, verbose=False)
+            self.problem.solve(solver=cp.CBC, verbose=True)
         except Exception:
             logger.warning("[Optimizer] CBC faalde, fallback naar GLPK_MI")
             try:
-                self.problem.solve(solver=cp.GLPK_MI)
+                self.problem.solve(solver=cp.GLPK_MI, verbose=True)
             except Exception as e:
                 logger.error(f"[Optimizer] Solver Critical Error: {e}")
                 return None
