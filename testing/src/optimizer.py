@@ -90,10 +90,10 @@ class SystemIdentificator:
         df["dT_1h"] = df["room_temp"].shift(-4) - df["room_temp"]
 
         # 2. Schat de COP voor het historische thermische vermogen
-        # Aanname: Vloerverwarming water is kamer_temp + 5 graden
+        # Aanname: Vloerverwarming water is kamer_temp + 6 graden
         cop_calc = COPModel(efficiency=0.50)
         df["cop_actual"] = df.apply(
-            lambda row: cop_calc.get_cop(row["temp"], row["room_temp"] + 5.0), axis=1
+            lambda row: cop_calc.get_cop(row["temp"], row["room_temp"] + 6.0), axis=1
         )
 
         # Als wp_actual elektrisch is (kW), dan vermenigvuldigen met COP

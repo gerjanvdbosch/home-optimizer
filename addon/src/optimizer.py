@@ -18,19 +18,45 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 # =========================================================
 logger = logging.getLogger(__name__)
 
+# =========================================================
+# 1. COP-MODEL (Carnot-based)
+# =========================================================
+class COPModel:
+    def __init__(self, efficiency=0.45, cop_min=1.0, cop_max=6.0):
+        self.eta = efficiency
+        self.cop_min = cop_min
+        self.cop_max = cop_max
+
+    def get_cop(self, T_out, T_sink):
+        """
+        Berekent COP o.b.v. buitentemperatuur en doeltemperatuur (sink).
+        T_sink is de watertemperatuur (bijv. 30C voor Vloer of 50C voor Boiler).
+        """
+        # Voeg 3 graden toe aan T_sink voor de warmtewisselaar delta (condensor)
+        T_sink_k = T_sink + 273.15 + 3.0
+        T_out_k = T_out + 273.15
+
+        # Carnot limiet: T_sink / (T_sink - T_out)
+        # We gebruiken een minimum delta van 5 graden om deling door nul te voorkomen
+        delta_t = np.maximum(T_sink_k - T_out_k, 5.0)
+
+        cop_theoretical = T_sink_k / delta_t
+        cop_real = cop_theoretical * self.eta
+
+        return np.clip(cop_real, self.cop_min, self.cop_max)
+
 
 # =========================================================
-# 1. SYSTEEM IDENTIFICATIE (RC, COP-vrij)
+# 2. SYSTEEM IDENTIFICATIE (RC Model)
 # =========================================================
 class SystemIdentificator:
     """
-    Identificeert R en C
+    Identificeert R (Isolatiewaarde) en C (Warmteopslagcapaciteit) van de woning.
     """
 
     def __init__(self, path):
-        self.R = 15.0  # K/kW
-        self.C = 30.0  # kWh/K
-        self.feature_cols = ["room_temp", "temp", "wp_actual", "pv_actual"]
+        self.R = 15.0  # Default: K/kW
+        self.C = 30.0  # Default: kWh/K
         self.path = Path(path)
         self.is_fitted = False
         self._load()
@@ -43,88 +69,88 @@ class SystemIdentificator:
                 self.C = data["C"]
                 self.is_fitted = True
                 logger.info(
-                    f"[Optimizer] Identificatie: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
+                    f"[Identificatie] Geladen: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
                 )
             except Exception:
-                logger.error("[Optimizer] Model corrupt.")
+                logger.error("[Identificatie] Model bestand corrupt of verouderd.")
 
     def train(self, df: pd.DataFrame):
+        """
+        Traint het RC model op historische data.
+        Filtert zonlicht en outliers weg voor een zuivere fysieke identificatie.
+        """
         df = df.copy()
         df = df.set_index("timestamp").sort_index()
-        df = df.resample("15min").asfreq()
+        # Vul kleine gaatjes op
+        df = df.resample("15min").interpolate(method="linear", limit=2)
 
-        # Gebruik 1-uurs delta om sensor-ruis te onderdrukken
+        # 1. Bepaal de temperatuurverandering over de KOMENDE 60 minuten
         df["dT_1h"] = df["room_temp"].shift(-4) - df["room_temp"]
 
-        cop_model = COPModel(t_supply_target=27.0, efficiency=0.5)
-        df["cop"] = df["temp"].apply(cop_model.cop)
+        # 2. Schat de COP voor het historische thermische vermogen
+        # Aanname: Vloerverwarming water is kamer_temp + 6 graden
+        cop_calc = COPModel(efficiency=0.50)
+        df["cop_actual"] = df.apply(
+            lambda row: cop_calc.get_cop(row["temp"], row["room_temp"] + 6.0), axis=1
+        )
 
-        # Features geschaald naar uurbasis
-        df["X1"] = -(df["room_temp"] - df["temp"])  # Verlies potentieel
-        df["X2"] = (
-            (df["wp_actual"] * df["cop"]).rolling(window=4).mean()
-        )  # Gem. winst over uur
+        # Als wp_actual elektrisch is (kW), dan vermenigvuldigen met COP
+        df["p_th_actual"] = df["wp_actual"] * df["cop_actual"]
 
-        # Filter: Geen zon (verstoort R), geen extreme uitschieters
-        mask = (df["pv_actual"] < 0.05) & (df["dT_1h"].abs() < 2.0)
+        # 3. Features voorbereiden (Rolling mean om ruis te onderdrukken)
+        # X1: Verlies naar buiten (T_room - T_out)
+        loss_potential = -(df["room_temp"] - df["temp"])
+        df["X1"] = loss_potential.rolling(window=4).mean().shift(-3)
+
+        # X2: Thermische winst
+        df["X2"] = df["p_th_actual"].rolling(window=4).mean().shift(-3)
+
+        # 4. Filteren
+        # Geen zon (pv < 0.05) en stabiele metingen (dT < 1.5)
+        mask = (df["pv_actual"] < 0.05) & (df["dT_1h"].abs() < 1.5)
         train_data = df[mask][["X1", "X2", "dT_1h"]].dropna()
 
         if len(train_data) < 50:
-            logger.info("[Optimizer] Te weinig stabiele data voor RC identificatie.")
+            logger.warning(
+                "[Identificatie] Te weinig stabiele data voor betrouwbare training."
+            )
             return
 
         X = train_data[["X1", "X2"]]
         y = train_data["dT_1h"]
 
+        # 5. Regressie
+        # dT = (P_th / C) - (deltaT / RC)
         model = LinearRegression(fit_intercept=False)
         model.fit(X, y)
         coef_loss, coef_gain = model.coef_
 
-        # Fysieke begrenzing en berekening (C tussen 10-100, R tussen 5-30)
-        c_gain_clamped = np.clip(coef_gain, 1.0 / 100.0, 1.0 / 10.0)
+        # 6. Begrenzing (Clamping) om fysiek onmogelijke waarden te voorkomen
+        # C tussen 15 en 120 kWh/K
+        c_gain_clamped = np.clip(coef_gain, 1.0 / 120.0, 1.0 / 15.0)
         self.C = 1.0 / c_gain_clamped
 
-        r_loss_clamped = np.clip(coef_loss, 1.0 / (30.0 * self.C), 1.0 / (5.0 * self.C))
+        # R tussen 5 en 40 K/kW
+        r_loss_clamped = np.clip(coef_loss, 1.0 / (40.0 * self.C), 1.0 / (5.0 * self.C))
         self.R = 1.0 / (r_loss_clamped * self.C)
 
         self.is_fitted = True
         joblib.dump({"R": self.R, "C": self.C}, self.path)
-        logger.info(
-            f"[Identificatie] Nieuwe stabiele waarden: R={self.R:.2f}, C={self.C:.2f}"
-        )
-
-
-# =========================================================
-# 2. COP-MODEL
-# =========================================================
-class COPModel:
-    def __init__(self, t_supply_target, efficiency=0.5, cop_min=1.0, cop_max=5.0):
-        self.t_supply = t_supply_target
-        self.eta = efficiency
-        self.cop_min = cop_min
-        self.cop_max = cop_max
-
-    def cop(self, T_out):
-        # Voorkom divide by zero als T_out == T_supply (onwaarschijnlijk maar toch)
-        delta_t = np.maximum(self.t_supply - T_out, 5.0)
-
-        # T in Kelvin
-        t_h_kelvin = self.t_supply + 273.15
-
-        cop_theoretical = t_h_kelvin / delta_t
-        cop_real = cop_theoretical * self.eta
-
-        return np.clip(cop_real, self.cop_min, self.cop_max)
+        logger.info(f"[Identificatie] Nieuw getraind: R={self.R:.2f}, C={self.C:.2f}")
 
 
 # =========================================================
 # 3. ML RESIDUAL MODEL
 # =========================================================
 class MLResidualPredictor:
+    """
+    Voorspelt het verschil (residual) tussen het RC-model en de werkelijkheid.
+    Vangt effecten op van Zon, Wind, Douchen, Koken, etc.
+    """
+
     def __init__(self, path: str):
         self.path = Path(path)
         self.model = None
-        # Definieer vaste feature-sets om mismatches te voorkomen
         self.features_ufh = [
             "temp",
             "solar",
@@ -137,75 +163,71 @@ class MLResidualPredictor:
         self.features_dhw = ["temp", "hour_sin", "hour_cos", "doy_sin", "doy_cos"]
 
         if self.path.exists():
-            self.model = joblib.load(self.path)
+            try:
+                self.model = joblib.load(self.path)
+            except Exception:
+                logger.error(f"Kon model {path} niet laden.")
 
     def train(self, df: pd.DataFrame, R, C, cop_model, is_dhw=False):
         df = df.copy()
         df = df.set_index("timestamp").sort_index()
-        df = df.resample("15min").asfreq()
-        dt = 0.25
-        boiler_mass_factor = 0.232
-
-        # Voeg 'hour' toe aan de bron-dataframe
+        df = df.resample("15min").interpolate(method="linear", limit=2)
         df = df.reset_index()
         df = add_cyclic_time_features(df, col_name="timestamp")
 
-        # 1. Bereken de theoretische RC-delta (Physics Baseline)
-        outside = df["temp"]
-        wp = df["wp_actual"]
-        cop = cop_model.cop(outside)
+        dt = 0.25
+        boiler_mass_factor = 0.232  # 200L boiler
 
         if not is_dhw:
-            df["solar"] = df["pv_actual"]
-            temp = df["room_temp"]
-            dT_rc = ((wp * cop) - (temp - outside) / R) * dt / C
+            # UFH: Sink ~26C (bij 20C kamer)
+            df["cop_calc"] = df.apply(
+                lambda row: cop_model.get_cop(row["temp"], row["room_temp"] + 6.0),
+                axis=1,
+            )
+
+            # Theoretisch: dT = (Winst - Verlies) / Massa
+            loss = (df["room_temp"] - df["temp"]) / R
+            dT_rc = ((df["wp_actual"] * df["cop_calc"]) - loss) * dt / C
             y_actual = df["room_temp"].shift(-1) - df["room_temp"]
+
+            df["solar"] = df["pv_actual"]
             feature_cols = self.features_ufh
         else:
-            dT_rc = (wp * cop * dt) / boiler_mass_factor
+            # DHW
+            df["dhw_temp"] = (df["dhw_top"] + df["dhw_bottom"]) / 2
+
+            # Sink ~45C-55C. We nemen hier gemiddeld +9 tov water
+            df["cop_calc"] = df.apply(
+                lambda row: cop_model.get_cop(row["temp"], row["dhw_temp"] + 9.0),
+                axis=1,
+            )
+
+            dT_rc = (df["wp_actual"] * df["cop_calc"] * dt) / boiler_mass_factor
             y_actual = df["dhw_temp"].shift(-1) - df["dhw_temp"]
             feature_cols = self.features_dhw
 
-        target_series = (y_actual - dT_rc).rename("target_residual")
+        target = (y_actual - dT_rc).rename("target_residual")
 
-        if is_dhw:
-            # Dit voorkomt dat het model de douche als een constante leksnelheid ziet.
-            target_series = target_series.clip(lower=-0.3, upper=0.2)
-
-        X = df.reindex(columns=feature_cols)
-        train_df = pd.concat([X, target_series], axis=1).dropna()
+        train_df = pd.concat([df[feature_cols], target], axis=1).dropna()
 
         if len(train_df) > 50:
-            X_train = train_df[feature_cols]
-            y_train = train_df["target_residual"]
-
             self.model = HistGradientBoostingRegressor()
-            self.model.fit(X_train, y_train)
+            self.model.fit(train_df[feature_cols], train_df["target_residual"])
             joblib.dump(self.model, self.path)
-            logger.info(
-                f"[Optimizer] Model {self.path} getraind op {len(X_train)} samples."
-            )
+            logger.info(f"[ML] Model {self.path.name} getraind.")
 
     def predict(self, forecast_df, is_dhw=False):
-        """
-        Voorspelt residuals voor de horizon.
-        LET OP: forecast_df moet de juiste kolomnamen bevatten.
-        """
         if self.model is None:
             return np.zeros(len(forecast_df))
 
-        # 1. Voorbereiden van de features
-        df_input = forecast_df.copy()
-        df_input["solar"] = df_input["power_corrected"]
-        df_input = add_cyclic_time_features(df_input, col_name="timestamp")
+        df_in = forecast_df.copy()
+        df_in["solar"] = df_in["power_corrected"]  # Gebruik forecast solar
+        df_in = add_cyclic_time_features(df_in, col_name="timestamp")
 
-        # 2. Selecteer de juiste features voor het model
-        feature_cols = self.features_dhw if is_dhw else self.features_ufh
+        cols = self.features_dhw if is_dhw else self.features_ufh
+        X = df_in.reindex(columns=cols, fill_value=0.0)
 
-        # 3. Voorspel
-        X_predict = df_input.reindex(columns=feature_cols, fill_value=0.0)
-
-        return self.model.predict(X_predict)
+        return self.model.predict(X)
 
 
 # =========================================================
