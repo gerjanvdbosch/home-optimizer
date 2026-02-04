@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
         logger.info("[System] API server started")
 
-        next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
+        next_run = datetime.now(timezone.utc) + timedelta(seconds=5)
 
         scheduler.add_job(collector.update_forecast, "interval", seconds=15)
         scheduler.add_job(collector.update_load, "interval", seconds=15)

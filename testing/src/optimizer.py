@@ -516,6 +516,9 @@ class ThermalMPC:
         soc = (dhw_avg - self.cold_water) / (self.dhw_target - self.cold_water)
         dhw_kwh = max(0.0, (dhw_avg - self.cold_water) * 0.232)
 
+        # Dit is puur: Import * Prijs
+        real_cost_import = np.sum(self.p_grid_import.value * self.P_prices.value) * self.dt
+
         return {
             "mode": mode,
             "target_power": round(current_p_el, 3),
@@ -523,7 +526,8 @@ class ThermalMPC:
             "planned_dhw": self.t_dhw.value.tolist(),
             "dhw_soc": max(0, min(1, soc)),
             "dhw_energy_kwh": dhw_kwh,
-            "cost_projected": float(self.problem.value),
+            "cost_projected": round(real_cost_import, 2),
+            "objective_score": float(self.problem.value),
             "status": self.problem.status,
         }
 
