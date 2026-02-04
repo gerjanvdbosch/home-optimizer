@@ -101,25 +101,22 @@ if __name__ == "__main__":
 
         next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
 
-        scheduler.add_job(
-            collector.update_forecast, "interval", minutes=15, next_run_time=next_run
-        )
-        scheduler.add_job(
-            collector.update_load, "interval", seconds=5, next_run_time=next_run
-        )
-        scheduler.add_job(
-            collector.update_history, "interval", minutes=1, next_run_time=next_run
-        )
+        scheduler.add_job(collector.update_forecast, "interval", minutes=15)
+        scheduler.add_job(collector.update_load, "interval", seconds=5)
+        scheduler.add_job(collector.update_history, "interval", minutes=1)
 
-        scheduler.add_job(
-            coordinator.tick, "interval", minutes=1, next_run_time=next_run
-        )
+        scheduler.add_job(coordinator.tick, "interval", minutes=1)
         scheduler.add_job(
             coordinator.optimize, "interval", minutes=15, next_run_time=next_run
         )
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
 
         logger.info("[System] Engine running")
+
+        collector.update_forecast()
+        collector.update_history()
+
+        coordinator.tick()
 
         scheduler.start()
 

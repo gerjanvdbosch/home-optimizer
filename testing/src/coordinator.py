@@ -5,7 +5,6 @@ import uvicorn
 
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.schedulers.background import BackgroundScheduler
 
 from config import Config
 from context import Context
@@ -102,7 +101,6 @@ if __name__ == "__main__":
     logger.info("[System] Starting...")
 
     scheduler = BlockingScheduler()
-    background = BackgroundScheduler()
 
     try:
         config = Config.load()
@@ -117,13 +115,15 @@ if __name__ == "__main__":
 
         logger.info("[System] API server started")
 
+        next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
+
         scheduler.add_job(collector.update_forecast, "interval", seconds=15)
         scheduler.add_job(collector.update_load, "interval", seconds=15)
         scheduler.add_job(collector.update_history, "interval", seconds=15)
         scheduler.add_job(coordinator.tick, "interval", seconds=15)
 
-        background.add_job(coordinator.train, "cron", hour=2, minute=5)
-        #scheduler.add_job(coordinator.optimize, "interval", seconds=10)
+        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
+        scheduler.add_job(coordinator.optimize, "interval", minutes=1, next_run_time=next_run)
 
         logger.info("[System] Engine running")
 
@@ -132,10 +132,8 @@ if __name__ == "__main__":
 
         coordinator.tick()
         coordinator.train()
-        coordinator.optimize()
 
         scheduler.start()
-        background.start()
 
     except (KeyboardInterrupt, SystemExit):
         logger.info("[System] Stopping and exiting...")

@@ -210,10 +210,6 @@ class MLResidualPredictor:
 
         target = (y_actual - dT_rc).rename("target_residual")
 
-        if is_dhw:
-            # DHW mag snel dalen (douchen), maar niet oneindig
-            target = target.clip(lower=-1.5, upper=0.2)
-
         train_df = pd.concat([df[feature_cols], target], axis=1).dropna()
 
         if len(train_df) > 50:
@@ -233,13 +229,7 @@ class MLResidualPredictor:
         cols = self.features_dhw if is_dhw else self.features_ufh
         X = df_in.reindex(columns=cols, fill_value=0.0)
 
-        preds = self.model.predict(X)
-
-        # Safety clamps op de voorspelling
-        if is_dhw:
-            return np.clip(preds, -1.5, 0.05)  # Max daling 1.5C/kwartier
-        else:
-            return np.clip(preds, -0.1, 0.1)  # Max invloed 0.1C/kwartier
+        return self.model.predict(X)
 
 
 # =========================================================
@@ -257,7 +247,7 @@ class ThermalMPC:
         self.horizon = 48  # 12 uur
         self.dt = 0.25  # 15 min
         self.p_el_max = 3.5  # kW
-        self.dhw_min = 35.0  # Absolute ondergrens
+        self.dhw_min = 30.0  # Absolute ondergrens
         self.dhw_target = 50.0
         self.cold_water = 15.0
 
@@ -294,6 +284,9 @@ class ThermalMPC:
 
         # NIEUW: Hulpvariabele voor grid import (DPP Fix)
         self.p_grid_import = cp.Variable(T, nonneg=True, name="p_grid_import")
+
+        # NIEUW: Hulpvariabele voor Solar Self-Consumption (vermijdt cp.minimum)
+        self.p_solar_self = cp.Variable(T, nonneg=True, name="p_solar_self")
 
         self.t_room = cp.Variable(T + 1, name="t_room")
         self.t_dhw = cp.Variable(T + 1, name="t_dhw")
@@ -366,33 +359,38 @@ class ThermalMPC:
                 self.t_room[t] + self.p_el_ufh[t] * 4.0 <= 30,
             ]
 
-            # 5. Net Load Constraint
-            # Definieer Net Load lineair.
-            # p_grid_import >= (Verbruik - Solar).
-            # Omdat p_grid_import ook >= 0 is (nonneg=True), werkt dit als max(0, net_load).
-            net_load_expr = (
-                self.p_el_ufh[t]
-                + self.p_el_dhw[t]
-                + self.P_load_base[t]
-                - self.P_solar_avail[t]
-            )
-            constraints += [self.p_grid_import[t] >= net_load_expr]
+            # 4. Net Load & Solar Logic (Linearized)
+            total_load = self.p_el_ufh[t] + self.p_el_dhw[t]
+            net_load_expr = total_load + self.P_load_base[t] - self.P_solar_avail[t]
+
+            constraints += [
+                # Import is wat we te kort komen
+                self.p_grid_import[t] >= net_load_expr,
+
+                # Solar Self Consumption Logic:
+                # p_solar_self mag niet meer zijn dan de Load
+                self.p_solar_self[t] <= total_load,
+                # p_solar_self mag niet meer zijn dan de Beschikbare Zon
+                self.p_solar_self[t] <= self.P_solar_avail[t]
+                # Door deze variabele te maximaliseren in de objective,
+                # zoekt de solver de 'overlap' tussen Load en Zon.
+            ]
 
         # --- OBJECTIVE ---
         # Gebruik de hulpvariabele p_grid_import i.p.v. cp.pos(net_load)
         # Dit is nu: Variabele * Parameter. Dat is DPP compliant.
         cost = cp.sum(cp.multiply(self.p_grid_import, self.P_prices)) * self.dt
 
-        # Solar Self-Consumption Bonus
-        consumed_total = self.p_el_ufh + self.p_el_dhw
-        # cp.minimum(Var, Param) is meestal OK, zolang je het niet x Param doet
-        solar_utilized = cp.minimum(consumed_total, self.P_solar_avail)
-        solar_bonus = cp.sum(solar_utilized) * 0.22
+        # Solar Bonus (Nu lineair en snel!)
+        solar_bonus = cp.sum(self.p_solar_self) * 0.22
 
-        # Anti-Pendel
-        switches = cp.sum(cp.abs(self.u_ufh[1:] - self.u_ufh[:-1])) + cp.sum(
-            cp.abs(self.u_dhw[1:] - self.u_dhw[:-1])
-        )
+        # Anti-Pendel Fix: Start-up penalty
+        # We straffen (u[t] - u[t-1]) alleen als het positief is.
+        # Dit is DCP compliant omdat cp.pos convex is en we minimaliseren.
+        # We gebruiken slicing [1:] en [:-1] voor vectoren.
+        startups_ufh = cp.sum(cp.pos(self.u_ufh[1:] - self.u_ufh[:-1]))
+        startups_dhw = cp.sum(cp.pos(self.u_dhw[1:] - self.u_dhw[:-1]))
+        switches = (startups_ufh + startups_dhw) * 0.5  # Straf factor
 
         # Comfort Penalties
         # 1. Te koud (Hard & Comfort)
@@ -492,7 +490,13 @@ class ThermalMPC:
         # 3. SOLVE
         try:
             # CBC is de beste open-source MILP solver
-            self.problem.solve(solver=cp.CBC, verbose=True)
+            self.problem.solve(
+                solver=cp.CBC,
+                verbose=True,
+                maximumSeconds=20,
+                numberThreads=1,
+                allowableGap=0.05
+            )
         except Exception:
             logger.warning("[Optimizer] CBC faalde, fallback naar GLPK_MI")
             try:
@@ -517,21 +521,11 @@ class ThermalMPC:
         soc = (dhw_avg - self.cold_water) / (self.dhw_target - self.cold_water)
         dhw_kwh = max(0.0, (dhw_avg - self.cold_water) * 0.232)
 
-        planned_modes = []
-        for i in range(self.horizon):
-            if self.u_dhw.value[i] > 0.5:
-                planned_modes.append("DHW")
-            elif self.u_ufh.value[i] > 0.5:
-                planned_modes.append("UFH")
-            else:
-                planned_modes.append("OFF")
-
         return {
             "mode": mode,
             "target_power": round(current_p_el, 3),
             "planned_room": self.t_room.value.tolist(),
             "planned_dhw": self.t_dhw.value.tolist(),
-            "planned_modes": planned_modes,
             "dhw_soc": max(0, min(1, soc)),
             "dhw_energy_kwh": dhw_kwh,
             "cost_projected": float(self.problem.value),
