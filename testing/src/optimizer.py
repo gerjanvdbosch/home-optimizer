@@ -493,7 +493,7 @@ class ThermalMPC:
             self.problem.solve(
                 solver=cp.CBC,
                 verbose=True,
-                maximumSeconds=20,
+                maximumSeconds=60,
                 numberThreads=1,
                 allowableGap=0.05
             )
