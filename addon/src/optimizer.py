@@ -517,7 +517,9 @@ class ThermalMPC:
         dhw_kwh = max(0.0, (dhw_avg - self.cold_water) * 0.232)
 
         # Dit is puur: Import * Prijs
-        real_cost_import = np.sum(self.p_grid_import.value * self.P_prices.value) * self.dt
+        real_cost_import = (
+            np.sum(self.p_grid_import.value * self.P_prices.value) * self.dt
+        )
 
         return {
             "mode": mode,
