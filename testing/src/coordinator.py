@@ -52,34 +52,18 @@ class Coordinator:
         if result is not None:
             self.context.result = result
 
-            print("\n" + "="*50)
-            print(f" OPTIMALISATIE RESULTAAT - {datetime.now().strftime('%H:%M:%S')}")
-            print("-"*50)
             print(f"Status:  {result['status']}")
-            print(f"Modus:   {result['mode']} (Vermogen: {result['target_power']:.2f} kW)")
-            print(f"Kosten:  €{result['cost_projected']:.2f} (projectie 12u)")
+            print(
+                f"Modus:   {result['mode']} (Vermogen: {result['target_power']:.2f} kW)"
+            )
+            print(f"Kosten:  €{result['cost_projected']:.2f}")
             print(f"Boiler:  {result['dhw_soc']*100:.1f}% SoC")
-            print("-"*50)
 
-            print("Verloop komende 12 uur:")
-            print(f"{'TIJD':<10} | {'MODE':<5} | {'KAMER':<10} | {'BOILER':<10}")
-            print("-"*40)
-
+            print("\nVerloop komende 12 uur:")
             for i in range(48):
                 r_t = result["planned_room"][i]
                 d_t = result["planned_dhw"][i]
-                m_t = result["planned_modes"][i] # De nieuwe data
-
-                # Alleen de eerste 15 minuten en daarna elk uur om de lijst korter te houden?
-                # Of gewoon alles zoals je vroeg:
-                timestamp = (datetime.now() + timedelta(minutes=i*15)).strftime("%H:%M")
-
-                # Kleurtje of symbool toevoegen voor leesbaarheid (optioneel)
-                mode_str = f"[{m_t}]" if m_t != "OFF" else " -- "
-
-                print(f"{timestamp:<10} | {mode_str:<5} | {r_t:.2f}°C    | {d_t:.2f}°C")
-
-            print("="*50 + "\n")
+                print(f"  T + {i*15:02}m | Kamer: {r_t:.2f}°C | Boiler: {d_t:.2f}°C")
 
 
     def train(self):
