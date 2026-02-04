@@ -389,7 +389,7 @@ class ThermalMPC:
         # We gebruiken slicing [1:] en [:-1] voor vectoren.
         startups_ufh = cp.sum(cp.pos(self.u_ufh[1:] - self.u_ufh[:-1]))
         startups_dhw = cp.sum(cp.pos(self.u_dhw[1:] - self.u_dhw[:-1]))
-        switches = (startups_ufh + startups_dhw) * 0.5  # Straf factor
+        switches = (startups_ufh + startups_dhw) * 2.0  # Straf factor
 
         # Comfort Penalties
         # 1. Te koud (Hard & Comfort)
@@ -490,11 +490,7 @@ class ThermalMPC:
         try:
             # CBC is de beste open-source MILP solver
             self.problem.solve(
-                solver=cp.CBC,
-                verbose=True,
-                maximumSeconds=60,
-                numberThreads=1,
-                allowableGap=0.05,
+                solver=cp.CBC, verbose=True, maximumSeconds=60, allowableGap=0.05
             )
         except Exception:
             logger.warning("[Optimizer] CBC faalde, fallback naar GLPK_MI")
