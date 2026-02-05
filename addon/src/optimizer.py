@@ -307,8 +307,8 @@ class ThermalMPC:
             constraints += [p_el_ufh[t] <= self.p_el_max * u_ufh[t]]
 
             # Haal COP op voor dit tijdstip (temperatuurafhankelijk)
-            c_ufh = self.cop_ufh.cop(forecast_df["temp"].iloc[t])
-            c_dhw = self.cop_dhw.cop(forecast_df["temp"].iloc[t])
+            c_ufh = self.cop_ufh.get_cop(forecast_df["temp"].iloc[t])
+            c_dhw = self.cop_dhw.get_cop(forecast_df["temp"].iloc[t])
 
             # --- KAMER DYNAMICA ---
             p_th_room = p_el_ufh[t] * c_ufh
@@ -438,10 +438,10 @@ class Optimizer:
         self.ident = SystemIdentificator(config.rc_model_path)
 
         self.cop_ufh = COPModel(
-            t_supply_target=27.0, efficiency=0.50, cop_min=2.5, cop_max=5.0
+            efficiency=0.50, cop_min=2.5, cop_max=5.0
         )
         self.cop_dhw = COPModel(
-            t_supply_target=55.0, efficiency=0.45, cop_min=1.5, cop_max=3.0
+            efficiency=0.45, cop_min=1.5, cop_max=3.0
         )
 
         # APARTE ML MODELLEN
