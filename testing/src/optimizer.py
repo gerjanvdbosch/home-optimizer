@@ -184,19 +184,14 @@ class SystemIdentificator:
             )
 
     def train(self, df):
-        df_proc = (
-            df.copy()
-            .set_index("timestamp")
-            .sort_index()
-        )
+        df_proc = df.copy().set_index("timestamp").sort_index()
 
         for col in df_proc.columns:
-            df_proc[col] = pd.to_numeric(df_proc[col], errors='coerce')
+            df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
 
         df_proc = (
-            df_proc
-            .resample("15min")
-            .interpolate(method='linear', limit=2)
+            df_proc.resample("15min")
+            .interpolate(method="linear", limit=2)
             .dropna()
             .reset_index()
         )
@@ -301,19 +296,14 @@ class MLResidualPredictor:
         ]
 
     def train(self, df, R, C, is_dhw=False):
-        df_proc = (
-            df.copy()
-            .set_index("timestamp")
-            .sort_index()
-        )
+        df_proc = df.copy().set_index("timestamp").sort_index()
 
         for col in df_proc.columns:
-            df_proc[col] = pd.to_numeric(df_proc[col], errors='coerce')
+            df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
 
         df_proc = (
-            df_proc
-            .resample("15min")
-            .interpolate(method='linear', limit=2)
+            df_proc.resample("15min")
+            .interpolate(method="linear", limit=2)
             .dropna()
             .reset_index()
         )
@@ -414,19 +404,22 @@ class ThermalMPC:
             total_load = p_el_wp + self.P_base_load[t]
 
             # 2. Elektrische Balans & PV Balans
-            constraints += [ total_load == self.p_grid[t] + self.p_solar_self[t] ]
-            constraints += [ self.P_solar[t] == self.p_solar_self[t] + self.p_export[t] ]
+            constraints += [total_load == self.p_grid[t] + self.p_solar_self[t]]
+            constraints += [self.P_solar[t] == self.p_solar_self[t] + self.p_export[t]]
 
             # 3. Thermische Balans (R-C en Tank model)
             constraints += [
                 # FIX: Gebruik p_th_ufh
-                self.t_room[t + 1] == self.t_room[t] + (
-                    (p_th_ufh - (self.t_room[t] - self.P_temp_out[t]) / R)
-                    * self.dt / C
+                self.t_room[t + 1]
+                == self.t_room[t]
+                + (
+                    (p_th_ufh - (self.t_room[t] - self.P_temp_out[t]) / R) * self.dt / C
                     + self.P_ufh_res[t]
                 ),
                 # FIX: Gebruik p_th_dhw
-                self.t_dhw[t + 1] == self.t_dhw[t] + (
+                self.t_dhw[t + 1]
+                == self.t_dhw[t]
+                + (
                     (p_th_dhw * self.dt) / 0.232
                     + self.P_dhw_res[t]
                     - self.P_dhw_loss_per_dt
@@ -443,7 +436,13 @@ class ThermalMPC:
             ]
 
         # --- OBJECTIVE FUNCTION (Onveranderd) ---
-        net_cost = cp.sum(cp.multiply(self.p_grid, self.P_prices) - cp.multiply(self.p_export, self.P_export_prices)) * self.dt
+        net_cost = (
+            cp.sum(
+                cp.multiply(self.p_grid, self.P_prices)
+                - cp.multiply(self.p_export, self.P_export_prices)
+            )
+            * self.dt
+        )
         comfort_room_low = cp.sum(cp.pos(self.room_target - self.t_room)) * 4.0
         comfort_dhw_low = cp.sum(cp.pos(self.dhw_target - self.t_dhw)) * 2.0
 
