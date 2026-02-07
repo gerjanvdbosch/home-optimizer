@@ -169,20 +169,20 @@ class Collector:
 
         # Detecteer kwartierwissel
         if slot_start > self.current_slot_start:
-            avg_pv = float(np.mean(self.pv_slots))
-            avg_wp = float(np.mean(self.wp_slots))
-            avg_compressor_freq = float(np.mean(self.compressor_slots))
-            avg_supply = float(np.mean(self.supply_slots))
-            avg_return = float(np.mean(self.return_slots))
-            avg_room = float(np.mean(self.room_slots))
-            avg_dhw_top = float(np.mean(self.dhw_top_slots))
-            avg_dhw_bottom = float(np.mean(self.dhw_bottom_slots))
+            avg_pv = self._mean(self.pv_slots)
+            avg_wp = self._mean(self.wp_slots)
+            avg_compressor_freq = self._mean(self.compressor_slots)
+            avg_supply = self._mean(self.supply_slots)
+            avg_return = self._mean(self.return_slots)
+            avg_room = self._mean(self.room_slots)
+            avg_dhw_top = self._mean(self.dhw_top_slots)
+            avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
+            avg_cop = self._mean(self.cop_slots)
+            avg_output = self._mean(self.output_slots)
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (
                 sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
             ) * -1.0
-            avg_cop = float(np.mean(self.cop_slots))
-            avg_output = float(np.mean(self.output_slots))
 
             self.pv_slots = []
             self.wp_slots = []
@@ -227,3 +227,14 @@ class Collector:
         if not buffer:
             return 0.0
         return float(np.median(buffer))
+
+    def _mean(self, values: list, default: float = np.nan):
+        if not values:
+            return default
+
+        result = np.nanmean(values)
+
+        if np.isnan(result):
+            return default
+
+        return float(result)
