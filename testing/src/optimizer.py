@@ -64,8 +64,9 @@ class HPPerformanceMap:
         self.cop_model = RandomForestRegressor(n_estimators=150, max_depth=10, min_samples_leaf=5, random_state=42)
         self.cop_model.fit(df_clean[features_cop], df_clean["cop"])
 
+        features_power = ["compressor_freq", "temp", "supply_temp", "hvac_mode"]
         self.power_model = LinearRegression(fit_intercept=False)
-        self.power_model.fit(df_clean[["compressor_freq", "temp"]], df_clean["wp_actual"])
+        self.power_model.fit(df_clean[features_power], df_clean["wp_actual"])
 
         # Max Freq Training
         df_f = df[df["compressor_freq"] > 15].copy()
@@ -103,9 +104,15 @@ class HPPerformanceMap:
         X = [[t_out, t_supply, t_return, delta_t, freq, mode_idx]]
         return float(self.cop_model.predict(X)[0])
 
-    def predict_p_el_slope(self, freq_ref, t_out):
-        if not self.is_fitted: return 0.04
-        p_el = self.power_model.predict([[freq_ref, t_out]])[0]
+    def predict_p_el_slope(self, freq_ref, t_out, t_sink, mode_idx):
+        if not self.is_fitted:
+            return 0.04
+
+        # Voorspel P_el met alle relevante features
+        X = [[freq_ref, t_out, t_sink, mode_idx]]
+        p_el = self.power_model.predict(X)[0]
+
+        # De slope is het voorspelde vermogen gedeeld door de referentiefrequentie
         return max(0.01, p_el / freq_ref)
 
     def predict_max_freq(self, t_out):
@@ -268,7 +275,7 @@ class ThermalMPC:
                 self.t_room[t+1] == self.t_room[t] + ((self.f_ufh[t]*self.P_th_per_hz_ufh[t] - (self.t_room[t]-self.P_temp_out[t])/R)*self.dt/C + self.P_ufh_res[t]),
                 self.t_dhw[t+1] == self.t_dhw[t] + ((self.f_dhw[t]*self.P_th_per_hz_dhw[t]*self.dt)/0.232 + self.P_dhw_res[t] - self.P_dhw_loss_per_dt),
                 self.t_room[t+1] + self.s_room_low[t] >= 18.0, # Veiligheidsondergrens
-                self.t_dhw[t+1] + self.s_dhw_low[t] >= 35.0, # Veiligheidsondergrens
+                self.t_dhw[t+1] + self.s_dhw_low[t] >= 20.0, # Veiligheidsondergrens
                 self.t_room[t+1] <= 22.5
             ]
 
@@ -316,41 +323,55 @@ class ThermalMPC:
         dhw_start = (state["dhw_top"] + state["dhw_bottom"]) / 2
         current_est_room, current_est_dhw = state["room_temp"], dhw_start
 
+        # Tijdelijke opslag voor gecombineerde waarden (DPP optimalisatie)
         th_per_hz_u, th_per_hz_d = np.zeros(T), np.zeros(T)
         el_per_hz_u, el_per_hz_d = np.zeros(T), np.zeros(T)
         v_max_freq = np.zeros(T)
 
-        # Haal learned refs op
+        # Haal alle geleerde parameters op
         ufh_ref = self.perf_map.ufh_freq_ref
         dhw_ref = self.perf_map.dhw_freq_ref
         ufh_dt = self.perf_map.ufh_delta_t_ref
         dhw_dt = self.perf_map.dhw_delta_t_ref
 
+        # Stel stilstandsverlies parameter in
         self.P_dhw_loss_per_dt.value = self.ident.K_loss_dhw * self.dt
 
         for t in range(T):
+            # Schat de maximale frequentie voor dit tijdstip
             v_max_freq[t] = self.perf_map.predict_max_freq(t_out[t])
 
-            # 1. UFH
+            # 1. UFH: Dynamische Stooklijn o.b.v. warmteverlies huis
             calc_room = max(current_est_room, 20.0)
             heat_loss_kw = max(0, (calc_room - t_out[t]) / self.ident.R)
+            # Overtemp = Vermogen / Afgiftecoëfficiënt
             overtemp_ufh = np.clip(heat_loss_kw / self.ident.K_emit, 0, 15.0)
             t_supply_ufh = calc_room + (ufh_dt / 2.0) + overtemp_ufh
 
             cop_u = self.perf_map.predict_cop(t_out[t], t_supply_ufh, t_supply_ufh - ufh_dt, ufh_ref, 1)
-            slope_u = self.perf_map.predict_p_el_slope(ufh_ref, t_out[t])
+            # Slope nu inclusief aanvoertemperatuur (t_sink) en modus
+            slope_u = self.perf_map.predict_p_el_slope(ufh_ref, t_out[t], t_supply_ufh, 1)
 
             el_per_hz_u[t] = slope_u
             th_per_hz_u[t] = slope_u * cop_u
 
-            # 2. DHW
+            # 2. DHW: Dynamische Aanvoer o.b.v. vermogen warmtepomp
             calc_dhw = max(current_est_dhw, 40.0)
-            p_th_dhw_est = dhw_ref * self.perf_map.predict_p_el_slope(dhw_ref, t_out[t]) * 2.5
-            overtemp_dhw = np.clip(p_th_dhw_est / self.ident.K_tank, 0, 20.0)
+
+            # Stap A: Maak een eerste schatting van het thermisch vermogen
+            # We gebruiken hier calc_dhw + dhw_dt als tijdelijke sink voor de allereerste COP-check
+            p_th_est = dhw_ref * self.perf_map.predict_p_el_slope(dhw_ref, t_out[t], calc_dhw + dhw_dt, 2) * self.perf_map.predict_cop(t_out[t], calc_dhw + dhw_dt, calc_dhw, dhw_ref, 2)
+
+            # Stap B: Bereken de overtemp die nodig is om DIT vermogen door de spiraal te duwen
+            # Overtemp = P_th / K_tank
+            overtemp_dhw = np.clip(p_th_est / self.ident.K_tank, 0, 20.0)
+
+            # Stap C: De aanvoer is de tank-temp + de helft van de water-delta + de overtemp over de spiraal
             t_supply_dhw = min(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 58.0)
 
+            # Stap D: De definitieve waarden voor de solver
             cop_d = self.perf_map.predict_cop(t_out[t], t_supply_dhw, t_supply_dhw - dhw_dt, dhw_ref, 2)
-            slope_d = self.perf_map.predict_p_el_slope(dhw_ref, t_out[t])
+            slope_d = self.perf_map.predict_p_el_slope(dhw_ref, t_out[t], t_supply_dhw, 2)
 
             el_per_hz_d[t] = slope_d
             th_per_hz_d[t] = slope_d * cop_d
