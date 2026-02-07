@@ -56,8 +56,10 @@ def create_test_context():
     prices = [0.30] * horizon
     prices[10:20] = [0.10] * 10
 
-    solar_forecast = np.zeros(horizon)
-    solar_forecast[16:32] = [2.0 * np.sin(x) for x in np.linspace(0, np.pi, 16)]
+    power_corrected = np.zeros(horizon)
+    power_corrected[16:32] = [2.0 * np.sin(x) for x in np.linspace(0, np.pi, 16)]
+
+    load_corrected = [0.1] * horizon
 
     forecast_df = pd.DataFrame(
         {
@@ -66,7 +68,8 @@ def create_test_context():
             "solar": solar_rad,
             "wind": wind,
             "price": prices,
-            "solar_forecast": solar_forecast,
+            "power_corrected": power_corrected,
+            "load_corrected": load_corrected,
         }
     )
 

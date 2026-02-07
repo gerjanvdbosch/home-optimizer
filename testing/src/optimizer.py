@@ -366,6 +366,7 @@ class ThermalMPC:
         self.P_t_room_init = cp.Parameter()
         self.P_t_dhw_init = cp.Parameter()
         self.P_prices = cp.Parameter(T, nonneg=True)
+        self.P_export_prices = cp.Parameter(T, nonneg=True)
         self.P_temp_out = cp.Parameter(T)
 
         self.P_max_freq = cp.Parameter(T, nonneg=True)
@@ -379,12 +380,14 @@ class ThermalMPC:
         self.P_ufh_res = cp.Parameter(T)
         self.P_dhw_res = cp.Parameter(T)
         self.P_solar = cp.Parameter(T, nonneg=True)
+        self.P_base_load = cp.Parameter(T, nonneg=True)
 
         self.f_ufh = cp.Variable(T, nonneg=True)
         self.f_dhw = cp.Variable(T, nonneg=True)
         self.ufh_on = cp.Variable(T, boolean=True)
         self.dhw_on = cp.Variable(T, boolean=True)
         self.p_grid = cp.Variable(T, nonneg=True)
+        self.p_export = cp.Variable(T, nonneg=True)
         self.p_solar_self = cp.Variable(T, nonneg=True)
         self.t_room = cp.Variable(T + 1)
         self.t_dhw = cp.Variable(T + 1)
@@ -392,66 +395,55 @@ class ThermalMPC:
         self.s_dhw_low = cp.Variable(T, nonneg=True)
 
         R, C = self.ident.R, self.ident.C
+
         constraints = [
             self.t_room[0] == self.P_t_room_init,
             self.t_dhw[0] == self.P_t_dhw_init,
         ]
 
         for t in range(T):
-            constraints += [
-                self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
-                self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
-                self.ufh_on[t] + self.dhw_on[t] <= 1,
-                # Minimale draaitijd simuleren: forceer frequentie als de unit aan staat
-                self.f_ufh[t] >= self.ufh_on[t] * 25,
-                self.f_dhw[t] >= self.dhw_on[t] * 40,
-            ]
-
-            p_el_t = (
+            # 1. Definieer vermogens
+            p_el_wp = (
                 self.f_ufh[t] * self.P_el_per_hz_ufh[t]
                 + self.f_dhw[t] * self.P_el_per_hz_dhw[t]
             )
+            # FIX: Thermisch vermogen moet komen uit frequentie x thermisch-per-Hz
+            p_th_ufh = self.f_ufh[t] * self.P_th_per_hz_ufh[t]
+            p_th_dhw = self.f_dhw[t] * self.P_th_per_hz_dhw[t]
 
-            constraints += [
-                self.p_grid[t] >= p_el_t - self.P_solar[t],
-                self.p_solar_self[t] <= p_el_t,
-                self.p_solar_self[t] <= self.P_solar[t],
-            ]
+            total_load = p_el_wp + self.P_base_load[t]
 
+            # 2. Elektrische Balans & PV Balans
+            constraints += [ total_load == self.p_grid[t] + self.p_solar_self[t] ]
+            constraints += [ self.P_solar[t] == self.p_solar_self[t] + self.p_export[t] ]
+
+            # 3. Thermische Balans (R-C en Tank model)
             constraints += [
-                self.t_room[t + 1]
-                == self.t_room[t]
-                + (
-                    (
-                        self.f_ufh[t] * self.P_th_per_hz_ufh[t]
-                        - (self.t_room[t] - self.P_temp_out[t]) / R
-                    )
-                    * self.dt
-                    / C
+                # FIX: Gebruik p_th_ufh
+                self.t_room[t + 1] == self.t_room[t] + (
+                    (p_th_ufh - (self.t_room[t] - self.P_temp_out[t]) / R)
+                    * self.dt / C
                     + self.P_ufh_res[t]
                 ),
-                self.t_dhw[t + 1]
-                == self.t_dhw[t]
-                + (
-                    (self.f_dhw[t] * self.P_th_per_hz_dhw[t] * self.dt) / 0.232
+                # FIX: Gebruik p_th_dhw
+                self.t_dhw[t + 1] == self.t_dhw[t] + (
+                    (p_th_dhw * self.dt) / 0.232
                     + self.P_dhw_res[t]
                     - self.P_dhw_loss_per_dt
                 ),
-                self.t_room[t + 1] + self.s_room_low[t]
-                >= 18.0,  # Veiligheidsondergrens
-                self.t_dhw[t + 1] + self.s_dhw_low[t] >= 20.0,  # Veiligheidsondergrens
+                # Machine & Veiligheidsgrenzen
+                self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
+                self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
+                self.ufh_on[t] + self.dhw_on[t] <= 1,
+                self.f_ufh[t] >= self.ufh_on[t] * 25,
+                self.f_dhw[t] >= self.dhw_on[t] * 35,
+                self.t_room[t + 1] + self.s_room_low[t] >= 18.0,
+                self.t_dhw[t + 1] + self.s_dhw_low[t] >= 35.0,
                 self.t_room[t + 1] <= 22.5,
             ]
 
-        # OBJECTIVE FUNCTION
-        # Kosten elektriciteit
-        cost_el = cp.sum(cp.multiply(self.p_grid, self.P_prices)) * self.dt
-
-        # 2. PV Bonus (beloning voor eigenverbruik)
-        pv_bonus = cp.sum(self.p_solar_self) * 0.22
-
-        # 3. Comfort Targets (De "Magneten")
-        # Straf voor te koud (pos(Target - T))
+        # --- OBJECTIVE FUNCTION (Onveranderd) ---
+        net_cost = cp.sum(cp.multiply(self.p_grid, self.P_prices) - cp.multiply(self.p_export, self.P_export_prices)) * self.dt
         comfort_room_low = cp.sum(cp.pos(self.room_target - self.t_room)) * 4.0
         comfort_dhw_low = cp.sum(cp.pos(self.dhw_target - self.t_dhw)) * 2.0
 
@@ -470,8 +462,7 @@ class ThermalMPC:
         # TOTAAL
         self.problem = cp.Problem(
             cp.Minimize(
-                cost_el
-                - pv_bonus
+                net_cost
                 + comfort_room_low
                 + comfort_room_high
                 + comfort_dhw_low
@@ -487,7 +478,9 @@ class ThermalMPC:
         T = self.horizon
         t_out = forecast_df.temp.values[:T]
         t_prices = [0.22] * T
+        t_export_prices = [0.05] * T
         t_solar = forecast_df.power_corrected.values[:T]
+        t_base_load = forecast_df.load_corrected.values[:T]
 
         res_u = res_u[:T]
         res_d = res_d[:T]
@@ -591,7 +584,9 @@ class ThermalMPC:
         self.P_t_dhw_init.value = dhw_start
         self.P_temp_out.value = t_out
         self.P_prices.value = t_prices
+        self.P_export_prices.value = t_export_prices
         self.P_solar.value = t_solar
+        self.P_base_load.value = t_base_load
         self.P_ufh_res.value = res_u
         self.P_dhw_res.value = res_d
 
