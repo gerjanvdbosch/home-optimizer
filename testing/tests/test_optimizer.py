@@ -91,6 +91,7 @@ def run_test():
     optimizer.ident.C = 30.0
     optimizer.ident.K_emit = 0.15
     optimizer.ident.K_tank = 0.25
+    optimizer.ident.K_loss_dhw = 0.20
 
     # 2. Mock de Performance Map
     optimizer.perf_map.is_fitted = True
@@ -125,7 +126,7 @@ def run_test():
 
             # Print tabelletje van de eerste 8 kwartieren
             plan_data = []
-            for i in range(24):
+            for i in range(48):
                 mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
                 plan_data.append({
                     "Tijd": context.forecast_df["timestamp"].iloc[i].strftime("%H:%M"),
