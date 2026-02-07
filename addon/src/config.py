@@ -11,8 +11,9 @@ class Config:
     pv_max_kw: float = 2.0
 
     sensor_pv_power: str = "sensor.pv_output"
-    sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
     sensor_grid_power: str = "sensor.p1_meter_power"
+    sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
+    sensor_wp_output: str = "sensor.ecodan_heatpump_ca09ec_geschatte_afgegeven_vermogen"
 
     sensor_dhw_top: str = "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
     sensor_dhw_bottom: str = "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
@@ -21,6 +22,8 @@ class Config:
     sensor_room_temp: str = "sensor.danfoss_15_temperature"
     sensor_compressor_freq: str = "sensor.ecodan_heatpump_compressor_frequentie"
     sensor_supply_temp: str = "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
+    sensor_return_temp: str = "sensor.ecodan_heatpump_ca09ec_retour_temp"
+    sensor_cop: str = "sensor.ecodan_heatpump_ca09ec_geschatte_cop"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 
     sensor_solcast: str = "sensor.solcast_pv_forecast_forecast_today"
@@ -33,6 +36,7 @@ class Config:
     rc_model_path: str = "/config/models/rc_model.joblib"
     load_model_path: str = "/config/models/load_model.joblib"
     solar_model_path: str = "/config/models/solar_model.joblib"
+    hp_model_path: str = "/config/models/hp_model.joblib"
 
     solar_model_ratio: float = 0.0
 

@@ -1,10 +1,10 @@
 import os
-import threading
 import logging
 import uvicorn
+import pandas as pd
 
 from datetime import datetime, timezone, timedelta
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from config import Config
 from context import Context
@@ -50,41 +50,53 @@ class Coordinator:
     def optimize(self):
         result = self.optimizer.resolve(self.context)
 
-        if result is not None:
+        if result:
+            logger.info("--- Resultaat ---")
+            logger.info(f"Gekozen Modus: {result['mode']}")
+            logger.info(f"Frequentie: {result['freq']} Hz")
+
+            # Toegang tot de interne solver variabelen via de mpc instantie
+            mpc = self.optimizer.mpc
+
+            if mpc.f_ufh.value is not None:
+                logger.info("\nPlan details:")
+                f_u = mpc.f_ufh.value
+                f_d = mpc.f_dhw.value
+                t_r = mpc.t_room.value
+                t_d = mpc.t_dhw.value  # De voorspelde DHW temp
+
+                plan_data = []
+                # We lopen door de hele horizon (48 kwartieren / 12 uur)
+                for i in range(48):
+                    mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
+                    plan_data.append(
+                        {
+                            "Tijd": self.context.forecast_df["timestamp"]
+                            .iloc[i]
+                            .strftime("%H:%M"),
+                            "Mode": mode,
+                            "Freq": round(max(f_u[i], f_d[i]), 1),
+                            "T_room": round(t_r[i], 2),
+                            "T_dhw": round(t_d[i], 2),
+                        }
+                    )
+
+                # Gebruik pandas om een mooie tabel te printen
+                print(pd.DataFrame(plan_data).to_string(index=False))
+
+            # Sla het resultaat op in de context voor de Web API
             self.context.result = result
-
-            print(f"Status:  {result['status']}")
-            print(
-                f"Modus:   {result['mode']} (Vermogen: {result['target_power']:.2f} kW)"
-            )
-            print(f"Kosten:  €{result['cost_projected']:.2f}")
-            print(f"Boiler:  {result['dhw_soc']*100:.1f}% SoC")
-
-            print("\nVerloop komende 12 uur:")
-            for i in range(48):
-                r_t = result["planned_room"][i]
-                d_t = result["planned_dhw"][i]
-                print(f"  T + {i*15:02}m | Kamer: {r_t:.2f}°C | Boiler: {d_t:.2f}°C")
 
     def train(self):
         self.solar.train()
         self.load.train()
         self.optimizer.train()
 
-    def start_api(self):
-        api.state.coordinator = self
-        uvicorn.run(
-            api,
-            host=self.config.webapi_host,
-            port=self.config.webapi_port,
-            log_level="warning",
-        )
-
 
 if __name__ == "__main__":
     logger.info("[System] Starting...")
 
-    scheduler = BlockingScheduler()
+    scheduler = BackgroundScheduler(job_defaults={"max_instances": 1})
 
     try:
         config = Config.load()
@@ -94,22 +106,25 @@ if __name__ == "__main__":
         collector = Collector(client, database, context, config)
         coordinator = Coordinator(context, config, database, collector)
 
-        webapi = threading.Thread(target=coordinator.start_api, daemon=True)
-        webapi.start()
-
-        logger.info("[System] API server started")
+        api.state.coordinator = coordinator
 
         next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
 
-        scheduler.add_job(collector.update_forecast, "interval", minutes=15)
-        scheduler.add_job(collector.update_load, "interval", seconds=5)
-        scheduler.add_job(collector.update_history, "interval", minutes=1)
-
-        scheduler.add_job(coordinator.tick, "interval", minutes=1)
         scheduler.add_job(
-            coordinator.optimize, "interval", minutes=15, next_run_time=next_run
+            collector.update_forecast, "interval", minutes=15, id="forecast"
         )
-        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
+        scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
+        scheduler.add_job(collector.update_history, "interval", minutes=1, id="history")
+
+        scheduler.add_job(coordinator.tick, "interval", minutes=1, id="tick")
+        scheduler.add_job(
+            coordinator.optimize,
+            "interval",
+            minutes=15,
+            next_run_time=next_run,
+            id="optimize",
+        )
+        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
 
         logger.info("[System] Engine running")
 
@@ -119,6 +134,15 @@ if __name__ == "__main__":
         coordinator.tick()
 
         scheduler.start()
+
+        logger.info("[System] Engine running")
+
+        uvicorn.run(
+            api,
+            host=config.webapi_host,
+            port=config.webapi_port,
+            log_level="warning",
+        )
 
     except (KeyboardInterrupt, SystemExit):
         logger.info("[System] Stopping and exiting...")

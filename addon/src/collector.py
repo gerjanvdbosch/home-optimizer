@@ -9,6 +9,7 @@ from config import Config
 from collections import deque
 from weather import WeatherClient
 from database import Database
+from context import HvacMode
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ class Collector:
         self.grid_slots = []
         self.compressor_slots = []
         self.supply_slots = []
+        self.return_slots = []
+        self.output_slots = []
+        self.cop_slots = []
         self.room_slots = []
         self.dhw_top_slots = []
         self.dhw_bottom_slots = []
@@ -115,6 +119,12 @@ class Collector:
         # In dat geval is het 'restverbruik' van het huis waarschijnlijk minimaal.
         self.context.stable_load = max(0.05, base_load)
 
+        if self.context.hvac_mode != HvacMode.OFF:
+            raw_output = self.client.get_wp_output()
+
+            if raw_output > 0:
+                self.output_slots.append(raw_output)
+
         logger.debug(
             f"[Collector] Load: Base={base_load:.2f}kW | "
             f"Calc: (Grid {self.context.stable_grid:.2f} + PV {self.context.stable_pv:.2f}) - WP {self.context.stable_wp:.2f}"
@@ -134,8 +144,18 @@ class Collector:
         self.dhw_top_slots.append(raw_dhw_top)
         self.dhw_bottom_slots.append(raw_dhw_bottom)
 
-        self.compressor_slots.append(self.client.get_compressor_freq())
-        self.supply_slots.append(self.client.get_supply_temp())
+        if self.context.hvac_mode != HvacMode.OFF:
+            self.supply_slots.append(self.client.get_supply_temp())
+            self.return_slots.append(self.client.get_return_temp())
+
+            raw_compressor_freq = self.client.get_compressor_freq()
+            raw_cop = self.client.get_cop()
+
+            if raw_compressor_freq > 0:
+                self.compressor_slots.append(raw_compressor_freq)
+
+            if raw_cop > 0:
+                self.cop_slots.append(raw_cop)
 
         logger.info("[Collector] Sensors updated")
 
@@ -156,13 +176,16 @@ class Collector:
 
         # Detecteer kwartierwissel
         if slot_start > self.current_slot_start:
-            avg_pv = float(np.mean(self.pv_slots))
-            avg_wp = float(np.mean(self.wp_slots))
-            avg_compressor_freq = float(np.mean(self.compressor_slots))
-            avg_supply = float(np.mean(self.supply_slots))
-            avg_room = float(np.mean(self.room_slots))
-            avg_dhw_top = float(np.mean(self.dhw_top_slots))
-            avg_dhw_bottom = float(np.mean(self.dhw_bottom_slots))
+            avg_pv = self._mean(self.pv_slots)
+            avg_wp = self._mean(self.wp_slots)
+            avg_compressor_freq = self._mean(self.compressor_slots)
+            avg_supply = self._mean(self.supply_slots)
+            avg_return = self._mean(self.return_slots)
+            avg_room = self._mean(self.room_slots)
+            avg_dhw_top = self._mean(self.dhw_top_slots)
+            avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
+            avg_cop = self._mean(self.cop_slots)
+            avg_output = self._mean(self.output_slots)
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (
                 sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
@@ -173,6 +196,9 @@ class Collector:
             self.grid_slots = []
             self.compressor_slots = []
             self.supply_slots = []
+            self.return_slots = []
+            self.cop_slots = []
+            self.output_slots = []
             self.room_slots = []
             self.dhw_top_slots = []
             self.dhw_bottom_slots = []
@@ -188,8 +214,11 @@ class Collector:
                 dhw_top=avg_dhw_top,
                 dhw_bottom=avg_dhw_bottom,
                 supply_temp=avg_supply,
+                return_temp=avg_return,
                 compressor_freq=avg_compressor_freq,
                 hvac_mode=int(self.context.hvac_mode.value),
+                cop=avg_cop,
+                wp_output=avg_output,
             )
 
             self.current_slot_start = slot_start
@@ -206,16 +235,13 @@ class Collector:
             return 0.0
         return float(np.median(buffer))
 
-    # Helper functie voor de berekening
-    def _calculate_avg_power(self, current, last):
-        if current is None or last is None:
-            return 0.0
+    def _mean(self, values: list, default: float = np.nan):
+        if not values:
+            return default
 
-        diff = current - last
+        result = np.nanmean(values)
 
-        # Reset detectie: Als meter vervangen is of reset naar 0
-        if diff < 0:
-            return 0.0  # Of current * 4 als je aanneemt dat hij bij 0 begon
+        if np.isnan(result):
+            return default
 
-        # kWh naar kW (bij 15 min interval = maal 4)
-        return diff * 4.0
+        return float(result)

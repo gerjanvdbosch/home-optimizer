@@ -91,7 +91,9 @@ class HPPerformanceMap:
         )
 
         # Refs Training (Freq & Delta T)
-        mask_ufh = (df["hvac_mode"] == HvacMode.HEATING.value) & (df["compressor_freq"] > 15)
+        mask_ufh = (df["hvac_mode"] == HvacMode.HEATING.value) & (
+            df["compressor_freq"] > 15
+        )
         if mask_ufh.any():
             self.ufh_freq_ref = float(df.loc[mask_ufh, "compressor_freq"].median())
             self.ufh_delta_t_ref = float(
@@ -100,7 +102,9 @@ class HPPerformanceMap:
                 .median()
             )
 
-        mask_dhw = (df["hvac_mode"] == HvacMode.DHW.value) & (df["compressor_freq"] > 15)
+        mask_dhw = (df["hvac_mode"] == HvacMode.DHW.value) & (
+            df["compressor_freq"] > 15
+        )
         if mask_dhw.any():
             self.dhw_freq_ref = float(df.loc[mask_dhw, "compressor_freq"].median())
             self.dhw_delta_t_ref = float(
@@ -182,7 +186,9 @@ class SystemIdentificator:
             .resample("15min")
             .interpolate()
         )
-        mask_rc = (df_proc["hvac_mode"] == HvacMode.HEATING.value) & (df_proc["pv_actual"] < 0.05)
+        mask_rc = (df_proc["hvac_mode"] == HvacMode.HEATING.value) & (
+            df_proc["pv_actual"] < 0.05
+        )
         train_rc = df_proc[mask_rc].copy()
 
         if len(train_rc) > 50:
@@ -293,7 +299,9 @@ class MLResidualPredictor:
                 (df["wp_output"] - (df["room_temp"] - df["temp"]) / R) * dt / C
             )
         else:
-            df = df[(df["hvac_mode"] == HvacMode.DHW.value) & (df["wp_output"] > 0.5)].copy()
+            df = df[
+                (df["hvac_mode"] == HvacMode.DHW.value) & (df["wp_output"] > 0.5)
+            ].copy()
             dhw_avg = (df["dhw_top"] + df["dhw_bottom"]) / 2
             target = dhw_avg.shift(-1) - dhw_avg - (df["wp_output"] * dt / 0.232)
 
@@ -335,8 +343,6 @@ class ThermalMPC:
         self.P_max_freq = cp.Parameter(T, nonneg=True)
         self.P_dhw_loss_per_dt = cp.Parameter(nonneg=True)
 
-        # We combineren slope en COP tot één parameter: "Thermisch vermogen per Hz"
-        # Dit lost de DPP UserWarning op.
         self.P_th_per_hz_ufh = cp.Parameter(T, nonneg=True)
         self.P_th_per_hz_dhw = cp.Parameter(T, nonneg=True)
         self.P_el_per_hz_ufh = cp.Parameter(T, nonneg=True)
@@ -484,7 +490,11 @@ class ThermalMPC:
             t_supply_ufh = calc_room + (ufh_dt / 2.0) + overtemp_ufh
 
             cop_u = self.perf_map.predict_cop(
-                t_out[t], t_supply_ufh, t_supply_ufh - ufh_dt, ufh_ref, HvacMode.HEATING.value
+                t_out[t],
+                t_supply_ufh,
+                t_supply_ufh - ufh_dt,
+                ufh_ref,
+                HvacMode.HEATING.value,
             )
             # Slope nu inclusief aanvoertemperatuur (t_sink) en modus
             slope_u = self.perf_map.predict_p_el_slope(
@@ -518,7 +528,11 @@ class ThermalMPC:
 
             # Stap D: De definitieve waarden voor de solver
             cop_d = self.perf_map.predict_cop(
-                t_out[t], t_supply_dhw, t_supply_dhw - dhw_dt, dhw_ref, HvacMode.DHW.value
+                t_out[t],
+                t_supply_dhw,
+                t_supply_dhw - dhw_dt,
+                dhw_ref,
+                HvacMode.DHW.value,
             )
             slope_d = self.perf_map.predict_p_el_slope(
                 dhw_ref, t_out[t], t_supply_dhw, HvacMode.DHW.value
@@ -582,7 +596,7 @@ class Optimizer:
         self.res_ufh.train(df, self.ident.R, self.ident.C, False)
         self.res_dhw.train(df, self.ident.R, self.ident.C, True)
 
-    def resolve(self, context):
+    def resolve(self, context: Context):
         res_u, res_d = self.res_ufh.predict(context.forecast_df), self.res_dhw.predict(
             context.forecast_df
         )

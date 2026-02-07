@@ -144,10 +144,8 @@ def run_test():
                         .strftime("%H:%M"),
                         "Mode": mode,
                         "Freq": round(max(f_u[i], f_d[i]), 1),
-                        "Verw_T_room": round(t_r[i], 2),
-                        "Verw_T_dhw": round(
-                            t_d[i], 2
-                        ),  # NIEUW: DHW temperatuur in de tabel
+                        "T_room": round(t_r[i], 2),
+                        "T_dhw": round(t_d[i], 2),  # NIEUW: DHW temperatuur in de tabel
                     }
                 )
 

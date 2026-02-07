@@ -36,6 +36,9 @@ class HAClient:
     def get_wp_power(self):
         return to_kw(self._get_state(self.config.sensor_wp_power))
 
+    def get_wp_output(self):
+        return to_kw(abs(self._get_state(self.config.sensor_wp_output)))
+
     def get_grid_power(self):
         return to_kw(self._get_state(self.config.sensor_grid_power))
 
@@ -56,6 +59,12 @@ class HAClient:
 
     def get_supply_temp(self):
         return float(self._get_state(self.config.sensor_supply_temp))
+
+    def get_return_temp(self):
+        return float(self._get_state(self.config.sensor_return_temp))
+
+    def get_cop(self):
+        return float(self._get_state(self.config.sensor_cop))
 
     def get_hvac_mode(self):
         hvac = {

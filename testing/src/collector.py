@@ -45,6 +45,12 @@ class Collector:
     def update_forecast(self):
         self.client.reload()
 
+        location = self.client.get_location()
+        if location != (None, None):
+            self.context.latitude, self.context.longitude = location
+        else:
+            logger.warning("[Collector] Locatie niet gevonden")
+
         solcast = self.client.get_forecast()
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
@@ -93,12 +99,10 @@ class Collector:
         raw_pv = self.client.get_pv_power()
         raw_wp = self.client.get_wp_power()
         raw_grid = self.client.get_grid_power()
-        raw_output = self.client.get_wp_output()
 
         self.pv_slots.append(raw_pv)
         self.wp_slots.append(raw_wp)
         self.grid_slots.append(raw_grid)
-        self.output_slots.append(raw_output)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -119,18 +123,18 @@ class Collector:
         # In dat geval is het 'restverbruik' van het huis waarschijnlijk minimaal.
         self.context.stable_load = max(0.05, base_load)
 
+        if self.context.hvac_mode != HvacMode.OFF:
+            raw_output = abs(self.client.get_wp_output())
+
+            if raw_output > 0:
+                self.output_slots.append(raw_output)
+
         logger.debug(
             f"[Collector] Load: Base={base_load:.2f}kW | "
             f"Calc: (Grid {self.context.stable_grid:.2f} + PV {self.context.stable_pv:.2f}) - WP {self.context.stable_wp:.2f}"
         )
 
     def update_sensors(self):
-        location = self.client.get_location()
-        if location != (None, None):
-            self.context.latitude, self.context.longitude = location
-        else:
-            logger.warning("[Collector] Locatie niet gevonden")
-
         raw_room = self.client.get_room_temp()
         raw_dhw_top = self.client.get_dhw_top()
         raw_dhw_bottom = self.client.get_dhw_bottom()
@@ -145,10 +149,17 @@ class Collector:
         self.dhw_bottom_slots.append(raw_dhw_bottom)
 
         if self.context.hvac_mode != HvacMode.OFF:
-            self.compressor_slots.append(self.client.get_compressor_freq())
             self.supply_slots.append(self.client.get_supply_temp())
             self.return_slots.append(self.client.get_return_temp())
-            self.cop_slots.append(self.client.get_cop())
+
+            raw_compressor_freq = self.client.get_compressor_freq()
+            raw_cop = self.client.get_cop()
+
+            if raw_compressor_freq > 0:
+                self.compressor_slots.append(raw_compressor_freq)
+
+            if raw_cop > 0:
+                self.cop_slots.append(raw_cop)
 
         logger.info("[Collector] Sensors updated")
 
