@@ -3,77 +3,77 @@ import numpy as np
 import logging
 import os
 import sys
+from unittest.mock import MagicMock
 
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Zorg dat de import paden kloppen
 current_dir = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.abspath(os.path.join(current_dir, "..", "src"))
-
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
+# Importeer de nieuwe Optimizer
+from optimizer import Optimizer
 
-# Importeer je eigen classes (zorg dat de bestandsnaam klopt, ik ga uit van optimizer.py)
-from optimizer import Optimizer, Context
-
-# Logging aanzetten zodat we zien wat de solver doet
+# Logging instellen
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 # =========================================================
-# 1. MOCK CLASSES (Om de dependencies te simuleren)
+# 1. MOCK CLASSES
 # =========================================================
 class MockConfig:
     def __init__(self):
+        self.perf_map_path = "test_perf_map.joblib"
         self.rc_model_path = "test_rc_model.joblib"
-        self.ufh_model_path = "test_ufh_residual.joblib"
-        self.dhw_model_path = "test_dhw_residual.joblib"
+        self.ufh_res_path = "test_ufh_res.joblib"
+        self.dhw_res_path = "test_dhw_res.joblib"
 
 class MockDatabase:
-    def get_history(self, cutoff_date):
-        # We geven een lege DF terug voor dit test-scenario
+    def get_history(self, days):
         return pd.DataFrame()
 
 # =========================================================
 # 2. DATA GENERATIE
 # =========================================================
 def create_test_context():
-    horizon = 48  # 12 uur aan data (15-min intervals)
+    horizon = 48  # 12 uur (48 * 15 min)
     now = datetime.now().replace(minute=0, second=0, microsecond=0)
 
-    # 1. Tijdstempels
+    # Tijdstempels
     timestamps = [now + timedelta(minutes=15*i) for i in range(horizon)]
 
-    # 2. Weersvoorspelling: koud in de ochtend, warmer in de middag
-    # Sinus golf tussen 2 en 8 graden
+    # Weersvoorspelling
     temps = 5 + 3 * np.sin(np.linspace(-np.pi, np.pi, horizon))
+    wind = [4.0] * horizon
+    solar_rad = np.maximum(0, 400 * np.sin(np.linspace(-np.pi, np.pi, horizon)))
 
-    # 3. Zonnepanelen: bult in het midden van de dag
-    solar = np.zeros(horizon)
-    solar[16:32] = [2.0 * np.sin(x) for x in np.linspace(0, np.pi, 16)]
-
-    # 4. Prijzen: duur in de ochtend/avond, goedkoop overdag
+    # Prijzen
     prices = [0.30] * horizon
-    prices[10:20] = [0.10] * 10 # Goedkope middag
+    prices[10:20] = [0.10] * 10
+
+    solar_forecast = np.zeros(horizon)
+    solar_forecast[16:32] = [2.0 * np.sin(x) for x in np.linspace(0, np.pi, 16)]
 
     forecast_df = pd.DataFrame({
         "timestamp": timestamps,
         "temp": temps,
-        "power_corrected": solar,    # Solar forecast
-        "load_corrected": [0.3] * horizon # Basisverbruik huis
+        "solar": solar_rad,
+        "wind": wind,
+        "price": prices,
+        "solar_forecast": solar_forecast
     })
 
-    # Maak de context object
-    class TestContext:
-        def __init__(self, df, pr):
+    class Context:
+        def __init__(self, df):
             self.forecast_df = df
-            self.prices = pr
-            self.room_temp = 19.2    # Huidige binnentemperatuur
-            self.dhw_top = 42.0     # Bovenkant boiler
-            self.dhw_bottom = 35.0  # Onderkant boiler
+            self.room_temp = 19.8
+            self.dhw_top = 12.0
+            self.dhw_bottom = 10.0
 
-    return TestContext(forecast_df, prices)
+    return Context(forecast_df)
 
 # =========================================================
 # 3. HET TEST RUNNEN
@@ -86,52 +86,72 @@ def run_test():
     db = MockDatabase()
     optimizer = Optimizer(config, db)
 
-    # Forceer RC waarden (zodat we niet hoeven te trainen)
+    # 1. Forceer modelwaarden
     optimizer.ident.R = 15.0
-    optimizer.ident.C = 40.0
-    optimizer.ident.is_fitted = True
+    optimizer.ident.C = 30.0
+    optimizer.ident.K_emit = 0.15
+    optimizer.ident.K_tank = 0.25
+
+    # 2. Mock de Performance Map
+    optimizer.perf_map.is_fitted = True
+    optimizer.perf_map.cop_model = MagicMock()
+    optimizer.perf_map.cop_model.predict.return_value = np.array([3.5])
+    optimizer.perf_map.power_model = MagicMock()
+    optimizer.perf_map.power_model.predict.return_value = np.array([1.4])
+
+    optimizer.perf_map.max_freq_model = MagicMock()
+    # Simuleer: dynamische limiet rond de 55-60Hz voor dit weer
+    optimizer.perf_map.max_freq_model.predict.side_effect = lambda x: [70.0 - (x[0][0] + 10) * 1.0]
 
     # Maak test data
     context = create_test_context()
 
-    logger.info(f"Huidige staat: Kamer={context.room_temp}C, Boiler Top={context.dhw_top}C")
+    logger.info(f"Huidige staat: Kamer={context.room_temp}C, Boiler Gemiddeld={(context.dhw_top+context.dhw_bottom)/2}C")
 
     # Run de optimizer
     result = optimizer.resolve(context)
 
     if result:
         logger.info("--- Resultaat ---")
-        logger.info(f"Status: {result['status']}")
         logger.info(f"Gekozen Modus: {result['mode']}")
-        logger.info(f"Target Vermogen: {result['target_power']} kW")
-        logger.info(f"Boiler Energy: {result['dhw_energy_kwh']:.2f} kWh")
+        logger.info(f"Frequentie: {result['freq']} Hz")
 
-        # Laat het verloop van de eerste 4 uur zien
-        logger.info("\nPlan voor de komende uren:")
-        plan_df = pd.DataFrame({
-            "Tijd": context.forecast_df["timestamp"][:16],
-            "Prijs": context.prices[:16],
-            "Temp_Out": context.forecast_df["temp"][:16].round(1),
-            "Plan_Room": [round(x, 2) for x in result['planned_room'][:16]],
-            "Plan_DHW": [round(x, 2) for x in result['planned_dhw'][:16]]
-        })
-        print(plan_df.to_string(index=False))
+        if optimizer.mpc.f_ufh.value is not None:
+            logger.info("\nEerste uren van het plan:")
+            f_u = optimizer.mpc.f_ufh.value
+            f_d = optimizer.mpc.f_dhw.value
+            t_r = optimizer.mpc.t_room.value
+            t_d = optimizer.mpc.t_dhw.value # De voorspelde DHW temp
 
-        # Check of de resultaten zinnig zijn
+            # Print tabelletje van de eerste 8 kwartieren
+            plan_data = []
+            for i in range(24):
+                mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
+                plan_data.append({
+                    "Tijd": context.forecast_df["timestamp"].iloc[i].strftime("%H:%M"),
+                    "Mode": mode,
+                    "Freq": round(max(f_u[i], f_d[i]), 1),
+                    "Verw_T_room": round(t_r[i], 2),
+                    "Verw_T_dhw": round(t_d[i], 2) # NIEUW: DHW temperatuur in de tabel
+                })
+
+            print(pd.DataFrame(plan_data).to_string(index=False))
+
         assert "mode" in result
-        assert result["target_power"] >= 0
-        logger.info("\n✅ Test geslaagd: De solver heeft een geldig plan gegenereerd.")
+        assert "freq" in result
+        logger.info("\n✅ Test geslaagd: De solver heeft een geldig resultaat gegenereerd.")
     else:
-        logger.error("❌ Test gefaald: Geen resultaat van de optimizer.")
+        logger.error("❌ Test gefaald: Geen resultaat.")
 
 if __name__ == "__main__":
-    # Verwijder oude test files als die er zijn
-    for f in ["test_rc_model.joblib", "test_ufh_residual.joblib", "test_dhw_residual.joblib"]:
-        if Path(f).exists(): Path(f).unlink()
+    paths = ["test_perf_map.joblib", "test_rc_model.joblib", "test_ufh_res.joblib", "test_dhw_res.joblib"]
+    for p in paths:
+        if Path(p).exists(): Path(p).unlink()
 
     try:
         run_test()
+    except Exception as e:
+        logger.exception(f"Fout tijdens test: {e}")
     finally:
-        # Opruimen
-        for f in ["test_rc_model.joblib", "test_ufh_residual.joblib", "test_dhw_residual.joblib"]:
-            if Path(f).exists(): Path(f).unlink()
+        for p in paths:
+            if Path(p).exists(): Path(p).unlink()

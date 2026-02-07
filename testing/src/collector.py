@@ -34,6 +34,9 @@ class Collector:
         self.grid_slots = []
         self.compressor_slots = []
         self.supply_slots = []
+        self.return_slots = []
+        self.output_slots = []
+        self.cop_slots = []
         self.room_slots = []
         self.dhw_top_slots = []
         self.dhw_bottom_slots = []
@@ -89,10 +92,12 @@ class Collector:
         raw_pv = self.client.get_pv_power()
         raw_wp = self.client.get_wp_power()
         raw_grid = self.client.get_grid_power()
+        raw_output = self.client.get_wp_output()
 
         self.pv_slots.append(raw_pv)
         self.wp_slots.append(raw_wp)
         self.grid_slots.append(raw_grid)
+        self.output_slots.append(raw_output)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -140,8 +145,11 @@ class Collector:
         self.dhw_top_slots.append(raw_dhw_top)
         self.dhw_bottom_slots.append(raw_dhw_bottom)
 
-        self.compressor_slots.append(self.client.get_compressor_freq())
-        self.supply_slots.append(self.client.get_supply_temp())
+        if self.context.hvac_mode != Context.HVACMode.OFF:
+            self.compressor_slots.append(self.client.get_compressor_freq())
+            self.supply_slots.append(self.client.get_supply_temp())
+            self.return_slots.append(self.client.get_return_temp())
+            self.cop_slots.append(self.client.get_cop())
 
         logger.info("[Collector] Sensors updated")
 
@@ -166,17 +174,23 @@ class Collector:
             avg_wp = float(np.mean(self.wp_slots))
             avg_compressor_freq = float(np.mean(self.compressor_slots))
             avg_supply = float(np.mean(self.supply_slots))
+            avg_return = float(np.mean(self.return_slots))
             avg_room = float(np.mean(self.room_slots))
             avg_dhw_top = float(np.mean(self.dhw_top_slots))
             avg_dhw_bottom = float(np.mean(self.dhw_bottom_slots))
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)) * -1.0
+            avg_cop = float(np.mean(self.cop_slots))
+            avg_output = float(np.mean(self.output_slots))
 
             self.pv_slots = []
             self.wp_slots = []
             self.grid_slots = []
             self.compressor_slots = []
             self.supply_slots = []
+            self.return_slots = []
+            self.cop_slots = []
+            self.output_slots = []
             self.room_slots = []
             self.dhw_top_slots = []
             self.dhw_bottom_slots = []
@@ -192,8 +206,11 @@ class Collector:
                 dhw_top=avg_dhw_top,
                 dhw_bottom=avg_dhw_bottom,
                 supply_temp=avg_supply,
+                return_temp=avg_return,
                 compressor_freq=avg_compressor_freq,
                 hvac_mode=int(self.context.hvac_mode.value),
+                cop=avg_cop,
+                wp_output=avg_output
             )
 
             self.current_slot_start = slot_start
@@ -209,17 +226,3 @@ class Collector:
         if not buffer:
             return 0.0
         return float(np.median(buffer))
-
-    # Helper functie voor de berekening
-    def _calculate_avg_power(self, current, last):
-        if current is None or last is None:
-            return 0.0
-
-        diff = current - last
-
-        # Reset detectie: Als meter vervangen is of reset naar 0
-        if diff < 0:
-            return 0.0 # Of current * 4 als je aanneemt dat hij bij 0 begon
-
-        # kWh naar kW (bij 15 min interval = maal 4)
-        return diff * 4.0

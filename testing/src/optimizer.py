@@ -4,590 +4,335 @@ import cvxpy as cp
 import joblib
 import logging
 
-from datetime import datetime, timedelta
 from pathlib import Path
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import HistGradientBoostingRegressor
 
-from config import Config
-from context import Context
-from database import Database
-from utils import add_cyclic_time_features
-
-# =========================================================
-# LOGGING
-# =========================================================
 logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# 1. COP-MODEL (Carnot-based)
+# 1. HEAT PUMP PERFORMANCE MAP
 # =========================================================
-class COPModel:
-    def __init__(self, efficiency=0.45, cop_min=1.0, cop_max=6.0):
-        self.eta = efficiency
-        self.cop_min = cop_min
-        self.cop_max = cop_max
-
-    def get_cop(self, T_out, T_sink):
-        """
-        Berekent COP o.b.v. buitentemperatuur en doeltemperatuur (sink).
-        T_sink is de watertemperatuur (bijv. 30C voor Vloer of 50C voor Boiler).
-        """
-        # Voeg 3 graden toe aan T_sink voor de warmtewisselaar delta (condensor)
-        T_sink_k = T_sink + 273.15 + 3.0
-        T_out_k = T_out + 273.15
-
-        # Carnot limiet: T_sink / (T_sink - T_out)
-        # We gebruiken een minimum delta van 5 graden om deling door nul te voorkomen
-        delta_t = np.maximum(T_sink_k - T_out_k, 5.0)
-
-        cop_theoretical = T_sink_k / delta_t
-        cop_real = cop_theoretical * self.eta
-
-        return np.clip(cop_real, self.cop_min, self.cop_max)
-
-
-# =========================================================
-# 2. SYSTEEM IDENTIFICATIE (RC Model)
-# =========================================================
-class SystemIdentificator:
-    """
-    Identificeert R (Isolatiewaarde) en C (Warmteopslagcapaciteit) van de woning.
-    """
-
+class HPPerformanceMap:
     def __init__(self, path):
-        self.R = 15.0  # Default: K/kW
-        self.C = 30.0  # Default: kWh/K
         self.path = Path(path)
         self.is_fitted = False
+        self.cop_model = None
+        self.power_model = None
+        self.max_freq_model = None
         self._load()
 
     def _load(self):
         if self.path.exists():
             try:
                 data = joblib.load(self.path)
-                self.R = data["R"]
-                self.C = data["C"]
+                self.cop_model = data["cop_model"]
+                self.power_model = data["power_model"]
+                self.max_freq_model = data["max_freq_model"]
                 self.is_fitted = True
-                logger.info(
-                    f"[Identificatie] Geladen: R={self.R:.2f} K/kW, C={self.C:.2f} kWh/K"
-                )
-            except Exception:
-                logger.error("[Identificatie] Model bestand corrupt of verouderd.")
+                logger.info("[HPPerformanceMap] Model geladen")
+            except:
+                logger.warning("[HPPerformanceMap] Laden mislukt")
 
     def train(self, df: pd.DataFrame):
-        """
-        Traint het RC model op historische data.
-        Filtert zonlicht en outliers weg voor een zuivere fysieke identificatie.
-        """
         df = df.copy()
-        df = df.set_index("timestamp").sort_index()
-        # Vul kleine gaatjes op
-        df = df.resample("15min").interpolate(method="linear", limit=2)
+        df["delta_t"] = df["supply_temp"] - df["return_temp"]
 
-        # 1. Bepaal de temperatuurverandering over de KOMENDE 60 minuten
-        df["dT_1h"] = df["room_temp"].shift(-4) - df["room_temp"]
-
-        # 2. Schat de COP voor het historische thermische vermogen
-        # Aanname: Vloerverwarming water is kamer_temp + 6 graden
-        cop_calc = COPModel(efficiency=0.50)
-        df["cop_actual"] = df.apply(
-            lambda row: cop_calc.get_cop(row["temp"], row["room_temp"] + 6.0), axis=1
+        mask = (
+            (df["compressor_freq"] > 15) &
+            (df["wp_actual"] > 0.2) &
+            (df["cop"].between(1.0, 7.0)) &
+            (df["delta_t"] > 1.0)
         )
+        mask &= ~((df["temp"].between(-3, 5)) & (df["cop"] < 1.5))
+        df_clean = df[mask].copy()
 
-        # Als wp_actual elektrisch is (kW), dan vermenigvuldigen met COP
-        df["p_th_actual"] = df["wp_actual"] * df["cop_actual"]
-
-        # 3. Features voorbereiden (Rolling mean om ruis te onderdrukken)
-        # X1: Verlies naar buiten (T_room - T_out)
-        loss_potential = -(df["room_temp"] - df["temp"])
-        df["X1"] = loss_potential.rolling(window=4).mean().shift(-3)
-
-        # X2: Thermische winst
-        df["X2"] = df["p_th_actual"].rolling(window=4).mean().shift(-3)
-
-        # 4. Filteren
-        # Geen zon (pv < 0.05) en stabiele metingen (dT < 1.5)
-        mask = (df["pv_actual"] < 0.05) & (df["dT_1h"].abs() < 1.5)
-        train_data = df[mask][["X1", "X2", "dT_1h"]].dropna()
-
-        if len(train_data) < 50:
-            logger.warning(
-                "[Identificatie] Te weinig stabiele data voor betrouwbare training."
-            )
+        if len(df_clean) < 50:
+            logger.warning("[PerformanceMap] Te weinig schone data.")
             return
 
-        X = train_data[["X1", "X2"]]
-        y = train_data["dT_1h"]
+        features_cop = ["temp", "supply_temp", "return_temp", "delta_t", "compressor_freq", "hvac_mode"]
+        self.cop_model = RandomForestRegressor(n_estimators=150, max_depth=10, min_samples_leaf=5, random_state=42)
+        self.cop_model.fit(df_clean[features_cop], df_clean["cop"])
 
-        # 5. Regressie
-        # dT = (P_th / C) - (deltaT / RC)
-        model = LinearRegression(fit_intercept=False)
-        model.fit(X, y)
-        coef_loss, coef_gain = model.coef_
+        self.power_model = LinearRegression(fit_intercept=False)
+        self.power_model.fit(df_clean[["compressor_freq", "temp"]], df_clean["wp_actual"])
 
-        # 6. Begrenzing (Clamping) om fysiek onmogelijke waarden te voorkomen
-        # C tussen 15 en 120 kWh/K
-        c_gain_clamped = np.clip(coef_gain, 1.0 / 120.0, 1.0 / 15.0)
-        self.C = 1.0 / c_gain_clamped
+        df['t_rounded'] = df['temp'].round()
+        max_freq_stats = df.groupby('t_rounded')['compressor_freq'].quantile(0.98).reset_index()
 
-        # R tussen 5 en 40 K/kW
-        r_loss_clamped = np.clip(coef_loss, 1.0 / (40.0 * self.C), 1.0 / (5.0 * self.C))
-        self.R = 1.0 / (r_loss_clamped * self.C)
+        # We fitten een simpele lineaire regressie: MaxFreq = a * Tout + b
+        self.max_freq_model = LinearRegression().fit(
+            max_freq_stats.index.values.reshape(-1, 1),
+            max_freq_stats.values
+        )
 
         self.is_fitted = True
-        joblib.dump({"R": self.R, "C": self.C}, self.path)
-        logger.info(f"[Identificatie] Nieuw getraind: R={self.R:.2f}, C={self.C:.2f}")
+        joblib.dump({"cop_model": self.cop_model, "power_model": self.power_model,  "max_freq_model": self.max_freq_model}, self.path)
 
+    def predict_cop(self, t_out, t_supply, t_return, freq, mode_idx):
+        if not self.is_fitted: return 3.5 if mode_idx==1 else 2.5
+        delta_t = max(1.0, t_supply - t_return)
+        X = [[t_out, t_supply, t_return, delta_t, freq, mode_idx]]
+        return float(self.cop_model.predict(X)[0])
+
+    def predict_p_el_slope(self, freq_ref, t_out):
+        if not self.is_fitted: return 0.04
+        p_el = self.power_model.predict([[freq_ref, t_out]])[0]
+        return max(0.01, p_el / freq_ref)
+
+    def predict_max_freq(self, t_out):
+        if self.max_freq_model is None:
+            return 70.0
+        freq = self.max_freq_model.predict([[t_out]])[0]
+        return float(np.clip(freq, 25.0, 80.0))
 
 # =========================================================
-# 3. ML RESIDUAL MODEL
+# 2. SYSTEM IDENTIFICATOR
+# =========================================================
+class SystemIdentificator:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.R, self.C = 15.0, 30.0
+        self.K_emit = 0.15
+        self.K_tank = 0.25
+        self._load()
+
+    def _load(self):
+        if self.path.exists():
+            data = joblib.load(self.path)
+            self.R, self.C = data.get("R", 15.0), data.get("C", 30.0)
+            self.K_emit = data.get("K_emit", 0.15)
+            self.K_tank = data.get("K_tank", 0.25)
+
+    def train(self, df):
+        df_proc = df.copy().set_index("timestamp").sort_index().resample("15min").interpolate()
+        mask_rc = (df_proc["hvac_mode"] == "UFH") & (df_proc["pv_actual"] < 0.05)
+        train_rc = df_proc[mask_rc].copy()
+
+        if len(train_rc) > 50:
+            train_rc["dT_1h"] = train_rc["room_temp"].shift(-4) - train_rc["room_temp"]
+            train_rc["X1"] = -(train_rc["room_temp"] - train_rc["temp"])
+            train_rc["X2"] = train_rc["wp_output"]
+            train_rc = train_rc.dropna()
+            model = LinearRegression(fit_intercept=False).fit(train_rc[["X1","X2"]], train_rc["dT_1h"])
+            self.C = 1.0 / np.clip(model.coef_[1], 1/150, 1/10)
+            self.R = 1.0 / (np.clip(model.coef_[0], 1/(50*self.C), 1/(5*self.C)) * self.C)
+
+        mask_ufh = (df["hvac_mode"] == "UFH") & (df["wp_output"] > 0.5)
+        if len(df[mask_ufh]) > 50:
+            dT_emit = ((df.loc[mask_ufh, "supply_temp"] + df.loc[mask_ufh, "return_temp"])/2) - df.loc[mask_ufh, "room_temp"]
+            self.K_emit = np.clip(float(np.median(df.loc[mask_ufh, "wp_output"] / dT_emit.clip(lower=1.0))), 0.05, 0.5)
+
+        mask_dhw = (df["hvac_mode"] == "DHW") & (df["wp_output"] > 1.0)
+        if len(df[mask_dhw]) > 50:
+            t_tank = (df.loc[mask_dhw, "dhw_top"] + df.loc[mask_dhw, "dhw_bottom"]) / 2
+            dT_tank = ((df.loc[mask_dhw, "supply_temp"] + df.loc[mask_dhw, "return_temp"])/2) - t_tank
+            self.K_tank = np.clip(float(np.median(df.loc[mask_dhw, "wp_output"] / dT_tank.clip(lower=1.0))), 0.1, 1.0)
+
+        joblib.dump({"R": self.R, "C": self.C, "K_emit": self.K_emit, "K_tank": self.K_tank}, self.path)
+
+# =========================================================
+# 3. ML RESIDUALS
 # =========================================================
 class MLResidualPredictor:
-    """
-    Voorspelt het verschil (residual) tussen het RC-model en de werkelijkheid.
-    Vangt effecten op van Zon, Wind, Douchen, Koken, etc.
-    """
-
-    def __init__(self, path: str):
+    def __init__(self, path):
         self.path = Path(path)
         self.model = None
-        self.features_ufh = [
-            "temp",
-            "solar",
-            "wind",
-            "hour_sin",
-            "hour_cos",
-            "doy_sin",
-            "doy_cos",
-        ]
-        self.features_dhw = ["temp", "hour_sin", "hour_cos", "doy_sin", "doy_cos"]
 
-        if self.path.exists():
-            try:
-                self.model = joblib.load(self.path)
-            except Exception:
-                logger.error(f"Kon model {path} niet laden.")
-
-    def train(self, df: pd.DataFrame, R, C, cop_model, is_dhw=False):
-        df = df.copy()
-        df = df.set_index("timestamp").sort_index()
-        df = df.resample("15min").interpolate(method="linear", limit=2)
-        df = df.reset_index()
-        df = add_cyclic_time_features(df, col_name="timestamp")
-
+    def train(self, df, R, C, is_dhw=False):
+        df = df.copy().set_index("timestamp").sort_index().resample("15min").interpolate().reset_index()
+        df = add_cyclic_time_features(df, "timestamp")
         dt = 0.25
-        boiler_mass_factor = 0.232  # 200L boiler
 
         if not is_dhw:
-            # UFH: Sink ~26C (bij 20C kamer)
-            df["cop_calc"] = df.apply(
-                lambda row: cop_model.get_cop(row["temp"], row["room_temp"] + 6.0),
-                axis=1,
-            )
-
-            # Theoretisch: dT = (Winst - Verlies) / Massa
-            loss = (df["room_temp"] - df["temp"]) / R
-            dT_rc = ((df["wp_actual"] * df["cop_calc"]) - loss) * dt / C
-            y_actual = df["room_temp"].shift(-1) - df["room_temp"]
-
-            df["solar"] = df["pv_actual"]
-            feature_cols = self.features_ufh
+            df = df[df["hvac_mode"]=="UFH"]
+            target = (df["room_temp"].shift(-1) - df["room_temp"]) - ((df["wp_output"] - (df["room_temp"]-df["temp"])/R)*dt/C)
         else:
-            # DHW
-            df["dhw_temp"] = (df["dhw_top"] + df["dhw_bottom"]) / 2
+            df = df[df["hvac_mode"] == "DHW"]
+            dhw_avg = (df["dhw_top"] + df["dhw_bottom"]) / 2
+            target = dhw_avg.shift(-1) - dhw_avg - (df["wp_output"] * dt / 0.232)
 
-            # Sink ~45C-55C. We nemen hier gemiddeld +9 tov water
-            df["cop_calc"] = df.apply(
-                lambda row: cop_model.get_cop(row["temp"], row["dhw_temp"] + 9.0),
-                axis=1,
-            )
-
-            dT_rc = (df["wp_actual"] * df["cop_calc"] * dt) / boiler_mass_factor
-            y_actual = df["dhw_temp"].shift(-1) - df["dhw_temp"]
-            feature_cols = self.features_dhw
-
-        target = (y_actual - dT_rc).rename("target_residual")
-
-        train_df = pd.concat([df[feature_cols], target], axis=1).dropna()
-
+        feats = ["temp", "solar", "wind", "hour_sin", "hour_cos", "day_sin", "day_cos"]
+        train_df = pd.concat([df[feats], target], axis=1).dropna()
         if len(train_df) > 50:
-            self.model = HistGradientBoostingRegressor()
-            self.model.fit(train_df[feature_cols], train_df["target_residual"])
+            self.model = RandomForestRegressor(n_estimators=100).fit(train_df[feats], train_df.iloc[:, -1])
             joblib.dump(self.model, self.path)
-            logger.info(f"[ML] Model {self.path.name} getraind.")
 
-    def predict(self, forecast_df, is_dhw=False):
-        if self.model is None:
-            return np.zeros(len(forecast_df))
-
-        df_in = forecast_df.copy()
-        df_in["solar"] = df_in["power_corrected"]  # Gebruik forecast solar
-        df_in = add_cyclic_time_features(df_in, col_name="timestamp")
-
-        cols = self.features_dhw if is_dhw else self.features_ufh
-        X = df_in.reindex(columns=cols, fill_value=0.0)
-
-        return self.model.predict(X)
-
+    def predict(self, forecast_df):
+        if self.model is None: return np.zeros(len(forecast_df))
+        df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
+        return self.model.predict(df[["temp", "solar", "wind", "hour_sin", "hour_cos", "day_sin", "day_cos"]])
 
 # =========================================================
-# 4. MPC (Optimization Core)
+# 4. THERMAL MPC
 # =========================================================
 class ThermalMPC:
-    def __init__(
-        self, ident: SystemIdentificator, cop_ufh: COPModel, cop_dhw: COPModel
-    ):
+    def __init__(self, ident, perf_map):
         self.ident = ident
-        self.cop_ufh_model = cop_ufh
-        self.cop_dhw_model = cop_dhw
-
-        # Instellingen
-        self.horizon = 48  # 12 uur
-        self.dt = 0.25  # 15 min
-        self.p_el_max = 3.5  # kW
-        self.dhw_min = 30.0  # Absolute ondergrens
-        self.dhw_target = 50.0
-        self.cold_water = 15.0
-
-        # Bouw de wiskundige structuur (DPP)
+        self.perf_map = perf_map
+        self.horizon, self.dt = 48, 0.25
         self._build_problem()
 
     def _build_problem(self):
-        """Constructs the CVXPY problem structure using Parameters for speed."""
         T = self.horizon
+        self.P_t_room_init = cp.Parameter()
+        self.P_t_dhw_init = cp.Parameter()
+        self.P_prices = cp.Parameter(T, nonneg=True)
+        self.P_temp_out = cp.Parameter(T)
 
-        # --- PARAMETERS (Inputs) ---
-        self.P_t_room_init = cp.Parameter(name="t_room_init")
-        self.P_t_dhw_init = cp.Parameter(name="t_dhw_init")
+        self.P_max_freq = cp.Parameter(T, nonneg=True)
 
-        self.P_temp_out = cp.Parameter(T, name="temp_out")
-        self.P_prices = cp.Parameter(T, nonneg=True, name="prices")
-        self.P_solar_avail = cp.Parameter(T, nonneg=True, name="solar")
-        self.P_load_base = cp.Parameter(T, name="load_base")
+        # We combineren slope en COP tot één parameter: "Thermisch vermogen per Hz"
+        # Dit lost de DPP UserWarning op.
+        self.P_th_per_hz_ufh = cp.Parameter(T, nonneg=True)
+        self.P_th_per_hz_dhw = cp.Parameter(T, nonneg=True)
+        self.P_el_per_hz_ufh = cp.Parameter(T, nonneg=True)
+        self.P_el_per_hz_dhw = cp.Parameter(T, nonneg=True)
 
-        self.P_ufh_res = cp.Parameter(T, name="ufh_res")
-        self.P_dhw_res = cp.Parameter(T, name="dhw_res")
+        self.P_ufh_res = cp.Parameter(T)
+        self.P_dhw_res = cp.Parameter(T)
+        self.P_solar = cp.Parameter(T, nonneg=True)
 
-        # Voorberekende vectoren (Pythonside logic)
-        self.P_cop_ufh = cp.Parameter(T, nonneg=True, name="cop_ufh")
-        self.P_cop_dhw = cp.Parameter(T, nonneg=True, name="cop_dhw")
-        self.P_min_p_ufh = cp.Parameter(T, nonneg=True, name="min_p_ufh")
+        self.f_ufh = cp.Variable(T, nonneg=True)
+        self.f_dhw = cp.Variable(T, nonneg=True)
+        self.ufh_on = cp.Variable(T, boolean=True)
+        self.dhw_on = cp.Variable(T, boolean=True)
+        self.p_grid = cp.Variable(T, nonneg=True)
+        self.p_solar_self = cp.Variable(T, nonneg=True)
+        self.t_room = cp.Variable(T+1)
+        self.t_dhw = cp.Variable(T+1)
+        self.s_room_low = cp.Variable(T, nonneg=True)
+        self.s_dhw_low = cp.Variable(T, nonneg=True)
 
-        # --- VARIABELEN ---
-        self.u_ufh = cp.Variable(T, boolean=True, name="u_ufh")
-        self.u_dhw = cp.Variable(T, boolean=True, name="u_dhw")
-
-        self.p_el_ufh = cp.Variable(T, nonneg=True, name="p_el_ufh")
-        self.p_el_dhw = cp.Variable(T, nonneg=True, name="p_el_dhw")
-
-        # NIEUW: Hulpvariabele voor grid import (DPP Fix)
-        self.p_grid_import = cp.Variable(T, nonneg=True, name="p_grid_import")
-
-        # NIEUW: Hulpvariabele voor Solar Self-Consumption (vermijdt cp.minimum)
-        self.p_solar_self = cp.Variable(T, nonneg=True, name="p_solar_self")
-
-        self.t_room = cp.Variable(T + 1, name="t_room")
-        self.t_dhw = cp.Variable(T + 1, name="t_dhw")
-
-        # Slack variabelen (Soft Constraints)
-        self.slack_room_low = cp.Variable(T, nonneg=True)  # < 19.0
-        self.slack_room_comfort = cp.Variable(T, nonneg=True)  # < 19.4 (zon buffer)
-        self.slack_room_high = cp.Variable(T, nonneg=True)  # > 22.0 (overheat)
-
-        self.slack_dhw_low = cp.Variable(T, nonneg=True)  # < 35.0
-        self.slack_dhw_high = cp.Variable(T, nonneg=True)  # > 50.0 (zon buffer)
-
-        # --- CONSTANTEN ---
         R, C = self.ident.R, self.ident.C
-        boiler_mass_factor = 0.232  # 200L
-        dhw_standby_loss = 0.04
-
-        # --- CONSTRAINTS ---
-        constraints = [
-            self.t_room[0] == self.P_t_room_init,
-            self.t_dhw[0] == self.P_t_dhw_init,
-        ]
+        constraints = [self.t_room[0] == self.P_t_room_init, self.t_dhw[0] == self.P_t_dhw_init]
 
         for t in range(T):
-            # 1. Hardware Limits
             constraints += [
-                self.u_ufh[t] + self.u_dhw[t] <= 1,
-                # DHW: Altijd max vermogen voor efficiëntie
-                self.p_el_dhw[t] == self.p_el_max * self.u_dhw[t],
-                # UFH: Modulerend tussen min en max
-                self.p_el_ufh[t] <= self.p_el_max * self.u_ufh[t],
-                self.p_el_ufh[t] >= self.P_min_p_ufh[t] * self.u_ufh[t],
+                self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
+                self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
+                self.ufh_on[t] + self.dhw_on[t] <= 1
             ]
 
-            # 2. Thermische Dynamica (Room)
-            # Winst = P_el * COP. Verlies = DeltaT / R.
-            p_th_room = self.p_el_ufh[t] * self.P_cop_ufh[t]
-            loss_room = (self.t_room[t] - self.P_temp_out[t]) / R
+            p_el_t = self.f_ufh[t] * self.P_el_per_hz_ufh[t] + self.f_dhw[t] * self.P_el_per_hz_dhw[t]
 
             constraints += [
-                self.t_room[t + 1]
-                == self.t_room[t]
-                + (p_th_room - loss_room) * self.dt / C
-                + self.P_ufh_res[t]
+                self.p_grid[t] >= p_el_t - self.P_solar[t],
+                self.p_solar_self[t] <= p_el_t,
+                self.p_solar_self[t] <= self.P_solar[t]
             ]
 
-            # 3. Thermische Dynamica (DHW)
-            p_th_dhw = self.p_el_dhw[t] * self.P_cop_dhw[t]
+            p_th_ufh = self.f_ufh[t] * self.P_th_per_hz_ufh[t]
+            p_th_dhw = self.f_dhw[t] * self.P_th_per_hz_dhw[t]
 
             constraints += [
-                self.t_dhw[t + 1]
-                == self.t_dhw[t]
-                + (p_th_dhw * self.dt) / boiler_mass_factor
-                - dhw_standby_loss
-                + self.P_dhw_res[t],
+                self.t_room[t+1] == self.t_room[t] + ((p_th_ufh - (self.t_room[t]-self.P_temp_out[t])/R)*self.dt/C + self.P_ufh_res[t]),
+                self.t_dhw[t+1] == self.t_dhw[t] + ((p_th_dhw*self.dt)/0.232 + self.P_dhw_res[t]),
+                self.t_room[t+1] + self.s_room_low[t] >= 19.5,
+                self.t_dhw[t+1] + self.s_dhw_low[t] >= 38.0,
+                self.t_room[t+1] <= 23.5
             ]
 
-            # 4. Comfort & Veiligheid
-            constraints += [
-                # Ondergrens
-                self.t_room[t + 1] + self.slack_room_low[t] >= 19.0,
-                self.t_room[t + 1] + self.slack_room_comfort[t] >= 19.4,
-                self.t_dhw[t + 1] + self.slack_dhw_low[t] >= self.dhw_min,
-                # Bovengrens (Soft)
-                self.t_dhw[t + 1] <= 50.0 + self.slack_dhw_high[t],
-                self.t_room[t + 1] <= 22.0 + self.slack_room_high[t],
-                self.t_dhw[t + 1] <= 65.0,
-                self.t_room[t + 1] <= 25.0,
-                # Supply Temp Proxy (Vloer bescherming, max 30C)
-                self.t_room[t] + self.p_el_ufh[t] * 4.0 <= 30,
-            ]
-
-            # 4. Net Load & Solar Logic (Linearized)
-            total_load = self.p_el_ufh[t] + self.p_el_dhw[t]
-            net_load_expr = total_load + self.P_load_base[t] - self.P_solar_avail[t]
-
-            constraints += [
-                # Import is wat we te kort komen
-                self.p_grid_import[t] >= net_load_expr,
-                # Solar Self Consumption Logic:
-                # p_solar_self mag niet meer zijn dan de Load
-                self.p_solar_self[t] <= total_load,
-                # p_solar_self mag niet meer zijn dan de Beschikbare Zon
-                self.p_solar_self[t] <= self.P_solar_avail[t],
-                # Door deze variabele te maximaliseren in de objective,
-                # zoekt de solver de 'overlap' tussen Load en Zon.
-            ]
-
-        # --- OBJECTIVE ---
-        # Gebruik de hulpvariabele p_grid_import i.p.v. cp.pos(net_load)
-        # Dit is nu: Variabele * Parameter. Dat is DPP compliant.
-        cost = cp.sum(cp.multiply(self.p_grid_import, self.P_prices)) * self.dt
-
-        # Solar Bonus (Nu lineair en snel!)
-        solar_bonus = cp.sum(self.p_solar_self) * 0.22
-
-        # Anti-Pendel Fix: Start-up penalty
-        # We straffen (u[t] - u[t-1]) alleen als het positief is.
-        # Dit is DCP compliant omdat cp.pos convex is en we minimaliseren.
-        # We gebruiken slicing [1:] en [:-1] voor vectoren.
-        startups_ufh = cp.sum(cp.pos(self.u_ufh[1:] - self.u_ufh[:-1]))
-        startups_dhw = cp.sum(cp.pos(self.u_dhw[1:] - self.u_dhw[:-1]))
-        switches = (startups_ufh + startups_dhw) * 2.0  # Straf factor
-
-        # Comfort Penalties
-        # 1. Te koud (Hard & Comfort)
-        pen_room_cold = (
-            cp.sum(self.slack_room_low) * 25.0 + cp.sum(self.slack_room_comfort) * 0.6
+        obj = cp.Minimize(
+            cp.sum(cp.multiply(self.p_grid, self.P_prices))*self.dt -
+            cp.sum(self.p_solar_self)*0.22 +
+            cp.sum(self.s_room_low + self.s_dhw_low)*150 +
+            cp.sum(cp.pos(21.0 - self.t_room))*0.1
         )
-        pen_dhw_cold = cp.sum(self.slack_dhw_low) * 25.0
+        self.problem = cp.Problem(obj, constraints)
 
-        # 2. Te warm (Soft)
-        pen_room_hot = cp.sum(self.slack_room_high) * 10.0
-        pen_dhw_hot = cp.sum(self.slack_dhw_high) * 0.02
-
-        # 3. Target Tracking (Kamer 20C, DHW 50C)
-        track_room = cp.sum(cp.pos(20.0 - self.t_room)) * 0.05
-        track_dhw = cp.sum(cp.pos(50.0 - self.t_dhw)) * 0.1
-
-        total_obj = (
-            cost
-            - solar_bonus
-            + switches
-            + pen_room_cold
-            + pen_dhw_cold
-            + pen_room_hot
-            + pen_dhw_hot
-            + track_room
-            + track_dhw
-        )
-
-        self.problem = cp.Problem(cp.Minimize(total_obj), constraints)
-
-        # Deze assert zou nu moeten slagen
-        assert (
-            self.problem.is_dpp()
-        ), "Probleem is niet DPP compliant! Check parameters."
-
-    def solve(self, state, forecast_df, prices, ufh_residuals, dhw_residuals):
-        # 1. BEREKEN VECTOREN (Python Logic Simulation)
-        # We simuleren hier de temperatuurverloop om de COP te schatten
-        temps = forecast_df["temp"].values
+    def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
-        dt = self.dt
+        t_out = forecast_df.temp.values
 
-        # Init waarden
         dhw_start = (state["dhw_top"] + state["dhw_bottom"]) / 2
-        sim_t_dhw = dhw_start
-        sim_t_room = state["room_temp"]
+        current_est_room, current_est_dhw = state["room_temp"], dhw_start
 
-        v_cop_ufh = []
-        v_cop_dhw = []
-        v_min_p_ufh = []
+        # Tijdelijke opslag voor gecombineerde waarden
+        th_per_hz_u, th_per_hz_d = np.zeros(T), np.zeros(T)
+        el_per_hz_u, el_per_hz_d = np.zeros(T), np.zeros(T)
+
+        v_max_freq = np.zeros(T)
 
         for t in range(T):
-            temp_out = temps[t]
+            v_max_freq[t] = self.perf_map.predict_max_freq(t_out[t])
 
-            # --- UFH Logic ---
-            t_sink_ufh = sim_t_room + 6.0
-            cop_u = self.cop_ufh_model.get_cop(temp_out, t_sink_ufh)
-            v_cop_ufh.append(cop_u)
+            # 1. UFH
+            calc_room = max(current_est_room, 20.0)
+            heat_loss_kw = max(0, (calc_room - t_out[t]) / self.ident.R)
+            overtemp_ufh = np.clip(heat_loss_kw / self.ident.K_emit, 0, 15.0)
+            t_supply_ufh = calc_room + 2.0 + overtemp_ufh
 
-            v_min_p_ufh.append(0.8 + max(0, (0 - temp_out) * 0.05))
+            cop_u = self.perf_map.predict_cop(t_out[t], t_supply_ufh, t_supply_ufh-4.0, 35, 1)
+            slope_u = self.perf_map.predict_p_el_slope(35, t_out[t])
 
-            # om de temperatuurstijging voor de COP-schatting te simuleren.
-            p_el_est_ufh = self.p_el_max * 0.4
-            rise_room = (
-                ((p_el_est_ufh * cop_u) - (sim_t_room - temp_out) / self.ident.R)
-                * dt
-                / self.ident.C
-            )
-            sim_t_room = np.clip(sim_t_room + rise_room, 18.0, 22.0)
+            el_per_hz_u[t] = slope_u
+            th_per_hz_u[t] = slope_u * cop_u
 
-            # --- DHW Logic ---
-            t_sink_dhw = sim_t_dhw + 9.0
-            cop_d = self.cop_dhw_model.get_cop(temp_out, t_sink_dhw)
-            v_cop_dhw.append(cop_d)
+            # 2. DHW
+            calc_dhw = max(current_est_dhw, 40.0)
+            p_th_dhw_est = 55 * self.perf_map.predict_p_el_slope(55, t_out[t]) * 2.5
+            overtemp_dhw = np.clip(p_th_dhw_est / self.ident.K_tank, 0, 20.0)
+            t_supply_dhw = min(calc_dhw + 3.5 + overtemp_dhw, 58.0)
 
-            # Maar beperk de thermische winst tot de fysieke limiet (bijv. 7.0 kW)
-            p_th_est_dhw = min(self.p_el_max * cop_d, 7.0)
-            rise_dhw = (p_th_est_dhw * dt) / 0.232
-            sim_t_dhw = np.clip(sim_t_dhw + rise_dhw, 15.0, 60.0)
+            cop_d = self.perf_map.predict_cop(t_out[t], t_supply_dhw, t_supply_dhw-7.0, 55, 2)
+            slope_d = self.perf_map.predict_p_el_slope(55, t_out[t])
 
-        # 2. PARAMETERS VULLEN
+            el_per_hz_d[t] = slope_d
+            th_per_hz_d[t] = slope_d * cop_d
+
+            # 3. State Update
+            current_est_room = calc_room - (calc_room - t_out[t])/(self.ident.R*self.ident.C)*self.dt + res_u[t]
+            current_est_dhw = calc_dhw - 0.05 + res_d[t]
+
+        # Vul parameters
+        self.P_max_freq.value = v_max_freq
+        self.P_th_per_hz_ufh.value = th_per_hz_u
+        self.P_th_per_hz_dhw.value = th_per_hz_d
+        self.P_el_per_hz_ufh.value = el_per_hz_u
+        self.P_el_per_hz_dhw.value = el_per_hz_d
+
         self.P_t_room_init.value = state["room_temp"]
         self.P_t_dhw_init.value = dhw_start
+        self.P_temp_out.value = t_out
+        self.P_prices.value = forecast_df["price"].values
+        self.P_solar.value = forecast_df["solar_forecast"].values
+        self.P_ufh_res.value = res_u
+        self.P_dhw_res.value = res_d
 
-        self.P_temp_out.value = temps
-        self.P_prices.value = np.array(prices)
-        self.P_solar_avail.value = forecast_df["power_corrected"].values
-        self.P_load_base.value = forecast_df["load_corrected"].values
-
-        self.P_ufh_res.value = np.array(ufh_residuals)
-        self.P_dhw_res.value = np.array(dhw_residuals)
-
-        self.P_cop_ufh.value = np.array(v_cop_ufh)
-        self.P_cop_dhw.value = np.array(v_cop_dhw)
-        self.P_min_p_ufh.value = np.array(v_min_p_ufh)
-
-        # 3. SOLVE
         try:
-            # CBC is de beste open-source MILP solver
-            self.problem.solve(
-                solver=cp.CBC, verbose=True, maximumSeconds=60, allowableGap=0.05
-            )
-        except Exception:
-            logger.warning("[Optimizer] CBC faalde, fallback naar GLPK_MI")
-            try:
-                self.problem.solve(solver=cp.GLPK_MI, verbose=True)
-            except Exception as e:
-                logger.error(f"[Optimizer] Solver Critical Error: {e}")
-                return None
-
-        if self.u_ufh.value is None:
-            logger.error(f"[Optimizer] Infeasible. Status: {self.problem.status}")
-            return None
-
-        # 4. FORMATTEER RESULTATEN
-        mode = (
-            "DHW"
-            if self.u_dhw.value[0] > 0.5
-            else "UFH" if self.u_ufh.value[0] > 0.5 else "OFF"
-        )
-        current_p_el = float(self.p_el_ufh.value[0] + self.p_el_dhw.value[0])
-
-        dhw_avg = (state["dhw_top"] + state["dhw_bottom"]) / 2
-        soc = (dhw_avg - self.cold_water) / (self.dhw_target - self.cold_water)
-        dhw_kwh = max(0.0, (dhw_avg - self.cold_water) * 0.232)
-
-        # Dit is puur: Import * Prijs
-        real_cost_import = np.sum(self.p_grid_import.value * self.P_prices.value) * self.dt
-
-        return {
-            "mode": mode,
-            "target_power": round(current_p_el, 3),
-            "planned_room": self.t_room.value.tolist(),
-            "planned_dhw": self.t_dhw.value.tolist(),
-            "dhw_soc": max(0, min(1, soc)),
-            "dhw_energy_kwh": dhw_kwh,
-            "cost_projected": round(real_cost_import, 2),
-            "objective_score": float(self.problem.value),
-            "status": self.problem.status,
-        }
-
+            self.problem.solve(solver=cp.CBC)
+            return self.f_ufh.value, self.f_dhw.value
+        except Exception as e:
+            logger.error(f"MPC Solve failed: {e}")
+            return np.zeros(T), np.zeros(T)
 
 # =========================================================
-# 5. EMS WRAPPER
+# 5. OPTIMIZER
 # =========================================================
 class Optimizer:
-    def __init__(self, config: Config, database: Database):
-        self.database = database
+    def __init__(self, config, database):
+        self.db = database
+        self.perf_map = HPPerformanceMap(config.perf_map_path)
         self.ident = SystemIdentificator(config.rc_model_path)
+        self.res_ufh = MLResidualPredictor(config.ufh_res_path)
+        self.res_dhw = MLResidualPredictor(config.dhw_res_path)
+        self.mpc = ThermalMPC(self.ident, self.perf_map)
 
-        # UFH: Efficiëntie ~0.50 (incl pompen), min COP 2.5
-        self.cop_ufh = COPModel(efficiency=0.50, cop_min=2.5, cop_max=6.0)
-        # DHW: Iets lager rendement door hogere temperatuur eisen
-        self.cop_dhw = COPModel(efficiency=0.45, cop_min=1.5, cop_max=4.5)
+    def train(self):
+        df = self.db.get_history(days=730)
+        if df.empty: return
+        self.perf_map.train(df)
+        self.ident.train(df)
+        self.res_ufh.train(df, self.ident.R, self.ident.C, False)
+        self.res_dhw.train(df, self.ident.R, self.ident.C, True)
 
-        self.ufh_res = MLResidualPredictor(config.ufh_model_path)
-        self.dhw_res = MLResidualPredictor(config.dhw_model_path)
-
-        self.mpc = ThermalMPC(self.ident, self.cop_ufh, self.cop_dhw)
-
-    def resolve(self, context: Context):
-        # Pak de horizon uit de context
-        horizon_df = context.forecast_df.iloc[: self.mpc.horizon].copy()
-
-        # Voorspel verstoringen (Zon door ramen, Douchen)
-        ufh_residuals = self.ufh_res.predict(horizon_df, is_dhw=False)
-        dhw_residuals = self.dhw_res.predict(horizon_df, is_dhw=True)
-
-        state = {
-            "room_temp": context.room_temp,
-            "dhw_top": context.dhw_top,
-            "dhw_bottom": context.dhw_bottom,
-        }
-
-        # Dynamische prijzen (indien beschikbaar in context, anders dummy)
-        prices = (
-            context.prices if hasattr(context, "prices") else [0.21] * len(horizon_df)
-        )
-        if len(prices) < len(horizon_df):
-            prices = [0.21] * len(horizon_df)
-
-        return self.mpc.solve(state, horizon_df, prices, ufh_residuals, dhw_residuals)
-
-    def train(self, days_back: int = 730):
-        cutoff = datetime.now() - timedelta(days=days_back)
-        history_df = self.database.get_history(cutoff_date=cutoff)
-
-        if history_df.empty:
-            logger.warning("[Optimizer] Geen data om te trainen.")
-            return
-
-        logger.info("[Optimizer] Start training System ID...")
-        self.ident.train(history_df)
-
-        logger.info("[Optimizer] Start training ML Residuals...")
-        self.ufh_res.train(
-            history_df, self.ident.R, self.ident.C, self.cop_ufh, is_dhw=False
-        )
-        self.dhw_res.train(
-            history_df, self.ident.R, self.ident.C, self.cop_dhw, is_dhw=True
-        )
+    def resolve(self, context):
+        res_u, res_d = self.res_ufh.predict(context.forecast_df), self.res_dhw.predict(context.forecast_df)
+        state = {"room_temp": context.room_temp, "dhw_top": context.dhw_top, "dhw_bottom": context.dhw_bottom}
+        f_ufh, f_dhw = self.mpc.solve(state, context.forecast_df, res_u, res_d)
+        hz = f_ufh[0] if f_ufh[0]>5 else f_dhw[0] if f_dhw[0]>5 else 0
+        mode = "UFH" if f_ufh[0]>5 else "DHW" if f_dhw[0]>5 else "OFF"
+        return {"mode": mode, "freq": round(hz,1)}
