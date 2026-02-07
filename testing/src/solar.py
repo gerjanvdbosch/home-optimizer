@@ -164,7 +164,9 @@ class SolarModel:
         joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
 
-        logger.info(f"[Solar] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW")
+        logger.info(
+            f"[Solar] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW"
+        )
 
     def predict(self, df_forecast: pd.DataFrame, model_ratio: float = 0.7):
         raw_solcast = df_forecast["pv_estimate"].fillna(0)
@@ -244,9 +246,7 @@ class SolarForecaster:
         df["power_corrected"] = self.nowcaster.apply(
             df, current_time, "power_ml", actual_pv=self.context.stable_pv
         )
-        df["power_corrected"] = df["power_corrected"].clip(
-            0, self.config.pv_max_kw
-        )
+        df["power_corrected"] = df["power_corrected"].clip(0, self.config.pv_max_kw)
 
         self.context.solar_bias = round(self.nowcaster.current_ratio, 3)
 

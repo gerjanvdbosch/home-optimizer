@@ -1,8 +1,8 @@
-import requests
 import pandas as pd
 import logging
 
-from config import Config
+from client import HAClient
+from context import Context
 
 logger = logging.getLogger(__name__)
 

@@ -104,9 +104,7 @@ class Collector:
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
         self.context.stable_pv = self._update_buffer(self.pv_buffer, raw_pv)
         self.context.stable_wp = self._update_buffer(self.wp_buffer, raw_wp)
-        self.context.stable_grid = self._update_buffer(
-            self.grid_buffer, raw_grid
-        )
+        self.context.stable_grid = self._update_buffer(self.grid_buffer, raw_grid)
 
         # 3. Berekening met gestabiliseerde waarden
         # Formule: Huisverbruik = (Netto Grid + PV Productie) - Warmtepomp
@@ -180,7 +178,9 @@ class Collector:
             avg_dhw_top = float(np.mean(self.dhw_top_slots))
             avg_dhw_bottom = float(np.mean(self.dhw_bottom_slots))
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
-            avg_export = (sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)) * -1.0
+            avg_export = (
+                sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
+            ) * -1.0
             avg_cop = float(np.mean(self.cop_slots))
             avg_output = float(np.mean(self.output_slots))
 
@@ -211,7 +211,7 @@ class Collector:
                 compressor_freq=avg_compressor_freq,
                 hvac_mode=int(self.context.hvac_mode.value),
                 cop=avg_cop,
-                wp_output=avg_output
+                wp_output=avg_output,
             )
 
             self.current_slot_start = slot_start

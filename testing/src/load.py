@@ -74,6 +74,7 @@ class LoadModel:
     Het Machine Learning model (HistGradientBoosting).
     Leert de basislijn van het huis (zonder WP).
     """
+
     def __init__(self, path: Path):
         self.path = path
         self.model: Optional[BaseEstimator] = None
@@ -117,11 +118,7 @@ class LoadModel:
         df_train["target_load"] = df_train["load_actual"] - df_train["wp_actual"]
         df_train["target_load"] = df_train["target_load"].clip(lower=0.05)
 
-        df_train = (
-            df_train
-            .dropna(subset=["target_load"])
-            .reset_index()
-        )
+        df_train = df_train.dropna(subset=["target_load"]).reset_index()
 
         # AANPASSING: Quantile Regression
         # We voorspellen het 90e percentiel (bovengrens).
@@ -145,7 +142,9 @@ class LoadModel:
         joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
 
-        logger.info(f"[Load] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW")
+        logger.info(
+            f"[Load] Model getraind op {len(df_train)} records. MAE={self.mae:.2f}kW"
+        )
 
     def predict(
         self, df_forecast: pd.DataFrame, fallback_kw: float = 0.05
@@ -191,12 +190,12 @@ class LoadForecaster:
 
         predicted_now = row_now["load_ml"]
 
-        self.nowcaster.update(actual_kw=self.context.stable_load, forecasted_kw=predicted_now)
+        self.nowcaster.update(
+            actual_kw=self.context.stable_load, forecasted_kw=predicted_now
+        )
 
         # 3. Apply NowCaster (Correctie projecteren over de tijd)
-        df["load_corrected"] = self.nowcaster.apply(
-            df, current_time, "load_ml"
-        )
+        df["load_corrected"] = self.nowcaster.apply(df, current_time, "load_ml")
 
         self.context.load_bias = round(self.nowcaster.current_ratio, 3)
 

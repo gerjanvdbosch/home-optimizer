@@ -1,8 +1,8 @@
-import json
 import os
 
 from dataclasses import dataclass
 from utils import safe_float
+
 
 @dataclass
 class Config:
@@ -45,6 +45,4 @@ class Config:
 
     @staticmethod
     def load():
-        return Config(
-            solar_model_ratio=safe_float(os.getenv("SOLAR_MODEL_RATIO", 0.7))
-        )
+        return Config(solar_model_ratio=safe_float(os.getenv("SOLAR_MODEL_RATIO", 0.7)))

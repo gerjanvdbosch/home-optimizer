@@ -14,26 +14,28 @@ src_path = os.path.abspath(os.path.join(current_dir, "..", "src"))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-# Importeer de nieuwe Optimizer
-from optimizer import Optimizer
+from optimizer import Optimizer  # noqa: E402
 
 # Logging instellen
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
 
 # =========================================================
 # 1. MOCK CLASSES
 # =========================================================
 class MockConfig:
     def __init__(self):
-        self.perf_map_path = "test_perf_map.joblib"
+        self.hp_model_path = "test_perf_map.joblib"
         self.rc_model_path = "test_rc_model.joblib"
-        self.ufh_res_path = "test_ufh_res.joblib"
-        self.dhw_res_path = "test_dhw_res.joblib"
+        self.ufh_model_path = "test_ufh_res.joblib"
+        self.dhw_model_path = "test_dhw_res.joblib"
+
 
 class MockDatabase:
     def get_history(self, days):
         return pd.DataFrame()
+
 
 # =========================================================
 # 2. DATA GENERATIE
@@ -43,7 +45,7 @@ def create_test_context():
     now = datetime.now().replace(minute=0, second=0, microsecond=0)
 
     # Tijdstempels
-    timestamps = [now + timedelta(minutes=15*i) for i in range(horizon)]
+    timestamps = [now + timedelta(minutes=15 * i) for i in range(horizon)]
 
     # Weersvoorspelling
     temps = 5 + 3 * np.sin(np.linspace(-np.pi, np.pi, horizon))
@@ -57,14 +59,16 @@ def create_test_context():
     solar_forecast = np.zeros(horizon)
     solar_forecast[16:32] = [2.0 * np.sin(x) for x in np.linspace(0, np.pi, 16)]
 
-    forecast_df = pd.DataFrame({
-        "timestamp": timestamps,
-        "temp": temps,
-        "solar": solar_rad,
-        "wind": wind,
-        "price": prices,
-        "solar_forecast": solar_forecast
-    })
+    forecast_df = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "temp": temps,
+            "solar": solar_rad,
+            "wind": wind,
+            "price": prices,
+            "solar_forecast": solar_forecast,
+        }
+    )
 
     class Context:
         def __init__(self, df):
@@ -74,6 +78,7 @@ def create_test_context():
             self.dhw_bottom = 10.0
 
     return Context(forecast_df)
+
 
 # =========================================================
 # 3. HET TEST RUNNEN
@@ -102,12 +107,16 @@ def run_test():
 
     optimizer.perf_map.max_freq_model = MagicMock()
     # Simuleer: dynamische limiet rond de 55-60Hz voor dit weer
-    optimizer.perf_map.max_freq_model.predict.side_effect = lambda x: [70.0 - (x[0][0] + 10) * 1.0]
+    optimizer.perf_map.max_freq_model.predict.side_effect = lambda x: [
+        70.0 - (x[0][0] + 10) * 1.0
+    ]
 
     # Maak test data
     context = create_test_context()
 
-    logger.info(f"Huidige staat: Kamer={context.room_temp}C, Boiler Gemiddeld={(context.dhw_top+context.dhw_bottom)/2}C")
+    logger.info(
+        f"Huidige staat: Kamer={context.room_temp}C, Boiler Gemiddeld={(context.dhw_top+context.dhw_bottom)/2}C"
+    )
 
     # Run de optimizer
     result = optimizer.resolve(context)
@@ -122,32 +131,47 @@ def run_test():
             f_u = optimizer.mpc.f_ufh.value
             f_d = optimizer.mpc.f_dhw.value
             t_r = optimizer.mpc.t_room.value
-            t_d = optimizer.mpc.t_dhw.value # De voorspelde DHW temp
+            t_d = optimizer.mpc.t_dhw.value  # De voorspelde DHW temp
 
             # Print tabelletje van de eerste 8 kwartieren
             plan_data = []
             for i in range(48):
                 mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
-                plan_data.append({
-                    "Tijd": context.forecast_df["timestamp"].iloc[i].strftime("%H:%M"),
-                    "Mode": mode,
-                    "Freq": round(max(f_u[i], f_d[i]), 1),
-                    "Verw_T_room": round(t_r[i], 2),
-                    "Verw_T_dhw": round(t_d[i], 2) # NIEUW: DHW temperatuur in de tabel
-                })
+                plan_data.append(
+                    {
+                        "Tijd": context.forecast_df["timestamp"]
+                        .iloc[i]
+                        .strftime("%H:%M"),
+                        "Mode": mode,
+                        "Freq": round(max(f_u[i], f_d[i]), 1),
+                        "Verw_T_room": round(t_r[i], 2),
+                        "Verw_T_dhw": round(
+                            t_d[i], 2
+                        ),  # NIEUW: DHW temperatuur in de tabel
+                    }
+                )
 
             print(pd.DataFrame(plan_data).to_string(index=False))
 
         assert "mode" in result
         assert "freq" in result
-        logger.info("\n✅ Test geslaagd: De solver heeft een geldig resultaat gegenereerd.")
+        logger.info(
+            "\n✅ Test geslaagd: De solver heeft een geldig resultaat gegenereerd."
+        )
     else:
         logger.error("❌ Test gefaald: Geen resultaat.")
 
+
 if __name__ == "__main__":
-    paths = ["test_perf_map.joblib", "test_rc_model.joblib", "test_ufh_res.joblib", "test_dhw_res.joblib"]
+    paths = [
+        "test_perf_map.joblib",
+        "test_rc_model.joblib",
+        "test_ufh_res.joblib",
+        "test_dhw_res.joblib",
+    ]
     for p in paths:
-        if Path(p).exists(): Path(p).unlink()
+        if Path(p).exists():
+            Path(p).unlink()
 
     try:
         run_test()
@@ -155,4 +179,5 @@ if __name__ == "__main__":
         logger.exception(f"Fout tijdens test: {e}")
     finally:
         for p in paths:
-            if Path(p).exists(): Path(p).unlink()
+            if Path(p).exists():
+                Path(p).unlink()

@@ -1,5 +1,4 @@
 import os
-import threading
 import logging
 import uvicorn
 
@@ -26,7 +25,9 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 class Coordinator:
-    def __init__(self, context: Context, config: Config, database: Database, collector: Collector):
+    def __init__(
+        self, context: Context, config: Config, database: Database, collector: Collector
+    ):
         self.solar = SolarForecaster(config, context, database)
         self.load = LoadForecaster(config, context, database)
         self.optimizer = Optimizer(config, database)
@@ -65,16 +66,16 @@ class Coordinator:
                 d_t = result["planned_dhw"][i]
                 print(f"  T + {i*15:02}m | Kamer: {r_t:.2f}°C | Boiler: {d_t:.2f}°C")
 
-
     def train(self):
         self.solar.train()
         self.load.train()
         self.optimizer.train()
 
+
 if __name__ == "__main__":
     logger.info("[System] Starting...")
 
-    scheduler = BackgroundScheduler(job_defaults={'max_instances': 1})
+    scheduler = BackgroundScheduler(job_defaults={"max_instances": 1})
 
     try:
         config = Config.load()
@@ -88,13 +89,25 @@ if __name__ == "__main__":
 
         next_run = datetime.now(timezone.utc) + timedelta(seconds=5)
 
-        scheduler.add_job(collector.update_forecast, "interval", seconds=15, id="update_forecast")
-        scheduler.add_job(collector.update_load, "interval", seconds=15, id="update_load")
-        scheduler.add_job(collector.update_history, "interval", seconds=15, id="update_history")
+        scheduler.add_job(
+            collector.update_forecast, "interval", seconds=15, id="update_forecast"
+        )
+        scheduler.add_job(
+            collector.update_load, "interval", seconds=15, id="update_load"
+        )
+        scheduler.add_job(
+            collector.update_history, "interval", seconds=15, id="update_history"
+        )
         scheduler.add_job(coordinator.tick, "interval", seconds=15, id="tick")
 
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
-        scheduler.add_job(coordinator.optimize, "interval", minutes=1, next_run_time=next_run, id="optimize")
+        scheduler.add_job(
+            coordinator.optimize,
+            "interval",
+            minutes=1,
+            next_run_time=next_run,
+            id="optimize",
+        )
 
         collector.update_forecast()
         collector.update_history()
