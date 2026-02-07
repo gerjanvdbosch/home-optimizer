@@ -183,6 +183,7 @@ class MLResidualPredictor:
     def __init__(self, path):
         self.path = Path(path)
         self.model = None
+        self.features = ["temp", "solar", "wind", "hour_sin", "hour_cos", "day_sin", "day_cos", "doy_sin", "doy_cos"]
 
     def train(self, df, R, C, is_dhw=False):
         df = df.copy().set_index("timestamp").sort_index().resample("15min").interpolate().reset_index()
@@ -197,16 +198,15 @@ class MLResidualPredictor:
             dhw_avg = (df["dhw_top"] + df["dhw_bottom"]) / 2
             target = dhw_avg.shift(-1) - dhw_avg - (df["wp_output"] * dt / 0.232)
 
-        feats = ["temp", "solar", "wind", "hour_sin", "hour_cos", "day_sin", "day_cos"]
-        train_df = pd.concat([df[feats], target], axis=1).dropna()
+        train_df = pd.concat([df[self.features], target], axis=1).dropna()
         if len(train_df) > 50:
-            self.model = RandomForestRegressor(n_estimators=100).fit(train_df[feats], train_df.iloc[:, -1])
+            self.model = RandomForestRegressor(n_estimators=100).fit(train_df[self.features], train_df.iloc[:, -1])
             joblib.dump(self.model, self.path)
 
     def predict(self, forecast_df):
         if self.model is None: return np.zeros(len(forecast_df))
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
-        return self.model.predict(df[["temp", "solar", "wind", "hour_sin", "hour_cos", "day_sin", "day_cos"]])
+        return self.model.predict(df[self.features])
 
 # =========================================================
 # 4. THERMAL MPC
@@ -319,6 +319,8 @@ class ThermalMPC:
     def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
         t_out = forecast_df.temp.values
+        t_prices = [0.22] * T
+        t_solar = forecast_df.solar_forecast.values
 
         dhw_start = (state["dhw_top"] + state["dhw_bottom"]) / 2
         current_est_room, current_est_dhw = state["room_temp"], dhw_start
@@ -390,8 +392,8 @@ class ThermalMPC:
         self.P_t_room_init.value = state["room_temp"]
         self.P_t_dhw_init.value = dhw_start
         self.P_temp_out.value = t_out
-        self.P_prices.value = forecast_df["price"].values
-        self.P_solar.value = forecast_df["solar_forecast"].values
+        self.P_prices.value = t_prices
+        self.P_solar.value = t_solar
         self.P_ufh_res.value = res_u
         self.P_dhw_res.value = res_d
 
