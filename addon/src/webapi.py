@@ -36,25 +36,12 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
     result = context.result if hasattr(context, "result") else None
 
     details = {
-        "Status": result["status"] if result is not None else "-",
         "Mode": result["mode"] if result is not None else "-",
-        "Target power": (
-            f"{result['target_power']:.2f} kW" if result is not None else "0.00 kW"
-        ),
-        "Kosten": (
-            f"€ {result['cost_projected']:.2f}" if result is not None else "€ 0.00"
-        ),
         "PV Huidig": (
             f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
         ),
         "Load Huidig": (
             f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-"
-        ),
-        "Boiler SoC": (
-            f"{result['dhw_soc']*100:.1f} %" if result is not None else "0.0 %"
-        ),
-        "Boiler Energy": (
-            f"{result['dhw_energy_kwh']:.2f} kWh" if result is not None else "0.00 kWh"
         ),
         "Boiler Solar": f"{getattr(context, 'boiler_solar_kwh', 0.0):.2f} kWh",
         "Verwachte Load": f"{getattr(context, 'predicted_load_now', 0.0):.2f} kW",
