@@ -9,6 +9,7 @@ from config import Config
 from collections import deque
 from weather import WeatherClient
 from database import Database
+from context import HvacMode
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class Collector:
         self.dhw_top_slots.append(raw_dhw_top)
         self.dhw_bottom_slots.append(raw_dhw_bottom)
 
-        if self.context.hvac_mode != Context.HVACMode.OFF:
+        if self.context.hvac_mode != HvacMode.OFF:
             self.compressor_slots.append(self.client.get_compressor_freq())
             self.supply_slots.append(self.client.get_supply_temp())
             self.return_slots.append(self.client.get_return_temp())

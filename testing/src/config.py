@@ -36,6 +36,7 @@ class Config:
     rc_model_path: str = "data/rc_model.joblib"
     load_model_path: str = "data/load_model.joblib"
     solar_model_path: str = "data/solar_model.joblib"
+    hp_model_path: str = "data/hp_model.joblib"
 
     solar_model_ratio: float = 0.0
 

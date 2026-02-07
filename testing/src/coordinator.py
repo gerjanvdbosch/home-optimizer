@@ -4,7 +4,7 @@ import logging
 import uvicorn
 
 from datetime import datetime, timezone, timedelta
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from config import Config
 from context import Context
@@ -71,20 +71,10 @@ class Coordinator:
         self.load.train()
         self.optimizer.train()
 
-    def start_api(self):
-        api.state.coordinator = self
-        uvicorn.run(
-            api,
-            host=self.config.webapi_host,
-            port=self.config.webapi_port,
-            log_level="warning",
-        )
-
-
 if __name__ == "__main__":
     logger.info("[System] Starting...")
 
-    scheduler = BlockingScheduler()
+    scheduler = BackgroundScheduler(job_defaults={'max_instances': 1})
 
     try:
         config = Config.load()
@@ -94,22 +84,17 @@ if __name__ == "__main__":
         collector = Collector(client, database, context, config)
         coordinator = Coordinator(context, config, database, collector)
 
-        webapi = threading.Thread(target=coordinator.start_api, daemon=True)
-        webapi.start()
-
-        logger.info("[System] API server started")
+        api.state.coordinator = coordinator
 
         next_run = datetime.now(timezone.utc) + timedelta(seconds=5)
 
-        scheduler.add_job(collector.update_forecast, "interval", seconds=15)
-        scheduler.add_job(collector.update_load, "interval", seconds=15)
-        scheduler.add_job(collector.update_history, "interval", seconds=15)
-        scheduler.add_job(coordinator.tick, "interval", seconds=15)
+        scheduler.add_job(collector.update_forecast, "interval", seconds=15, id="update_forecast")
+        scheduler.add_job(collector.update_load, "interval", seconds=15, id="update_load")
+        scheduler.add_job(collector.update_history, "interval", seconds=15, id="update_history")
+        scheduler.add_job(coordinator.tick, "interval", seconds=15, id="tick")
 
-        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5)
-        scheduler.add_job(coordinator.optimize, "interval", minutes=1, next_run_time=next_run)
-
-        logger.info("[System] Engine running")
+        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
+        scheduler.add_job(coordinator.optimize, "interval", minutes=1, next_run_time=next_run, id="optimize")
 
         collector.update_forecast()
         collector.update_history()
@@ -118,6 +103,15 @@ if __name__ == "__main__":
         coordinator.train()
 
         scheduler.start()
+
+        logger.info("[System] Engine running")
+
+        uvicorn.run(
+            api,
+            host=config.webapi_host,
+            port=config.webapi_port,
+            log_level="warning",
+        )
 
     except (KeyboardInterrupt, SystemExit):
         logger.info("[System] Stopping and exiting...")

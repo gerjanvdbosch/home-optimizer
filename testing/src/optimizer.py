@@ -4,6 +4,7 @@ import cvxpy as cp
 import joblib
 import logging
 
+from datetime import datetime, timedelta
 from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
@@ -410,15 +411,19 @@ class ThermalMPC:
 class Optimizer:
     def __init__(self, config, database):
         self.db = database
-        self.perf_map = HPPerformanceMap(config.perf_map_path)
+        self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path)
-        self.res_ufh = MLResidualPredictor(config.ufh_res_path)
-        self.res_dhw = MLResidualPredictor(config.dhw_res_path)
+        self.res_ufh = MLResidualPredictor(config.ufh_model_path)
+        self.res_dhw = MLResidualPredictor(config.dhw_model_path)
         self.mpc = ThermalMPC(self.ident, self.perf_map)
 
-    def train(self):
-        df = self.db.get_history(days=730)
-        if df.empty: return
+    def train(self, days_back: int = 730):
+        cutoff = datetime.now() - timedelta(days=days_back)
+
+        df = self.db.get_history(cutoff_date=cutoff)
+        if df.empty:
+            return
+
         self.perf_map.train(df)
         self.ident.train(df)
         self.res_ufh.train(df, self.ident.R, self.ident.C, False)
@@ -426,8 +431,19 @@ class Optimizer:
 
     def resolve(self, context):
         res_u, res_d = self.res_ufh.predict(context.forecast_df), self.res_dhw.predict(context.forecast_df)
-        state = {"room_temp": context.room_temp, "dhw_top": context.dhw_top, "dhw_bottom": context.dhw_bottom}
+
+        state = {
+            "room_temp": context.room_temp,
+            "dhw_top": context.dhw_top,
+            "dhw_bottom": context.dhw_bottom
+        }
+
         f_ufh, f_dhw = self.mpc.solve(state, context.forecast_df, res_u, res_d)
-        hz = f_ufh[0] if f_ufh[0]>5 else f_dhw[0] if f_dhw[0]>5 else 0
-        mode = "UFH" if f_ufh[0]>5 else "DHW" if f_dhw[0]>5 else "OFF"
-        return {"mode": mode, "freq": round(hz,1)}
+
+        hz = f_ufh[0] if f_ufh[0] > 15 else f_dhw[0] if f_dhw[0] > 15 else 0
+        mode = "UFH" if f_ufh[0] > 15 else "DHW" if f_dhw[0] > 15 else "OFF"
+
+        return {
+            "mode": mode,
+            "freq": round(hz,1)
+        }
