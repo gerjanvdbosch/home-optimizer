@@ -438,7 +438,7 @@ class ThermalMPC:
                 self.f_ufh[t] >= self.ufh_on[t] * 25,
                 self.f_dhw[t] >= self.dhw_on[t] * 35,
                 self.t_room[t + 1] + self.s_room_low[t] >= 18.0,
-                self.t_dhw[t + 1] + self.s_dhw_low[t] >= 35.0,
+                self.t_dhw[t + 1] + self.s_dhw_low[t] >= 25.0,
                 self.t_room[t + 1] <= 22.5,
             ]
 
