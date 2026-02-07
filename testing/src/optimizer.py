@@ -42,9 +42,11 @@ class HPPerformanceMap:
                 self.ufh_delta_t_ref = data.get("ufh_delta_t_ref", 4.0)
                 self.dhw_delta_t_ref = data.get("dhw_delta_t_ref", 7.0)
                 self.is_fitted = True
-                logger.info("[HPPerformanceMap] Model geladen")
+                logger.info(
+                    f"[Optimizer] Loaded refs: UFH={self.ufh_freq_ref:.1f}Hz/dT={self.ufh_delta_t_ref:.1f}, DHW={self.dhw_freq_ref:.1f}Hz/dT={self.dhw_delta_t_ref:.1f}"
+                )
             except Exception:
-                logger.warning("[HPPerformanceMap] Laden mislukt")
+                logger.warning("[Optimizer] Performance map laden mislukt.")
 
     def train(self, df: pd.DataFrame):
         df = df.copy()
@@ -60,7 +62,7 @@ class HPPerformanceMap:
         df_clean = df[mask].copy()
 
         if len(df_clean) < 50:
-            logger.warning("[PerformanceMap] Te weinig schone data.")
+            logger.warning("[Optimizer] Te weinig data voor performance map training.")
             return
 
         features_cop = [
@@ -114,7 +116,7 @@ class HPPerformanceMap:
             )
 
         logger.info(
-            f"[HPPerf] Learned refs: UFH={self.ufh_freq_ref:.1f}Hz/dT={self.ufh_delta_t_ref:.1f}, DHW={self.dhw_freq_ref:.1f}Hz/dT={self.dhw_delta_t_ref:.1f}"
+            f"[Optimizer] Learned refs: UFH={self.ufh_freq_ref:.1f}Hz/dT={self.ufh_delta_t_ref:.1f}, DHW={self.dhw_freq_ref:.1f}Hz/dT={self.dhw_delta_t_ref:.1f}"
         )
 
         self.is_fitted = True
@@ -177,15 +179,28 @@ class SystemIdentificator:
             self.K_emit = data.get("K_emit", 0.15)
             self.K_tank = data.get("K_tank", 0.25)
             self.K_loss_dhw = data.get("K_loss_dhw", 0.15)
+            logger.info(
+                f"[Optimizer] Loaded system ID: R={self.R:.1f}K/W, C={self.C:.1f}kWh/K, K_emit={self.K_emit:.3f}kW/°C, K_tank={self.K_tank:.3f}kW/°C, K_loss_dhw={self.K_loss_dhw:.3f}°C/h"
+            )
 
     def train(self, df):
         df_proc = (
             df.copy()
             .set_index("timestamp")
             .sort_index()
-            .resample("15min")
-            .interpolate()
         )
+
+        for col in df_proc.columns:
+            df_proc[col] = pd.to_numeric(df_proc[col], errors='coerce')
+
+        df_proc = (
+            df_proc
+            .resample("15min")
+            .interpolate(method='linear', limit=2)
+            .dropna()
+            .reset_index()
+        )
+
         mask_rc = (df_proc["hvac_mode"] == HvacMode.HEATING.value) & (
             df_proc["pv_actual"] < 0.05
         )
@@ -250,6 +265,10 @@ class SystemIdentificator:
                 float(abs(df_l.loc[mask_sb, "change"].median())), 0.02, 0.5
             )
 
+        logger.info(
+            f"[Optimizer] Learned system ID: R={self.R:.1f}K/W, C={self.C:.1f}kWh/K, K_emit={self.K_emit:.3f}kW/°C, K_tank={self.K_tank:.3f}kW/°C, K_loss_dhw={self.K_loss_dhw:.3f}°C/h"
+        )
+
         joblib.dump(
             {
                 "R": self.R,
@@ -271,7 +290,7 @@ class MLResidualPredictor:
         self.model = None
         self.features = [
             "temp",
-            "solar",
+            "pv_actual",
             "wind",
             "hour_sin",
             "hour_cos",
@@ -282,15 +301,24 @@ class MLResidualPredictor:
         ]
 
     def train(self, df, R, C, is_dhw=False):
-        df = (
+        df_proc = (
             df.copy()
             .set_index("timestamp")
             .sort_index()
+        )
+
+        for col in df_proc.columns:
+            df_proc[col] = pd.to_numeric(df_proc[col], errors='coerce')
+
+        df_proc = (
+            df_proc
             .resample("15min")
-            .interpolate()
+            .interpolate(method='linear', limit=2)
+            .dropna()
             .reset_index()
         )
-        df = add_cyclic_time_features(df, "timestamp")
+
+        df = add_cyclic_time_features(df_proc, "timestamp")
         dt = 0.25
 
         if not is_dhw:
@@ -457,9 +485,12 @@ class ThermalMPC:
 
     def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
-        t_out = forecast_df.temp.values
+        t_out = forecast_df.temp.values[:T]
         t_prices = [0.22] * T
-        t_solar = forecast_df.solar_forecast.values
+        t_solar = forecast_df.power_corrected.values[:T]
+
+        res_u = res_u[:T]
+        res_d = res_d[:T]
 
         dhw_start = (state["dhw_top"] + state["dhw_bottom"]) / 2
         current_est_room, current_est_dhw = state["room_temp"], dhw_start
