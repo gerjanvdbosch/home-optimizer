@@ -37,10 +37,10 @@ class HAClient:
         return to_kw(self._get_state(self.config.sensor_wp_power))
 
     def get_wp_output(self):
-        return to_kw(self._get_state(self.config.sensor_wp_output))
+        return safe_float(self._get_state(self.config.sensor_wp_output))
 
     def get_grid_power(self):
-        return safe_float(self._get_state(self.config.sensor_grid_power))
+        return to_kw(self._get_state(self.config.sensor_grid_power))
 
     def get_room_temp(self):
         return safe_float(self._get_state(self.config.sensor_room_temp))
