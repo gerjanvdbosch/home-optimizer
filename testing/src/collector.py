@@ -124,7 +124,7 @@ class Collector:
         self.context.stable_load = max(0.05, base_load)
 
         if self.context.hvac_mode != HvacMode.OFF:
-            raw_output = abs(self.client.get_wp_output())
+            raw_output = self.client.get_wp_output()
 
             if raw_output > 0:
                 self.output_slots.append(raw_output)
@@ -182,14 +182,14 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = self._mean(self.pv_slots)
             avg_wp = self._mean(self.wp_slots)
-            avg_compressor_freq = self._mean(self.compressor_slots)
+            avg_compressor_freq = self._mean(self.compressor_slots, 0)
             avg_supply = self._mean(self.supply_slots)
             avg_return = self._mean(self.return_slots)
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
             avg_cop = self._mean(self.cop_slots)
-            avg_output = self._mean(self.output_slots)
+            avg_output = self._mean(self.output_slots, 0)
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (
                 sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)

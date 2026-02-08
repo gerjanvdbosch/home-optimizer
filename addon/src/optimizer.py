@@ -528,7 +528,7 @@ class ThermalMPC:
             th_per_hz_u[t] = slope_u * cop_u
 
             # 2. DHW: Dynamische Aanvoer o.b.v. vermogen warmtepomp
-            calc_dhw = max(current_est_dhw, self.dhw_target - 5.0)
+            calc_dhw = max(current_est_dhw, 40.0)
 
             # Stap A: Maak een eerste schatting van het thermisch vermogen
             # We gebruiken hier calc_dhw + dhw_dt als tijdelijke sink voor de allereerste COP-check

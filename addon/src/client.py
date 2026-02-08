@@ -37,7 +37,7 @@ class HAClient:
         return to_kw(self._get_state(self.config.sensor_wp_power))
 
     def get_wp_output(self):
-        return to_kw(abs(self._get_state(self.config.sensor_wp_output)))
+        return to_kw(self._get_state(self.config.sensor_wp_output))
 
     def get_grid_power(self):
         return to_kw(self._get_state(self.config.sensor_grid_power))
