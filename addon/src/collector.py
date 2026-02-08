@@ -87,7 +87,7 @@ class Collector:
 
         self.database.save_forecast(df_today)
 
-        forecast_df = df_today[df_today["timestamp"] >= self.context.now].copy()
+        # forecast_df = df_today[df_today["timestamp"] >= self.context.now].copy()
 
         self.context.forecast_df_raw = df_today
 
@@ -98,10 +98,12 @@ class Collector:
         raw_pv = self.client.get_pv_power()
         raw_wp = self.client.get_wp_power()
         raw_grid = self.client.get_grid_power()
+        raw_output = self.client.get_wp_output()
 
         self.pv_slots.append(raw_pv)
         self.wp_slots.append(raw_wp)
         self.grid_slots.append(raw_grid)
+        self.output_slots.append(raw_output)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -121,12 +123,6 @@ class Collector:
         # Als base_load negatief is, is de meting van de WP waarschijnlijk hoger dan de P1/PV meten.
         # In dat geval is het 'restverbruik' van het huis waarschijnlijk minimaal.
         self.context.stable_load = max(0.05, base_load)
-
-        if self.context.hvac_mode != HvacMode.OFF:
-            raw_output = self.client.get_wp_output()
-
-            if raw_output > 0:
-                self.output_slots.append(raw_output)
 
         logger.debug(
             f"[Collector] Load: Base={base_load:.2f}kW | "
@@ -187,8 +183,8 @@ class Collector:
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
-            avg_cop = self._mean(self.cop_slots)
-            avg_output = self._mean(self.output_slots, 0)
+            avg_cop = self._mean(self.cop_slots, 0)
+            avg_output = self._mean(self.output_slots)
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (
                 sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
