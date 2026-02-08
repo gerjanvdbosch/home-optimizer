@@ -26,7 +26,8 @@ class Config:
     sensor_cop: str = "sensor.ecodan_heatpump_ca09ec_geschatte_cop"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 
-    sensor_solcast: str = "sensor.solcast_pv_forecast_forecast_today"
+    sensor_solcast_today: str = "sensor.solcast_pv_forecast_forecast_today"
+    sensor_solcast_tomorrow: str = "sensor.solcast_pv_forecast_forecast_tomorrow"
     sensor_home: str = "zone.home"
 
     database_path: str = "/config/db/database.sqlite"

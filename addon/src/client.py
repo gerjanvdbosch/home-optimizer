@@ -78,7 +78,7 @@ class HAClient:
         return HvacMode(hvac)
 
     def get_forecast(self):
-        attributes = self._get_attributes(self.config.sensor_solcast)
+        attributes = self._get_attributes(self.config.sensor_solcast_today)
         if not attributes:
             return []
         return attributes.get("detailedForecast", [])

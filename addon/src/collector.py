@@ -89,7 +89,7 @@ class Collector:
 
         forecast_df = df_today[df_today["timestamp"] >= self.context.now].copy()
 
-        self.context.forecast_df_raw = forecast_df
+        self.context.forecast_df_raw = df_today
 
         logger.info("[Collector] Forecast updated")
 
