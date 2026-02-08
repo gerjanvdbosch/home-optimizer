@@ -89,7 +89,7 @@ class Collector:
 
         forecast_df = df_today[df_today["timestamp"] >= self.context.now].copy()
 
-        self.context.forecast_df_raw = forecast_df
+        self.context.forecast_df_raw = df_today
 
         logger.info("[Collector] Forecast updated")
 
@@ -227,7 +227,7 @@ class Collector:
             self.current_slot_start = slot_start
 
             logger.info(
-                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW"
+                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW Freq={avg_compressor_freq:.1f}Hz Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C COP={avg_cop:.2f} Output={avg_output:.2f}kW"
             )
 
     def _update_buffer(self, buffer: deque, value: float):
