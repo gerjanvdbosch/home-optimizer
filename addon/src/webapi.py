@@ -389,10 +389,10 @@ def _get_explanation_data(coordinator) -> dict:
     forecaster = coordinator.solar
 
     if not hasattr(context, "forecast_df") or context.forecast_df is None:
-        return None
+        return "Geen forecast data beschikbaar."
 
     if not forecaster.model.is_fitted:
-        return None
+        return "Model nog niet getraind."
 
     try:
         local_tz = datetime.now().astimezone().tzinfo
