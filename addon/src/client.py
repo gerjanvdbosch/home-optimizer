@@ -40,31 +40,31 @@ class HAClient:
         return to_kw(self._get_state(self.config.sensor_wp_output))
 
     def get_grid_power(self):
-        return to_kw(self._get_state(self.config.sensor_grid_power))
+        return safe_float(self._get_state(self.config.sensor_grid_power))
 
     def get_room_temp(self):
-        return float(self._get_state(self.config.sensor_room_temp))
+        return safe_float(self._get_state(self.config.sensor_room_temp))
 
     def get_dhw_top(self):
-        return float(self._get_state(self.config.sensor_dhw_top))
+        return safe_float(self._get_state(self.config.sensor_dhw_top))
 
     def get_dhw_bottom(self):
-        return float(self._get_state(self.config.sensor_dhw_bottom))
+        return safe_float(self._get_state(self.config.sensor_dhw_bottom))
 
     def get_dhw_setpoint(self):
-        return float(self._get_state(self.config.sensor_dhw_setpoint))
+        return safe_float(self._get_state(self.config.sensor_dhw_setpoint))
 
     def get_compressor_freq(self):
-        return float(self._get_state(self.config.sensor_compressor_freq))
+        return safe_float(self._get_state(self.config.sensor_compressor_freq))
 
     def get_supply_temp(self):
-        return float(self._get_state(self.config.sensor_supply_temp))
+        return safe_float(self._get_state(self.config.sensor_supply_temp))
 
     def get_return_temp(self):
-        return float(self._get_state(self.config.sensor_return_temp))
+        return safe_float(self._get_state(self.config.sensor_return_temp))
 
     def get_cop(self):
-        return float(self._get_state(self.config.sensor_cop))
+        return safe_float(self._get_state(self.config.sensor_cop))
 
     def get_hvac_mode(self):
         hvac = {

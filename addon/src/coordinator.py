@@ -67,7 +67,7 @@ class Coordinator:
 
                 plan_data = []
                 # We lopen door de hele horizon (48 kwartieren / 12 uur)
-                for i in range(48):
+                for i in range(mpc.horizon):
                     mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
                     plan_data.append(
                         {

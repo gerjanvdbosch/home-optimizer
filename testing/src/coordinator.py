@@ -37,7 +37,7 @@ class Coordinator:
         self.collector = collector
 
     def tick(self):
-        self.context.now = datetime.now(timezone.utc)
+        self.context.now = datetime.now(timezone.utc).replace(day=14, month=1, year=2026)
 
         self.collector.update_sensors()
 
@@ -67,7 +67,7 @@ class Coordinator:
 
                 plan_data = []
                 # We lopen door de hele horizon (48 kwartieren / 12 uur)
-                for i in range(48):
+                for i in range(mpc.horizon):
                     mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
                     plan_data.append(
                         {
@@ -100,7 +100,7 @@ if __name__ == "__main__":
 
     try:
         config = Config.load()
-        context = Context(now=datetime.now(timezone.utc))
+        context = Context(now=datetime.now(timezone.utc).replace(day=14, month=1, year=2026))
         client = HAClient(config)
         database = Database(config)
         collector = Collector(client, database, context, config)
