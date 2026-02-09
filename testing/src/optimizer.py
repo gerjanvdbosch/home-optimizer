@@ -61,7 +61,7 @@ class HPPerformanceMap:
         mask &= ~((df["temp"].between(-3, 5)) & (df["cop"] < 1.5))
         df_clean = df[mask].copy()
 
-        if len(df_clean) < 50:
+        if len(df_clean) < 10:
             logger.warning("[Optimizer] Te weinig data voor performance map training.")
             return
 
@@ -201,7 +201,7 @@ class SystemIdentificator:
         )
         train_rc = df_proc[mask_rc].copy()
 
-        if len(train_rc) > 50:
+        if len(train_rc) > 10:
             train_rc["dT_1h"] = train_rc["room_temp"].shift(-4) - train_rc["room_temp"]
             train_rc["X1"] = -(train_rc["room_temp"] - train_rc["temp"])
             train_rc["X2"] = train_rc["wp_output"]
@@ -215,7 +215,7 @@ class SystemIdentificator:
             )
 
         mask_ufh = (df["hvac_mode"] == HvacMode.HEATING.value) & (df["wp_output"] > 0.5)
-        if len(df[mask_ufh]) > 50:
+        if len(df[mask_ufh]) > 10:
             dT_emit = (
                 (df.loc[mask_ufh, "supply_temp"] + df.loc[mask_ufh, "return_temp"]) / 2
             ) - df.loc[mask_ufh, "room_temp"]
@@ -229,7 +229,7 @@ class SystemIdentificator:
             )
 
         mask_dhw = (df["hvac_mode"] == HvacMode.DHW.value) & (df["wp_output"] > 1.0)
-        if len(df[mask_dhw]) > 50:
+        if len(df[mask_dhw]) > 10:
             t_tank = (df.loc[mask_dhw, "dhw_top"] + df.loc[mask_dhw, "dhw_bottom"]) / 2
 
             dT_tank = (
@@ -255,7 +255,7 @@ class SystemIdentificator:
             & (df_l["change"] < 0)
             & (df_l["change"] > -0.8)
         )
-        if len(df_l[mask_sb]) > 50:
+        if len(df_l[mask_sb]) > 10:
             self.K_loss_dhw = np.clip(
                 float(abs(df_l.loc[mask_sb, "change"].median())), 0.02, 0.5
             )
@@ -324,11 +324,12 @@ class MLResidualPredictor:
             target = dhw_avg.shift(-1) - dhw_avg - (df["wp_output"] * dt / 0.232)
 
         train_df = pd.concat([df[self.features], target], axis=1).dropna()
-        if len(train_df) > 50:
+        if len(train_df) > 10:
             self.model = RandomForestRegressor(n_estimators=100).fit(
                 train_df[self.features], train_df.iloc[:, -1]
             )
             joblib.dump(self.model, self.path)
+            logger.info(f"[Optimizer] Residual model getraind: {self.path}")
 
     def predict(self, forecast_df):
         if self.model is None:

@@ -84,10 +84,20 @@ class HAClient:
         return attributes.get("detailedForecast", [])
 
     def _get_state(self, entity_id):
-        return self._get_payload(entity_id).get("state")
+        try:
+            return self._get_payload(entity_id).get("state")
+        except Exception as e:
+            logger.exception("[Client] Error getting state for %s: %s", entity_id, e)
+            return None
 
     def _get_attributes(self, entity_id):
-        return self._get_payload(entity_id).get("attributes", {})
+        try:
+            return self._get_payload(entity_id).get("attributes", {})
+        except Exception as e:
+            logger.exception(
+                "[Client] Error getting attributes for %s: %s", entity_id, e
+            )
+            return None
 
     def _get_payload(self, entity_id):
         try:
@@ -99,7 +109,7 @@ class HAClient:
             logger.debug("[Client] Payload for %s: %s", entity_id, payload)
             return payload
         except Exception as e:
-            logger.exception("[Client] Error getting state %s: %s", e)
+            logger.exception("[Client] Error getting state %s: %s", entity_id, e)
             return None
 
     def _set_state(self, entity_id, state, attributes=None, friendly_name=None):
