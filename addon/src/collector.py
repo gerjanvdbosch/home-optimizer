@@ -100,10 +100,10 @@ class Collector:
         raw_grid = self.client.get_grid_power()
         raw_output = self.client.get_wp_output()
 
-        self.pv_slots.append(raw_pv)
-        self.wp_slots.append(raw_wp)
-        self.grid_slots.append(raw_grid)
-        self.output_slots.append(raw_output)
+        self._update_slot(self.pv_slots, raw_pv)
+        self._update_slot(self.wp_slots, raw_wp)
+        self._update_slot(self.grid_slots, raw_grid)
+        self._update_slot(self.output_slots, raw_output)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -139,22 +139,22 @@ class Collector:
         self.context.dhw_bottom = raw_dhw_bottom
         self.context.hvac_mode = self.client.get_hvac_mode()
 
-        self.room_slots.append(raw_room)
-        self.dhw_top_slots.append(raw_dhw_top)
-        self.dhw_bottom_slots.append(raw_dhw_bottom)
+        self._update_slot(self.room_slots, raw_room)
+        self._update_slot(self.dhw_top_slots, raw_dhw_top)
+        self._update_slot(self.dhw_bottom_slots, raw_dhw_bottom)
 
         if self.context.hvac_mode != HvacMode.OFF:
-            self.supply_slots.append(self.client.get_supply_temp())
-            self.return_slots.append(self.client.get_return_temp())
+            self._update_slot(self.supply_slots, self.client.get_supply_temp())
+            self._update_slot(self.return_slots, self.client.get_return_temp())
 
             raw_compressor_freq = self.client.get_compressor_freq()
             raw_cop = self.client.get_cop()
 
             if raw_compressor_freq > 0:
-                self.compressor_slots.append(raw_compressor_freq)
+                self._update_slot(self.compressor_slots, raw_compressor_freq)
 
             if raw_cop > 0:
-                self.cop_slots.append(raw_cop)
+                self._update_slot(self.cop_slots, raw_cop)
 
         logger.info("[Collector] Sensors updated")
 
@@ -234,11 +234,15 @@ class Collector:
             return 0.0
         return float(np.median(buffer))
 
-    def _mean(self, values: list, default: float = np.nan):
-        if not values:
+    def _update_slot(self, slot: list, value: float):
+        if value is not None:
+            slot.append(value)
+
+    def _mean(self, value, default: float = np.nan):
+        if not value:
             return default
 
-        result = np.nanmean(values)
+        result = np.nanmean(value)
 
         if np.isnan(result):
             return default
