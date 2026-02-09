@@ -28,6 +28,15 @@ class HPPerformanceMap:
         self.dhw_freq_ref = 60.0
         self.ufh_delta_t_ref = 4.0
         self.dhw_delta_t_ref = 7.0
+        self.features_cop = [
+            "temp",
+            "supply_temp",
+            "return_temp",
+            "delta_t",
+            "compressor_freq",
+            "hvac_mode",
+        ]
+        self.features_power = ["compressor_freq", "temp", "supply_temp", "hvac_mode"]
         self._load()
 
     def _load(self):
@@ -65,22 +74,13 @@ class HPPerformanceMap:
             logger.warning("[Optimizer] Te weinig data voor performance map training.")
             return
 
-        features_cop = [
-            "temp",
-            "supply_temp",
-            "return_temp",
-            "delta_t",
-            "compressor_freq",
-            "hvac_mode",
-        ]
         self.cop_model = RandomForestRegressor(
             n_estimators=150, max_depth=10, min_samples_leaf=5, random_state=42
         )
-        self.cop_model.fit(df_clean[features_cop], df_clean["cop"])
+        self.cop_model.fit(df_clean[self.features_cop], df_clean["cop"])
 
-        features_power = ["compressor_freq", "temp", "supply_temp", "hvac_mode"]
         self.power_model = LinearRegression(fit_intercept=False)
-        self.power_model.fit(df_clean[features_power], df_clean["wp_actual"])
+        self.power_model.fit(df_clean[self.features_power], df_clean["wp_actual"])
 
         # Max Freq Training
         df_f = df[df["compressor_freq"] > 15].copy()
@@ -138,7 +138,9 @@ class HPPerformanceMap:
             return 3.5 if mode_idx == 1 else 2.5
 
         delta_t = max(1.0, t_supply - t_return)
-        X = [[t_out, t_supply, t_return, delta_t, freq, mode_idx]]
+        data = [t_out, t_supply, t_return, delta_t, freq, mode_idx]
+
+        X = pd.DataFrame([data], columns=self.features_cop)
 
         return float(self.cop_model.predict(X)[0])
 
@@ -146,8 +148,11 @@ class HPPerformanceMap:
         if not self.is_fitted:
             return 0.04
 
+        data = [freq_ref, t_out, t_sink, mode_idx]
+
         # Voorspel P_el met alle relevante features
-        X = [[freq_ref, t_out, t_sink, mode_idx]]
+        X = pd.DataFrame([data], columns=self.features_power)
+
         p_el = self.power_model.predict(X)[0]
 
         # De slope is het voorspelde vermogen gedeeld door de referentiefrequentie
@@ -156,7 +161,12 @@ class HPPerformanceMap:
     def predict_max_freq(self, t_out):
         if self.max_freq_model is None:
             return 70.0
-        freq = self.max_freq_model.predict([[t_out]])[0]
+
+        t_rounded = round(t_out)
+        X = pd.DataFrame([[t_rounded]], columns=["t_rounded"])
+
+        freq = self.max_freq_model.predict(X)[0]
+
         return float(np.clip(freq, 25.0, 80.0))
 
 
@@ -285,7 +295,7 @@ class MLResidualPredictor:
         self.model = None
         self.features = [
             "temp",
-            "pv_actual",
+            "solar",
             "wind",
             "hour_sin",
             "hour_cos",
@@ -297,6 +307,7 @@ class MLResidualPredictor:
 
     def train(self, df, R, C, is_dhw=False):
         df_proc = df.copy().set_index("timestamp").sort_index()
+        df_proc["solar"] = df_proc["pv_actual"]
 
         for col in df_proc.columns:
             df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
@@ -334,7 +345,9 @@ class MLResidualPredictor:
     def predict(self, forecast_df):
         if self.model is None:
             return np.zeros(len(forecast_df))
+
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
+        df["solar"] = df["power_corrected"]
 
         return self.model.predict(df[self.features])
 
@@ -572,6 +585,13 @@ class ThermalMPC:
                 + res_u[t]
             )
             current_est_dhw = calc_dhw - (self.ident.K_loss_dhw * self.dt) + res_d[t]
+
+            if t < 16: # 16 stappen = 4 uur
+                logger.debug(
+                    f"[MPC Debug] t={t*0.25:.2f}h | T_out={t_out[t]:.1f} | T_room_calc={calc_room:.1f} | "
+                    f"HeatLoss={(calc_room - t_out[t]) / self.ident.R:.2f}kW | "
+                    f"COP_U={cop_u:.2f} | P_el_slope={slope_u:.3f} | P_th_per_hz={th_per_hz_u[t]:.3f}"
+                )
 
         # Vul parameters
         self.P_max_freq.value = v_max_freq

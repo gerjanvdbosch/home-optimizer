@@ -177,14 +177,14 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = self._mean(self.pv_slots)
             avg_wp = self._mean(self.wp_slots)
-            avg_compressor_freq = self._mean(self.compressor_slots, 0)
-            avg_supply = self._mean(self.supply_slots)
-            avg_return = self._mean(self.return_slots)
-            avg_room = self._mean(self.room_slots)
-            avg_dhw_top = self._mean(self.dhw_top_slots)
-            avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
-            avg_cop = self._mean(self.cop_slots, 0)
             avg_output = self._mean(self.output_slots)
+            avg_cop = self._median(self.cop_slots, 0)
+            avg_compressor_freq = self._median(self.compressor_slots, 0)
+            avg_supply = self._median(self.supply_slots)
+            avg_return = self._median(self.return_slots)
+            avg_room = self._median(self.room_slots)
+            avg_dhw_top = self._median(self.dhw_top_slots)
+            avg_dhw_bottom = self._median(self.dhw_bottom_slots)
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (
                 sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
@@ -243,6 +243,17 @@ class Collector:
             return default
 
         result = np.nanmean(value)
+
+        if np.isnan(result):
+            return default
+
+        return float(result)
+
+    def _median(self, value, default: float = np.nan):
+        if not value:
+            return default
+
+        result = np.nanmedian(value)
 
         if np.isnan(result):
             return default
