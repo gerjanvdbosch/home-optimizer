@@ -78,10 +78,19 @@ class HAClient:
         return HvacMode(hvac)
 
     def get_forecast(self):
-        attributes = self._get_attributes(self.config.sensor_solcast_today)
-        if not attributes:
-            return []
-        return attributes.get("detailedForecast", [])
+        attributes_today = self._get_attributes(self.config.sensor_solcast_today)
+        attributes_tomorrow = self._get_attributes(self.config.sensor_solcast_tomorrow)
+
+        forecast_today = []
+        forecast_tomorrow = []
+
+        if attributes_today:
+            forecast_today = attributes_today.get("detailedForecast", [])
+
+        if attributes_tomorrow:
+            forecast_tomorrow = attributes_tomorrow.get("detailedForecast", [])
+
+        return forecast_today + forecast_tomorrow
 
     def _get_state(self, entity_id):
         try:

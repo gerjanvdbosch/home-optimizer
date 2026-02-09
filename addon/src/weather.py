@@ -34,7 +34,7 @@ class WeatherClient:
             "azimuth": self.config.pv_azimuth,
             "minutely_15": ",".join(sensors),
             "timezone": "UTC",
-            "forecast_days": 2,
+            "forecast_days": 3,
             "past_days": 1,
         }
 
