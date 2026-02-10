@@ -65,6 +65,8 @@ class Coordinator:
                 t_r = mpc.t_room.value
                 t_d = mpc.t_dhw.value  # De voorspelde DHW temp
 
+                tz = datetime.now().astimezone().tzinfo
+
                 plan_data = []
                 # We lopen door de hele horizon (48 kwartieren / 12 uur)
                 for i in range(mpc.horizon):
@@ -73,6 +75,7 @@ class Coordinator:
                         {
                             "Tijd": self.context.forecast_df["timestamp"]
                             .iloc[i]
+                            .tz_convert(tz)
                             .strftime("%H:%M"),
                             "Mode": mode,
                             "Freq": round(max(f_u[i], f_d[i]), 1),
