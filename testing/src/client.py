@@ -24,9 +24,6 @@ class HAClient:
     def get_wp_power(self):
         return float(self.data.get("wp_power", 0.0))
 
-    def get_wp_output(self):
-        return float(self.data.get("wp_output", 0.0))
-
     def get_grid_power(self):
         return float(self.data.get("grid_power", 0.0))
 
@@ -50,9 +47,6 @@ class HAClient:
 
     def get_return_temp(self):
         return self.data.get("return_temp", 0.0)
-
-    def get_cop(self):
-        return self.data.get("cop", 0.0)
 
     def get_hvac_mode(self):
         return HvacMode(HvacMode.OFF)

@@ -8,8 +8,6 @@
   "return_temp": 20.0,
   "pv_power": 0.0,
   "grid_power": 0.43,
-  "wp_output": 0.0,
-  "cop": 0.0,
   "solcast": [
     {
       "period_start": "2026-01-14T00:00:00+00:00",
