@@ -603,13 +603,10 @@ class MLResidualPredictor:
 
         train_set = df_feat[self.features + ["target"]].dropna()
 
-        # Filter uitschieters (bijv. douchen is -10 K/u, dat moet de ML niet willen leren)
+        # DHW kan grotere afwijkingen hebben door taps, dus ruimere grenzen.
         if is_dhw:
-            train_set = train_set[train_set["target"].between(-12.0, 0.5)]
-            n_usage = len(train_set[train_set["target"] < -2.0])
-            logger.info(
-                f"[Optimizer] DHW training samples with usage signal: {n_usage}"
-            )
+            train_set = train_set[train_set["target"].between(-50.0, 0.5)]
+            print("Debug ML Residuals Sample (DHW):")
         else:
             train_set = train_set[train_set["target"].between(-0.5, 0.5)]
             print("Debug ML Residuals Sample (UFH):")
@@ -869,13 +866,6 @@ class ThermalMPC:
                 + res_u[t]
             )
             current_est_dhw = calc_dhw - (self.ident.K_loss_dhw * self.dt) + res_d[t]
-
-            if t < 16:  # 16 stappen = 4 uur
-                logger.debug(
-                    f"[MPC Debug] t={t*0.25:.2f}h | T_out={t_out[t]:.1f} | T_room_calc={calc_room:.1f} | "
-                    f"HeatLoss={(calc_room - t_out[t]) / self.ident.R:.2f}kW | "
-                    f"COP_U={cop_u:.2f} | P_el_slope={slope_u:.3f} | P_th_per_hz={th_per_hz_u[t]:.3f}"
-                )
 
         # Vul parameters
         self.P_max_freq.value = v_max_freq

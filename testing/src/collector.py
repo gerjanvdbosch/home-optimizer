@@ -53,7 +53,7 @@ class Collector:
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
-            hour=0, minute=0, second=0, microsecond=0, day=14, month=1, year=2026
+            hour=12, minute=0, second=0, microsecond=0, day=14, month=1, year=2026
         ).tz_convert("UTC")
         end_filter = start_filter + timedelta(days=1)
         full_index = pd.date_range(
