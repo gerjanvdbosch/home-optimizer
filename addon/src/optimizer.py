@@ -867,6 +867,12 @@ class ThermalMPC:
             )
             current_est_dhw = calc_dhw - (self.ident.K_loss_dhw * self.dt) + res_d[t]
 
+            logger.debug(
+                f"[MPC Debug] t={t*0.25:.2f}h | T_out={t_out[t]:.1f} | T_room_calc={calc_room:.1f} | "
+                f"HeatLoss={(calc_room - t_out[t]) / self.ident.R:.2f}kW | "
+                f"COP_U={cop_u:.2f} | COP_D={cop_d:.2f} | P_el_slope={slope_u:.3f} | P_th_per_hz={th_per_hz_u[t]:.3f}"
+            )
+
         # Vul parameters
         self.P_max_freq.value = v_max_freq
         self.P_th_per_hz_ufh.value = th_per_hz_u
