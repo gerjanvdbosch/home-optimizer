@@ -603,12 +603,13 @@ class MLResidualPredictor:
 
         train_set = df_feat[self.features + ["target"]].dropna()
 
-
-
         # Filter uitschieters (bijv. douchen is -10 K/u, dat moet de ML niet willen leren)
         if is_dhw:
-            train_set = train_set[train_set["target"].between(-4.0, 0.5)]
-            print("Debug ML Residuals Sample (DHW):")
+            train_set = train_set[train_set["target"].between(-12.0, 0.5)]
+            n_usage = len(train_set[train_set["target"] < -2.0])
+            logger.info(
+                f"[Optimizer] DHW training samples with usage signal: {n_usage}"
+            )
         else:
             train_set = train_set[train_set["target"].between(-0.5, 0.5)]
             print("Debug ML Residuals Sample (UFH):")
