@@ -18,11 +18,12 @@ logger = logging.getLogger(__name__)
 # =========================================================
 FLOW_UFH = 18.0  # Liter per minuut
 FLOW_DHW = 19.0  # Liter per minuut
-CP_WATER = 4.186 # kJ/kg.K
+CP_WATER = 4.186  # kJ/kg.K
 
 # Bereken kW per Kelvin delta_T: (Flow / 60) * Cp
 FACTOR_UFH = (FLOW_UFH / 60.0) * CP_WATER  # ~1.2558 kW/K
 FACTOR_DHW = (FLOW_DHW / 60.0) * CP_WATER  # ~1.3256 kW/K
+
 
 # =========================================================
 # 1. HEAT PUMP PERFORMANCE MAP
@@ -89,11 +90,11 @@ class HPPerformanceMap:
         # Gebruik numpy select voor snelheid en correctheid
         conditions = [
             df["hvac_mode"] == HvacMode.HEATING.value,
-            df["hvac_mode"] == HvacMode.DHW.value
+            df["hvac_mode"] == HvacMode.DHW.value,
         ]
         choices = [
             df["delta_t"] * FACTOR_UFH,  # 18 L/min
-            df["delta_t"] * FACTOR_DHW   # 19 L/min
+            df["delta_t"] * FACTOR_DHW,  # 19 L/min
         ]
 
         # Default 0 als het geen heating/dhw is (zou gefilterd moeten worden)
@@ -115,7 +116,9 @@ class HPPerformanceMap:
         df_clean = df[mask].copy()
 
         if len(df_clean) < 50:
-            logger.warning("[Optimizer] Te weinig valide data voor performance map training.")
+            logger.warning(
+                "[Optimizer] Te weinig valide data voor performance map training."
+            )
             return
 
         # ============================
@@ -126,7 +129,7 @@ class HPPerformanceMap:
             max_depth=10,
             min_samples_leaf=10,
             random_state=42,
-            n_jobs=-1
+            n_jobs=-1,
         )
         self.cop_model.fit(df_clean[self.features_cop], df_clean["cop"])
 
@@ -144,9 +147,7 @@ class HPPerformanceMap:
         df_f["t_rounded"] = df_f["temp"].round()
 
         max_freq_stats = (
-            df_f.groupby("t_rounded")["compressor_freq"]
-            .quantile(0.98)
-            .reset_index()
+            df_f.groupby("t_rounded")["compressor_freq"].quantile(0.98).reset_index()
         )
 
         if not max_freq_stats.empty:
@@ -160,13 +161,21 @@ class HPPerformanceMap:
         # ============================
         mask_ufh = df_clean["hvac_mode"] == HvacMode.HEATING.value
         if mask_ufh.any():
-            self.ufh_freq_ref = float(df_clean.loc[mask_ufh, "compressor_freq"].median())
-            self.ufh_delta_t_ref = float(df_clean.loc[mask_ufh, "delta_t"].clip(2, 8).median())
+            self.ufh_freq_ref = float(
+                df_clean.loc[mask_ufh, "compressor_freq"].median()
+            )
+            self.ufh_delta_t_ref = float(
+                df_clean.loc[mask_ufh, "delta_t"].clip(2, 8).median()
+            )
 
         mask_dhw = df_clean["hvac_mode"] == HvacMode.DHW.value
         if mask_dhw.any():
-            self.dhw_freq_ref = float(df_clean.loc[mask_dhw, "compressor_freq"].median())
-            self.dhw_delta_t_ref = float(df_clean.loc[mask_dhw, "delta_t"].clip(4, 10).median())
+            self.dhw_freq_ref = float(
+                df_clean.loc[mask_dhw, "compressor_freq"].median()
+            )
+            self.dhw_delta_t_ref = float(
+                df_clean.loc[mask_dhw, "delta_t"].clip(4, 10).median()
+            )
 
         logger.info(
             f"[Optimizer] Trained. Refs: UFH={self.ufh_freq_ref:.1f}Hz/dT={self.ufh_delta_t_ref:.1f}, "
@@ -188,14 +197,15 @@ class HPPerformanceMap:
             self.path,
         )
 
-
     def predict_cop(self, t_out, t_supply, t_return, freq, mode_idx):
         if not self.is_fitted:
             return 3.5 if mode_idx == HvacMode.HEATING.value else 2.5
 
         delta_t = max(0.5, t_supply - t_return)
-        data = pd.DataFrame([[t_out, t_supply, t_return, delta_t, freq, mode_idx]],
-                            columns=self.features_cop)
+        data = pd.DataFrame(
+            [[t_out, t_supply, t_return, delta_t, freq, mode_idx]],
+            columns=self.features_cop,
+        )
         return float(self.cop_model.predict(data)[0])
 
     def predict_p_el_slope(self, freq_ref, t_out, t_sink, mode_idx):
@@ -203,10 +213,11 @@ class HPPerformanceMap:
         Voorspelt elektrisch vermogen per Hz (slope) rondom het referentiepunt.
         """
         if not self.is_fitted:
-            return 0.04 # Default fallback
+            return 0.04  # Default fallback
 
-        data = pd.DataFrame([[freq_ref, t_out, t_sink, mode_idx]],
-                            columns=self.features_power)
+        data = pd.DataFrame(
+            [[freq_ref, t_out, t_sink, mode_idx]], columns=self.features_power
+        )
         p_el_pred = self.power_model.predict(data)[0]
 
         # Slope = Power / Freq. Zorg dat we niet door 0 delen of negatief gaan.
@@ -217,7 +228,9 @@ class HPPerformanceMap:
             return 75.0
 
         t_rounded = round(t_out)
-        pred = self.max_freq_model.predict(pd.DataFrame([[t_rounded]], columns=["t_rounded"]))[0]
+        pred = self.max_freq_model.predict(
+            pd.DataFrame([[t_rounded]], columns=["t_rounded"])
+        )[0]
         return float(np.clip(pred, 30.0, 90.0))
 
 
@@ -257,7 +270,15 @@ class SystemIdentificator:
         # 0. Data Voorbereiding (Algemeen)
         # ============================
         # Zorg dat alle kolommen numeriek zijn
-        cols_to_numeric = ["supply_temp", "return_temp", "room_temp", "temp", "dhw_top", "dhw_bottom", "pv_actual"]
+        cols_to_numeric = [
+            "supply_temp",
+            "return_temp",
+            "room_temp",
+            "temp",
+            "dhw_top",
+            "dhw_bottom",
+            "pv_actual",
+        ]
         for col in cols_to_numeric:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -267,25 +288,30 @@ class SystemIdentificator:
         # Bereken output op basis van HVAC mode
         conditions = [
             df["hvac_mode"] == HvacMode.HEATING.value,
-            df["hvac_mode"] == HvacMode.DHW.value
+            df["hvac_mode"] == HvacMode.DHW.value,
         ]
-        choices = [
-            df["delta_t"] * FACTOR_UFH,
-            df["delta_t"] * FACTOR_DHW
-        ]
+        choices = [df["delta_t"] * FACTOR_UFH, df["delta_t"] * FACTOR_DHW]
         df["wp_output"] = np.select(conditions, choices, default=0.0)
 
         # ============================
         # Dataset A: Uurgemiddelden (Voor R & C)
         # ============================
         # Traagheid van het gebouw zie je pas na uren.
-        df_1h = df.set_index("timestamp").resample("1h").agg({
-            "room_temp": "mean",
-            "temp": "mean",
-            "wp_output": "mean",
-            "pv_actual": "mean",
-            "hvac_mode": lambda x: x.mode()[0] if not x.mode().empty else 0
-        }).dropna().reset_index()
+        df_1h = (
+            df.set_index("timestamp")
+            .resample("1h")
+            .agg(
+                {
+                    "room_temp": "mean",
+                    "temp": "mean",
+                    "wp_output": "mean",
+                    "pv_actual": "mean",
+                    "hvac_mode": lambda x: x.mode()[0] if not x.mode().empty else 0,
+                }
+            )
+            .dropna()
+            .reset_index()
+        )
 
         df_1h["dT_next"] = df_1h["room_temp"].shift(-1) - df_1h["room_temp"]
         df_1h["delta_T_env"] = df_1h["room_temp"] - df_1h["temp"]
@@ -295,17 +321,19 @@ class SystemIdentificator:
         # Dataset B: Kwartierwaarden (Voor K_emit & K_tank)
         # ============================
         # Afgifte van vloer/spiraal is een snel proces, 15min data is hier beter.
-        df_15m = df.set_index("timestamp").resample("15min").mean().dropna().reset_index()
+        df_15m = (
+            df.set_index("timestamp").resample("15min").mean().dropna().reset_index()
+        )
 
         # ==========================================
         # STAP 1: Afkoeling (Bepaal Tau = R * C)
         # ==========================================
         # Filter: Nacht, WP uit, Temperatuur daalt, Buiten koud genoeg
         mask_cooling = (
-                (df_1h["wp_output"] < 0.1) &  # WP uit
-                (df_1h["pv_actual"] < 0.1) &  # Nacht
-                (df_1h["dT_next"] < -0.01) &  # Temp daalt significant
-                (df_1h["delta_T_env"] > 4.0)  # Binnen warmer dan buiten
+            (df_1h["wp_output"] < 0.1)  # WP uit
+            & (df_1h["pv_actual"] < 0.1)  # Nacht
+            & (df_1h["dT_next"] < -0.01)  # Temp daalt significant
+            & (df_1h["delta_T_env"] > 4.0)  # Binnen warmer dan buiten
         )
         df_cool = df_1h[mask_cooling].copy()
 
@@ -313,7 +341,11 @@ class SystemIdentificator:
 
         if len(df_cool) > 10:
             print("Debug Cooling Data Sample:")
-            print(df_cool[["timestamp", "room_temp", "temp", "dT_next", "delta_T_env"]].head(30))
+            print(
+                df_cool[
+                    ["timestamp", "room_temp", "temp", "dT_next", "delta_T_env"]
+                ].head(30)
+            )
 
             # Model: dT/dt = -1/(RC) * (T_room - T_out) -> Y = a * X
             X_cool = -df_cool[["delta_T_env"]]
@@ -327,10 +359,14 @@ class SystemIdentificator:
             # Sanity Check: Tau tussen 50 uur (slecht) en 1000 uur (passiefhuis)
             # Tau_inv dus tussen 0.02 en 0.001
             if tau_inv < 0.0005 or tau_inv > 0.05:
-                logger.warning(f"[SysID] Cooling fit onbetrouwbaar (Tau_inv={tau_inv:.5f}).")
+                logger.warning(
+                    f"[SysID] Cooling fit onbetrouwbaar (Tau_inv={tau_inv:.5f})."
+                )
                 tau_inv = None
             else:
-                logger.info(f"[SysID] Cooling identified: Tau (RC) = {1 / tau_inv:.1f} uur")
+                logger.info(
+                    f"[SysID] Cooling identified: Tau (RC) = {1 / tau_inv:.1f} uur"
+                )
 
         # ==========================================
         # STAP 2: Verwarming (Bepaal C)
@@ -340,15 +376,16 @@ class SystemIdentificator:
             tau_inv = 1.0 / (self.R * self.C)
 
         # Filter: WP aan, Temp stijgt
-        mask_heat = (
-                (df_1h["wp_output"] > 0.8) &
-                (df_1h["dT_next"] > 0.01)
-        )
+        mask_heat = (df_1h["wp_output"] > 0.7) & (df_1h["dT_next"] > 0.01)
         df_heat = df_1h[mask_heat].copy()
 
         if len(df_heat) > 10:
             print("Debug Heating Data Sample:")
-            print(df_heat[["timestamp", "room_temp", "temp", "dT_next", "delta_T_env"]].head(30))
+            print(
+                df_heat[
+                    ["timestamp", "room_temp", "temp", "dT_next", "delta_T_env"]
+                ].head(30)
+            )
 
             # Model: dT/dt + (1/RC)*dT_env = (1/C)*P
             y_heat_adjusted = df_heat["dT_next"] + (tau_inv * df_heat["delta_T_env"])
@@ -367,24 +404,30 @@ class SystemIdentificator:
                 if 10.0 < new_C < 200.0 and 2.0 < new_R < 60.0:
                     self.C = float(new_C)
                     self.R = float(new_R)
-                    logger.info(f"[SysID] SPLIT TRAINED: R={self.R:.1f} K/kW, C={self.C:.1f} kWh/K")
+                    logger.info(
+                        f"[SysID] SPLIT TRAINED: R={self.R:.1f} K/kW, C={self.C:.1f} kWh/K"
+                    )
                 else:
-                    logger.warning(f"[SysID] Waarden buiten bereik: R={new_R:.1f}, C={new_C:.1f}")
+                    logger.warning(
+                        f"[SysID] Waarden buiten bereik: R={new_R:.1f}, C={new_C:.1f}"
+                    )
 
         # ============================
         # 3. Identificatie K_emit (Vloerafgifte)
         # ============================
         mask_ufh = (
-                (df_15m["hvac_mode"] == HvacMode.HEATING.value) &
-                (df_15m["wp_output"] > 1.0) &
-                (df_15m["supply_temp"] < 35) &  # Niet te heet (voorkom overshoot data)
-                (df_15m["supply_temp"] > df_15m["room_temp"] + 2)  # Zinvolle delta T
+            (df_15m["hvac_mode"] == HvacMode.HEATING.value)
+            & (df_15m["wp_output"] > 0.7)
+            & (df_15m["supply_temp"] < 35)  # Niet te heet (voorkom overshoot data)
+            & (df_15m["supply_temp"] > df_15m["room_temp"] + 2)  # Zinvolle delta T
         )
         df_ufh = df_15m[mask_ufh].copy()
 
         if len(df_ufh) > 20:
             print("Debug UFH Data Sample:")
-            print(df_ufh[["timestamp", "room_temp", "supply_temp", "wp_output"]].head(30))
+            print(
+                df_ufh[["timestamp", "room_temp", "supply_temp", "wp_output"]].head(30)
+            )
 
             t_avg_water = (df_ufh["supply_temp"] + df_ufh["return_temp"]) / 2
             delta_T_emit = t_avg_water - df_ufh["room_temp"]
@@ -398,15 +441,26 @@ class SystemIdentificator:
         # 4. Identificatie K_tank (Spiraalafgifte)
         # ============================
         mask_dhw = (
-                (df_15m["hvac_mode"] == HvacMode.DHW.value) &
-                (df_15m["wp_output"] > 2.0) &
-                (df_15m["supply_temp"] > 35)
+            (df_15m["hvac_mode"] == HvacMode.DHW.value)
+            & (df_15m["wp_output"] > 1.7)
+            & (df_15m["supply_temp"] > 35)
         )
         df_dhw = df_15m[mask_dhw].copy()
 
         if len(df_dhw) > 10:
             print("Debug DHW Data Sample:")
-            print(df_dhw[["timestamp", "dhw_top", "dhw_bottom", "supply_temp", "return_temp", "wp_output"]].head(30))
+            print(
+                df_dhw[
+                    [
+                        "timestamp",
+                        "dhw_top",
+                        "dhw_bottom",
+                        "supply_temp",
+                        "return_temp",
+                        "wp_output",
+                    ]
+                ].head(30)
+            )
             t_tank = (df_dhw["dhw_top"] + df_dhw["dhw_bottom"]) / 2
             t_avg_water = (df_dhw["supply_temp"] + df_dhw["return_temp"]) / 2
             delta_T_hx = t_avg_water - t_tank
@@ -429,11 +483,11 @@ class SystemIdentificator:
         df_loss["dT_tank"] = df_loss["t_tank"].diff()
 
         mask_sb = (
-                (df_loss["hvac_mode"] != HvacMode.DHW.value) &
-                (df_loss["wp_output"] < 0.1) &
-                (df_loss["dT_tank"] < 0) &
-                (df_loss["dt_hours"] > 0.1) &
-                (df_loss["dt_hours"] < 1.0)
+            (df_loss["hvac_mode"] != HvacMode.DHW.value)
+            & (df_loss["wp_output"] < 0.1)
+            & (df_loss["dT_tank"] < 0)
+            & (df_loss["dt_hours"] > 0.1)
+            & (df_loss["dt_hours"] < 1.0)
         )
 
         df_sb = df_loss[mask_sb].copy()
@@ -468,6 +522,7 @@ class SystemIdentificator:
             self.path,
         )
 
+
 # =========================================================
 # 3. ML RESIDUALS
 # =========================================================
@@ -475,103 +530,104 @@ class MLResidualPredictor:
     def __init__(self, path):
         self.path = Path(path)
         self.model = None
+        # Alleen externe factoren en tijd.
+        # wp_output en room_temp halen we eruit voor de MPC-stabiliteit.
         self.features = [
-            "temp", "solar", "wind",
-            "hour_sin", "hour_cos",
-            "day_sin", "day_cos",
-            "doy_sin", "doy_cos"
+            "temp",
+            "solar",
+            "wind",
+            "hour_sin",
+            "hour_cos",
+            "day_sin",
+            "day_cos",
+            "doy_sin",
+            "doy_cos",
         ]
 
-    def train(self, df, R, C, is_dhw=False):
-        """
-        Train residu op het verschil tussen fysisch model en werkelijkheid.
-        Houdt rekening met specifieke flow-factoren via wp_output in df (moet voorbewerkt zijn).
-        """
-        df_proc = df.copy().set_index("timestamp").sort_index()
-        df_proc["solar"] = df_proc["pv_actual"] # Alias
+    def train(self, df, R, C, is_dhw=False, K_loss_dhw=0.0):
+        self.R = R
+        self.C = C
+        self.K_loss_dhw = K_loss_dhw
+        df_proc = df.copy().sort_values("timestamp")
 
-        # Data types cleanen
-        for col in df_proc.columns:
-            df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
+        # Bereken wp_output voor de hele set
+        df_proc["delta_t_water"] = (
+            df_proc["supply_temp"] - df_proc["return_temp"]
+        ).clip(lower=0)
+        df_proc["wp_output"] = np.where(
+            df_proc["hvac_mode"] == HvacMode.DHW.value,
+            df_proc["delta_t_water"] * FACTOR_DHW,
+            np.where(
+                df_proc["hvac_mode"] == HvacMode.HEATING.value,
+                df_proc["delta_t_water"] * FACTOR_UFH,
+                0.0,
+            ),
+        )
 
-        # Resample en bereken P_th opnieuw voor zekerheid als df niet uit SystemID komt
-        df_proc["delta_t"] = (df_proc["supply_temp"] - df_proc["return_temp"])
-
-        if is_dhw:
-             # Alleen DHW data en juiste factor
-            mask = (df_proc["hvac_mode"] == HvacMode.DHW.value) & (df_proc["delta_t"] > 0)
-            factor = FACTOR_DHW
-        else:
-            # Alleen Heating data en juiste factor
-            mask = (df_proc["hvac_mode"] == HvacMode.HEATING.value) & (df_proc["delta_t"] > 0)
-            factor = FACTOR_UFH
-
-        df_proc["wp_output"] = df_proc["delta_t"] * factor
-
-        # Resample
-        df_proc = df_proc.dropna().reset_index()
-        df_feat = add_cyclic_time_features(df_proc, "timestamp")
-
-        dt = 0.25 # 15 min in uren
+        dt_hours = df_proc["timestamp"].diff().dt.total_seconds().shift(-1) / 3600
 
         if not is_dhw:
-            # Fysisch model: T_next = T_curr + (P_heat - Loss)/C * dt
-            # Target = T_measured_next - T_model_next
-            # We trainen op de 'fout' van het fysieke model (externe invloeden zoals zoninstraling door ramen)
-
-            df_feat = df_feat[df_feat["hvac_mode"] == HvacMode.HEATING.value]
+            # UFH: Alleen trainen op Heating of Standby (om afkoeling te leren)
+            mask = (df_proc["hvac_mode"] == HvacMode.HEATING.value) | (
+                df_proc["wp_output"] < 0.1
+            )
+            df_feat = df_proc[mask].copy()
+            dt = dt_hours[mask]
 
             t_curr = df_feat["room_temp"]
             t_next = df_feat["room_temp"].shift(-1)
             p_heat = df_feat["wp_output"]
             t_out = df_feat["temp"]
 
-            t_model_next = t_curr + ((p_heat - (t_curr - t_out)/R) * dt / C)
-            target = t_next - t_model_next
-
-            print("Debug Heating Residuals Sample:")
-            print(df_feat[["timestamp", "room_temp", "temp", "wp_output"]].head(30))
-
+            # Fysische basis: T_next = T_curr + (P_heat - Verlies) * dt / C
+            t_model_next = t_curr + ((p_heat - (t_curr - t_out) / self.R) * dt / self.C)
         else:
-            # DHW Model: T_next = T_curr + (P_heat * dt / C_water_vol)
-            # Volume ~ 200L -> 0.232 kWh/K (4.186 * 200 / 3600)
-            # We gebruiken hier 0.232 als hardcoded capaciteit van de tank
-            tank_cap = 0.232
+            # DHW: JUIST trainen op ALLES (ook als HP uit staat) om sluipverbruik te leren
+            df_feat = df_proc.copy()
+            dt = dt_hours
 
-            df_feat = df_feat[(df_feat["hvac_mode"] == HvacMode.DHW.value) & (df_feat["wp_output"] > 0.5)]
-
+            tank_cap = 0.232  # 200L boiler constant
             t_curr = (df_feat["dhw_top"] + df_feat["dhw_bottom"]) / 2
-            t_next = ((df_feat["dhw_top"] + df_feat["dhw_bottom"]) / 2).shift(-1)
+            t_next = t_curr.shift(-1)
             p_heat = df_feat["wp_output"]
 
-            t_model_next = t_curr + (p_heat * dt / tank_cap)
-            target = t_next - t_model_next
+            # Fysische basis inclusief het vaste K_loss uit je SysID
+            t_model_next = t_curr + (p_heat * dt / tank_cap) - (self.K_loss_dhw * dt)
 
-            print("Debug DHW Residuals Sample:")
-            print(df_feat[["timestamp", "dhw_top", "dhw_bottom", "wp_output"]].head(30))
+        # Residu berekenen (K/u)
+        target = (t_next - t_model_next) / dt
 
-        train_set = pd.concat([df_feat[self.features], target.rename("target")], axis=1).dropna()
+        df_feat = add_cyclic_time_features(df_feat, "timestamp")
+        df_feat["solar"] = df_feat["pv_actual"]
+        df_feat["target"] = target
 
-        if len(train_set) > 50:
+        train_set = df_feat[self.features + ["target"]].dropna()
+
+
+
+        # Filter uitschieters (bijv. douchen is -10 K/u, dat moet de ML niet willen leren)
+        if is_dhw:
+            train_set = train_set[train_set["target"].between(-1.0, 0.5)]
+            print("Debug ML Residuals Sample (DHW):")
+        else:
+            train_set = train_set[train_set["target"].between(-0.5, 0.5)]
+            print("Debug ML Residuals Sample (UFH):")
+
+        print(train_set.head(30))
+
+        if len(train_set) > 10:
             self.model = RandomForestRegressor(
-                n_estimators=100,
-                min_samples_leaf=5,
-                n_jobs=-1
+                n_estimators=100, max_depth=5, min_samples_leaf=15
             ).fit(train_set[self.features], train_set["target"])
-
             joblib.dump(self.model, self.path)
-            logger.info(f"[Optimizer] Residual model trained: {self.path.name}")
 
     def predict(self, forecast_df):
-        return np.zeros(len(forecast_df))
-
         if self.model is None:
             return np.zeros(len(forecast_df))
 
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
-        df["solar"] = df["power_corrected"] # Mapping forecast solar naar model feature
+        df["solar"] = df["power_corrected"]
 
-        # Zorg dat alle features aanwezig zijn
         for col in self.features:
             if col not in df.columns:
                 df[col] = 0.0
@@ -655,14 +711,14 @@ class ThermalMPC:
                 == self.t_room[t]
                 + (
                     (p_th_ufh - (self.t_room[t] - self.P_temp_out[t]) / R) * self.dt / C
-                    + self.P_ufh_res[t]
+                    + (self.P_ufh_res[t] * self.dt)
                 ),
                 # FIX: Gebruik p_th_dhw
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
                 + (
                     (p_th_dhw * self.dt) / 0.232
-                    + self.P_dhw_res[t]
+                    + (self.P_dhw_res[t] * self.dt)
                     - self.P_dhw_loss_per_dt
                 ),
                 # Machine & Veiligheidsgrenzen
@@ -866,8 +922,8 @@ class Optimizer:
 
         self.perf_map.train(df)
         self.ident.train(df)
-        self.res_ufh.train(df, self.ident.R, self.ident.C, False)
-        self.res_dhw.train(df, self.ident.R, self.ident.C, True)
+        self.res_ufh.train(df, self.ident.R, self.ident.C)
+        self.res_dhw.train(df, self.ident.R, self.ident.C, True, self.ident.K_loss_dhw)
 
     def resolve(self, context: Context):
         res_u, res_d = self.res_ufh.predict(context.forecast_df), self.res_dhw.predict(

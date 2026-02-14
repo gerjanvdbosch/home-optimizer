@@ -37,7 +37,9 @@ class Coordinator:
         self.collector = collector
 
     def tick(self):
-        self.context.now = datetime.now(timezone.utc).replace(day=14, month=1, year=2026)
+        self.context.now = datetime.now(timezone.utc).replace(
+            day=14, month=1, year=2026
+        )
 
         self.collector.update_sensors()
 
@@ -103,7 +105,9 @@ if __name__ == "__main__":
 
     try:
         config = Config.load()
-        context = Context(now=datetime.now(timezone.utc).replace(day=14, month=1, year=2026))
+        context = Context(
+            now=datetime.now(timezone.utc).replace(day=14, month=1, year=2026)
+        )
         client = HAClient(config)
         database = Database(config)
         collector = Collector(client, database, context, config)

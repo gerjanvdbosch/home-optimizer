@@ -148,7 +148,6 @@ class Collector:
             self._update_slot(self.return_slots, self.client.get_return_temp())
 
             raw_compressor_freq = self.client.get_compressor_freq()
-            raw_cop = self.client.get_cop()
 
             if raw_compressor_freq > 0:
                 self._update_slot(self.compressor_slots, raw_compressor_freq)
@@ -208,7 +207,7 @@ class Collector:
                 supply_temp=avg_supply,
                 return_temp=avg_return,
                 compressor_freq=avg_compressor_freq,
-                hvac_mode=int(self.context.hvac_mode.value)
+                hvac_mode=int(self.context.hvac_mode.value),
             )
 
             self.current_slot_start = slot_start
