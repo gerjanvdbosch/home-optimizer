@@ -122,9 +122,9 @@ class HPPerformanceMap:
         # 2. COP model (Random Forest)
         # ============================
         self.cop_model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=12,
-            min_samples_leaf=4,
+            n_estimators=50,
+            max_depth=10,
+            min_samples_leaf=10,
             random_state=42,
             n_jobs=-1
         )
@@ -866,8 +866,8 @@ class Optimizer:
 
         self.perf_map.train(df)
         self.ident.train(df)
-        # self.res_ufh.train(df, self.ident.R, self.ident.C, False)
-        # self.res_dhw.train(df, self.ident.R, self.ident.C, True)
+        self.res_ufh.train(df, self.ident.R, self.ident.C, False)
+        self.res_dhw.train(df, self.ident.R, self.ident.C, True)
 
     def resolve(self, context: Context):
         res_u, res_d = self.res_ufh.predict(context.forecast_df), self.res_dhw.predict(
