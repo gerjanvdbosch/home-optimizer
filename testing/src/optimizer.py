@@ -641,8 +641,6 @@ class ThermalMPC:
         self.ident = ident
         self.perf_map = perf_map
         self.horizon, self.dt = 48, 0.25
-        self.room_target = 20.0
-        self.dhw_target = 50.0
         self._build_problem()
 
     def _build_problem(self):
@@ -653,6 +651,12 @@ class ThermalMPC:
         self.P_prices = cp.Parameter(T, nonneg=True)
         self.P_export_prices = cp.Parameter(T, nonneg=True)
         self.P_temp_out = cp.Parameter(T)
+
+        # Nieuw: Dynamische grenzen voor UFH en DHW
+        self.P_room_min = cp.Parameter(T, nonneg=True)
+        self.P_room_max = cp.Parameter(T, nonneg=True)
+        self.P_dhw_min = cp.Parameter(T, nonneg=True)
+        self.P_dhw_max = cp.Parameter(T, nonneg=True)
 
         self.P_max_freq = cp.Parameter(T, nonneg=True)
         self.P_dhw_loss_per_dt = cp.Parameter(nonneg=True)
@@ -676,6 +680,8 @@ class ThermalMPC:
         self.p_solar_self = cp.Variable(T, nonneg=True)
         self.t_room = cp.Variable(T + 1)
         self.t_dhw = cp.Variable(T + 1)
+
+        # Slack variabelen voor als de bodem echt niet gehaald kan worden
         self.s_room_low = cp.Variable(T, nonneg=True)
         self.s_dhw_low = cp.Variable(T, nonneg=True)
 
@@ -699,6 +705,7 @@ class ThermalMPC:
             total_load = p_el_wp + self.P_base_load[t]
 
             # 2. Elektrische Balans & PV Balans
+            # Hierdoor "weet" de solver dat zonlicht gebruiken alleen de export_price kost
             constraints += [total_load == self.p_grid[t] + self.p_solar_self[t]]
             constraints += [self.P_solar[t] == self.p_solar_self[t] + self.p_export[t]]
 
@@ -723,14 +730,17 @@ class ThermalMPC:
                 self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
                 self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
-                self.f_ufh[t] >= self.ufh_on[t] * 25,
-                self.f_dhw[t] >= self.dhw_on[t] * 35,
-                self.t_room[t + 1] + self.s_room_low[t] >= 18.0,
-                self.t_dhw[t + 1] + self.s_dhw_low[t] >= 25.0,
-                self.t_room[t + 1] <= 22.5,
+                # self.f_ufh[t] >= self.ufh_on[t] * 25,
+                # self.f_dhw[t] >= self.dhw_on[t] * 35,
+                # Dynamische Comfort Grenzen
+                self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
+                self.t_room[t + 1] <= self.P_room_max[t],
+                self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
+                self.t_dhw[t + 1] <= self.P_dhw_max[t],
             ]
 
-        # --- OBJECTIVE FUNCTION (Onveranderd) ---
+        # --- OBJECTIVE FUNCTION ---
+        # 1. Echte Netto Kosten (Inkoop minus Export)
         net_cost = (
             cp.sum(
                 cp.multiply(self.p_grid, self.P_prices)
@@ -738,19 +748,23 @@ class ThermalMPC:
             )
             * self.dt
         )
-        comfort_room_low = cp.sum(cp.pos(self.room_target - self.t_room)) * 4.0
-        comfort_dhw_low = cp.sum(cp.pos(self.dhw_target - self.t_dhw)) * 2.0
 
-        # NIEUW: Straf voor te warm (pos(T - Target)) -> Dit dwingt uitschakeling af!
-        comfort_room_high = cp.sum(cp.pos(self.t_room - 21.0)) * 5.0
-        comfort_dhw_high = cp.sum(cp.pos(self.t_dhw - 51.0)) * 2.0
+        # 2. Comfort (Straf voor te koud t.o.v. de ondergrens van dat moment)
+        comfort_room_low = cp.sum(cp.pos(self.P_room_min - self.t_room[1:])) * 8.0
+        comfort_dhw_low = cp.sum(cp.pos(self.P_dhw_min - self.t_dhw[1:])) * 6.0
 
-        # 4. Schakelkosten (Switching Costs)
-        # Verlaagd van 10.0 naar 0.5 om uitschakelen rendabel te maken
+        # 3. Zuinigheid (Kleine straf op hogere temperaturen)
+        # Dit zorgt dat de WP niet onnodig naar 22.5 graden stookt als stroom duur is
+        efficiency_penalty = (
+            cp.sum(cp.pos(self.t_room[1:] - self.P_room_min)) * 0.1
+            + cp.sum(cp.pos(self.t_dhw[1:] - self.P_dhw_min)) * 0.05
+        )
+
+        # 4. Schakelkosten
         ufh_switch = cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.5
         dhw_switch = cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.5
 
-        # 5. Veiligheid (Absolute bodem)
+        # 5. Veiligheid (Absolute bodem schending)
         safety_violation = cp.sum(self.s_room_low + self.s_dhw_low) * 100
 
         # TOTAAL
@@ -758,9 +772,8 @@ class ThermalMPC:
             cp.Minimize(
                 net_cost
                 + comfort_room_low
-                + comfort_room_high
                 + comfort_dhw_low
-                + comfort_dhw_high
+                + efficiency_penalty
                 + ufh_switch
                 + dhw_switch
                 + safety_violation
@@ -770,14 +783,40 @@ class ThermalMPC:
 
     def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
+        now = datetime.now()
+
         t_out = forecast_df.temp.values[:T]
-        t_prices = [0.22] * T
+        t_prices = [0.22] * T  # Of haal uit forecast_df als je dynamische prijzen hebt
         t_export_prices = [0.05] * T
         t_solar = forecast_df.power_corrected.values[:T]
         t_base_load = forecast_df.load_corrected.values[:T]
 
         res_u = res_u[:T]
         res_d = res_d[:T]
+
+        # --- Target Profielen Berekenen ---
+        r_min, r_max = np.zeros(T), np.zeros(T)
+        d_min, d_max = np.zeros(T), np.zeros(T)
+
+        for t in range(T):
+            fut_time = now + timedelta(hours=t * self.dt)
+            hour = fut_time.hour
+
+            # UFH Nachtverlaging profiel
+            if 22 <= hour or hour < 6:
+                r_min[t] = 19.0  # Nacht ondergrens
+                r_max[t] = 20.0  # Nacht bovengrens
+            else:
+                r_min[t] = 19.5  # Dag ondergrens
+                r_max[t] = 21.5  # Ruimte voor solar buffering overdag
+
+            # DHW Comfort profiel
+            if 17 <= hour < 21:
+                d_min[t] = 50.0  # Warm voor piekgebruik
+            else:
+                d_min[t] = 25.0  # Mag afkoelen buiten piek
+
+            d_max[t] = 55.0  # Altijd ruimte voor solar buffering in boiler
 
         dhw_start = (state["dhw_top"] + state["dhw_bottom"]) / 2
         current_est_room, current_est_dhw = state["room_temp"], dhw_start
@@ -800,8 +839,8 @@ class ThermalMPC:
             # Schat de maximale frequentie voor dit tijdstip
             v_max_freq[t] = self.perf_map.predict_max_freq(t_out[t])
 
-            # 1. UFH: Dynamische Stooklijn o.b.v. warmteverlies huis
-            calc_room = max(current_est_room, 20.0)
+            # UFH COP en Slope
+            calc_room = max(current_est_room, r_min[t])
             heat_loss_kw = max(0, (calc_room - t_out[t]) / self.ident.R)
             # Overtemp = Vermogen / Afgiftecoëfficiënt
             overtemp_ufh = np.clip(heat_loss_kw / self.ident.K_emit, 0, 15.0)
@@ -822,11 +861,8 @@ class ThermalMPC:
             el_per_hz_u[t] = slope_u
             th_per_hz_u[t] = slope_u * cop_u
 
-            # 2. DHW: Dynamische Aanvoer o.b.v. vermogen warmtepomp
-            calc_dhw = max(current_est_dhw, 40.0)
-
-            # Stap A: Maak een eerste schatting van het thermisch vermogen
-            # We gebruiken hier calc_dhw + dhw_dt als tijdelijke sink voor de allereerste COP-check
+            # DHW COP en Slope
+            calc_dhw = max(current_est_dhw, d_min[t])
             p_th_est = (
                 dhw_ref
                 * self.perf_map.predict_p_el_slope(
@@ -836,9 +872,6 @@ class ThermalMPC:
                     t_out[t], calc_dhw + dhw_dt, calc_dhw, dhw_ref, HvacMode.DHW.value
                 )
             )
-
-            # Stap B: Bereken de overtemp die nodig is om DIT vermogen door de spiraal te duwen
-            # Overtemp = P_th / K_tank
             overtemp_dhw = np.clip(p_th_est / self.ident.K_tank, 0, 20.0)
 
             # Stap C: De aanvoer is de tank-temp + de helft van de water-delta + de overtemp over de spiraal
@@ -867,7 +900,7 @@ class ThermalMPC:
             )
             current_est_dhw = calc_dhw - (self.ident.K_loss_dhw * self.dt) + res_d[t]
 
-            logger.debug(
+            logger.info(
                 f"[MPC Debug] t={t*0.25:.2f}h | T_out={t_out[t]:.1f} | T_room_calc={calc_room:.1f} | "
                 f"HeatLoss={(calc_room - t_out[t]) / self.ident.R:.2f}kW | "
                 f"COP_U={cop_u:.2f} | COP_D={cop_d:.2f} | P_el_slope={slope_u:.3f} | P_th_per_hz={th_per_hz_u[t]:.3f}"
@@ -889,6 +922,12 @@ class ThermalMPC:
         self.P_base_load.value = t_base_load
         self.P_ufh_res.value = res_u
         self.P_dhw_res.value = res_d
+
+        # Nieuwe target parameters koppelen
+        self.P_room_min.value = r_min
+        self.P_room_max.value = r_max
+        self.P_dhw_min.value = d_min
+        self.P_dhw_max.value = d_max
 
         try:
             self.problem.solve(solver=cp.CBC)

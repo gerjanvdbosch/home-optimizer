@@ -65,6 +65,9 @@ class Coordinator:
                 t_r = mpc.t_room.value
                 t_d = mpc.t_dhw.value  # De voorspelde DHW temp
 
+                t_out = mpc.P_temp_out.value
+                solar = mpc.P_solar.value
+
                 tz = datetime.now().astimezone().tzinfo
 
                 plan_data = []
@@ -79,6 +82,8 @@ class Coordinator:
                             .strftime("%H:%M"),
                             "Mode": mode,
                             "Freq": round(max(f_u[i], f_d[i]), 1),
+                            "T_out": round(t_out[i], 1),  # Toegevoegd
+                            "Solar": round(solar[i], 2),  # Toegevoegd
                             "T_room": round(t_r[i], 2),
                             "T_dhw": round(t_d[i], 2),
                         }
