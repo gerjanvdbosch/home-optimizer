@@ -98,12 +98,10 @@ class Collector:
         raw_pv = self.client.get_pv_power()
         raw_wp = self.client.get_wp_power()
         raw_grid = self.client.get_grid_power()
-        raw_output = self.client.get_wp_output()
 
         self._update_slot(self.pv_slots, raw_pv)
         self._update_slot(self.wp_slots, raw_wp)
         self._update_slot(self.grid_slots, raw_grid)
-        self._update_slot(self.output_slots, raw_output)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -148,13 +146,9 @@ class Collector:
             self._update_slot(self.return_slots, self.client.get_return_temp())
 
             raw_compressor_freq = self.client.get_compressor_freq()
-            raw_cop = self.client.get_cop()
 
             if raw_compressor_freq > 0:
                 self._update_slot(self.compressor_slots, raw_compressor_freq)
-
-            if raw_cop > 0:
-                self._update_slot(self.cop_slots, raw_cop)
 
         logger.info("[Collector] Sensors updated")
 
@@ -177,14 +171,12 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = self._mean(self.pv_slots)
             avg_wp = self._mean(self.wp_slots)
-            avg_output = self._mean(self.output_slots)
-            avg_cop = self._median(self.cop_slots, 0)
             avg_compressor_freq = self._median(self.compressor_slots, 0)
-            avg_supply = self._median(self.supply_slots)
-            avg_return = self._median(self.return_slots)
-            avg_room = self._median(self.room_slots)
-            avg_dhw_top = self._median(self.dhw_top_slots)
-            avg_dhw_bottom = self._median(self.dhw_bottom_slots)
+            avg_supply = self._mean(self.supply_slots)
+            avg_return = self._mean(self.return_slots)
+            avg_room = self._mean(self.room_slots)
+            avg_dhw_top = self._mean(self.dhw_top_slots)
+            avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
             avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
             avg_export = (
                 sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
@@ -196,8 +188,6 @@ class Collector:
             self.compressor_slots = []
             self.supply_slots = []
             self.return_slots = []
-            self.cop_slots = []
-            self.output_slots = []
             self.room_slots = []
             self.dhw_top_slots = []
             self.dhw_bottom_slots = []
@@ -216,14 +206,12 @@ class Collector:
                 return_temp=avg_return,
                 compressor_freq=avg_compressor_freq,
                 hvac_mode=int(self.context.hvac_mode.value),
-                cop=avg_cop,
-                wp_output=avg_output,
             )
 
             self.current_slot_start = slot_start
 
             logger.info(
-                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW Freq={avg_compressor_freq:.1f}Hz Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C COP={avg_cop:.2f} Output={avg_output:.2f}kW"
+                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW Freq={avg_compressor_freq:.1f}Hz Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C"
             )
 
     def _update_buffer(self, buffer: deque, value: float):

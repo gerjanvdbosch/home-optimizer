@@ -39,7 +39,6 @@ class Measurement(Base):
     grid_export = Column(Float)
     pv_actual = Column(Float)
     wp_actual = Column(Float)
-    wp_output = Column(Float)
 
     room_temp = Column(Float)
     dhw_top = Column(Float)
@@ -48,7 +47,6 @@ class Measurement(Base):
     return_temp = Column(Float)
     compressor_freq = Column(Float)
     hvac_mode = Column(Integer)
-    cop = Column(Float)
 
 
 class Database:
