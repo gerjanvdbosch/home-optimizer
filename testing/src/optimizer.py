@@ -603,7 +603,7 @@ class MLResidualPredictor:
         # Ruis wegpoetsen
         if is_dhw:
             # Alles tussen -0.8 en +0.8 wordt 0.0
-            target = np.where(np.abs(target) < 0.8, 0, target)
+            target = np.where(np.abs(target) < 1.5, 0, target)
             target = np.where(target > 0, 0, target)
         else:
             target = np.where(np.abs(target) < 0.05, 0, target)
@@ -784,8 +784,10 @@ class ThermalMPC:
         )
 
         # 4. Schakelkosten
-        ufh_switch = cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.5
-        dhw_switch = cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.5
+        switching_penalty = (
+            cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.5
+            + cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.5
+        )
 
         # 5. Veiligheid (Absolute bodem schending)
         violation_penalty = (
@@ -806,8 +808,7 @@ class ThermalMPC:
                 + comfort_room_low
                 + comfort_dhw_low
                 + efficiency_penalty
-                + ufh_switch
-                + dhw_switch
+                + switching_penalty
                 + violation_penalty
                 + variation_penalty
             ),
@@ -850,7 +851,7 @@ class ThermalMPC:
             if 17 <= hour < 21:
                 d_min[t] = 50.0  # Warm voor piekgebruik
             else:
-                d_min[t] = 25.0  # Mag afkoelen buiten piek
+                d_min[t] = 10.0  # Mag afkoelen buiten piek
 
             d_max[t] = 55.0  # Altijd ruimte voor solar buffering in boiler
 
