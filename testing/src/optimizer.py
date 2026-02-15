@@ -996,4 +996,4 @@ class Optimizer:
         hz = f_ufh[0] if f_ufh[0] > 15 else f_dhw[0] if f_dhw[0] > 15 else 0
         mode = "UFH" if f_ufh[0] > 15 else "DHW" if f_dhw[0] > 15 else "OFF"
 
-        return {"mode": mode, "freq": round(hz, 1)}
+        return {"mode": mode, "freq": round(hz, 1), "status": self.mpc.problem.status}

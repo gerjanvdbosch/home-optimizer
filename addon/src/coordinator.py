@@ -52,6 +52,7 @@ class Coordinator:
 
         if result:
             logger.info("--- Resultaat ---")
+            logger.info(f"Status: {result['status']}")
             logger.info(f"Gekozen Modus: {result['mode']}")
             logger.info(f"Frequentie: {result['freq']} Hz")
 
