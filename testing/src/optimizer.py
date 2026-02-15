@@ -24,6 +24,9 @@ CP_WATER = 4.186  # kJ/kg.K
 FACTOR_UFH = (FLOW_UFH / 60.0) * CP_WATER  # ~1.2558 kW/K
 FACTOR_DHW = (FLOW_DHW / 60.0) * CP_WATER  # ~1.3256 kW/K
 
+MIN_FREQ_UFH = 20.0  # Hz
+MIN_FREQ_DHW = 50.0  # Hz
+
 
 # =========================================================
 # 1. HEAT PUMP PERFORMANCE MAP
@@ -225,7 +228,7 @@ class HPPerformanceMap:
 
     def predict_max_freq(self, t_out):
         if self.max_freq_model is None:
-            return 75.0
+            return 82.0
 
         t_rounded = round(t_out)
         pred = self.max_freq_model.predict(
@@ -674,6 +677,9 @@ class ThermalMPC:
         self.P_max_freq = cp.Parameter(T, nonneg=True)
         self.P_dhw_loss_per_dt = cp.Parameter(nonneg=True)
 
+        self.P_min_th_power_ufh = cp.Parameter(T, nonneg=True)
+        self.P_min_th_power_dhw = cp.Parameter(T, nonneg=True)
+
         self.P_th_per_hz_ufh = cp.Parameter(T, nonneg=True)
         self.P_th_per_hz_dhw = cp.Parameter(T, nonneg=True)
         self.P_el_per_hz_ufh = cp.Parameter(T, nonneg=True)
@@ -706,15 +712,6 @@ class ThermalMPC:
             self.t_room[0] == self.P_t_room_init,
             self.t_dhw[0] == self.P_t_dhw_init,
         ]
-
-        # UFH: Minimaal 2.5 graden verschil nodig voor stabiele afgifte
-        # Factor UFH (18L/min) is ~1.25 kW/K
-        min_dt_ufh = 2.5
-        self.P_min_th_power_ufh.value = FACTOR_UFH * min_dt_ufh  # ~3.1 kW
-
-        # DHW: Minimaal 4.5 graden verschil
-        min_dt_dhw = 4.5
-        self.P_min_th_power_dhw.value = FACTOR_DHW * min_dt_dhw  # ~6.0 kW
 
         for t in range(T):
             # 1. Definieer vermogens
@@ -751,21 +748,18 @@ class ThermalMPC:
                     - self.P_dhw_loss_per_dt
                 ),
                 # Machine & Veiligheidsgrenzen
-                self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
-                self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
+                self.t_dhw[t + 1] >= 10.0,
+                # Modus & Frequentie (Directe ondergrenzen)
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
-                # Kamer temperatuur met slacks
+                self.f_ufh[t] >= self.ufh_on[t] * MIN_FREQ_UFH,
+                self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
+                self.f_dhw[t] >= self.dhw_on[t] * MIN_FREQ_DHW,
+                self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
+                # Comfort grenzen (met slacks)
                 self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_room[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
-                # Boiler temperatuur met slacks
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
                 self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
-                # Dit is de 'echte' beperking in zacht weer.
-                # Als p_th_ufh hierdoor hoger moet zijn dan wat 20Hz levert,
-                # zal de solver de frequentie vanzelf verhogen (bijv. naar 28Hz).
-                p_th_ufh >= self.ufh_on[t] * self.P_min_th_power_ufh,
-                p_th_dhw >= self.dhw_on[t] * self.P_min_th_power_dhw,
-                self.t_dhw[t + 1] >= 10.0,
             ]
 
         # --- OBJECTIVE FUNCTION ---
@@ -799,6 +793,12 @@ class ThermalMPC:
             + cp.sum(self.s_dhw_low + self.s_dhw_high) * 500
         )
 
+        # Dit straft grote sprongen in frequentie (bijv. van 60 naar 20 ineens)
+        variation_penalty = (
+            cp.sum(cp.abs(self.f_ufh[1:] - self.f_ufh[:-1])) * 0.01
+            + cp.sum(cp.abs(self.f_dhw[1:] - self.f_dhw[:-1])) * 0.01
+        )
+
         # TOTAAL
         self.problem = cp.Problem(
             cp.Minimize(
@@ -809,6 +809,7 @@ class ThermalMPC:
                 + ufh_switch
                 + dhw_switch
                 + violation_penalty
+                + variation_penalty
             ),
             constraints,
         )
@@ -822,6 +823,9 @@ class ThermalMPC:
         t_export_prices = [0.05] * T
         t_solar = forecast_df.power_corrected.values[:T]
         t_base_load = forecast_df.load_corrected.values[:T]
+
+        v_min_p_th_u = np.zeros(T)
+        v_min_p_th_d = np.zeros(T)
 
         res_u = res_u[:T]
         res_d = res_d[:T]
@@ -870,6 +874,9 @@ class ThermalMPC:
         for t in range(T):
             # Schat de maximale frequentie voor dit tijdstip
             v_max_freq[t] = self.perf_map.predict_max_freq(t_out[t])
+
+            v_min_p_th_u[t] = MIN_FREQ_UFH * th_per_hz_u[t]
+            v_min_p_th_d[t] = MIN_FREQ_DHW * th_per_hz_d[t]
 
             # UFH COP en Slope
             calc_room = max(current_est_room, r_min[t])
@@ -940,6 +947,9 @@ class ThermalMPC:
             )
 
         # Vul parameters
+        self.P_min_th_power_ufh.value = v_min_p_th_u
+        self.P_min_th_power_dhw.value = v_min_p_th_d
+
         self.P_max_freq.value = v_max_freq
         self.P_th_per_hz_ufh.value = th_per_hz_u
         self.P_th_per_hz_dhw.value = th_per_hz_d
