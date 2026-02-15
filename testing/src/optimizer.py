@@ -896,7 +896,7 @@ class ThermalMPC:
             overtemp_dhw = np.clip(p_th_est / self.ident.K_tank, 0, 20.0)
 
             # Stap C: De aanvoer is de tank-temp + de helft van de water-delta + de overtemp over de spiraal
-            t_supply_dhw = min(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 58.0)
+            t_supply_dhw = min(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 59.0)
 
             # Stap D: De definitieve waarden voor de solver
             cop_d = self.perf_map.predict_cop(
