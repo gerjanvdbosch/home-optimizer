@@ -652,6 +652,9 @@ class ThermalMPC:
         self.P_export_prices = cp.Parameter(T, nonneg=True)
         self.P_temp_out = cp.Parameter(T)
 
+        self.P_min_th_power_ufh = cp.Parameter(nonneg=True)
+        self.P_min_th_power_dhw = cp.Parameter(nonneg=True)
+
         # Nieuw: Dynamische grenzen voor UFH en DHW
         self.P_room_min = cp.Parameter(T, nonneg=True)
         self.P_room_max = cp.Parameter(T, nonneg=True)
@@ -692,6 +695,15 @@ class ThermalMPC:
             self.t_dhw[0] == self.P_t_dhw_init,
         ]
 
+        # UFH: Minimaal 2.5 graden verschil nodig voor stabiele afgifte
+        # Factor UFH (18L/min) is ~1.25 kW/K
+        min_dt_ufh = 2.5
+        self.P_min_th_power_ufh.value = FACTOR_UFH * min_dt_ufh  # ~3.1 kW
+
+        # DHW: Minimaal 4.5 graden verschil
+        min_dt_dhw = 4.5
+        self.P_min_th_power_dhw.value = FACTOR_DHW * min_dt_dhw  # ~6.0 kW
+
         for t in range(T):
             # 1. Definieer vermogens
             p_el_wp = (
@@ -730,13 +742,19 @@ class ThermalMPC:
                 self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
                 self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
-                # self.f_ufh[t] >= self.ufh_on[t] * 25,
-                # self.f_dhw[t] >= self.dhw_on[t] * 35,
                 # Dynamische Comfort Grenzen
                 self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_room[t + 1] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
                 self.t_dhw[t + 1] <= self.P_dhw_max[t],
+                # Zorg dat de compressor sowieso niet onder de ~20Hz zakt als hij draait
+                # self.f_ufh[t] >= self.ufh_on[t] * 25.0,
+                # self.f_dhw[t] >= self.dhw_on[t] * 25.0,
+                # Dit is de 'echte' beperking in zacht weer.
+                # Als p_th_ufh hierdoor hoger moet zijn dan wat 20Hz levert,
+                # zal de solver de frequentie vanzelf verhogen (bijv. naar 28Hz).
+                p_th_ufh >= self.ufh_on[t] * self.P_min_th_power_ufh,
+                p_th_dhw >= self.dhw_on[t] * self.P_min_th_power_dhw,
             ]
 
         # --- OBJECTIVE FUNCTION ---
@@ -903,7 +921,8 @@ class ThermalMPC:
             logger.info(
                 f"[MPC Debug] t={t*0.25:.2f}h | T_out={t_out[t]:.1f} | T_room_calc={calc_room:.1f} | "
                 f"HeatLoss={(calc_room - t_out[t]) / self.ident.R:.2f}kW | "
-                f"COP_U={cop_u:.2f} | COP_D={cop_d:.2f} | P_el_slope={slope_u:.3f} | P_th_per_hz={th_per_hz_u[t]:.3f}"
+                f"COP_U={cop_u:.2f} | COP_D={cop_d:.2f} | P_el_slope={slope_u:.3f} | P_th_per_hz={th_per_hz_u[t]:.3f} | "
+                f"Supply_U={t_supply_ufh:.1f} | Supply_D={t_supply_dhw:.1f}"
             )
 
         # Vul parameters
@@ -930,7 +949,7 @@ class ThermalMPC:
         self.P_dhw_max.value = d_max
 
         try:
-            self.problem.solve(solver=cp.CBC)
+            self.problem.solve(solver=cp.CBC, verbose=True)
             return self.f_ufh.value, self.f_dhw.value
         except Exception as e:
             logger.error(f"MPC Solve failed: {e}")
