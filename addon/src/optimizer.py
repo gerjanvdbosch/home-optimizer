@@ -603,10 +603,10 @@ class MLResidualPredictor:
         # Ruis wegpoetsen
         if is_dhw:
             # Alles tussen -0.8 en +0.8 wordt 0.0
-            target = np.where(np.abs(target) < 2.0, 0, target)
+            target = np.where(np.abs(target) < 0.05, 0, target)
             target = np.where(target > 0, 0, target)
         else:
-            target = np.where(np.abs(target) < 0.05, 0, target)
+            target = np.where(np.abs(target) < 0.02, 0, target)
 
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
         df_feat["solar"] = df_feat["pv_actual"]
@@ -617,7 +617,7 @@ class MLResidualPredictor:
         # DHW kan grotere afwijkingen hebben door taps, dus ruimere grenzen.
         if is_dhw:
             # -50.0 vangt sensorfouten op, 0.5 zorgt dat we niet leren van HP-opwarmfouten
-            train_set = train_set[train_set["target"].between(-50.0, 0.5)]
+            train_set = train_set[train_set["target"].between(-1.0, 0.5)]
         else:
             # Vangt extreme situaties op zoals open ramen of directe zon op de sensor
             train_set = train_set[train_set["target"].between(-0.5, 0.5)]
@@ -885,7 +885,7 @@ class ThermalMPC:
             # Overtemp = Vermogen / Afgiftecoëfficiënt
             overtemp_ufh = np.clip(heat_loss_kw / self.ident.K_emit, 0, 15.0)
             t_supply_ufh = np.clip(
-                calc_room + (ufh_dt / 2.0) + overtemp_ufh, 23.0, 30.0
+                calc_room + (ufh_dt / 2.0) + overtemp_ufh, 20.0, 30.0
             )
 
             cop_u = self.perf_map.predict_cop(
@@ -917,7 +917,7 @@ class ThermalMPC:
             overtemp_dhw = np.clip(p_th_est / self.ident.K_tank, 0, 20.0)
 
             # Stap C: De aanvoer is de tank-temp + de helft van de water-delta + de overtemp over de spiraal
-            t_supply_dhw = np.clip(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 30.0, 59.0)
+            t_supply_dhw = np.clip(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 25.0, 59.0)
 
             # Stap D: De definitieve waarden voor de solver
             cop_d = self.perf_map.predict_cop(
