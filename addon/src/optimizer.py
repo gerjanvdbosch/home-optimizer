@@ -597,6 +597,14 @@ class MLResidualPredictor:
         # Residu berekenen (K/u)
         target = (t_next - t_model_next) / dt
 
+        # Ruis wegpoetsen
+        if is_dhw:
+            # Alles tussen -0.8 en +0.8 wordt 0.0
+            target = np.where(np.abs(target) < 0.8, 0, target)
+            target = np.where(target > 0, 0, target)
+        else:
+            target = np.where(np.abs(target) < 0.05, 0, target)
+
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
         df_feat["solar"] = df_feat["pv_actual"]
         df_feat["target"] = target
@@ -605,18 +613,20 @@ class MLResidualPredictor:
 
         # DHW kan grotere afwijkingen hebben door taps, dus ruimere grenzen.
         if is_dhw:
+            # -50.0 vangt sensorfouten op, 0.5 zorgt dat we niet leren van HP-opwarmfouten
             train_set = train_set[train_set["target"].between(-50.0, 0.5)]
-            print("Debug ML Residuals Sample (DHW):")
         else:
+            # Vangt extreme situaties op zoals open ramen of directe zon op de sensor
             train_set = train_set[train_set["target"].between(-0.5, 0.5)]
-            print("Debug ML Residuals Sample (UFH):")
 
-        print(train_set.head(30))
+        print("Debug ML Residuals Train Set:")
+        print(train_set[["temp", "solar", "target"]].head(30))
 
         if len(train_set) > 10:
             self.model = RandomForestRegressor(
                 n_estimators=100, max_depth=5, min_samples_leaf=15
             ).fit(train_set[self.features], train_set["target"])
+
             joblib.dump(self.model, self.path)
 
     def predict(self, forecast_df):
@@ -682,7 +692,7 @@ class ThermalMPC:
         self.p_export = cp.Variable(T, nonneg=True)
         self.p_solar_self = cp.Variable(T, nonneg=True)
         self.t_room = cp.Variable(T + 1)
-        self.t_dhw = cp.Variable(T + 1)
+        self.t_dhw = cp.Variable(T + 1, nonneg=True)
 
         # Slack variabelen voor als de bodem echt niet gehaald kan worden
         self.s_room_low = cp.Variable(T, nonneg=True)
@@ -755,6 +765,7 @@ class ThermalMPC:
                 # zal de solver de frequentie vanzelf verhogen (bijv. naar 28Hz).
                 p_th_ufh >= self.ufh_on[t] * self.P_min_th_power_ufh,
                 p_th_dhw >= self.dhw_on[t] * self.P_min_th_power_dhw,
+                self.t_dhw[t + 1] >= 10.0,
             ]
 
         # --- OBJECTIVE FUNCTION ---
@@ -1005,4 +1016,4 @@ class Optimizer:
         hz = ufh_now if ufh_now > 15 else dhw_now if dhw_now > 15 else 0
         mode = "UFH" if ufh_now > 15 else "DHW" if dhw_now > 15 else "OFF"
 
-        return {"mode": mode, "freq": round(hz, 1), "status": self.mpc.problem.status}
+        return {"mode": mode, "freq": round(hz), "status": self.mpc.problem.status}

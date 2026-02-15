@@ -84,7 +84,7 @@ class Coordinator:
                             .tz_convert(tz)
                             .strftime("%H:%M"),
                             "Mode": mode,
-                            "Freq": round(max(f_u[i], f_d[i]), 1),
+                            "Freq": round(max(f_u[i], f_d[i])),
                             "T_out": round(t_out[i], 1),  # Toegevoegd
                             "Solar": round(solar[i], 2),  # Toegevoegd
                             "T_room": round(t_r[i], 2),
