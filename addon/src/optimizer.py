@@ -686,7 +686,9 @@ class ThermalMPC:
 
         # Slack variabelen voor als de bodem echt niet gehaald kan worden
         self.s_room_low = cp.Variable(T, nonneg=True)
+        self.s_room_high = cp.Variable(T, nonneg=True)
         self.s_dhw_low = cp.Variable(T, nonneg=True)
+        self.s_dhw_high = cp.Variable(T, nonneg=True)
 
         R, C = self.ident.R, self.ident.C
 
@@ -742,14 +744,12 @@ class ThermalMPC:
                 self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
                 self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
-                # Dynamische Comfort Grenzen
+                # Kamer temperatuur met slacks
                 self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
-                self.t_room[t + 1] <= self.P_room_max[t],
+                self.t_room[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
+                # Boiler temperatuur met slacks
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
-                self.t_dhw[t + 1] <= self.P_dhw_max[t],
-                # Zorg dat de compressor sowieso niet onder de ~20Hz zakt als hij draait
-                # self.f_ufh[t] >= self.ufh_on[t] * 25.0,
-                # self.f_dhw[t] >= self.dhw_on[t] * 25.0,
+                self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
                 # Dit is de 'echte' beperking in zacht weer.
                 # Als p_th_ufh hierdoor hoger moet zijn dan wat 20Hz levert,
                 # zal de solver de frequentie vanzelf verhogen (bijv. naar 28Hz).
@@ -783,7 +783,10 @@ class ThermalMPC:
         dhw_switch = cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.5
 
         # 5. Veiligheid (Absolute bodem schending)
-        safety_violation = cp.sum(self.s_room_low + self.s_dhw_low) * 100
+        violation_penalty = (
+            cp.sum(self.s_room_low + self.s_room_high) * 1000
+            + cp.sum(self.s_dhw_low + self.s_dhw_high) * 500
+        )
 
         # TOTAAL
         self.problem = cp.Problem(
@@ -794,7 +797,7 @@ class ThermalMPC:
                 + efficiency_penalty
                 + ufh_switch
                 + dhw_switch
-                + safety_violation
+                + violation_penalty
             ),
             constraints,
         )
@@ -993,7 +996,13 @@ class Optimizer:
 
         f_ufh, f_dhw = self.mpc.solve(state, context.forecast_df, res_u, res_d)
 
-        hz = f_ufh[0] if f_ufh[0] > 15 else f_dhw[0] if f_dhw[0] > 15 else 0
-        mode = "UFH" if f_ufh[0] > 15 else "DHW" if f_dhw[0] > 15 else "OFF"
+        if f_ufh is None or f_dhw is None:
+            return {"mode": "OFF", "freq": 0.0, "status": "FAIL"}
+
+        ufh_now = f_ufh[0] if len(f_ufh) > 0 else 0
+        dhw_now = f_dhw[0] if len(f_dhw) > 0 else 0
+
+        hz = ufh_now if ufh_now > 15 else dhw_now if dhw_now > 15 else 0
+        mode = "UFH" if ufh_now > 15 else "DHW" if dhw_now > 15 else "OFF"
 
         return {"mode": mode, "freq": round(hz, 1), "status": self.mpc.problem.status}
