@@ -421,7 +421,7 @@ class SystemIdentificator:
         mask_ufh = (
             (df_15m["hvac_mode"] == HvacMode.HEATING.value)
             & (df_15m["wp_output"] > 0.7)
-            & (df_15m["supply_temp"] < 35)  # Niet te heet (voorkom overshoot data)
+            & (df_15m["supply_temp"] < 30)  # Niet te heet (voorkom overshoot data)
             & (df_15m["supply_temp"] > df_15m["room_temp"] + 2)  # Zinvolle delta T
         )
         df_ufh = df_15m[mask_ufh].copy()
@@ -446,7 +446,7 @@ class SystemIdentificator:
         mask_dhw = (
             (df_15m["hvac_mode"] == HvacMode.DHW.value)
             & (df_15m["wp_output"] > 1.7)
-            & (df_15m["supply_temp"] > 35)
+            & (df_15m["supply_temp"] > 30)
         )
         df_dhw = df_15m[mask_dhw].copy()
 
