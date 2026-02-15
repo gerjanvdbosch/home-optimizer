@@ -24,7 +24,7 @@ CP_WATER = 4.186  # kJ/kg.K
 FACTOR_UFH = (FLOW_UFH / 60.0) * CP_WATER  # ~1.2558 kW/K
 FACTOR_DHW = (FLOW_DHW / 60.0) * CP_WATER  # ~1.3256 kW/K
 
-MIN_FREQ_UFH = 20.0  # Hz
+MIN_FREQ_UFH = 30.0  # Hz
 MIN_FREQ_DHW = 50.0  # Hz
 
 
@@ -603,7 +603,7 @@ class MLResidualPredictor:
         # Ruis wegpoetsen
         if is_dhw:
             # Alles tussen -0.8 en +0.8 wordt 0.0
-            target = np.where(np.abs(target) < 1.5, 0, target)
+            target = np.where(np.abs(target) < 2.0, 0, target)
             target = np.where(target > 0, 0, target)
         else:
             target = np.where(np.abs(target) < 0.05, 0, target)
@@ -785,8 +785,8 @@ class ThermalMPC:
 
         # 4. Schakelkosten
         switching_penalty = (
-            cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.5
-            + cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.5
+            cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 2.0
+            + cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 2.0
         )
 
         # 5. Veiligheid (Absolute bodem schending)
@@ -884,7 +884,9 @@ class ThermalMPC:
             heat_loss_kw = max(0, (calc_room - t_out[t]) / self.ident.R)
             # Overtemp = Vermogen / Afgiftecoëfficiënt
             overtemp_ufh = np.clip(heat_loss_kw / self.ident.K_emit, 0, 15.0)
-            t_supply_ufh = calc_room + (ufh_dt / 2.0) + overtemp_ufh
+            t_supply_ufh = np.clip(
+                calc_room + (ufh_dt / 2.0) + overtemp_ufh, 23.0, 30.0
+            )
 
             cop_u = self.perf_map.predict_cop(
                 t_out[t],
@@ -915,7 +917,7 @@ class ThermalMPC:
             overtemp_dhw = np.clip(p_th_est / self.ident.K_tank, 0, 20.0)
 
             # Stap C: De aanvoer is de tank-temp + de helft van de water-delta + de overtemp over de spiraal
-            t_supply_dhw = min(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 59.0)
+            t_supply_dhw = np.clip(calc_dhw + (dhw_dt / 2.0) + overtemp_dhw, 30.0, 59.0)
 
             # Stap D: De definitieve waarden voor de solver
             cop_d = self.perf_map.predict_cop(
