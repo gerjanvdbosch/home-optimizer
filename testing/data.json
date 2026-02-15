@@ -1,7 +1,7 @@
 {
-  "room_temp": 20.0,
-  "dhw_top": 50.0,
-  "dhw_bottom": 50.0,
+  "room_temp": 19.0,
+  "dhw_top": 40.0,
+  "dhw_bottom": 34.0,
   "dhw_setpoint": 50.0,
   "compressor_freq": 50.0,
   "supply_temp": 25.0,
