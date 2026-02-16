@@ -70,6 +70,7 @@ class Coordinator:
 
                 t_out = mpc.P_temp_out.value
                 solar = mpc.P_solar.value
+                load = mpc.P_base_load.value
 
                 tz = datetime.now().astimezone().tzinfo
 
@@ -85,8 +86,9 @@ class Coordinator:
                             .strftime("%H:%M"),
                             "Mode": mode,
                             "Freq": round(max(f_u[i], f_d[i])),
-                            "T_out": round(t_out[i], 1),  # Toegevoegd
-                            "Solar": round(solar[i], 2),  # Toegevoegd
+                            "T_out": round(t_out[i], 1),
+                            "P_Solar": round(solar[i], 2),
+                            "P_Load": round(load[i], 2),
                             "T_room": round(t_r[i], 2),
                             "T_dhw": round(t_d[i], 2),
                         }

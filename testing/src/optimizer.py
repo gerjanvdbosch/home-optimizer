@@ -779,8 +779,8 @@ class ThermalMPC:
         # 3. Zuinigheid (Kleine straf op hogere temperaturen)
         # Dit zorgt dat de WP niet onnodig naar 22.5 graden stookt als stroom duur is
         efficiency_penalty = (
-            cp.sum(cp.pos(self.t_room[1:] - self.P_room_min)) * 0.1
-            + cp.sum(cp.pos(self.t_dhw[1:] - self.P_dhw_min)) * 0.05
+            cp.sum(cp.pos(self.t_room[1:] - self.P_room_min)) * 0.001
+            + cp.sum(cp.pos(self.t_dhw[1:] - self.P_dhw_min)) * 0.001
         )
 
         # 4. Schakelkosten
@@ -849,11 +849,11 @@ class ThermalMPC:
 
             # DHW Comfort profiel
             if 17 <= hour < 21:
-                d_min[t] = 50.0  # Warm voor piekgebruik
+                d_min[t] = 49.0  # Warm voor piekgebruik
             else:
                 d_min[t] = 10.0  # Mag afkoelen buiten piek
 
-            d_max[t] = 55.0  # Altijd ruimte voor solar buffering in boiler
+            d_max[t] = 57.0  # Altijd ruimte voor solar buffering in boiler
 
         dhw_start = (state["dhw_top"] + state["dhw_bottom"]) / 2
         current_est_room, current_est_dhw = state["room_temp"], dhw_start
