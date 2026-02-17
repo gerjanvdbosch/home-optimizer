@@ -408,7 +408,7 @@
         </div>
     </div>
 
-    {% if details %}
+    {% if details and is_today %}
     <div class="details-grid">
         {% for key, value in details.items() %}
         <div class="stat-item">
