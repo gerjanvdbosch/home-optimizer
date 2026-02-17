@@ -80,6 +80,7 @@ class LoadModel:
         self.model: Optional[BaseEstimator] = None
         self.is_fitted = False
         self.feature_cols = [
+            "hour",
             "hour_sin",
             "hour_cos",
             "dow_sin",
