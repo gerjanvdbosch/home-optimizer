@@ -78,22 +78,24 @@ class Coordinator:
                     mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
                     plan_data.append(
                         {
-                            "Tijd": self.context.forecast_df["timestamp"]
+                            "time": self.context.forecast_df["timestamp"]
                             .iloc[i]
                             .tz_convert(tz)
                             .strftime("%H:%M"),
-                            "Mode": mode,
-                            "Freq": round(max(f_u[i], f_d[i])),
-                            "T_out": round(t_out[i], 1),
-                            "P_Solar": round(solar[i], 2),
-                            "P_Load": round(load[i], 2),
-                            "T_room": round(t_r[i], 2),
-                            "T_dhw": round(t_d[i], 2),
+                            "mode": mode,
+                            "freq": round(max(f_u[i], f_d[i])),
+                            "t_out": f"{t_out[i]:.1f}",
+                            "p_solar": f"{solar[i]:.2f}",
+                            "p_load": f"{load[i]:.2f}",
+                            "t_room": f"{t_r[i+1]:.2f}",
+                            "t_dhw": f"{t_d[i+1]:.2f}",
                         }
                     )
 
                 # Gebruik pandas om een mooie tabel te printen
                 print(pd.DataFrame(plan_data).to_string(index=False))
+
+                self.context.optimization_plan = plan_data
 
             # Sla het resultaat op in de context voor de Web API
             self.context.result = result
