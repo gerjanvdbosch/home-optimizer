@@ -643,6 +643,7 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
     # Haal data op (get_history haalt alles op NA de datum, dus we moeten straks filteren op eindtijd)
     df = database.get_history(start_utc)
+    df["timestamp"] = df["timestamp"].dt.tz_convert(local_tz)
 
     if df.empty:
         return []

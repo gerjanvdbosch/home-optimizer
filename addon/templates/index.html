@@ -214,7 +214,7 @@
 
         /* TABEL STYLING */
         .table-container {
-            max-height: 400px; /* Scrollbaar als de dag lang is */
+            //max-height: 400px; /* Scrollbaar als de dag lang is */
             overflow-y: auto;
         }
 
@@ -445,7 +445,7 @@
                 <tbody>
                     {% for row in optimization_plan %}
                     <tr>
-                        <td style="color: var(--text-muted);">{{ row.time }}</td>
+                        <td>{{ row.time }}</td>
 
                         <!-- MODE KOLOM -->
                         <!-- UFH = Bright Purple (#d05ce3) -->
@@ -455,21 +455,21 @@
                             {{ row.mode }}
                         </td>
 
-                        <td style="color: var(--text-muted);">{{ row.freq }}</td>
+                        <td style="color: {% if row.freq|float == 0 %}var(--text-muted){% endif %}">{{ row.freq }}</td>
                         <td style="color: var(--text-muted);">{{ row.t_out }}</td>
 
                         <!-- Solar blijft de originele Amber/Goud kleur -->
-                        <td style="color: #ffb74d;">{{ row.p_solar }}</td>
+                        <td style="color: {% if row.p_solar|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">{{ row.p_solar }}</td>
 
                         <td style="color: var(--text-muted);">{{ row.p_load }}</td>
 
                         <!-- T_ROOM: Kleurt mee met UFH (Paars) -->
-                        <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% else %}var(--text-muted){% endif %};">
+                        <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% endif %};">
                             {{ row.t_room }}
                         </td>
 
                         <!-- T_DHW: Kleurt mee met DHW (Cyaan) -->
-                        <td style="color: {% if row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                        <td style="color: {% if row.mode == 'DHW' %}#00e5ff{% endif %};">
                             {{ row.t_dhw }}
                         </td>
                     </tr>
@@ -523,12 +523,12 @@
                 {% for row in measurements %}
                 <tr>
                     <td>{{ row.time }}</td>
-                    <td style="color: #ffb74d;">{{ row.pv }}</td>
+                    <td style="color: {% if row.pv|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">{{ row.pv }}</td>
                     <td>{{ row.import }}</td>
                     <td>{{ row.export }}</td>
                     <td style="font-weight: bold;">{{ row.total }}</td>
-                    <td style="color: #90caf9;">{{ row.wp }}</td>
-                    <td class="col-highlight">{{ row.base }}</td>
+                    <td style="color: {% if row.wp|float > 0 %}#009ac7{% else %}var(--text-muted){% endif %};">{{ row.wp }}</td>
+                    <td style="color: {% if row.base|float > 0 %}#F50057{% else %}var(--text-muted){% endif %};">{{ row.base }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
