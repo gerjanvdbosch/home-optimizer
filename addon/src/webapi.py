@@ -8,7 +8,7 @@ from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from datetime import timedelta, datetime, timezone
+from datetime import timedelta, datetime, timezone, date
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -20,17 +20,41 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @api.get("/", response_class=HTMLResponse)
-def index(request: Request, explain: str = None, train: str = None, view: str = "hour"):
+def index(
+    request: Request,
+    explain: str = None,
+    train: str = None,
+    view: str = "hour",
+    date_str: str = None,
+):
     """
     Dashboard Home. Leest status direct uit Context.
     """
     coordinator = request.app.state.coordinator
     context = coordinator.context
 
+    local_tz = datetime.now().astimezone().tzinfo
+    today = context.now.astimezone(local_tz).date()
+
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            target_date = today
+    else:
+        target_date = today
+
+    # Navigatie datums berekenen
+    prev_date = target_date - timedelta(days=1)
+    next_date = target_date + timedelta(days=1)
+
+    # Is het vandaag? (Voor UI highlight en auto-refresh logica)
+    is_today = target_date == today
+
     # 1. Grafieken genereren
-    plot_html = _get_solar_forecast_plot(request)
+    plot_html = _get_solar_forecast_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
-    measurements_data = _get_energy_table(request, view_mode)
+    measurements_data = _get_energy_table(request, view_mode, target_date)
     importance_html = ""
 
     result = context.result if hasattr(context, "result") else None
@@ -75,11 +99,16 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
             "explanation": explanation,
             "measurements": measurements_data,
             "current_view": view_mode,
+            "target_date": target_date,
+            "prev_date": prev_date,
+            "next_date": next_date,
+            "is_today": is_today,
+            "today_date": today,
         },
     )
 
 
-def _get_solar_forecast_plot(request: Request) -> str:
+def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     """
     Genereert de interactieve Plotly grafiek.
     Past smoothing toe op historische data voor mooie weergave.
@@ -94,6 +123,13 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
+
+    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_of_day = datetime.combine(target_date, datetime.max.time()).replace(
+        tzinfo=local_tz
+    )
 
     # --- 1. FORECAST DATA VOORBEREIDING ---
     df = context.forecast_df.copy()
@@ -118,11 +154,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         return ""
 
     # --- 2. HISTORIE OPHALEN & SMOOTHEN ---
-    cutoff_date = (
-        local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        .replace(tzinfo=local_tz)
-        .astimezone(timezone.utc)
-    )
+    cutoff_date = start_of_day.astimezone(timezone.utc)
 
     df_hist = database.get_history(cutoff_date)
     df_hist_plot = pd.DataFrame()
@@ -149,16 +181,19 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df_hist_plot = df_hist_smooth.reset_index()
 
     # --- 3. BEREIK BEPALEN ---
-    active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
-    zon_uren = df[df[active_col] > 0]
-    if not zon_uren.empty and not df_hist_plot.empty:
-        x_start = zon_uren["timestamp_local"].min() - timedelta(hours=2)
-        x_end = max(
-            zon_uren["timestamp_local"].max(), df_hist_plot["timestamp_local"].max()
-        ) + timedelta(hours=2)
-    else:
-        x_start = df["timestamp_local"].min()
-        x_end = df["timestamp_local"].max()
+    # active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
+    # zon_uren = df[df[active_col] > 0]
+    # if not zon_uren.empty and not df_hist_plot.empty:
+    #     x_start = zon_uren["timestamp_local"].min() - timedelta(hours=2)
+    #     x_end = max(
+    #         zon_uren["timestamp_local"].max(), df_hist_plot["timestamp_local"].max()
+    #     ) + timedelta(hours=2)
+    # else:
+    #     x_start = df["timestamp_local"].min()
+    #     x_end = df["timestamp_local"].max()
+
+    x_start = start_of_day
+    x_end = end_of_day
 
     fig = go.Figure()
 
@@ -601,7 +636,7 @@ def _get_importance_plot_plotly(request: Request) -> str:
     )
 
 
-def _get_energy_table(request: Request, view_mode: str = "15min"):
+def _get_energy_table(request: Request, view_mode: str, target_date: date):
     """
     Haalt data op en verwerkt deze op basis van de modus:
     - "15min": Toont vermogen (kW) met smoothing.
@@ -612,19 +647,21 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
 
     # 1. Algemene Data Fetch (Gedeeld)
     local_tz = datetime.now().astimezone().tzinfo
-    now_local = datetime.now(local_tz)
-    start_of_day_utc = now_local.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ).astimezone(timezone.utc)
+    start_dt = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    start_utc = start_dt.astimezone(timezone.utc)
 
-    # Let op: dit haalt ook weerdata (temp, cloud, etc) op, maar dat negeren we gewoon.
-    df = database.get_history(start_of_day_utc)
+    # Haal data op (get_history haalt alles op NA de datum, dus we moeten straks filteren op eindtijd)
+    df = database.get_history(start_utc)
 
     if df.empty:
         return []
 
     # Zet tijdzone goed en indexeer
-    df["timestamp"] = df["timestamp"].dt.tz_convert(local_tz)
+    end_dt = start_dt + timedelta(days=1)
+    df = df[(df["timestamp"] >= start_dt) & (df["timestamp"] < end_dt)]
+
     df = df.set_index("timestamp").sort_index()
 
     # Kolommen die we gaan bewerken
@@ -645,8 +682,11 @@ def _get_energy_table(request: Request, view_mode: str = "15min"):
         df = df.resample("1h", label="left").sum(numeric_only=True)
 
         # 3. Filter toekomst weg (anders heb je lege rijen voor vanavond)
-        current_hour = now_local.replace(minute=0, second=0, microsecond=0)
-        df = df[df.index <= current_hour]
+        if target_date == datetime.now(local_tz).date():
+            current_hour = datetime.now(local_tz).replace(
+                minute=0, second=0, microsecond=0
+            )
+            df = df[df.index <= current_hour]
 
     # --- EINDE SPLITSING ---
 

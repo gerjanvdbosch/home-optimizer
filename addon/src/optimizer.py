@@ -840,7 +840,7 @@ class ThermalMPC:
             hour = fut_time.hour
 
             # UFH Nachtverlaging profiel
-            if 22 <= hour or hour <= 7:
+            if 21 <= hour or hour <= 7:
                 r_min[t] = 19.0  # Nacht ondergrens
                 r_max[t] = 20.0  # Nacht bovengrens
             else:
