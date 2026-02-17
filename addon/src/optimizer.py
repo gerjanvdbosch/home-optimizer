@@ -446,7 +446,7 @@ class SystemIdentificator:
         mask_dhw = (
             (df_15m["hvac_mode"] == HvacMode.DHW.value)
             & (df_15m["wp_output"] > 1.7)
-            & (df_15m["supply_temp"] > 30)
+            & (df_15m["supply_temp"] > 35)
         )
         df_dhw = df_15m[mask_dhw].copy()
 
@@ -840,7 +840,7 @@ class ThermalMPC:
             hour = fut_time.hour
 
             # UFH Nachtverlaging profiel
-            if 22 <= hour or hour < 6:
+            if 22 <= hour or hour <= 7:
                 r_min[t] = 19.0  # Nacht ondergrens
                 r_max[t] = 20.0  # Nacht bovengrens
             else:
@@ -848,8 +848,8 @@ class ThermalMPC:
                 r_max[t] = 21.5  # Ruimte voor solar buffering overdag
 
             # DHW Comfort profiel
-            if 17 <= hour < 21:
-                d_min[t] = 49.0  # Warm voor piekgebruik
+            if 11 <= hour < 19:
+                d_min[t] = 50.0  # Warm voor piekgebruik
             else:
                 d_min[t] = 10.0  # Mag afkoelen buiten piek
 
