@@ -360,7 +360,7 @@
             padding: 4px 8px;
             border: 1px solid var(--border-color);
             border-radius: 12px;
-            margin-left: 5px;
+            margin-right: 5px;
         }
 
         .today-btn:hover {
@@ -378,6 +378,10 @@
 
         <!-- DATUM NAVIGATIE (Nu binnen de top-bar) -->
         <div class="nav-bar">
+            {% if not is_today %}
+            <a href="?date_str={{ today_date }}&view={{ current_view }}" class="today-btn">NU</a>
+            {% endif %}
+
             <a href="?date_str={{ prev_date }}&view={{ current_view }}" class="nav-btn">&lsaquo;</a>
 
             <span class="date-display">
@@ -389,10 +393,6 @@
             </span>
 
             <a href="?date_str={{ next_date }}&view={{ current_view }}" class="nav-btn">&rsaquo;</a>
-
-            {% if not is_today %}
-            <a href="?date_str={{ today_date }}&view={{ current_view }}" class="today-btn">NU</a>
-            {% endif %}
         </div>
     </div>
 
@@ -419,6 +419,65 @@
     </div>
     {% else %}
     <div class="empty-msg">Wachten op data...</div>
+    {% endif %}
+
+    <!-- WARMTEPOMP PLANNING TABEL -->
+    {% if optimization_plan and is_today %}
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Planning</h3>
+        </div>
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Tijd</th>
+                        <th style="text-align: center;">Mode</th>
+                        <th>Freq</th>
+                        <th>Outside (°C)</th>
+                        <th>Solar (kW)</th>
+                        <th>Load (kW)</th>
+                        <th>Room (°C)
+                        <th>DHW (°C)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in optimization_plan %}
+                    <tr>
+                        <td style="color: var(--text-muted);">{{ row.time }}</td>
+
+                        <!-- MODE KOLOM -->
+                        <!-- UFH = Bright Purple (#d05ce3) -->
+                        <!-- DHW = Electric Cyan (#00e5ff) -->
+                        <td style="text-align: center; font-weight: bold;
+                            color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                            {{ row.mode }}
+                        </td>
+
+                        <td style="color: var(--text-muted);">{{ row.freq }}</td>
+                        <td style="color: var(--text-muted);">{{ row.t_out }}</td>
+
+                        <!-- Solar blijft de originele Amber/Goud kleur -->
+                        <td style="color: #ffb74d;">{{ row.p_solar }}</td>
+
+                        <td style="color: var(--text-muted);">{{ row.p_load }}</td>
+
+                        <!-- T_ROOM: Kleurt mee met UFH (Paars) -->
+                        <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% else %}var(--text-muted){% endif %};">
+                            {{ row.t_room }}
+                        </td>
+
+                        <!-- T_DHW: Kleurt mee met DHW (Cyaan) -->
+                        <td style="color: {% if row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                            {{ row.t_dhw }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
     {% endif %}
 
     <div class="card">

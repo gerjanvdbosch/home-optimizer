@@ -98,6 +98,7 @@ def index(
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
+            "optimization_plan": getattr(context, "optimization_plan", None),
             "current_view": view_mode,
             "target_date": target_date,
             "prev_date": prev_date,

@@ -92,6 +92,7 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
+            "optimization_plan": getattr(context, "optimization_plan", None),
             "current_view": view_mode,
             "target_date": target_date,
             "prev_date": prev_date,
