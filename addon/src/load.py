@@ -124,8 +124,7 @@ class LoadModel:
         # We voorspellen het 90e percentiel (bovengrens).
         # Dit zorgt dat de optimizer "ruimte" houdt voor het huishouden.
         self.model = HistGradientBoostingRegressor(
-            loss="quantile",
-            quantile=0.90,
+            loss="absolute_error",
             learning_rate=0.05,
             max_iter=500,
             max_leaf_nodes=31,
