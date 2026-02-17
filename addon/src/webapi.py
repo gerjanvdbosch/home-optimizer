@@ -655,10 +655,11 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
     # Haal data op (get_history haalt alles op NA de datum, dus we moeten straks filteren op eindtijd)
     df = database.get_history(start_utc)
-    df["timestamp"] = df["timestamp"].dt.tz_convert(local_tz)
 
     if df.empty:
         return []
+
+    df["timestamp"] = df["timestamp"].dt.tz_convert(local_tz)
 
     # Zet tijdzone goed en indexeer
     end_dt = start_dt + timedelta(days=1)
@@ -680,8 +681,20 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
         # 1. kW naar kWh (delen door 4)
         df[process_cols] = df[process_cols] * 0.25
 
-        # 2. Sommeer per uur
-        df = df.resample("1h", label="left").sum(numeric_only=True)
+        # Energie-waarden tellen we op (sum)
+        # De modus bepalen we door de meest voorkomende waarde te kiezen (lambda x.mode)
+        agg_map = {
+            "grid_import": "sum",
+            "grid_export": "sum",
+            "pv_actual": "sum",
+            "wp_actual": "sum",
+            "hvac_mode": lambda x: (
+                x[x != 0].mode().iloc[0] if not x[x != 0].mode().empty else 0
+            ),
+        }
+
+        # Voer de bewerking uit
+        df = df.resample("1h", label="left").agg(agg_map)
 
         # 3. Filter toekomst weg (anders heb je lege rijen voor vanavond)
         if target_date == datetime.now(local_tz).date():
@@ -715,6 +728,7 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
                 "export": f"{row['grid_export']:.2f}",
                 "total": f"{row['total_calc']:.2f}",
                 "base": f"{row['base_calc']:.2f}",
+                "mode": int(round(row.get("hvac_mode", 0))),
             }
         )
 

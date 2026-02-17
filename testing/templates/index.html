@@ -527,7 +527,9 @@
                     <td>{{ row.import }}</td>
                     <td>{{ row.export }}</td>
                     <td style="font-weight: bold;">{{ row.total }}</td>
-                    <td style="color: {% if row.wp|float > 0 %}#009ac7{% else %}var(--text-muted){% endif %};">{{ row.wp }}</td>
+                    <td style="color: {% if row.mode == 1 %}#00e5ff{% elif row.mode == 4 %}#00e5ff{% elif row.mode == 2 %}#d05ce3{% else %}var(--text-muted){% endif %};">
+                        {{ row.wp }}
+                    </td>
                     <td style="color: {% if row.base|float > 0 %}#F50057{% else %}var(--text-muted){% endif %};">{{ row.base }}</td>
                 </tr>
                 {% endfor %}
