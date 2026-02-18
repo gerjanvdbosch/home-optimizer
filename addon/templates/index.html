@@ -336,18 +336,6 @@
             color: var(--primary-color);
         }
 
-        .today-btn {
-            font-size: 0.8rem;
-            color: var(--primary-color);
-            text-transform: uppercase;
-            font-weight: bold;
-            text-decoration: none;
-            padding: 4px 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            margin-right: 5px;
-        }
-
         /* Nieuwe wrapper om de knop en de selector naast elkaar te houden */
         .nav-wrapper {
             display: flex;
@@ -357,22 +345,23 @@
 
         /* De NU knop als losse, opvallende knop */
         .today-btn {
-            font-size: 0.75rem;
-            color: var(--primary-color);
-            text-transform: uppercase;
-            font-weight: bold;
             text-decoration: none;
-            padding: 8px 14px;
-            border: 1px solid var(--primary-color); /* Rand in primaire kleur */
-            border-radius: 8px; /* Iets minder rond dan de bar voor contrast */
-            background-color: rgba(0, 154, 199, 0.1); /* Subtiele gloed */
-            transition: all 0.2s ease;
-            line-height: 1;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-color);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 7px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(4px);
+            transition: all 0.2s;
         }
 
         .today-btn:hover {
             background-color: var(--primary-color);
             color: white;
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 12px rgba(0, 154, 199, 0.3);
         }
 
         /* Update nav-bar: margin-right op de oude knop kan nu weg */
@@ -438,8 +427,6 @@
         </div>
         {% endfor %}
     </div>
-    {% else %}
-    <div class="empty-msg">Wachten op data...</div>
     {% endif %}
 
     {% if explanation %}

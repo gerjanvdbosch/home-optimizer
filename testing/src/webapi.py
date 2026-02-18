@@ -457,8 +457,8 @@ def _get_explanation_data(coordinator) -> dict:
         # Als het donker is (< 0.05 kW), zoek de piek van de dag
         if prediction_now < 0.05:
             # Zoek piek in df_today ipv de hele df
-            idx_max_in_today = df_today[target_col].argmax()
-            peak_val = df_today.iloc[idx_max_in_today][target_col]
+            idx_max_in_today = df_today['pv_actual'].argmax()
+            peak_val = df_today.iloc[idx_max_in_today]['pv_actual']
 
             if peak_val > 0.1:
                 row = df_today.iloc[[idx_max_in_today]].copy()
