@@ -665,6 +665,10 @@ class ThermalMPC:
         self.P_export_prices = cp.Parameter(T, nonneg=True)
         self.P_temp_out = cp.Parameter(T)
 
+        # Splitsen in straf (duur) en beloning (zon) om DCP error te voorkomen
+        self.P_overheat_penalty = cp.Parameter(T, nonneg=True)
+        self.P_solar_reward = cp.Parameter(T, nonneg=True)
+
         self.P_min_th_power_ufh = cp.Parameter(nonneg=True)
         self.P_min_th_power_dhw = cp.Parameter(nonneg=True)
 
@@ -747,8 +751,6 @@ class ThermalMPC:
                     + (self.P_dhw_res[t] * self.dt)
                     - self.P_dhw_loss_per_dt
                 ),
-                # Machine & Veiligheidsgrenzen
-                self.t_dhw[t + 1] >= 10.0,
                 # Modus & Frequentie (Directe ondergrenzen)
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
                 self.f_ufh[t] >= self.ufh_on[t] * MIN_FREQ_UFH,
@@ -776,17 +778,29 @@ class ThermalMPC:
         comfort_room_low = cp.sum(cp.pos(self.P_room_min - self.t_room[1:])) * 8.0
         comfort_dhw_low = cp.sum(cp.pos(self.P_dhw_min - self.t_dhw[1:])) * 6.0
 
-        # 3. Zuinigheid (Kleine straf op hogere temperaturen)
-        # Dit zorgt dat de WP niet onnodig naar 22.5 graden stookt als stroom duur is
-        efficiency_penalty = (
-            cp.sum(cp.pos(self.t_room[1:] - self.P_room_min)) * 0.001
-            + cp.sum(cp.pos(self.t_dhw[1:] - self.P_dhw_min)) * 0.001
+        # 3. Zuinigheid (Penalty als het donker is)
+        # We straffen het overschrijden van het minimum ALLEEN als P_overheat_penalty > 0
+        efficiency_penalty = cp.sum(
+            cp.multiply(
+                cp.pos(self.t_room[1:] - self.P_room_min), self.P_overheat_penalty
+            )
+        ) + cp.sum(
+            cp.multiply(
+                cp.pos(self.t_dhw[1:] - self.P_dhw_min), self.P_overheat_penalty
+            )
         )
+
+        # 4. Opslag Beloning (Reward als de zon schijnt)
+        # We belonen simpelweg de temperatuurhoeveelheid. Hoe warmer, hoe meer 'winst' (min-kosten).
+        # Dit doen we alleen als P_solar_reward > 0.
+        storage_reward = cp.sum(
+            cp.multiply(self.t_room[1:], self.P_solar_reward)
+        ) + cp.sum(cp.multiply(self.t_dhw[1:], self.P_solar_reward))
 
         # 4. Schakelkosten
         switching_penalty = (
-            cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 2.0
-            + cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 2.0
+            cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 10.0
+            + cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 10.0
         )
 
         # 5. Veiligheid (Absolute bodem schending)
@@ -811,6 +825,7 @@ class ThermalMPC:
                 + switching_penalty
                 + violation_penalty
                 + variation_penalty
+                - storage_reward
             ),
             constraints,
         )
@@ -827,6 +842,9 @@ class ThermalMPC:
 
         v_min_p_th_u = np.zeros(T)
         v_min_p_th_d = np.zeros(T)
+
+        v_penalty = np.zeros(T)
+        v_reward = np.zeros(T)
 
         res_u = res_u[:T]
         res_d = res_d[:T]
@@ -873,6 +891,22 @@ class ThermalMPC:
         self.P_dhw_loss_per_dt.value = self.ident.K_loss_dhw * self.dt
 
         for t in range(T):
+            excess_solar = t_solar[t] > t_base_load[t]
+
+            if excess_solar:
+                # ZON:
+                # 1. Geen straf op warmte (mag bufferen)
+                v_penalty[t] = 0.0
+                # 2. Wel beloning! (Stimuleer bufferen)
+                # Waarde 0.05 betekent: elke graad warmte is 5 cent waard.
+                v_reward[t] = 0.05
+            else:
+                # GEEN ZON:
+                # 1. Wel straf op onnodige warmte (terug naar minimum)
+                v_penalty[t] = 0.5
+                # 2. Geen beloning
+                v_reward[t] = 0.0
+
             # Schat de maximale frequentie voor dit tijdstip
             v_max_freq[t] = self.perf_map.predict_max_freq(t_out[t])
 
@@ -974,6 +1008,9 @@ class ThermalMPC:
         self.P_room_max.value = r_max
         self.P_dhw_min.value = d_min
         self.P_dhw_max.value = d_max
+
+        self.P_overheat_penalty.value = v_penalty
+        self.P_solar_reward.value = v_reward
 
         try:
             self.problem.solve(solver=cp.CBC, verbose=True)
