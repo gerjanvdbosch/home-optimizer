@@ -125,6 +125,9 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
 
+    today = context.now.astimezone(local_tz).date()
+    is_today = target_date == today
+
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
         tzinfo=local_tz
     )
@@ -198,21 +201,7 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
 
     fig = go.Figure()
 
-    # A. Raw Solcast (Grijs, dashed)
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp_local"],
-            y=df["pv_estimate"],
-            mode="lines",
-            name="Solcast",
-            line=dict(color="#888888", dash="dash", width=1),
-            opacity=0.7,
-            hovertemplate="%{y:.2f} kW<extra></extra>",
-            # hoverinfo="skip",
-        )
-    )
-
-    if "power_ml_raw" in df.columns:
+    if "power_ml_raw" in df.columns and is_today:
         fig.add_trace(
             go.Scatter(
                 x=df["timestamp_local"],
@@ -242,6 +231,20 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
         )
 
     if not df_hist_plot.empty:
+        # A. Raw Solcast (Grijs, dashed)
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["pv_estimate"],
+                mode="lines",
+                name="Solcast",
+                line=dict(color="#888888", dash="dash", width=1),
+                opacity=0.7,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                # hoverinfo="skip",
+            )
+        )
+
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],

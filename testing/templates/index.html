@@ -421,6 +421,62 @@
     <div class="empty-msg">Wachten op data...</div>
     {% endif %}
 
+    {% if explanation %}
+    <div class="explain-container">
+        <div style="margin-bottom:10px; font-weight:bold; color:var(--primary-color);">
+            Focus: {{ explanation.time_label }}
+        </div>
+
+        <table class="explain-table">
+            <thead>
+            <tr>
+                <th>Factor</th>
+                <th>Impact (kW)</th>
+            </tr>
+            </thead>
+            <tbody>
+            <!-- Basiswaarde -->
+            <tr>
+                <td>Basiswaarde (Gem.)</td>
+                <td>{{ explanation.base }}</td>
+            </tr>
+
+            <!-- Factoren Loop -->
+            {% for factor in explanation.factors %}
+            <tr>
+                <td style="text-transform: capitalize;">{{ factor.label }}</td>
+                <td class="{{ factor.css_class }}">{{ factor.value }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="2" style="text-align:center; font-style:italic; padding:10px;">
+                    Geen significante invloeden.
+                </td>
+            </tr>
+            {% endfor %}
+
+            <!-- Eindresultaat -->
+            <tr style="border-top: 1px solid var(--border-color); font-weight:bold;">
+                <td>Voorspelling</td>
+                <td class="val-base">{{ explanation.prediction }}</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Importance</h3>
+            <div class="header-actions">
+                <button class="explain-btn" onclick="toggle('train')">Train</button>
+            </div>
+        </div>
+        <div class="chart-container">
+            {{ importance_plot | safe }}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- WARMTEPOMP PLANNING TABEL -->
     {% if optimization_plan and is_today %}
     <div class="card">
@@ -540,62 +596,6 @@
             {% endif %}
         </div>
     </div>
-
-    {% if explanation %}
-    <div class="explain-container">
-        <div style="margin-bottom:10px; font-weight:bold; color:var(--primary-color);">
-            Focus: {{ explanation.time_label }}
-        </div>
-
-        <table class="explain-table">
-            <thead>
-            <tr>
-                <th>Factor</th>
-                <th>Impact (kW)</th>
-            </tr>
-            </thead>
-            <tbody>
-            <!-- Basiswaarde -->
-            <tr>
-                <td>Basiswaarde (Gem.)</td>
-                <td>{{ explanation.base }}</td>
-            </tr>
-
-            <!-- Factoren Loop -->
-            {% for factor in explanation.factors %}
-            <tr>
-                <td style="text-transform: capitalize;">{{ factor.label }}</td>
-                <td class="{{ factor.css_class }}">{{ factor.value }}</td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="2" style="text-align:center; font-style:italic; padding:10px;">
-                    Geen significante invloeden.
-                </td>
-            </tr>
-            {% endfor %}
-
-            <!-- Eindresultaat -->
-            <tr style="border-top: 1px solid var(--border-color); font-weight:bold;">
-                <td>Voorspelling</td>
-                <td class="val-base">{{ explanation.prediction }}</td>
-            </tr>
-            </tbody>
-        </table>
-    </div>
-
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Importance</h3>
-            <div class="header-actions">
-                <button class="explain-btn" onclick="toggle('train')">Train</button>
-            </div>
-        </div>
-        <div class="chart-container">
-            {{ importance_plot | safe }}
-        </div>
-    </div>
-    {% endif %}
 </div>
 
 <div id="loading-overlay" class="loading-overlay">

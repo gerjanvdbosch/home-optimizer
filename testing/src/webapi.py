@@ -20,7 +20,13 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @api.get("/", response_class=HTMLResponse)
-def index(request: Request, explain: str = None, train: str = None, view: str = "hour", date_str: str = None):
+def index(
+    request: Request,
+    explain: str = None,
+    train: str = None,
+    view: str = "hour",
+    date_str: str = None,
+):
     """
     Dashboard Home. Leest status direct uit Context.
     """
@@ -43,7 +49,7 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
     next_date = target_date + timedelta(days=1)
 
     # Is het vandaag? (Voor UI highlight en auto-refresh logica)
-    is_today = (target_date == today)
+    is_today = target_date == today
 
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request, target_date)
@@ -98,7 +104,7 @@ def index(request: Request, explain: str = None, train: str = None, view: str = 
             "prev_date": prev_date,
             "next_date": next_date,
             "is_today": is_today,
-            "today_date": today
+            "today_date": today,
         },
     )
 
@@ -119,8 +125,15 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
 
-    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
-    end_of_day = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=local_tz)
+    today = context.now.astimezone(local_tz).date()
+    is_today = target_date == today
+
+    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_of_day = datetime.combine(target_date, datetime.max.time()).replace(
+        tzinfo=local_tz
+    )
 
     # --- 1. FORECAST DATA VOORBEREIDING ---
     df = context.forecast_df.copy()
@@ -188,21 +201,7 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
 
     fig = go.Figure()
 
-    # A. Raw Solcast (Grijs, dashed)
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp_local"],
-            y=df["pv_estimate"],
-            mode="lines",
-            name="Solcast",
-            line=dict(color="#888888", dash="dash", width=1),
-            opacity=0.7,
-            hovertemplate="%{y:.2f} kW<extra></extra>",
-            # hoverinfo="skip",
-        )
-    )
-
-    if "power_ml_raw" in df.columns:
+    if "power_ml_raw" in df.columns and is_today:
         fig.add_trace(
             go.Scatter(
                 x=df["timestamp_local"],
@@ -232,6 +231,20 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
         )
 
     if not df_hist_plot.empty:
+        # A. Raw Solcast (Grijs, dashed)
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["pv_estimate"],
+                mode="lines",
+                name="Solcast",
+                line=dict(color="#888888", dash="dash", width=1),
+                opacity=0.7,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                # hoverinfo="skip",
+            )
+        )
+
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],
@@ -638,7 +651,9 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
     # 1. Algemene Data Fetch (Gedeeld)
     local_tz = datetime.now().astimezone().tzinfo
-    start_dt = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
+    start_dt = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
     start_utc = start_dt.astimezone(timezone.utc)
 
     # Haal data op (get_history haalt alles op NA de datum, dus we moeten straks filteren op eindtijd)
@@ -676,7 +691,9 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
             "grid_export": "sum",
             "pv_actual": "sum",
             "wp_actual": "sum",
-            "hvac_mode": lambda x: x[x != 0].mode().iloc[0] if not x[x != 0].mode().empty else 0
+            "hvac_mode": lambda x: (
+                x[x != 0].mode().iloc[0] if not x[x != 0].mode().empty else 0
+            ),
         }
 
         # Voer de bewerking uit
@@ -684,7 +701,9 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
         # 3. Filter toekomst weg (anders heb je lege rijen voor vanavond)
         if target_date == datetime.now(local_tz).date():
-            current_hour = datetime.now(local_tz).replace(minute=0, second=0, microsecond=0)
+            current_hour = datetime.now(local_tz).replace(
+                minute=0, second=0, microsecond=0
+            )
             df = df[df.index <= current_hour]
 
     # --- EINDE SPLITSING ---
