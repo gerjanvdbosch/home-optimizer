@@ -435,7 +435,7 @@
                         <th>Tijd</th>
                         <th style="text-align: center;">Mode</th>
                         <th>Freq</th>
-                        <th>Outside (°C)</th>
+                        <th>Temp (°C)</th>
                         <th>Solar (kW)</th>
                         <th>Load (kW)</th>
                         <th>Room (°C)
@@ -530,7 +530,7 @@
                     <td style="color: {% if row.mode == 1 %}#00e5ff{% elif row.mode == 4 %}#00e5ff{% elif row.mode == 2 %}#d05ce3{% else %}var(--text-muted){% endif %};">
                         {{ row.wp }}
                     </td>
-                    <td style="color: {% if row.base|float > 0 %}#F50057{% else %}var(--text-muted){% endif %};">{{ row.base }}</td>
+                    <td>{{ row.base }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>

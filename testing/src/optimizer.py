@@ -445,8 +445,8 @@ class SystemIdentificator:
         # ============================
         mask_dhw = (
             (df_15m["hvac_mode"] == HvacMode.DHW.value)
-            & (df_15m["wp_output"] > 1.7)
-            & (df_15m["supply_temp"] > 35)
+            & (df_15m["wp_output"] > 1.5)
+            & (df_15m["supply_temp"] > 30)
         )
         df_dhw = df_15m[mask_dhw].copy()
 
