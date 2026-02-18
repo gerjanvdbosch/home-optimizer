@@ -440,7 +440,7 @@ def _get_explanation_data(coordinator) -> dict:
         # 3. Zoek 'Nu'
         target_time = current_time.astimezone(df["timestamp"].dt.tz)
         idx_now = df["timestamp"].searchsorted(target_time)
-        idx_now = min(idx_now, len(df) - 1)
+        idx_now = max(0, min(idx_now, len(df) - 1))
 
         # 4. Slimme Logica: Nu of Piek?
         prediction_now = df.iloc[idx_now][target_col]
@@ -450,7 +450,7 @@ def _get_explanation_data(coordinator) -> dict:
 
         # Als het donker is (< 0.05 kW), zoek de piek van de dag
         if prediction_now < 0.05:
-            idx_max = df[target_col].idxmax()
+            idx_max = df[target_col].argmax()
             peak_val = df.iloc[idx_max][target_col]
 
             if peak_val > 0.1:
