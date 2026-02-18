@@ -445,25 +445,16 @@ def _get_explanation_data(coordinator) -> dict:
         idx_now = df["timestamp"].searchsorted(target_time)
         idx_now = max(0, min(idx_now, len(df) - 1))
 
-        today_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
-
-        # Zorg dat de timestamps in de juiste timezone staan voor de vergelijking
-        df_today = df[
-            (df["timestamp"] >= today_start) & (df["timestamp"] < today_end)
-        ].copy()
-
         # 4. Slimme Logica: Nu of Piek?
         prediction_now = df.iloc[idx_now][target_col]
 
         # Als het donker is (< 0.05 kW), zoek de piek van de dag
         if prediction_now < 0.05:
-            # Zoek piek in df_today ipv de hele df
-            idx_max_in_today = df_today["pv_actual"].argmax()
-            peak_val = df_today.iloc[idx_max_in_today]["pv_actual"]
+            idx_max = df[target_col].argmax()
+            peak_val = df.iloc[idx_max][target_col]
 
             if peak_val > 0.1:
-                row = df_today.iloc[[idx_max_in_today]].copy()
+                row = df.iloc[[idx_max]].copy()
                 ts = row["timestamp"].dt.tz_convert(local_tz).iloc[0]
                 time_label = f"Piek om {ts.strftime('%H:%M')}"
             else:
