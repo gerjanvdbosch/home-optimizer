@@ -212,6 +212,7 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
             line=dict(color="#888888", dash="dash", width=1),
             opacity=0.7,
             hovertemplate="%{y:.2f} kW<extra></extra>",
+            showlegend=False,
             # hoverinfo="skip",
         )
     )
