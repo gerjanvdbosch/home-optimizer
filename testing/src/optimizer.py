@@ -833,7 +833,7 @@ class ThermalMPC:
 
     def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
-        now = datetime.now()
+        now = state['now']
 
         t_out = forecast_df.temp.values[:T]
         t_prices = [0.22] * T  # Of haal uit forecast_df als je dynamische prijzen hebt
@@ -871,8 +871,8 @@ class ThermalMPC:
                 r_max[t] = 20.0  # Nacht bovengrens
 
             # DHW Comfort profiel
-            if 11 <= hour < 19:
-                d_min[t] = 50.0  # Warm voor piekgebruik
+            if 15 <= hour < 17:
+                d_min[t] = 49.0  # Warm voor piekgebruik
             else:
                 d_min[t] = 10.0  # Mag afkoelen buiten piek
 
@@ -1055,6 +1055,7 @@ class Optimizer:
         )
 
         state = {
+            "now": context.now,
             "room_temp": context.room_temp,
             "dhw_top": context.dhw_top,
             "dhw_bottom": context.dhw_bottom,
