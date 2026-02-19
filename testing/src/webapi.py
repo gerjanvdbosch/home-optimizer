@@ -201,6 +201,20 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
 
     fig = go.Figure()
 
+    # A. Raw Solcast (Grijs, dashed)
+    fig.add_trace(
+        go.Scatter(
+            x=df["timestamp_local"],
+            y=df["pv_estimate"],
+            mode="lines",
+            name="Solcast",
+            line=dict(color="#888888", dash="dash", width=1),
+            opacity=0.7,
+            hovertemplate="%{y:.2f} kW<extra></extra>",
+            # hoverinfo="skip",
+        )
+    )
+
     if "power_ml_raw" in df.columns and is_today:
         fig.add_trace(
             go.Scatter(
