@@ -653,7 +653,7 @@ class ThermalMPC:
     def __init__(self, ident, perf_map):
         self.ident = ident
         self.perf_map = perf_map
-        self.horizon, self.dt = 48, 0.25
+        self.horizon, self.dt = 68, 0.25
         self._build_problem()
 
     def _build_problem(self):
