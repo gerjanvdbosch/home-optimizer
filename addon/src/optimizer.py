@@ -498,16 +498,17 @@ class SystemIdentificator:
             print("Debug Stilstandsverlies DHW Sample:")
             print(df_sb[["timestamp", "dT_tank", "dt_hours", "wp_output"]].head(30))
 
-            # Loss rate positief maken voor berekening
-            loss_rates = -(df_sb["dT_tank"] / df_sb["dt_hours"])
+            # Fysica: dT/dt = -(1 / (R_tank * C_tank)) * (T_tank - T_room)
+            # We weten C_tank (0.232 kWh/K voor 200L).
+            # We berekenen de 'verliesfactor' per graad verschil met de kamer
+            t_diff = (df_sb["t_tank"] - df_sb["room_temp"]).clip(lower=1.0)
+            loss_factor_per_hour = -(df_sb["dT_tank"] / df_sb["dt_hours"]) / t_diff
 
-            # Filter: Verlies > 0.5 °C/uur is bijna altijd tappen, geen stilstand
-            loss_rates = loss_rates[loss_rates < 0.5]
-
-            if len(loss_rates) > 5:
-                # Gebruik het 25e percentiel om 'klein gebruik' eruit te filteren
-                # en de echte isolatiewaarde te vinden.
-                self.K_loss_dhw = float(np.clip(loss_rates.quantile(0.25), 0.02, 0.4))
+            # K_loss_dhw wordt nu een dimensieloze factor (1/h) of 1/(R*C)
+            self.K_loss_dhw = float(
+                np.clip(loss_factor_per_hour.quantile(0.25), 0.001, 0.05)
+            )
+            # Betekenis: bij 0.01 verliest hij 1% van het temperatuurverschil met de kamer per uur.
 
         logger.info(
             f"[Optimizer] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
@@ -593,9 +594,15 @@ class MLResidualPredictor:
             t_curr = (df_feat["dhw_top"] + df_feat["dhw_bottom"]) / 2
             t_next = t_curr.shift(-1)
             p_heat = df_feat["wp_output"]
+            # Boiler verlies model: K_loss_dhw * (T_tank - T_room)
+            t_room = df_feat["room_temp"]
 
             # Fysische basis inclusief het vaste K_loss uit je SysID
-            t_model_next = t_curr + (p_heat * dt / tank_cap) - (self.K_loss_dhw * dt)
+            t_model_next = (
+                t_curr
+                + (p_heat * dt / tank_cap)
+                - (self.K_loss_dhw * (t_curr - t_room) * dt)
+            )
 
         # Residu berekenen (K/u)
         target = (t_next - t_model_next) / dt
@@ -726,46 +733,57 @@ class ThermalMPC:
         ]
 
         for t in range(T):
-            # 1. Definieer vermogens
+            # 1. Definieer elektrische en thermische vermogens
             p_el_wp = (
                 self.f_ufh[t] * self.P_el_per_hz_ufh[t]
                 + self.f_dhw[t] * self.P_el_per_hz_dhw[t]
             )
-            # FIX: Thermisch vermogen moet komen uit frequentie x thermisch-per-Hz
+
             p_th_ufh = self.f_ufh[t] * self.P_th_per_hz_ufh[t]
             p_th_dhw = self.f_dhw[t] * self.P_th_per_hz_dhw[t]
 
-            total_load = p_el_wp + self.P_base_load[t]
-
-            # 2. Elektrische Balans & PV Balans
-            # Hierdoor "weet" de solver dat zonlicht gebruiken alleen de export_price kost
-            constraints += [total_load == self.p_grid[t] + self.p_solar_self[t]]
-            constraints += [self.P_solar[t] == self.p_solar_self[t] + self.p_export[t]]
-
-            # 3. Thermische Balans (R-C en Tank model)
+            # 2. Elektrische Balans
             constraints += [
-                # FIX: Gebruik p_th_ufh
+                p_el_wp + self.P_base_load[t] == self.p_grid[t] + self.p_solar_self[t],
+                self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
+            ]
+
+            # 3. Thermische Transitie (DE KERN)
+            constraints += [
+                # KAMER TRANSITIE: T_next = T_now + (Winst - Verlies_naar_buiten) + Residu
+                # Verlies_naar_buiten = (T_room - T_out) / R
                 self.t_room[t + 1]
                 == self.t_room[t]
                 + (
                     (p_th_ufh - (self.t_room[t] - self.P_temp_out[t]) / R) * self.dt / C
                     + (self.P_ufh_res[t] * self.dt)
                 ),
-                # FIX: Gebruik p_th_dhw
+                # BOILER TRANSITIE: T_next = T_now + Winst - Verlies_naar_kamer + Residu
+                # Verlies_naar_kamer = (T_dhw - T_room) * k * dt
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
                 + (
                     (p_th_dhw * self.dt) / 0.232
+                    - (self.t_dhw[t] - self.t_room[t]) * self.P_dhw_loss_per_dt
                     + (self.P_dhw_res[t] * self.dt)
-                    - self.P_dhw_loss_per_dt
                 ),
-                # Modus & Frequentie (Directe ondergrenzen)
+            ]
+
+            # 4. Fysische Harde Grenzen (Vloer)
+            # Voorkomt dat het model "gekke" sprongen maakt onder de omgevingstemp
+            constraints += [
+                self.t_room[t + 1] >= self.P_temp_out[t],
+                self.t_dhw[t + 1] >= self.t_room[t + 1],
+            ]
+
+            # 5. Modus, Frequentie en Comfort Slacks
+            constraints += [
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
                 self.f_ufh[t] >= self.ufh_on[t] * MIN_FREQ_UFH,
                 self.f_ufh[t] <= self.ufh_on[t] * self.P_max_freq[t],
                 self.f_dhw[t] >= self.dhw_on[t] * MIN_FREQ_DHW,
                 self.f_dhw[t] <= self.dhw_on[t] * self.P_max_freq[t],
-                # Comfort grenzen (met slacks)
+                # Comfort grenzen
                 self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_room[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
