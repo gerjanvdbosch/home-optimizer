@@ -603,10 +603,10 @@ class MLResidualPredictor:
         # Ruis wegpoetsen
         if is_dhw:
             # Alles tussen -0.8 en +0.8 wordt 0.0
-            target = np.where(np.abs(target) < 0.05, 0, target)
+            target = np.where(np.abs(target) < 0.2, 0, target)
             target = np.where(target > 0, 0, target)
         else:
-            target = np.where(np.abs(target) < 0.02, 0, target)
+            target = np.where(np.abs(target) < 0.15, 0, target)
 
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
         df_feat["solar"] = df_feat["pv_actual"]
@@ -616,11 +616,11 @@ class MLResidualPredictor:
 
         # DHW kan grotere afwijkingen hebben door taps, dus ruimere grenzen.
         if is_dhw:
-            # -50.0 vangt sensorfouten op, 0.5 zorgt dat we niet leren van HP-opwarmfouten
+            # Vangt sensorfouten op, 0.5 zorgt dat we niet leren van HP-opwarmfouten
             train_set = train_set[train_set["target"].between(-1.0, 0.5)]
         else:
             # Vangt extreme situaties op zoals open ramen of directe zon op de sensor
-            train_set = train_set[train_set["target"].between(-0.5, 0.5)]
+            train_set = train_set[train_set["target"].between(-1.2, 1.2)]
 
         print("Debug ML Residuals Train Set:")
         print(train_set[["temp", "solar", "target"]].head(30))
@@ -710,12 +710,19 @@ class ThermalMPC:
         self.s_room_high = cp.Variable(T, nonneg=True)
         self.s_dhw_low = cp.Variable(T, nonneg=True)
         self.s_dhw_high = cp.Variable(T, nonneg=True)
+        self.s_room_overheat = cp.Variable(T, nonneg=True)
+        self.s_dhw_overheat = cp.Variable(T, nonneg=True)
 
         R, C = self.ident.R, self.ident.C
 
         constraints = [
             self.t_room[0] == self.P_t_room_init,
             self.t_dhw[0] == self.P_t_dhw_init,
+        ]
+
+        constraints += [
+            self.s_room_overheat >= self.t_room[1:] - self.P_room_min,
+            self.s_dhw_overheat >= self.t_dhw[1:] - self.P_dhw_min,
         ]
 
         for t in range(T):
@@ -776,20 +783,14 @@ class ThermalMPC:
         )
 
         # 2. Comfort (Straf voor te koud t.o.v. de ondergrens van dat moment)
-        comfort_room_low = cp.sum(cp.pos(self.P_room_min - self.t_room[1:])) * 8.0
-        comfort_dhw_low = cp.sum(cp.pos(self.P_dhw_min - self.t_dhw[1:])) * 6.0
+        comfort_room_low = cp.sum(self.s_room_low) * 8.0
+        comfort_dhw_low = cp.sum(self.s_dhw_low) * 6.0
 
-        # 3. Zuinigheid (Penalty als het donker is)
+        # 3. Zuinigheid (Gebruikt nu de nieuwe overheat slacks)
         # We straffen het overschrijden van het minimum ALLEEN als P_overheat_penalty > 0
         efficiency_penalty = cp.sum(
-            cp.multiply(
-                cp.pos(self.t_room[1:] - self.P_room_min), self.P_overheat_penalty
-            )
-        ) + cp.sum(
-            cp.multiply(
-                cp.pos(self.t_dhw[1:] - self.P_dhw_min), self.P_overheat_penalty
-            )
-        )
+            cp.multiply(self.s_room_overheat, self.P_overheat_penalty)
+        ) + cp.sum(cp.multiply(self.s_dhw_overheat, self.P_overheat_penalty))
 
         # 4. Opslag Beloning (Reward als de zon schijnt)
         # We belonen simpelweg de temperatuurhoeveelheid. Hoe warmer, hoe meer 'winst' (min-kosten).
@@ -833,7 +834,7 @@ class ThermalMPC:
 
     def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
-        now = state['now']
+        now = state["now"]
 
         t_out = forecast_df.temp.values[:T]
         t_prices = [0.22] * T  # Of haal uit forecast_df als je dynamische prijzen hebt
@@ -872,7 +873,7 @@ class ThermalMPC:
 
             # DHW Comfort profiel
             if 15 <= hour < 17:
-                d_min[t] = 49.0  # Warm voor piekgebruik
+                d_min[t] = 50.0  # Warm voor piekgebruik
             else:
                 d_min[t] = 10.0  # Mag afkoelen buiten piek
 
