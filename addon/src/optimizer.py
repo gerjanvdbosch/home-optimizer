@@ -653,7 +653,8 @@ class ThermalMPC:
     def __init__(self, ident, perf_map):
         self.ident = ident
         self.perf_map = perf_map
-        self.horizon, self.dt = 68, 0.25
+        self.horizon = 96
+        self.dt = 0.25
         self._build_problem()
 
     def _build_problem(self):
@@ -857,13 +858,17 @@ class ThermalMPC:
             fut_time = now + timedelta(hours=t * self.dt)
             hour = fut_time.hour
 
-            # UFH Nachtverlaging profiel
-            if 21 <= hour or hour <= 7:
+            # UFH dag profiel
+            if 8 <= hour <= 23:
+                if 18 <= hour:
+                    r_min[t] = 20.0  # Avond ondergrens
+                else:
+                    r_min[t] = 19.5  # Dag ondergrens
+
+                r_max[t] = 21.5  # Ruimte voor solar buffering overdag
+            else:
                 r_min[t] = 19.0  # Nacht ondergrens
                 r_max[t] = 20.0  # Nacht bovengrens
-            else:
-                r_min[t] = 19.5  # Dag ondergrens
-                r_max[t] = 21.5  # Ruimte voor solar buffering overdag
 
             # DHW Comfort profiel
             if 11 <= hour < 19:
