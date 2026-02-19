@@ -90,7 +90,7 @@ class Coordinator:
                             "p_solar": f"{solar[i]:.2f}",
                             "p_load": f"{load[i]:.2f}",
                             "t_room": f"{t_r[i]:.2f}",
-                            "t_dhw": f"{t_d[i]:.2f}"
+                            "t_dhw": f"{t_d[i]:.2f}",
                         }
                     )
 
