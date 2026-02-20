@@ -673,6 +673,9 @@ class ThermalMPC:
         self.P_export_prices = cp.Parameter(T, nonneg=True)
         self.P_temp_out = cp.Parameter(T)
 
+        self.P_ufh_running_now = cp.Parameter(nonneg=True)
+        self.P_dhw_running_now = cp.Parameter(nonneg=True)
+
         # Splitsen in straf (duur) en beloning (zon) om DCP error te voorkomen
         self.P_overheat_penalty = cp.Parameter(T, nonneg=True)
         self.P_solar_reward = cp.Parameter(T, nonneg=True)
@@ -701,6 +704,11 @@ class ThermalMPC:
         self.P_dhw_res = cp.Parameter(T)
         self.P_solar = cp.Parameter(T, nonneg=True)
         self.P_base_load = cp.Parameter(T, nonneg=True)
+
+        self.hp_on = cp.Variable(T, boolean=True)  # Is de machine überhaupt aan?
+        self.start_hp = cp.Variable(T, boolean=True)  # Machine gaat aan (OFF -> ON)
+        self.stop_hp = cp.Variable(T, boolean=True)  # Machine gaat uit (ON -> OFF)
+        self.mode_change = cp.Variable(T, boolean=True)  # Wissel tussen UFH en DHW
 
         self.f_ufh = cp.Variable(T, nonneg=True)
         self.f_dhw = cp.Variable(T, nonneg=True)
@@ -733,6 +741,31 @@ class ThermalMPC:
         ]
 
         for t in range(T):
+            # 1. Koppel machine-status: aan als UFH of DHW aan is
+            constraints += [self.hp_on[t] == self.ufh_on[t] + self.dhw_on[t]]
+
+            # 2. Bepaal status van de vorige stap
+            prev_hp = (
+                self.P_ufh_running_now + self.P_dhw_running_now
+                if t == 0
+                else self.hp_on[t - 1]
+            )
+            prev_u = self.P_ufh_running_now if t == 0 else self.ufh_on[t - 1]
+            prev_d = self.P_dhw_running_now if t == 0 else self.dhw_on[t - 1]
+
+            # 3. Detecteer Machine Start & Stop (De compressor-cyclus)
+            constraints += [
+                self.start_hp[t] >= self.hp_on[t] - prev_hp,
+                self.stop_hp[t] >= prev_hp - self.hp_on[t],
+            ]
+
+            # 4. Detecteer Modus Wissel (De driewegklep)
+            if t >= 0:  # Ook bij t=0 kijken we naar de start-state
+                constraints += [
+                    self.mode_change[t] >= self.ufh_on[t] + prev_d - 1,
+                    self.mode_change[t] >= self.dhw_on[t] + prev_u - 1,
+                ]
+
             # 1. Definieer elektrische en thermische vermogens
             p_el_wp = (
                 self.f_ufh[t] * self.P_el_per_hz_ufh[t]
@@ -817,22 +850,24 @@ class ThermalMPC:
             cp.multiply(self.t_room[1:], self.P_solar_reward)
         ) + cp.sum(cp.multiply(self.t_dhw[1:], self.P_solar_reward))
 
-        # 4. Schakelkosten
-        switching_penalty = (
-            cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 10.0
-            + cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 10.0
-        )
-
         # 5. Veiligheid (Absolute bodem schending)
         violation_penalty = (
             cp.sum(self.s_room_low + self.s_room_high) * 1000
             + cp.sum(self.s_dhw_low + self.s_dhw_high) * 500
         )
 
-        # Dit straft grote sprongen in frequentie (bijv. van 60 naar 20 ineens)
+        # 1. De boete op de cyclus (Start + Stop).
+        # Dit straft korte OFF-periodes extreem hard af (€0.80 per keer uit/aan).
+        hp_cycle_penalty = cp.sum(self.start_hp) * 0.40 + cp.sum(self.stop_hp) * 0.40
+
+        # 2. De boete op een modus-wissel.
+        # Laag, want direct switchen is prima zolang de machine maar aan blijft.
+        mode_switch_penalty = cp.sum(self.mode_change) * 0.5
+
+        # 3. De variation penalty (hoger gezet voor stabiele frequentie)
         variation_penalty = (
-            cp.sum(cp.abs(self.f_ufh[1:] - self.f_ufh[:-1])) * 0.01
-            + cp.sum(cp.abs(self.f_dhw[1:] - self.f_dhw[:-1])) * 0.01
+            cp.sum(cp.abs(self.f_ufh[1:] - self.f_ufh[:-1])) * 0.05
+            + cp.sum(cp.abs(self.f_dhw[1:] - self.f_dhw[:-1])) * 0.05
         )
 
         # TOTAAL
@@ -842,7 +877,8 @@ class ThermalMPC:
                 + comfort_room_low
                 + comfort_dhw_low
                 + efficiency_penalty
-                + switching_penalty
+                + hp_cycle_penalty
+                + mode_switch_penalty
                 + violation_penalty
                 + variation_penalty
                 - storage_reward
@@ -853,6 +889,13 @@ class ThermalMPC:
     def solve(self, state, forecast_df, res_u, res_d):
         T = self.horizon
         now = state["now"]
+
+        self.P_ufh_running_now.value = (
+            1.0 if state.get("hvac_mode") == HvacMode.HEATING.value else 0.0
+        )
+        self.P_dhw_running_now.value = (
+            1.0 if state.get("hvac_mode") == HvacMode.DHW.value else 0.0
+        )
 
         t_out = forecast_df.temp.values[:T]
         t_prices = [0.22] * T  # Of haal uit forecast_df als je dynamische prijzen hebt
@@ -1078,6 +1121,7 @@ class Optimizer:
             "room_temp": context.room_temp,
             "dhw_top": context.dhw_top,
             "dhw_bottom": context.dhw_bottom,
+            "hvac_mode": context.hvac_mode,
         }
 
         f_ufh, f_dhw = self.mpc.solve(state, context.forecast_df, res_u, res_d)
