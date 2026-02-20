@@ -1080,7 +1080,7 @@ class ThermalMPC:
         self.P_solar_reward.value = v_reward
 
         try:
-            self.problem.solve(solver=cp.CBC, verbose=True)
+            self.problem.solve(solver=cp.HIGHS, verbose=True)
             return self.f_ufh.value, self.f_dhw.value
         except Exception as e:
             logger.error(f"MPC Solve failed: {e}")
