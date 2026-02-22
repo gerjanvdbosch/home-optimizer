@@ -450,9 +450,7 @@ class HydraulicPredictor:
         self.is_fitted = False
 
         self.model_supply_ufh = None
-        self.model_delta_ufh = None
         self.model_supply_dhw = None
-        self.model_delta_dhw = None
 
         # Features: Elektrisch Vermogen, Buiten Temp, Sink Temp
         self.features = ["wp_actual", "temp", "sink_temp"]
@@ -485,7 +483,6 @@ class HydraulicPredictor:
                 logger.warning(f"[Hydraulic] Model laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
-
         df = df.copy()
         df["delta_t"] = (df["supply_temp"] - df["return_temp"]).clip(lower=0.1) # Voorkom delen door nul
 
@@ -541,38 +538,6 @@ class HydraulicPredictor:
             # Train ML Model
             self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features], df_dhw["supply_temp"])
             logger.info(f"[Hydraulic] DHW Geleerd: Factor={self.learned_factor_dhw:.2f} kW/K, MinLift={self.learned_lift_dhw:.2f}C")
-
-        # Filter op draaiende machine
-        df = df_proc[df_proc["wp_actual"] > 0.2].copy()
-
-        # Voeg sink_temp toe
-        df["sink_temp"] = np.where(df["hvac_mode"] == HvacMode.HEATING.value, df["room_temp"], df["dhw_bottom"])
-        df["delta_t_water"] = df["supply_temp"] - df["return_temp"]
-
-        # --- UFH Training ---
-        mask_u = (df["hvac_mode"] == HvacMode.HEATING.value) & (df["delta_t_water"] > 0.5)
-        df_u = df[mask_u].dropna(subset=self.features + ["supply_temp", "delta_t_water"])
-        if len(df_u) > 20:
-            self.model_supply_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_u[self.features],
-                                                                                            df_u["supply_temp"])
-            self.model_delta_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_u[self.features],
-                                                                                           df_u["delta_t_water"])
-
-        # --- DHW Training ---
-        mask_d = (df["hvac_mode"] == HvacMode.DHW.value) & (df["delta_t_water"] > 1.0)
-        df_d = df[mask_d].dropna(subset=self.features + ["supply_temp", "delta_t_water"])
-        if len(df_d) > 20:
-            self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_d[self.features],
-                                                                                            df_d["supply_temp"])
-            self.model_delta_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_d[self.features],
-                                                                                           df_d["delta_t_water"])
-
-        self.is_fitted = True
-        joblib.dump({
-            "sup_u": self.model_supply_ufh, "dt_u": self.model_delta_ufh,
-            "sup_d": self.model_supply_dhw, "dt_d": self.model_delta_dhw
-        }, self.path)
-
 
         self.is_fitted = True
         # Sla alles op, inclusief de geleerde constanten
@@ -640,22 +605,6 @@ class HydraulicPredictor:
         factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
         return p_th / factor if p_th > 0 else 0.0
 
-    def predict_hydraulics(self, mode, p_el, t_out, t_sink):
-        """Voorspelt (Supply, DeltaT) op basis van elektrisch vermogen."""
-        if not self.is_fitted:
-            # Fallbacks als model nog niet getraind is
-            return (t_sink + 5, 3.0) if mode == "UFH" else (t_sink + 10, 6.0)
-
-        data = pd.DataFrame([[p_el, t_out, t_sink]], columns=self.features)
-
-        if mode == "UFH":
-            t_sup = float(self.model_supply_ufh.predict(data)[0])
-            dt = float(self.model_delta_ufh.predict(data)[0])
-        else:
-            t_sup = float(self.model_supply_dhw.predict(data)[0])
-            dt = float(self.model_delta_dhw.predict(data)[0])
-
-        return t_sup, dt
 # =========================================================
 # 3. ML RESIDUALS
 # =========================================================
