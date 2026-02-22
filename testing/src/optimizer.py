@@ -426,45 +426,74 @@ class HydraulicPredictor:
         joblib.dump({"supply_ufh": self.model_supply_ufh, "supply_dhw": self.model_supply_dhw, "delta_ufh": self.model_delta_ufh}, self.path)
 
     def predict_supply(self, mode, p_th, t_out, t_sink):
-        """Voorspelt aanvoer. Nu met betere natuurkundige grenzen."""
+        """
+        Voorspelt aanvoer.
+        Houdt rekening met:
+        1. Fysieke Delta T (Vermogen / Flow)
+        2. Minimale temperatuur boven de sink (Retour Lift)
+        3. Machine Learning correcties
+        """
 
+        # STAP 1: Bereken de fysieke Delta T
+        # Dit is hoeveel graden het water opwarmt door het vermogen dat erin gaat.
+        # Formule: Vermogen (kW) / Factor (kW/K)
+        factor = FACTOR_UFH if mode == "UFH" else FACTOR_DHW
+        delta_t_calc = p_th / factor if p_th > 0 else 0.0
+
+        # STAP 2: Bepaal grenzen per modus
         if mode == "UFH":
-            # Realistischer voor een heel huis: K_emit rond 0.6 t/m 1.0
-            # base_lift is hoeveel graden we boven de kamertemp moeten zitten
-            base_lift = (p_th / 0.8) + (p_th / FACTOR_UFH / 2)
-            physical_guess = t_sink + base_lift
+            # VLOERVERWARMING
+            # De retour moet minimaal iets warmer zijn dan de kamer om warmte af te geven.
+            # Bijv. 0.5 graad.
+            min_return_lift = 0.5
 
-            # Veiligheid: Vloer nooit boven 40 graden (tenzij ML anders bewijst)
+            # Veiligheid: Vloer niet te heet (max 35 graden aanvoer)
             max_safe = 30.0
-            min_lift = 2.0  # Altijd 2 graden boven kamer
-        else:
-            # DHW: Spiraal heeft minder oppervlak, dus meer lift nodig
-            base_lift = (p_th / 0.4) + (p_th / FACTOR_DHW / 2)
-            physical_guess = t_sink + base_lift
-            max_safe = 60.0
-            min_lift = 4.0  # Altijd 4 graden boven tank
 
-        # Pas ML toe als het er is
+            # Fysieke 'gok' voor als ML faalt:
+            # We verwachten dat de aanvoer ongeveer (Kamer + 0.5 + DeltaT + een beetje extra weerstand) is.
+            physical_guess = t_sink + min_return_lift + delta_t_calc + 1.0
+
+        else:
+            # DHW (BOILER)
+            # De spiraal in de boiler heeft een groter verschil nodig om warmte over te dragen.
+            # De retour moet minstens 3 à 4 graden warmer zijn dan het water in het vat.
+            min_return_lift = 4.0
+
+            # Veiligheid: Max temperatuur warmtepomp (vaak 55-60 graden)
+            max_safe = 60.0
+
+            # Fysieke 'gok':
+            physical_guess = t_sink + min_return_lift + delta_t_calc + 2.0
+
+        # STAP 3: Bepaal de HARDE fysieke ondergrens voor Aanvoer
+        # Aanvoer MOET minimaal zijn: (Sink + RetourLift) + Delta T
+        # Als we hieronder gaan, zou de retour kouder zijn dan de kamer/boiler (onmogelijk).
+        min_supply_hard = t_sink + min_return_lift + delta_t_calc
+
+        # STAP 4: Machine Learning Predictie (indien beschikbaar)
+        prediction = physical_guess  # Startwaarde
+        val = 0.0
+
         if self.is_fitted:
+            # We vragen het model wat het denkt, op basis van historische data
             data = pd.DataFrame([[p_th, t_out, t_sink]], columns=self.features)
             try:
                 if mode == "UFH" and self.model_supply_ufh:
                     val = float(self.model_supply_ufh.predict(data)[0])
-                    # Mix: We vertrouwen ML voor 70%, fysica voor 30%
+                    # Mix: 70% ML (leert leidingverliezen etc), 30% Fysica
                     prediction = 0.7 * val + 0.3 * physical_guess
                 elif mode == "DHW" and self.model_supply_dhw:
                     val = float(self.model_supply_dhw.predict(data)[0])
                     prediction = 0.7 * val + 0.3 * physical_guess
-                else:
-                    prediction = physical_guess
             except:
-                prediction = physical_guess
-        else:
-            prediction = physical_guess
+                pass  # Fallback naar physical_guess bij error
 
-        # HARD RAIL: De aanvoer moet altijd hoger zijn dan de sink + min_lift,
-        # maar mag nooit boven de veiligheidsgrens uitkomen.
-        return np.clip(prediction, t_sink + min_lift, max_safe)
+        logger.info(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
+        # STAP 5: Final Check & Clip
+        # De voorspelling mag nooit lager zijn dan de fysieke ondergrens (min_supply_hard)
+        # En nooit hoger dan de veiligheidsgrens (max_safe)
+        return np.clip(prediction, min_supply_hard, max_safe)
 
     def predict_delta(self, mode, p_th, t_out, t_sink):
         if self.is_fitted and mode == "UFH" and self.model_delta_ufh:
