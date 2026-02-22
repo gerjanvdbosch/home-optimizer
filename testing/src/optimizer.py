@@ -292,21 +292,41 @@ class SystemIdentificator:
         df_15m = df_proc.set_index("timestamp").resample("15min").mean().dropna().reset_index()
 
         # --- LEER DE TRAAGHEID (LAG) VAN DE VLOER ---
-        df_lag = df_15m.copy()
-        df_lag['dT_room'] = df_lag['room_temp'].diff()
+        # Stap 1: Smooth de kamertemperatuur (voorkomt het "trapjes" effect van sensoren)
+        # We nemen een rollend gemiddelde van 4 kwartieren (1 uur) om de trend te zien.
+        df_15m['room_smooth'] = df_15m['room_temp'].rolling(window=4, center=True).mean()
+
+        # Stap 2: Bereken temperatuurverschil over een uur (niet per kwartier, dat is te weinig)
+        # Dit versterkt het signaal van opwarming.
+        df_15m['dT_trend'] = df_15m['room_smooth'].diff(4)  # Verschil met 1 uur geleden
 
         best_lag = 0
         best_corr = -1.0
 
-        # Test vertragingen van 1 kwartier (15m) tot 16 kwartieren (4 uur)
-        for lag in range(1, 17):
-            df_lag[f'wp_lag_{lag}'] = df_lag['wp_output'].shift(lag)
-            corr = df_lag['dT_room'].corr(df_lag[f'wp_lag_{lag}'])
+        # We testen vertragingen van 0 tot 4 uur
+        for lag in range(0, 17):
+            # We vergelijken de warmtepomp output van 'lag' kwartieren geleden
+            # met de temperatuurtrend van NU.
+            col_name = f'wp_lag_{lag}'
+            df_15m[col_name] = df_15m['wp_output'].shift(lag)
+
+            # Bereken correlatie
+            corr = df_15m['dT_trend'].corr(df_15m[col_name])
+
             if pd.notna(corr) and corr > best_corr:
                 best_corr = corr
                 best_lag = lag
 
-        self.ufh_lag_steps = int(np.clip(best_lag, 1, 12))  # Minimaal 30m, Max 3 uur
+        # Als de correlatie te zwak is (< 0.1), is de data te rommelig.
+        # Dan pakken we een veilige fallback van 8 kwartieren (2 uur).
+        if best_corr < 0.1:
+            logger.warning(
+                f"[SysID] Geen duidelijke vloertraagheid gevonden (max corr={best_corr:.2f}). Fallback naar 2 uur.")
+            self.ufh_lag_steps = 8
+        else:
+            self.ufh_lag_steps = int(np.clip(best_lag, 2, 16))  # Minimaal 30 min, max 4 uur
+            logger.info(
+                f"[SysID] Vloertraagheid gedetecteerd: {self.ufh_lag_steps * 15} minuten (Corr={best_corr:.2f})")
 
         # --- LEER K_emit & K_tank (Als fallback of validatie) ---
         mask_ufh = (df_15m["hvac_mode"] == HvacMode.HEATING.value) & (df_15m["wp_output"] > 0.7)
@@ -557,7 +577,8 @@ class MLResidualPredictor:
         if self.model is None:
             return np.zeros(len(forecast_df))
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
-        df["solar"] = df.get("power_corrected", 0.0)
+        # FIX: Veilig data ophalen. PV is vaak 'pv_estimate' of 'power_corrected'
+        df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
         for col in self.features:
             if col not in df.columns: df[col] = 0.0
         return self.model.predict(df[self.features])
@@ -573,10 +594,6 @@ class ThermalMPC:
         self.hydraulic = hydraulic # NIEUW: Het hydraulische model
         self.horizon = 96
         self.dt = 0.25
-
-        # Wordt alleen nog gebruikt voor logging/debug, logica zit nu in hydraulic
-        self.FACTOR_UFH = (18.0 / 60.0) * 4.186
-        self.FACTOR_DHW = (19.0 / 60.0) * 4.186
 
         self._build_problem()
 
@@ -603,22 +620,24 @@ class ThermalMPC:
         # Dynamisch berekende fysica (COP & Limits)
         self.P_cop_ufh = cp.Parameter(T, nonneg=True)
         self.P_cop_dhw = cp.Parameter(T, nonneg=True)
-        self.P_max_pel = cp.Parameter(T, nonneg=True)  # Max elektrisch vermogen
-        self.P_min_pel = cp.Parameter(T, nonneg=True)  # Min elektrisch vermogen (pendelgrens)
 
-        # Traagheid: Warmte die al in de vloer zit uit het verleden
-        # De grootte van deze parameter hangt af van self.ident.ufh_lag_steps
+        # FIX: We gebruiken nu VASTE profielen. Als hij aan staat, verbruikt hij DIT.
+        # Geen vrijheid meer voor de solver om te kiezen tussen min/max.
+        self.P_fixed_pel_ufh = cp.Parameter(T, nonneg=True)
+        self.P_fixed_pel_dhw = cp.Parameter(T, nonneg=True)
+
         self.P_hist_heat = cp.Parameter(self.ident.ufh_lag_steps, nonneg=True)
+        self.P_solar_gain = cp.Parameter(T) # BUGFIX: Toegevoegd voor zonnewarmte!
 
-        # --- VARIABELEN (Puur Elektrisch kW) ---
-        self.p_el_ufh = cp.Variable(T, nonneg=True)
-        self.p_el_dhw = cp.Variable(T, nonneg=True)
-
-        # Booleans voor status (AAN/UIT en exclusiviteit)
+        # --- VARIABELEN ---
+        # Binary ON/OFF is nu de enige echte keuzevariabele
         self.ufh_on = cp.Variable(T, boolean=True)
         self.dhw_on = cp.Variable(T, boolean=True)
 
-        # Grid interactie
+        # p_el wordt een afgeleide variabele (dependent), geen vrije keuze meer
+        self.p_el_ufh = cp.Variable(T, nonneg=True)
+        self.p_el_dhw = cp.Variable(T, nonneg=True)
+
         self.p_grid = cp.Variable(T, nonneg=True)
         self.p_export = cp.Variable(T, nonneg=True)
         self.p_solar_self = cp.Variable(T, nonneg=True)
@@ -634,7 +653,6 @@ class ThermalMPC:
 
         # --- CONSTRAINTS ---
         R, C = self.ident.R, self.ident.C
-        lag = self.ident.ufh_lag_steps
 
         constraints = [
             self.t_room[0] == self.P_t_room_init,
@@ -660,10 +678,10 @@ class ThermalMPC:
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
 
                 # 2. Thermische Transities
-                # Kamer (Met vertraging!)
+                # BUGFIX: Solar gain is nu meegenomen in de kamerbalans!
                 self.t_room[t + 1] == self.t_room[t] + (
                         (active_room_heat - (self.t_room[t] - self.P_temp_out[t]) / R) * self.dt / C
-                ),
+                ) + (self.P_solar_gain[t] * self.dt),
 
                 # DHW (Direct, met stilstandsverlies)
                 self.t_dhw[t + 1] == self.t_dhw[t] + (
@@ -674,31 +692,27 @@ class ThermalMPC:
                 # 3. Fysieke Grenzen & Exclusiviteit
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
 
-                # Maximaal vermogen (berekend in solve o.b.v. Supply Temp limiet)
-                self.p_el_ufh[t] <= self.ufh_on[t] * self.P_max_pel[t],
-                self.p_el_dhw[t] <= self.dhw_on[t] * self.P_max_pel[t],
+                # 4. FIX: GEEN MODULATIE.
+                # Het vermogen is EXACT gelijk aan het voorspelde profiel als hij AAN staat.
+                self.p_el_ufh[t] == self.ufh_on[t] * self.P_fixed_pel_ufh[t],
+                self.p_el_dhw[t] == self.dhw_on[t] * self.P_fixed_pel_dhw[t],
 
-                # Minimaal vermogen (om pendelen te voorkomen)
-                self.p_el_ufh[t] >= self.ufh_on[t] * self.P_min_pel[t],
-                self.p_el_dhw[t] >= self.dhw_on[t] * self.P_min_pel[t],
-
-                # 4. Comfort Grenzen (Soft constraints)
+                # 5. Comfort
                 self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_room[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
-                self.t_dhw[t + 1] <= self.P_dhw_max[t], # Harde max voor veiligheid
+                self.t_dhw[t + 1] <= self.P_dhw_max[t],
             ]
 
         # --- OBJECTIVE FUNCTION ---
-        # Kosten minimaliseren (Grid Import * Prijs - Export * Prijs)
         net_cost = cp.sum(cp.multiply(self.p_grid, self.P_prices) - cp.multiply(self.p_export, self.P_export_prices)) * self.dt
 
-        # Comfort penalty (zwaar wegen zodat hij alleen afwijkt als het echt moet)
-        comfort = cp.sum(self.s_room_low * 20.0 + self.s_dhw_low * 15.0 + self.s_room_high * 5.0)
+        # Comfort penalties
+        comfort = cp.sum(self.s_room_low * 20.0 + self.s_dhw_low * 5.0 + self.s_room_high * 2.0)
 
-        # Switching penalty (voorkom aan/uit knipperlicht gedrag)
-        switching = cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 1.5 + \
-                    cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 25.0
+        # Switching penalty (Belangrijk bij ON/OFF regeling om pendelen te voorkomen)
+        switching = cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.05 + \
+                    cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.05
 
         self.problem = cp.Problem(cp.Minimize(net_cost + comfort + switching), constraints)
 
@@ -720,7 +734,7 @@ class ThermalMPC:
 
         return r_min, r_max, d_min, d_max
 
-    def solve(self, state, forecast_df, recent_history_df):
+    def solve(self, state, forecast_df, recent_history_df, solar_gains):
         T = self.horizon
         r_min, r_max, d_min, d_max = self._get_targets(state["now"], T)
 
@@ -737,59 +751,64 @@ class ThermalMPC:
 
         # --- FYSIEKE PARAMETERS VOORBEIDEIDING ---
         cop_u, cop_d, max_p, min_p = np.zeros(T), np.zeros(T), np.zeros(T), np.zeros(T)
+        self.P_solar_gain.value = solar_gains[:T]
 
-        # We halen de geleerde parameters op
-        R = self.ident.R             # Isolatie
-        K_emit = self.ident.K_emit   # Vloerafgifte
+        cop_u, cop_d = np.zeros(T), np.zeros(T)
 
-        # Fysieke limiet beton (veiligheid, geen schatting maar harde grens materiaal)
-        MAX_SUPPLY_LIMIT = 28.0
+        # Arrays voor het VASTE vermogen (geleerd gedrag)
+        fixed_p_ufh, fixed_p_dhw = np.zeros(T), np.zeros(T)
+
+        MAX_SUPPLY_LIMIT = 30.0
 
         for t in range(T):
             t_out = forecast_df.temp.values[t]
-            t_room_target = r_min[t] # We willen minimaal dit halen
+            t_room_target = r_min[t]
 
-            # ---------------------------------------------------------------------
-            # STAP 1: BEREKEN VEREISTE AANVOERTEMPERATUUR (INVERSE PHYSICS)
-            # ---------------------------------------------------------------------
-            # A. Hoeveel warmte verliest het huis bij deze buitentemp?
-            #    Formula: P_loss = (T_binnen - T_buiten) / R
-            heat_loss_kw = max(0, (t_room_target - t_out) / R)
+            # 1. Warmteverlies bepalen voor dit timeslot
+            heat_loss_kw = max(0, (t_room_target - t_out) / self.ident.R)
 
-            # VRAAG AAN ML: Als ik heat_loss_kw wil leveren, welke T_supply hoort daarbij?
-            # We gebruiken de HydraulicPredictor in plaats van vaste flow formules.
+            # 2. Hydraulische predictie (Supply Temp)
             pred_supply = self.hydraulic.predict_supply("UFH", heat_loss_kw, t_out, t_room_target)
-
-            # Veiligheid en Limieten
             calculated_supply_ufh = np.clip(pred_supply, t_room_target + 2.0, MAX_SUPPLY_LIMIT)
 
-            # ---------------------------------------------------------------------
-            # STAP 2: COP EN VERMOGEN BEPALEN
-            # ---------------------------------------------------------------------
+            # 3. COP en Limits
             cop_u[t] = self.perf_map.predict_cop(t_out, calculated_supply_ufh, HvacMode.HEATING.value)
             cop_d[t] = self.perf_map.predict_cop(t_out, d_max[t], HvacMode.DHW.value)
 
             min_kw_machine, max_kw_machine = self.perf_map.get_pel_limits(t_out)
 
-            # Maximaal thermisch vermogen dat de vloer aankan bij MAX_SUPPLY_LIMIT
-            # Hier gebruiken we nog wel K_emit als 'harde' veiligheidsgrens,
-            # maar de target supply komt uit ML.
-            delta_t_cap = max(0, MAX_SUPPLY_LIMIT - state["room_temp"])
-            p_th_max_floor = delta_t_cap * K_emit
+            # 4. FIX UFH VERMOGEN
+            # Bereken wat puur fysisch nodig is om het verlies te dekken
+            req_pel_loss = heat_loss_kw / cop_u[t] if cop_u[t] > 0 else 0
 
-            # Vertaal naar elektrisch
+            # Fysieke limiet van de vloer
+            delta_t_cap = max(0, MAX_SUPPLY_LIMIT - state["room_temp"])
+            p_th_max_floor = delta_t_cap * self.ident.K_emit
             max_kw_floor = p_th_max_floor / cop_u[t] if cop_u[t] > 0 else 0
 
-            # De limiet is de bottleneck (Machine of Vloer)
-            max_p[t] = min(max_kw_machine, max_kw_floor)
-            min_p[t] = min_kw_machine
+            # KEUZE LOGICA:
+            # We nemen het MAXIMUM van:
+            # A) Het geleerde 'Steady State' minimum (min_kw_machine)
+            # B) Wat er nodig is om het verlies te dekken (req_pel_loss)
+            # Dit voorkomt dat hij te zacht draait als het koud is, maar voorkomt ook
+            # dat hij naar MAX schiet (2kW) als dat niet nodig is.
+            target_p_ufh = max(min_kw_machine, req_pel_loss)
 
-            if max_p[t] < min_p[t]: max_p[t], min_p[t] = 0.0, 0.0
+            # Clip dit target wel altijd binnen de machinegrenzen en vloergrenzen
+            fixed_p_ufh[t] = np.clip(target_p_ufh, min_kw_machine, min(max_kw_machine, max_kw_floor))
+
+            # DHW blijft op Max Power (Boilers doen dat meestal)
+            fixed_p_dhw[t] = max_kw_machine
+
+            # Fallback (als 0, dan kan hij niet aan)
+            if fixed_p_ufh[t] < 0.1: fixed_p_ufh[t] = 0.0
+            if fixed_p_dhw[t] < 0.1: fixed_p_dhw[t] = 0.0
 
         self.P_cop_ufh.value = np.clip(cop_u, 2.0, 9.0)
         self.P_cop_dhw.value = np.clip(cop_d, 1.5, 5.0)
-        self.P_max_pel.value = max_p
-        self.P_min_pel.value = min_p
+
+        self.P_fixed_pel_ufh.value = fixed_p_ufh
+        self.P_fixed_pel_dhw.value = fixed_p_dhw
 
         # --- VUL HISTORISCHE WARMTE (LAG) ---
         lag = self.ident.ufh_lag_steps
@@ -816,50 +835,6 @@ class ThermalMPC:
             return None, None
 
         return self.p_el_ufh.value, self.p_el_dhw.value
-
-    # def prepare_recent_history(raw_df: pd.DataFrame) -> pd.DataFrame:
-    #     """
-    #     Zet ruwe sensor data van de afgelopen uren om naar 15-minuten blokken
-    #     met de gemiddelde wp_output (thermisch vermogen in kW).
-    #     """
-    #     if raw_df is None or raw_df.empty:
-    #         # Als er geen data is (bijv. bij de eerste keer opstarten), geef een leeg dataframe terug
-    #         return pd.DataFrame(columns=['wp_output'])
-    #
-    #     df = raw_df.copy()
-    #
-    #     # Zorg dat de timestamp kolom een datetime object is
-    #     if not np.issubdtype(df['timestamp'].dtype, np.datetime64):
-    #         df['timestamp'] = pd.to_datetime(df['timestamp'])
-    #
-    #     # Bereken delta T (Aanvoer - Retour)
-    #     df["delta_t"] = (df["supply_temp"] - df["return_temp"]).clip(lower=0.0)
-    #
-    #     # Bereken thermisch vermogen per meetpunt
-    #     conditions = [
-    #         df["hvac_mode"] == HVAC_MODE_HEATING,
-    #         df["hvac_mode"] == HVAC_MODE_DHW,
-    #     ]
-    #     choices = [
-    #         df["delta_t"] * FACTOR_UFH,
-    #         df["delta_t"] * FACTOR_DHW,
-    #     ]
-    #     df["wp_output"] = np.select(conditions, choices, default=0.0)
-    #
-    #     # Zet de index op timestamp voor het resamplen
-    #     df.set_index("timestamp", inplace=True)
-    #
-    #     # Resample naar gemiddelden per 15 minuten (15T of 15min)
-    #     # Dit is cruciaal, want de MPC verwacht stappen van 15 minuten!
-    #     df_15m = df.resample("15min").mean()
-    #
-    #     # Vul eventuele gaten op met 0 (als de WP uit stond en er geen data was)
-    #     df_15m["wp_output"] = df_15m["wp_output"].fillna(0.0)
-    #
-    #     # Reset de index zodat we weer een normale DataFrame hebben (optioneel, maar netjes)
-    #     df_15m.reset_index(inplace=True)
-    #
-    #     return df_15m[['timestamp', 'wp_output']]
 
 
 # =========================================================
@@ -899,12 +874,28 @@ class Optimizer:
         }
 
         cutoff = context.now - timedelta(hours=4)
-        recent_history_df = self.db.get_history(cutoff_date=cutoff)
+        raw_hist = self.db.get_history(cutoff_date=cutoff)
+
+        # BUGFIX: Calculate wp_output before passing to MPC so lag works properly!
+        recent_history_df = pd.DataFrame()
+        if not raw_hist.empty:
+            raw_hist = raw_hist.copy() # BUGFIX: Voorkomt SetWithCopyWarnings
+            raw_hist["delta_t"] = (raw_hist["supply_temp"] - raw_hist["return_temp"]).clip(lower=0.0)
+            raw_hist["wp_output"] = np.where(
+                raw_hist["hvac_mode"] == HvacMode.HEATING.value, raw_hist["delta_t"] * FACTOR_UFH,
+                np.where(raw_hist["hvac_mode"] == HvacMode.DHW.value, raw_hist["delta_t"] * FACTOR_DHW, 0.0)
+            )
+            raw_hist.set_index("timestamp", inplace=True)
+            # BUGFIX: numeric_only=True weghalen warning
+            recent_history_df = raw_hist.resample("15min").mean(numeric_only=True).fillna(0).reset_index()
+
+        # FIX: Voorspel de zon-opwarming vooraf via het getrainde ML model
+        solar_gains = self.res_ufh.predict(context.forecast_df)
 
         temp_out = context.forecast_df.temp.values[0]
 
-        # Krijg de ideale P_el (elektrische kW) voor de komende 24u
-        p_el_ufh_plan, p_el_dhw_plan = self.mpc.solve(state, context.forecast_df, recent_history_df)
+        # Geef de solar_gains ook mee aan de solver
+        p_el_ufh_plan, p_el_dhw_plan = self.mpc.solve(state, context.forecast_df, recent_history_df, solar_gains)
 
         if p_el_ufh_plan is None:
             return {"mode": "OFF", "target_pel_kw": 0.0, "target_supply_temp": 0.0}
@@ -921,30 +912,18 @@ class Optimizer:
         if p_el_dhw_now > 0.1:
             mode = "DHW"
             target_pel = p_el_dhw_now
-
-            # Bereken verwacht thermisch vermogen
             cop_now = self.perf_map.predict_cop(temp_out, context.dhw_bottom, HvacMode.DHW.value)
             p_th_dhw = target_pel * cop_now
-
-            # Vraag aan HydraulicPredictor: Welke supply temp hoort bij dit vermogen?
-            pred_supply = self.hydraulic.predict_supply("DHW", p_th_dhw, temp_out, context.dhw_bottom)
-            target_supply_temp = pred_supply
+            target_supply_temp = self.hydraulic.predict_supply("DHW", p_th_dhw, temp_out, context.dhw_bottom)
 
         elif p_el_ufh_now > 0.1:
             mode = "UFH"
             target_pel = p_el_ufh_now
-
-            # Bereken verwacht thermisch vermogen
             cop_now = self.perf_map.predict_cop(temp_out, context.room_temp, HvacMode.HEATING.value)
             p_th_ufh = target_pel * cop_now
+            target_supply_temp = self.hydraulic.predict_supply("UFH", p_th_ufh, temp_out, context.room_temp)
 
-            # Vraag aan HydraulicPredictor: Welke supply temp en delta T horen hierbij?
-            pred_supply = self.hydraulic.predict_supply("UFH", p_th_ufh, temp_out, context.room_temp)
-            pred_delta = self.hydraulic.predict_delta("UFH", p_th_ufh, temp_out, context.room_temp)
-
-            logger.info(f"[Optimizer] UFH Active. P_th={p_th_ufh:.2f}kW -> Model Supply={pred_supply:.1f}, Delta={pred_delta:.1f}")
-
-            target_supply_temp = pred_supply
+            logger.info(f"[Optimizer] UFH Active. Fixed Plan Power={target_pel:.2f}kW, Predicted Supply={target_supply_temp:.1f}C")
 
         return {
             "mode": mode,
