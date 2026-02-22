@@ -329,25 +329,103 @@ class SystemIdentificator:
                 f"[SysID] Vloertraagheid gedetecteerd: {self.ufh_lag_steps * 15} minuten (Corr={best_corr:.2f})")
 
         # --- LEER K_emit & K_tank (Als fallback of validatie) ---
-        mask_ufh = (df_15m["hvac_mode"] == HvacMode.HEATING.value) & (df_15m["wp_output"] > 0.7)
-        df_ufh = df_15m[mask_ufh].copy()
+        mask_ufh = (
+                (df_proc["hvac_mode"] == HvacMode.HEATING.value)
+                & (df_proc["wp_output"] > 0.7)
+                & (df_proc["supply_temp"] < 30)  # Niet te heet (voorkom overshoot data)
+                & (df_proc["supply_temp"] > df_proc["room_temp"] + 1)  # Zinvolle delta T
+        )
+        df_ufh = df_proc[mask_ufh].copy()
+
         if len(df_ufh) > 20:
+            print("Debug UFH Data Sample:")
+            print(
+                df_ufh[["timestamp", "room_temp", "supply_temp", "wp_output"]].head(30)
+            )
+
             t_avg_water = (df_ufh["supply_temp"] + df_ufh["return_temp"]) / 2
             delta_T_emit = t_avg_water - df_ufh["room_temp"]
             valid = delta_T_emit > 0.5
             if valid.any():
-                self.K_emit = float(np.clip((df_ufh.loc[valid, "wp_output"] / delta_T_emit[valid]).median(), 0.05, 1.5))
+                k_values = df_ufh.loc[valid, "wp_output"] / delta_T_emit[valid]
+                # AANPASSING: Clip verhoogd naar 1.5 omdat je vloer meer vermogen aankan
+                self.K_emit = float(np.clip(k_values.median(), 0.05, 1.5))
 
-        mask_dhw = (df_15m["hvac_mode"] == HvacMode.DHW.value) & (df_15m["wp_output"] > 1.5)
-        df_dhw = df_15m[mask_dhw].copy()
+        # ============================
+        # 4. Identificatie K_tank (Spiraalafgifte)
+        # ============================
+        mask_dhw = (
+                (df_proc["hvac_mode"] == HvacMode.DHW.value)
+                & (df_proc["wp_output"] > 1.0)
+                & (df_proc["supply_temp"] > df_proc["dhw_bottom"] + 1)
+
+        )
+        df_dhw = df_proc[mask_dhw].copy()
+
         if len(df_dhw) > 10:
-            t_tank = (df_dhw["dhw_top"] + df_dhw["dhw_bottom"]) / 2
-            delta_T_hx = ((df_dhw["supply_temp"] + df_dhw["return_temp"]) / 2) - t_tank
+            print("Debug DHW Data Sample:")
+            print(
+                df_dhw[
+                    [
+                        "timestamp",
+                        "dhw_top",
+                        "dhw_bottom",
+                        "supply_temp",
+                        "return_temp",
+                        "wp_output",
+                    ]
+                ].head(30)
+            )
+            t_avg_water = (df_dhw["supply_temp"] + df_dhw["return_temp"]) / 2
+            delta_T_hx = t_avg_water - df_dhw["dhw_bottom"]
+
+            # Alleen als water warmer is dan tank
             valid_idx = delta_T_hx > 2.0
             if valid_idx.any():
-                self.K_tank = float(
-                    np.clip((df_dhw.loc[valid_idx, "wp_output"] / delta_T_hx[valid_idx]).median(), 0.15, 2.0))
+                k_values = df_dhw.loc[valid_idx, "wp_output"] / delta_T_hx[valid_idx]
+                self.K_tank = float(np.clip(k_values.median(), 0.15, 2.0))
 
+        # ============================
+        # 5. Identificatie Stilstandsverlies DHW
+        # ============================
+        # Gebruik originele DF voor tijdstappen, want resample kan gaten maskeren
+        df_loss = df_proc.sort_values("timestamp").copy()
+        df_loss["t_tank"] = (df_loss["dhw_top"] + df_loss["dhw_bottom"]) / 2.0
+
+        # FIX: Gebruik de kolom timestamp voor de diff, niet de index
+        df_loss["dt_hours"] = df_loss["timestamp"].diff().dt.total_seconds() / 3600.0
+        df_loss["dT_tank"] = df_loss["t_tank"].diff()
+
+        mask_sb = (
+                (df_loss["hvac_mode"] != HvacMode.DHW.value)
+                & (df_loss["wp_output"] < 0.1)
+                & (df_loss["dT_tank"] < 0)
+                & (df_loss["dt_hours"] > 0.1)
+                & (df_loss["dT_tank"] > -0.3) # douchen
+                & (df_loss["dt_hours"] < 1.0)
+        )
+
+        df_sb = df_loss[mask_sb].copy()
+        if len(df_sb) > 20:
+            print("Debug Stilstandsverlies DHW Sample:")
+            print(df_sb[["timestamp", "dT_tank", "dt_hours", "wp_output"]].head(30))
+
+            # Fysica: dT/dt = -(1 / (R_tank * C_tank)) * (T_tank - T_room)
+            # We weten C_tank (0.232 kWh/K voor 200L).
+            # We berekenen de 'verliesfactor' per graad verschil met de kamer
+            t_diff = (df_sb["t_tank"] - df_sb["room_temp"]).clip(lower=1.0)
+            loss_factor_per_hour = -(df_sb["dT_tank"] / df_sb["dt_hours"]) / t_diff
+
+            # K_loss_dhw wordt nu een dimensieloze factor (1/h) of 1/(R*C)
+            self.K_loss_dhw = float(
+                np.clip(loss_factor_per_hour.quantile(0.25), 0.001, 0.05)
+            )
+            # Betekenis: bij 0.01 verliest hij 1% van het temperatuurverschil met de kamer per uur.
+
+        logger.info(
+            f"[Optimizer] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
+            f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f}"
+        )
         joblib.dump(
             {"R": self.R, "C": self.C, "K_emit": self.K_emit, "K_tank": self.K_tank, "K_loss_dhw": self.K_loss_dhw,
              "ufh_lag_steps": self.ufh_lag_steps}, self.path)
@@ -489,7 +567,7 @@ class HydraulicPredictor:
             except:
                 pass  # Fallback naar physical_guess bij error
 
-        logger.info(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
+        logger.debug(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
         # STAP 5: Final Check & Clip
         # De voorspelling mag nooit lager zijn dan de fysieke ondergrens (min_supply_hard)
         # En nooit hoger dan de veiligheidsgrens (max_safe)
@@ -739,9 +817,11 @@ class ThermalMPC:
         # Comfort penalties
         comfort = cp.sum(self.s_room_low * 20.0 + self.s_dhw_low * 5.0 + self.s_room_high * 2.0)
 
-        # Switching penalty (Belangrijk bij ON/OFF regeling om pendelen te voorkomen)
-        switching = cp.sum(cp.abs(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.05 + \
-                    cp.sum(cp.abs(self.dhw_on[1:] - self.dhw_on[:-1])) * 0.05
+        # Penalty voor ELKE KEER dat de modus van 0 naar 1 gaat (starten)
+        start_dhw_penalty = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])) * 10.0  # Zeer zware straf
+        start_ufh_penalty = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.5
+
+        switching = start_ufh_penalty + start_dhw_penalty
 
         self.problem = cp.Problem(cp.Minimize(net_cost + comfort + switching), constraints)
 
@@ -758,7 +838,7 @@ class ThermalMPC:
 
             # Boiler: Warm hebben voor de avonddouche (17:00-21:00)
             # Rest van de dag mag hij zakken tot 40, maar 's middags boosten we vaak op zon
-            d_min[t] = 48.0 if 16 <= h <= 21 else 35.0
+            d_min[t] = 50.0 if 16 <= h <= 21 else 10.0
             d_max[t] = 55.0 # Max boiler temp (voor COP behoud)
 
         return r_min, r_max, d_min, d_max
