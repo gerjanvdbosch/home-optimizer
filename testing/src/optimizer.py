@@ -176,8 +176,13 @@ class SystemIdentificator:
 
         # Bereken thermisch vermogen
         df_proc["delta_t"] = (df_proc["supply_temp"] - df_proc["return_temp"]).clip(lower=0.0)
-        df_proc["wp_output"] = np.where(df_proc["hvac_mode"] == HvacMode.HEATING.value,
-                                        df_proc["delta_t"] * FACTOR_UFH, 0.0)
+        # Bereken output op basis van HVAC mode
+        conditions = [
+            df_proc["hvac_mode"] == HvacMode.HEATING.value,
+            df_proc["hvac_mode"] == HvacMode.DHW.value,
+        ]
+        choices = [df_proc["delta_t"] * FACTOR_UFH, df_proc["delta_t"] * FACTOR_DHW]
+        df_proc["wp_output"] = np.select(conditions, choices, default=0.0)
 
         # Resample naar 1 uur voor stabiele thermische modellering
         df_1h = df_proc.set_index("timestamp").resample("1h").mean().dropna(
@@ -440,8 +445,13 @@ class HydraulicPredictor:
         self.is_fitted = False
         self.model_supply_ufh = None
         self.model_supply_dhw = None
-        self.model_delta_ufh = None
-        # Features: Thermisch Vermogen, Buiten Temp, Doel Temp (Kamer of Boiler)
+
+        # NIEUW: Geleerde fysieke parameters (met veilige defaults)
+        self.learned_factor_ufh = FACTOR_UFH  # Flow (kW/K)
+        self.learned_factor_dhw = FACTOR_DHW
+        self.learned_lift_ufh = 0.5           # Minimaal verschil Retour -> Kamer
+        self.learned_lift_dhw = 3.0           # Minimaal verschil Retour -> Tank
+
         self.features = ["wp_output", "temp", "sink_temp"]
         self._load()
 
@@ -449,9 +459,15 @@ class HydraulicPredictor:
         if self.path.exists():
             try:
                 data = joblib.load(self.path)
-                self.model_supply_ufh = data["supply_ufh"]
-                self.model_supply_dhw = data["supply_dhw"]
-                self.model_delta_ufh = data["delta_ufh"]
+                self.model_supply_ufh = data.get("supply_ufh")
+                self.model_supply_dhw = data.get("supply_dhw")
+
+                # Laad geleerde fysieke parameters (indien aanwezig in bestand)
+                self.learned_factor_ufh = data.get("factor_ufh", FACTOR_UFH)
+                self.learned_factor_dhw = data.get("factor_dhw", FACTOR_DHW)
+                self.learned_lift_ufh = data.get("lift_ufh", 0.5)
+                self.learned_lift_dhw = data.get("lift_dhw", 3.0)
+
                 self.is_fitted = True
                 logger.info("[Hydraulic] Zelflerend aanvoertemperatuur model geladen.")
             except Exception as e:
@@ -459,100 +475,102 @@ class HydraulicPredictor:
 
     def train(self, df: pd.DataFrame):
         df = df.copy()
+        df["delta_t"] = (df["supply_temp"] - df["return_temp"]).clip(lower=0.1) # Voorkom delen door nul
 
-        # Basis filter: Alleen rijen waar de warmtepomp echt draait en warmte levert
-        # Delta T moet positief zijn (Aanvoer > Retour)
-        df["delta_t"] = df["supply_temp"] - df["return_temp"]
-        df = df[df["delta_t"] > 1.0].copy() # Filter ruis en stilstand
-
-        # Voeg sink_temp toe voor de features
+        # Bepaal sink temp
         conditions = [df["hvac_mode"] == HvacMode.HEATING.value, df["hvac_mode"] == HvacMode.DHW.value]
         choices_sink = [df["room_temp"], df["dhw_bottom"]]
         df["sink_temp"] = np.select(conditions, choices_sink, default=20.0)
 
-        # Gebruik fysieke berekening voor training data labeling
+        # Bereken vermogen op basis van vaste constanten (om te labelen)
+        # of gebruik wp_output uit data als je een echte warmtemeter hebt.
         df["wp_output"] = np.select(conditions, [df["delta_t"] * FACTOR_UFH, df["delta_t"] * FACTOR_DHW], default=0.0)
 
         # --- Filteren voor UFH (Verwarming) ---
         mask_ufh = (
             (df["hvac_mode"] == HvacMode.HEATING.value) &
             (df["wp_output"] > 0.6) &
-            (df["supply_temp"] > df["room_temp"] + 1.0) & # Moet warmer zijn dan de kamer
-            (df["supply_temp"].between(22.0, 30.0))      # Realistische grenzen
+            (df["supply_temp"] > df["room_temp"] + 1.0) &
+            (df["delta_t"] > 0.5)
         )
-        df_ufh = df[mask_ufh].dropna(subset=self.features + ["supply_temp", "delta_t"])
+        df_ufh = df[mask_ufh].dropna(subset=self.features + ["supply_temp", "return_temp"])
 
-        if len(df_ufh) > 15: # Iets meer data nodig voor betrouwbaarheid
+        if len(df_ufh) > 15:
+            # 1. Leer de FLOW Factor (Vermogen / DeltaT)
+            # We pakken de mediaan omdat flow vaak constant is bij vloerverwarming
+            self.learned_factor_ufh = (df_ufh["wp_output"] / df_ufh["delta_t"]).median()
+
+            # 2. Leer de Minimale Lift (Retour - Kamer)
+            # We pakken het 5e percentiel: wat is het minimale verschil dat we nodig hebben?
+            # Dit vertegenwoordigt de situatie "net genoeg warmteafgifte".
+            actual_lift = df_ufh["return_temp"] - df_ufh["room_temp"]
+            self.learned_lift_ufh = max(0.2, actual_lift.quantile(0.05))
+
+            # Train ML Model
             self.model_supply_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_ufh[self.features], df_ufh["supply_temp"])
-            self.model_delta_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_ufh[self.features], df_ufh["delta_t"])
-            logger.info(f"[Hydraulic] UFH getraind op {len(df_ufh)} schone datapunten.")
+            logger.info(f"[Hydraulic] UFH Geleerd: Factor={self.learned_factor_ufh:.2f} kW/K, MinLift={self.learned_lift_ufh:.2f}C")
 
-        # --- Filteren voor DHW (Boiler) ---
+        # --- DHW TRAINING & PARAMETER EXTRACTIE ---
         mask_dhw = (
             (df["hvac_mode"] == HvacMode.DHW.value) &
-            (df["wp_output"] > 0.9) &
-            (df["supply_temp"] > df["dhw_bottom"] + 2.0) & # Moet warmer zijn dan de tank
-            (df["supply_temp"].between(30.0, 65.0))       # Realistische grenzen
+            (df["wp_output"] > 1.0) &
+            (df["supply_temp"] > df["dhw_bottom"] + 2.0)
         )
-        df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp"])
+        df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"])
 
         if len(df_dhw) > 10:
+            # 1. Leer Flow Factor
+            self.learned_factor_dhw = (df_dhw["wp_output"] / df_dhw["delta_t"]).median()
+
+            # 2. Leer Lift (Retour - TankBodem)
+            actual_lift_dhw = df_dhw["return_temp"] - df_dhw["dhw_bottom"]
+            self.learned_lift_dhw = max(1.0, actual_lift_dhw.quantile(0.05))
+
+            # Train ML Model
             self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features], df_dhw["supply_temp"])
-            logger.info(f"[Hydraulic] DHW getraind op {len(df_dhw)} schone datapunten.")
+            logger.info(f"[Hydraulic] DHW Geleerd: Factor={self.learned_factor_dhw:.2f} kW/K, MinLift={self.learned_lift_dhw:.2f}C")
 
         self.is_fitted = True
-        joblib.dump({"supply_ufh": self.model_supply_ufh, "supply_dhw": self.model_supply_dhw, "delta_ufh": self.model_delta_ufh}, self.path)
+        # Sla alles op, inclusief de geleerde constanten
+        joblib.dump({
+            "supply_ufh": self.model_supply_ufh,
+            "supply_dhw": self.model_supply_dhw,
+            "factor_ufh": self.learned_factor_ufh,
+            "factor_dhw": self.learned_factor_dhw,
+            "lift_ufh": self.learned_lift_ufh,
+            "lift_dhw": self.learned_lift_dhw
+        }, self.path)
 
     def predict_supply(self, mode, p_th, t_out, t_sink):
-        """
-        Voorspelt aanvoer.
-        Houdt rekening met:
-        1. Fysieke Delta T (Vermogen / Flow)
-        2. Minimale temperatuur boven de sink (Retour Lift)
-        3. Machine Learning correcties
-        """
+        """Voorspelt aanvoer op basis van GELEERDE hydraulische eigenschappen."""
 
-        # STAP 1: Bereken de fysieke Delta T
-        # Dit is hoeveel graden het water opwarmt door het vermogen dat erin gaat.
-        # Formule: Vermogen (kW) / Factor (kW/K)
-        factor = FACTOR_UFH if mode == "UFH" else FACTOR_DHW
-        delta_t_calc = p_th / factor if p_th > 0 else 0.0
-
-        # STAP 2: Bepaal grenzen per modus
         if mode == "UFH":
-            # VLOERVERWARMING
-            # De retour moet minimaal iets warmer zijn dan de kamer om warmte af te geven.
-            # Bijv. 0.5 graad.
-            min_return_lift = 0.5
+            # Gebruik geleerde parameters (met fallback naar constants als training faalde)
+            factor = self.learned_factor_ufh if self.is_fitted else FACTOR_UFH
+            min_lift = self.learned_lift_ufh if self.is_fitted else 0.5
 
-            # Veiligheid: Vloer niet te heet (max 35 graden aanvoer)
             max_safe = 30.0
 
-            # Fysieke 'gok' voor als ML faalt:
-            # We verwachten dat de aanvoer ongeveer (Kamer + 0.5 + DeltaT + een beetje extra weerstand) is.
-            physical_guess = t_sink + min_return_lift + delta_t_calc + 1.0
+            # Fysieke Delta T
+            delta_t_calc = p_th / factor if p_th > 0 else 0.0
 
-        else:
-            # DHW (BOILER)
-            # De spiraal in de boiler heeft een groter verschil nodig om warmte over te dragen.
-            # De retour moet minstens 3 à 4 graden warmer zijn dan het water in het vat.
-            min_return_lift = 4.0
+            # Fysieke gok: Kamer + Geleerde Lift + Geleerde DeltaT
+            physical_guess = t_sink + min_lift + delta_t_calc + 1.0
 
-            # Veiligheid: Max temperatuur warmtepomp (vaak 55-60 graden)
+            # Harde ondergrens
+            min_supply_hard = t_sink + min_lift + delta_t_calc
+
+        else: # DHW
+            factor = self.learned_factor_dhw if self.is_fitted else FACTOR_DHW
+            min_lift = self.learned_lift_dhw if self.is_fitted else 3.0
             max_safe = 60.0
 
-            # Fysieke 'gok':
-            physical_guess = t_sink + min_return_lift + delta_t_calc + 2.0
+            delta_t_calc = p_th / factor if p_th > 0 else 0.0
+            physical_guess = t_sink + min_lift + delta_t_calc + 2.0
+            min_supply_hard = t_sink + min_lift + delta_t_calc
 
-        # STAP 3: Bepaal de HARDE fysieke ondergrens voor Aanvoer
-        # Aanvoer MOET minimaal zijn: (Sink + RetourLift) + Delta T
-        # Als we hieronder gaan, zou de retour kouder zijn dan de kamer/boiler (onmogelijk).
-        min_supply_hard = t_sink + min_return_lift + delta_t_calc
-
-        # STAP 4: Machine Learning Predictie (indien beschikbaar)
-        prediction = physical_guess  # Startwaarde
-        val = 0.0
-
+        # ML Predictie (Mix)
+        prediction = physical_guess
         if self.is_fitted:
             # We vragen het model wat het denkt, op basis van historische data
             data = pd.DataFrame([[p_th, t_out, t_sink]], columns=self.features)
@@ -574,11 +592,8 @@ class HydraulicPredictor:
         return np.clip(prediction, min_supply_hard, max_safe)
 
     def predict_delta(self, mode, p_th, t_out, t_sink):
-        if self.is_fitted and mode == "UFH" and self.model_delta_ufh:
-            data = pd.DataFrame([[p_th, t_out, t_sink]], columns=self.features)
-            return float(self.model_delta_ufh.predict(data)[0])
-        # Fysische fallback: DeltaT = Vermogen / (FlowFactor)
-        factor = FACTOR_UFH if mode == "UFH" else FACTOR_DHW
+        # Gebruik de geleerde factor voor de delta T voorspelling
+        factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
         return p_th / factor if p_th > 0 else 0.0
 # =========================================================
 # 3. ML RESIDUALS
