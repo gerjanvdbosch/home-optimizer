@@ -413,24 +413,49 @@ class SystemIdentificator:
         # We kijken naar DHW runs en berekenen: C = Energie_in / Temperatuurstijging
         df_dhw = df_proc[df_proc["hvac_mode"] == HvacMode.DHW.value].copy()
         if len(df_dhw) > 10:
-            df_dhw['dt_h'] = df_dhw['timestamp'].diff().dt.total_seconds() / 3600.0
-            df_dhw['dT_tank'] = (df_dhw['dhw_top'] + df_dhw['dhw_bottom']).diff() / 2.0
-
-            # Bereken C voor elk kwartier: (P_th * dt) / dT
-            # Alleen valide als dT positief is en P_th > 0
-            valid = (df_dhw['dT_tank'] > 0.2) & (df_dhw['wp_output'] > 1.0)
-            if valid.any():
-                c_vals = (df_dhw.loc[valid, 'wp_output'] * df_dhw.loc[valid, 'dt_h']) / df_dhw.loc[valid, 'dT_tank']
-                self.C_tank = float(np.clip(c_vals.median(), 0.15, 0.35))
-                logger.info(f"[SysID] Geleerde Boiler Massa (C_tank): {self.C_tank:.3f} kWh/K")
-            else:
-                self.C_tank = 0.232  # Fallback naar puur 200L water
-
-            # --- NIEUW: Leer de maximale aanvoertemperatuur van de machine ---
             # Wat is de hoogste supply_temp die we ooit in DHW mode hebben gezien?
             self.T_max_wp = float(df_dhw['supply_temp'].quantile(0.99))
             logger.info(f"[SysID] Geleerde Max WP Temp: {self.T_max_wp:.1f}C")
 
+        df_dhw_all = df_proc.copy()
+        # Markeer elke keer dat de modus verandert
+        df_dhw_all['run_id'] = (df_dhw_all['hvac_mode'] != df_dhw_all['hvac_mode'].shift()).cumsum()
+
+        # Filter alleen op de DHW regels
+        df_dhw_runs = df_dhw_all[df_dhw_all['hvac_mode'] == HvacMode.DHW.value].copy()
+
+        calculated_cs = []
+
+        # Loop per run (bijv. elke dag 1 run)
+        for run_id, run_data in df_dhw_runs.groupby('run_id'):
+            if len(run_data) < 4: continue  # Te korte run (minder dan een uur)
+
+            # Energie die erin ging (Vermogen * tijd in uren)
+            # We nemen aan dat data 15min (0.25h) is, of bereken exact verschil
+            dt_hours = run_data['timestamp'].diff().dt.total_seconds().fillna(900) / 3600.0
+            total_energy_in = (run_data['wp_output'] * dt_hours).sum()
+
+            # Temperatuurstijging (Einde - Begin)
+            # We nemen een gemiddelde van de eerste 2 en laatste 2 metingen voor stabiliteit
+            t_start = (run_data['dhw_top'].iloc[:2].mean() + run_data['dhw_bottom'].iloc[:2].mean()) / 2.0
+            t_end = (run_data['dhw_top'].iloc[-2:].mean() + run_data['dhw_bottom'].iloc[-2:].mean()) / 2.0
+
+            delta_T_total = t_end - t_start
+
+            # Alleen valideren als er serieus gestookt is (> 5 graden erbij en > 1 kWh erin)
+            if delta_T_total > 5.0 and total_energy_in > 1.0:
+                c_calc = total_energy_in / delta_T_total
+                calculated_cs.append(c_calc)
+
+        if len(calculated_cs) > 0:
+            # Pak de mediaan om uitschieters (bijv. water tappen tijdens run) te negeren
+            c_median = float(np.median(calculated_cs))
+
+            # Clip tussen realistische waarden voor 150L - 250L effectief
+            # 0.232 is exact 200L. We staan toe dat het iets lager is (dode zones) of iets hoger (vat warmt op)
+            self.C_tank = float(np.clip(c_median, 0.100, 0.500))
+            logger.info(
+                f"[SysID] Geleerde Boiler Massa (Integraal): {self.C_tank:.3f} kWh/K (o.b.v. {len(calculated_cs)} runs)")
 
         logger.info(
             f"[Optimizer] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
