@@ -564,7 +564,7 @@ class HydraulicPredictor:
             except:
                 pass  # Fallback naar physical_guess bij error
 
-        # logger.debug(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
+        logger.debug(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
         # STAP 5: Final Check & Clip
         # De voorspelling mag nooit lager zijn dan de fysieke ondergrens (min_supply_hard)
         # En nooit hoger dan de veiligheidsgrens (max_safe)
@@ -663,9 +663,6 @@ class MLResidualPredictor:
         else:
             # Vangt extreme situaties op zoals open ramen of directe zon op de sensor
             train_set = train_set[train_set["target"].between(-1.2, 1.2)]
-
-        print("Debug ML Residuals Train Set:")
-        print(train_set[["temp", "solar", "target"]].head(30))
 
         if len(train_set) > 10:
             self.model = RandomForestRegressor(
