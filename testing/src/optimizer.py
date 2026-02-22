@@ -343,11 +343,6 @@ class SystemIdentificator:
         df_ufh = df_proc[mask_ufh].copy()
 
         if len(df_ufh) > 20:
-            print("Debug UFH Data Sample:")
-            print(
-                df_ufh[["timestamp", "room_temp", "supply_temp", "wp_output"]].head(30)
-            )
-
             t_avg_water = (df_ufh["supply_temp"] + df_ufh["return_temp"]) / 2
             delta_T_emit = t_avg_water - df_ufh["room_temp"]
             valid = delta_T_emit > 0.5
@@ -368,19 +363,6 @@ class SystemIdentificator:
         df_dhw = df_proc[mask_dhw].copy()
 
         if len(df_dhw) > 10:
-            print("Debug DHW Data Sample:")
-            print(
-                df_dhw[
-                    [
-                        "timestamp",
-                        "dhw_top",
-                        "dhw_bottom",
-                        "supply_temp",
-                        "return_temp",
-                        "wp_output",
-                    ]
-                ].head(30)
-            )
             t_avg_water = (df_dhw["supply_temp"] + df_dhw["return_temp"]) / 2
             delta_T_hx = t_avg_water - df_dhw["dhw_bottom"]
 
@@ -412,9 +394,6 @@ class SystemIdentificator:
 
         df_sb = df_loss[mask_sb].copy()
         if len(df_sb) > 20:
-            print("Debug Stilstandsverlies DHW Sample:")
-            print(df_sb[["timestamp", "dT_tank", "dt_hours", "wp_output"]].head(30))
-
             # Fysica: dT/dt = -(1 / (R_tank * C_tank)) * (T_tank - T_room)
             # We weten C_tank (0.232 kWh/K voor 200L).
             # We berekenen de 'verliesfactor' per graad verschil met de kamer
@@ -585,7 +564,7 @@ class HydraulicPredictor:
             except:
                 pass  # Fallback naar physical_guess bij error
 
-        logger.debug(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
+        # logger.debug(f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}")
         # STAP 5: Final Check & Clip
         # De voorspelling mag nooit lager zijn dan de fysieke ondergrens (min_supply_hard)
         # En nooit hoger dan de veiligheidsgrens (max_safe)
@@ -882,55 +861,73 @@ class ThermalMPC:
         # Arrays voor het VASTE vermogen (geleerd gedrag)
         fixed_p_ufh, fixed_p_dhw = np.zeros(T), np.zeros(T)
 
-        MAX_SUPPLY_LIMIT = 30.0
+        MAX_SUPPLY_LIMIT_UFH = 30.0
+        MAX_SUPPLY_LIMIT_DHW = 60.0
 
         for t in range(T):
             t_out = forecast_df.temp.values[t]
             t_room_target = r_min[t]
 
-            # 1. Warmteverlies bepalen voor dit timeslot
+            # 1. GRENZEN VAN DE MACHINE (Elektrisch kW)
+            min_kw_el, max_kw_el = self.perf_map.get_pel_limits(t_out)
+
+            # ==========================================================
+            # STAP A: VLOERVERWARMING (UFH) - ZELF LEREND
+            # ==========================================================
+            # 1. Eerste schatting COP op basis van kamer temperatuur
+            cop_guess_u = self.perf_map.predict_cop(t_out, t_room_target, HvacMode.HEATING.value)
+
+            # 2. Bepaal thermisch doel (Verlies dekken of machine minimum)
             heat_loss_kw = max(0, (t_room_target - t_out) / self.ident.R)
+            p_th_ufh_target = max(min_kw_el * cop_guess_u, heat_loss_kw)
 
-            # 2. Hydraulische predictie (Supply Temp)
-            pred_supply = self.hydraulic.predict_supply("UFH", heat_loss_kw, t_out, t_room_target)
-            calculated_supply_ufh = np.clip(pred_supply, t_room_target + 2.0, MAX_SUPPLY_LIMIT)
+            # 3. Bereken hydrauliek op basis van dit thermisch vermogen
+            t_sup_u = self.hydraulic.predict_supply("UFH", p_th_ufh_target, t_out, t_room_target)
+            dt_u = self.hydraulic.predict_delta("UFH", p_th_ufh_target, t_out, t_room_target)
 
-            # 3. COP en Limits
-            cop_u[t] = self.perf_map.predict_cop(t_out, calculated_supply_ufh, HvacMode.HEATING.value)
-            cop_d[t] = self.perf_map.predict_cop(t_out, d_max[t], HvacMode.DHW.value)
+            # 4. Verfijn COP op basis van de voorspelde effectieve temperatuur
+            t_eff_u = t_sup_u - (dt_u / 2.0)
+            cop_u[t] = self.perf_map.predict_cop(t_out, t_eff_u, HvacMode.HEATING.value)
 
-            min_kw_machine, max_kw_machine = self.perf_map.get_pel_limits(t_out)
+            # 5. Finale Elektrische vastlegging
+            req_pel_ufh = heat_loss_kw / cop_u[t] if cop_u[t] > 0 else 0
 
-            # 4. FIX UFH VERMOGEN
-            # Bereken wat puur fysisch nodig is om het verlies te dekken
-            req_pel_loss = heat_loss_kw / cop_u[t] if cop_u[t] > 0 else 0
+            # Limiet check (Vloer mag niet te heet worden)
+            delta_t_cap = max(0, MAX_SUPPLY_LIMIT_UFH - state["room_temp"])
+            max_pel_floor = (delta_t_cap * self.ident.K_emit) / cop_u[t] if cop_u[t] > 0 else 0
 
-            # Fysieke limiet van de vloer
-            delta_t_cap = max(0, MAX_SUPPLY_LIMIT - state["room_temp"])
-            p_th_max_floor = delta_t_cap * self.ident.K_emit
-            max_kw_floor = p_th_max_floor / cop_u[t] if cop_u[t] > 0 else 0
+            target_p_u = max(min_kw_el, req_pel_ufh)
+            fixed_p_ufh[t] = np.clip(target_p_u, min_kw_el, min(max_kw_el, max_pel_floor))
 
-            # KEUZE LOGICA:
-            # We nemen het MAXIMUM van:
-            # A) Het geleerde 'Steady State' minimum (min_kw_machine)
-            # B) Wat er nodig is om het verlies te dekken (req_pel_loss)
-            # Dit voorkomt dat hij te zacht draait als het koud is, maar voorkomt ook
-            # dat hij naar MAX schiet (2kW) als dat niet nodig is.
-            target_p_ufh = max(min_kw_machine, req_pel_loss)
+            # ==========================================================
+            # STAP B: BOILER (DHW) - ZELF LEREND
+            # ==========================================================
+            # 1. Eerste schatting COP op basis van huidige tank bodem
+            cop_guess_d = self.perf_map.predict_cop(t_out, state["dhw_bottom"], HvacMode.DHW.value)
 
-            # Clip dit target wel altijd binnen de machinegrenzen en vloergrenzen
-            fixed_p_ufh[t] = np.clip(target_p_ufh, min_kw_machine, min(max_kw_machine, max_kw_floor))
+            # 2. Voor boiler gaan we uit van vol vermogen (max_kw_el)
+            p_th_dhw_target = max_kw_el * cop_guess_d
 
-            # DHW blijft op Max Power (Boilers doen dat meestal)
-            fixed_p_dhw[t] = max_kw_machine
+            # 3. Bereken hydrauliek
+            t_sup_d = self.hydraulic.predict_supply("DHW", p_th_dhw_target, t_out, state["dhw_bottom"])
+            dt_d = self.hydraulic.predict_delta("DHW", p_th_dhw_target, t_out, state["dhw_bottom"])
 
-            # Fallback (als 0, dan kan hij niet aan)
+            # 4. Verfijn COP op basis van effectieve temperatuur in de spiraal
+            t_eff_d = t_sup_d - (dt_d / 2.0)
+            cop_d[t] = self.perf_map.predict_cop(t_out, t_eff_d, HvacMode.DHW.value)
+
+            # 5. Finale Elektrische vastlegging
+            fixed_p_dhw[t] = max_kw_el
+
+            # Veiligheid: als berekende COP onzinnig is of p_el te klein
             if fixed_p_ufh[t] < 0.1: fixed_p_ufh[t] = 0.0
             if fixed_p_dhw[t] < 0.1: fixed_p_dhw[t] = 0.0
 
-        self.P_cop_ufh.value = np.clip(cop_u, 2.0, 9.0)
-        self.P_cop_dhw.value = np.clip(cop_d, 1.5, 5.0)
+            logger.debug(f"Time {t}: T_out={t_out:.1f}C, RoomTarget={t_room_target:.1f}C | UFH: COP={cop_u[t]:.2f}, T_sup={t_sup_u:.1f}C, P_el={fixed_p_ufh[t]:.2f}kW | DHW: COP={cop_d[t]:.2f}, T_sup={t_sup_d:.1f}C, P_el={fixed_p_dhw[t]:.2f}kW U_Delta={dt_u:.1f}C, D_Delta={dt_d:.1f}C")
 
+        # Parameters laden in solver
+        self.P_cop_ufh.value = np.clip(cop_u, 1.5, 9.0)
+        self.P_cop_dhw.value = np.clip(cop_d, 1.1, 5.0)
         self.P_fixed_pel_ufh.value = fixed_p_ufh
         self.P_fixed_pel_dhw.value = fixed_p_dhw
 
@@ -1039,6 +1036,9 @@ class Optimizer:
             cop_now = self.perf_map.predict_cop(temp_out, context.dhw_bottom, HvacMode.DHW.value)
             p_th_dhw = target_pel * cop_now
             target_supply_temp = self.hydraulic.predict_supply("DHW", p_th_dhw, temp_out, context.dhw_bottom)
+            delta_t = self.hydraulic.predict_delta("DHW", p_th_dhw, temp_out, context.dhw_bottom)
+
+            logger.debug(f"DHW: COP={cop_now:.2f}, T_sup={target_supply_temp:.1f}C, P_el={target_pel:.2f}kW | DeltaT={delta_t:.1f}C")
 
         elif p_el_ufh_now > 0.1:
             mode = "UFH"
@@ -1046,8 +1046,9 @@ class Optimizer:
             cop_now = self.perf_map.predict_cop(temp_out, context.room_temp, HvacMode.HEATING.value)
             p_th_ufh = target_pel * cop_now
             target_supply_temp = self.hydraulic.predict_supply("UFH", p_th_ufh, temp_out, context.room_temp)
+            delta_t = self.hydraulic.predict_delta("UFH", p_th_ufh, temp_out, context.room_temp)
 
-            logger.info(f"[Optimizer] UFH Active. Fixed Plan Power={target_pel:.2f}kW, Predicted Supply={target_supply_temp:.1f}C")
+            logger.debug(f"UFH: COP={cop_now:.2f}, T_sup={target_supply_temp:.1f}C, P_el={target_pel:.2f}kW | DeltaT={delta_t:.1f}C")
 
         return {
             "mode": mode,
