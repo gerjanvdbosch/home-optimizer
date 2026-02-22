@@ -147,6 +147,8 @@ class SystemIdentificator:
         self.K_emit = 0.15  # kW/K (Afgifte vloer)
         self.K_tank = 0.25  # kW/K (Afgifte spiraal)
         self.K_loss_dhw = 0.01  # °C/uur verlies
+        self.C_tank = 0.232  # kWh/K (200L water)
+        self.T_max_wp = 58.0  # Max aanvoertemperatuur van de machine (voor veiligheid in optimalisatie)
         self.ufh_lag_steps = 4  # Aantal 15-minuten stappen traagheid (default 1 uur)
         self._load()
 
@@ -159,6 +161,8 @@ class SystemIdentificator:
                 self.K_emit = data.get("K_emit", 0.15)
                 self.K_tank = data.get("K_tank", 0.25)
                 self.K_loss_dhw = data.get("K_loss_dhw", 0.01)
+                self.C_tank = data.get("C_tank", 0.232)
+                self.T_max_wp = data.get("T_max_wp", 58.0)
                 self.ufh_lag_steps = data.get("ufh_lag_steps", 4)
                 logger.info(
                     f"[SysID] Geladen: Lag={self.ufh_lag_steps * 15}m, K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f} R={self.R:.1f} C={self.C:.1f} K_loss_dhw={self.K_loss_dhw:.3f}"
@@ -406,12 +410,34 @@ class SystemIdentificator:
             )
             # Betekenis: bij 0.01 verliest hij 1% van het temperatuurverschil met de kamer per uur.
 
+        # We kijken naar DHW runs en berekenen: C = Energie_in / Temperatuurstijging
+        df_dhw = df_proc[df_proc["hvac_mode"] == HvacMode.DHW.value].copy()
+        if len(df_dhw) > 10:
+            df_dhw['dt_h'] = df_dhw['timestamp'].diff().dt.total_seconds() / 3600.0
+            df_dhw['dT_tank'] = (df_dhw['dhw_top'] + df_dhw['dhw_bottom']).diff() / 2.0
+
+            # Bereken C voor elk kwartier: (P_th * dt) / dT
+            # Alleen valide als dT positief is en P_th > 0
+            valid = (df_dhw['dT_tank'] > 0.2) & (df_dhw['wp_output'] > 1.0)
+            if valid.any():
+                c_vals = (df_dhw.loc[valid, 'wp_output'] * df_dhw.loc[valid, 'dt_h']) / df_dhw.loc[valid, 'dT_tank']
+                self.C_tank = float(np.clip(c_vals.median(), 0.15, 0.35))
+                logger.info(f"[SysID] Geleerde Boiler Massa (C_tank): {self.C_tank:.3f} kWh/K")
+            else:
+                self.C_tank = 0.232  # Fallback naar puur 200L water
+
+            # --- NIEUW: Leer de maximale aanvoertemperatuur van de machine ---
+            # Wat is de hoogste supply_temp die we ooit in DHW mode hebben gezien?
+            self.T_max_wp = float(df_dhw['supply_temp'].quantile(0.99))
+            logger.info(f"[SysID] Geleerde Max WP Temp: {self.T_max_wp:.1f}C")
+
+
         logger.info(
             f"[Optimizer] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
-            f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f}"
+            f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f} C_tank={self.C_tank:.3f} T_max_wp={self.T_max_wp:.1f}"
         )
         joblib.dump(
-            {"R": self.R, "C": self.C, "K_emit": self.K_emit, "K_tank": self.K_tank, "K_loss_dhw": self.K_loss_dhw,
+            {"R": self.R, "C": self.C, "K_emit": self.K_emit, "K_tank": self.K_tank, "K_loss_dhw": self.K_loss_dhw, "C_tank": self.C_tank, "T_max_wp": self.T_max_wp,
              "ufh_lag_steps": self.ufh_lag_steps}, self.path)
 
 
@@ -422,8 +448,14 @@ class HydraulicPredictor:
     def __init__(self, path):
         self.path = Path(path)
         self.is_fitted = False
+
         self.model_supply_ufh = None
+        self.model_delta_ufh = None
         self.model_supply_dhw = None
+        self.model_delta_dhw = None
+
+        # Features: Elektrisch Vermogen, Buiten Temp, Sink Temp
+        self.features = ["wp_actual", "temp", "sink_temp"]
 
         # NIEUW: Geleerde fysieke parameters (met veilige defaults)
         self.learned_factor_ufh = FACTOR_UFH  # Flow (kW/K)
@@ -453,6 +485,7 @@ class HydraulicPredictor:
                 logger.warning(f"[Hydraulic] Model laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
+
         df = df.copy()
         df["delta_t"] = (df["supply_temp"] - df["return_temp"]).clip(lower=0.1) # Voorkom delen door nul
 
@@ -464,7 +497,7 @@ class HydraulicPredictor:
         # Bereken vermogen op basis van vaste constanten (om te labelen)
         # of gebruik wp_output uit data als je een echte warmtemeter hebt.
         df["wp_output"] = np.select(conditions, [df["delta_t"] * FACTOR_UFH, df["delta_t"] * FACTOR_DHW], default=0.0)
-
+        df_proc = df.copy()
         # --- Filteren voor UFH (Verwarming) ---
         mask_ufh = (
             (df["hvac_mode"] == HvacMode.HEATING.value) &
@@ -508,6 +541,38 @@ class HydraulicPredictor:
             # Train ML Model
             self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features], df_dhw["supply_temp"])
             logger.info(f"[Hydraulic] DHW Geleerd: Factor={self.learned_factor_dhw:.2f} kW/K, MinLift={self.learned_lift_dhw:.2f}C")
+
+        # Filter op draaiende machine
+        df = df_proc[df_proc["wp_actual"] > 0.2].copy()
+
+        # Voeg sink_temp toe
+        df["sink_temp"] = np.where(df["hvac_mode"] == HvacMode.HEATING.value, df["room_temp"], df["dhw_bottom"])
+        df["delta_t_water"] = df["supply_temp"] - df["return_temp"]
+
+        # --- UFH Training ---
+        mask_u = (df["hvac_mode"] == HvacMode.HEATING.value) & (df["delta_t_water"] > 0.5)
+        df_u = df[mask_u].dropna(subset=self.features + ["supply_temp", "delta_t_water"])
+        if len(df_u) > 20:
+            self.model_supply_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_u[self.features],
+                                                                                            df_u["supply_temp"])
+            self.model_delta_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_u[self.features],
+                                                                                           df_u["delta_t_water"])
+
+        # --- DHW Training ---
+        mask_d = (df["hvac_mode"] == HvacMode.DHW.value) & (df["delta_t_water"] > 1.0)
+        df_d = df[mask_d].dropna(subset=self.features + ["supply_temp", "delta_t_water"])
+        if len(df_d) > 20:
+            self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_d[self.features],
+                                                                                            df_d["supply_temp"])
+            self.model_delta_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_d[self.features],
+                                                                                           df_d["delta_t_water"])
+
+        self.is_fitted = True
+        joblib.dump({
+            "sup_u": self.model_supply_ufh, "dt_u": self.model_delta_ufh,
+            "sup_d": self.model_supply_dhw, "dt_d": self.model_delta_dhw
+        }, self.path)
+
 
         self.is_fitted = True
         # Sla alles op, inclusief de geleerde constanten
@@ -570,10 +635,27 @@ class HydraulicPredictor:
         # En nooit hoger dan de veiligheidsgrens (max_safe)
         return np.clip(prediction, min_supply_hard, max_safe)
 
-    def predict_delta(self, mode, p_th, t_out, t_sink):
+    def predict_delta(self, mode, p_th):
         # Gebruik de geleerde factor voor de delta T voorspelling
         factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
         return p_th / factor if p_th > 0 else 0.0
+
+    def predict_hydraulics(self, mode, p_el, t_out, t_sink):
+        """Voorspelt (Supply, DeltaT) op basis van elektrisch vermogen."""
+        if not self.is_fitted:
+            # Fallbacks als model nog niet getraind is
+            return (t_sink + 5, 3.0) if mode == "UFH" else (t_sink + 10, 6.0)
+
+        data = pd.DataFrame([[p_el, t_out, t_sink]], columns=self.features)
+
+        if mode == "UFH":
+            t_sup = float(self.model_supply_ufh.predict(data)[0])
+            dt = float(self.model_delta_ufh.predict(data)[0])
+        else:
+            t_sup = float(self.model_supply_dhw.predict(data)[0])
+            dt = float(self.model_delta_dhw.predict(data)[0])
+
+        return t_sup, dt
 # =========================================================
 # 3. ML RESIDUALS
 # =========================================================
@@ -583,10 +665,11 @@ class MLResidualPredictor:
         self.model = None
         self.features = ["temp", "solar", "wind", "hour_sin", "hour_cos", "day_sin", "day_cos", "doy_sin", "doy_cos"]
 
-    def train(self, df, R, C, is_dhw=False, K_loss_dhw=0.0):
+    def train(self, df, R, C, is_dhw=False, K_loss_dhw=0.0, C_tank=0.232):
         self.R = R
         self.C = C
         self.K_loss_dhw = K_loss_dhw
+        self.C_tank = C_tank
         df_proc = df.copy().sort_values("timestamp")
 
         # Bereken wp_output voor de hele set
@@ -625,7 +708,6 @@ class MLResidualPredictor:
             df_feat = df_proc.copy()
             dt = dt_hours
 
-            tank_cap = 0.232  # 200L boiler constant
             t_curr = (df_feat["dhw_top"] + df_feat["dhw_bottom"]) / 2
             t_next = t_curr.shift(-1)
             p_heat = df_feat["wp_output"]
@@ -635,7 +717,7 @@ class MLResidualPredictor:
             # Fysische basis inclusief het vaste K_loss uit je SysID
             t_model_next = (
                 t_curr
-                + (p_heat * dt / tank_cap)
+                + (p_heat * dt / self.C_tank)
                 - (self.K_loss_dhw * (t_curr - t_room) * dt)
             )
 
@@ -783,7 +865,7 @@ class ThermalMPC:
 
                 # DHW (Direct, met stilstandsverlies)
                 self.t_dhw[t + 1] == self.t_dhw[t] + (
-                        (p_th_dhw_now * self.dt) / 0.232  # 0.232 = Cap voor 200L boiler
+                        (p_th_dhw_now * self.dt) / self.ident.C_tank   # 0.232 = Cap voor 200L boiler
                         - (self.t_dhw[t] - self.t_room[t]) * (self.ident.K_loss_dhw * self.dt)
                 ),
 
@@ -880,7 +962,7 @@ class ThermalMPC:
 
             # 3. Bereken hydrauliek op basis van dit thermisch vermogen
             t_sup_u = self.hydraulic.predict_supply("UFH", p_th_ufh_target, t_out, t_room_target)
-            dt_u = self.hydraulic.predict_delta("UFH", p_th_ufh_target, t_out, t_room_target)
+            dt_u = self.hydraulic.predict_delta("UFH", p_th_ufh_target)
 
             # 4. Verfijn COP op basis van de voorspelde effectieve temperatuur
             t_eff_u = t_sup_u - (dt_u / 2.0)
@@ -907,7 +989,7 @@ class ThermalMPC:
 
             # 3. Bereken hydrauliek
             t_sup_d = self.hydraulic.predict_supply("DHW", p_th_dhw_target, t_out, state["dhw_bottom"])
-            dt_d = self.hydraulic.predict_delta("DHW", p_th_dhw_target, t_out, state["dhw_bottom"])
+            dt_d = self.hydraulic.predict_delta("DHW", p_th_dhw_target)
 
             # 4. Verfijn COP op basis van effectieve temperatuur in de spiraal
             t_eff_d = t_sup_d - (dt_d / 2.0)
@@ -1033,7 +1115,7 @@ class Optimizer:
             cop_now = self.perf_map.predict_cop(temp_out, context.dhw_bottom, HvacMode.DHW.value)
             p_th_dhw = target_pel * cop_now
             target_supply_temp = self.hydraulic.predict_supply("DHW", p_th_dhw, temp_out, context.dhw_bottom)
-            delta_t = self.hydraulic.predict_delta("DHW", p_th_dhw, temp_out, context.dhw_bottom)
+            delta_t = self.hydraulic.predict_delta("DHW", p_th_dhw)
 
             logger.debug(f"DHW: COP={cop_now:.2f}, T_sup={target_supply_temp:.1f}C, P_el={target_pel:.2f}kW | DeltaT={delta_t:.1f}C")
 
@@ -1043,7 +1125,7 @@ class Optimizer:
             cop_now = self.perf_map.predict_cop(temp_out, context.room_temp, HvacMode.HEATING.value)
             p_th_ufh = target_pel * cop_now
             target_supply_temp = self.hydraulic.predict_supply("UFH", p_th_ufh, temp_out, context.room_temp)
-            delta_t = self.hydraulic.predict_delta("UFH", p_th_ufh, temp_out, context.room_temp)
+            delta_t = self.hydraulic.predict_delta("UFH", p_th_ufh)
 
             logger.debug(f"UFH: COP={cop_now:.2f}, T_sup={target_supply_temp:.1f}C, P_el={target_pel:.2f}kW | DeltaT={delta_t:.1f}C")
 
