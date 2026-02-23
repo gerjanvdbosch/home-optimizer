@@ -3,7 +3,6 @@
   "dhw_top": 19.0,
   "dhw_bottom": 19.0,
   "dhw_setpoint": 50.0,
-  "compressor_freq": 50.0,
   "supply_temp": 25.0,
   "return_temp": 20.0,
   "pv_power": 0.0,

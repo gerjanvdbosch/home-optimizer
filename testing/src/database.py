@@ -45,7 +45,6 @@ class Measurement(Base):
     dhw_bottom = Column(Float)
     supply_temp = Column(Float)
     return_temp = Column(Float)
-    compressor_freq = Column(Float)
     hvac_mode = Column(Integer)
 
 

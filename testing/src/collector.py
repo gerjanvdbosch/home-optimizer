@@ -33,7 +33,6 @@ class Collector:
         self.pv_slots = []
         self.wp_slots = []
         self.grid_slots = []
-        self.compressor_slots = []
         self.supply_slots = []
         self.return_slots = []
         self.room_slots = []
@@ -147,11 +146,6 @@ class Collector:
             self._update_slot(self.supply_slots, self.client.get_supply_temp())
             self._update_slot(self.return_slots, self.client.get_return_temp())
 
-            raw_compressor_freq = self.client.get_compressor_freq()
-
-            if raw_compressor_freq > 0:
-                self._update_slot(self.compressor_slots, raw_compressor_freq)
-
         logger.info("[Collector] Sensors updated")
 
     def update_history(self):
@@ -173,7 +167,6 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = self._mean(self.pv_slots)
             avg_wp = self._mean(self.wp_slots)
-            avg_compressor_freq = self._median(self.compressor_slots, 0)
             avg_supply = self._mean(self.supply_slots)
             avg_return = self._mean(self.return_slots)
             avg_room = self._mean(self.room_slots)
@@ -187,7 +180,6 @@ class Collector:
             self.pv_slots = []
             self.wp_slots = []
             self.grid_slots = []
-            self.compressor_slots = []
             self.supply_slots = []
             self.return_slots = []
             self.room_slots = []
@@ -206,14 +198,13 @@ class Collector:
                 dhw_bottom=avg_dhw_bottom,
                 supply_temp=avg_supply,
                 return_temp=avg_return,
-                compressor_freq=avg_compressor_freq,
                 hvac_mode=int(self.context.hvac_mode.value),
             )
 
             self.current_slot_start = slot_start
 
             logger.info(
-                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW Freq={avg_compressor_freq:.1f}Hz Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C"
+                f"[Collector] PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C"
             )
 
     def _update_buffer(self, buffer: deque, value: float):

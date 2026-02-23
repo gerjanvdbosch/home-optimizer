@@ -19,7 +19,6 @@ class Config:
     sensor_dhw_setpoint: str = "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde"
 
     sensor_room_temp: str = "sensor.danfoss_15_temperature"
-    sensor_compressor_freq: str = "sensor.ecodan_heatpump_compressor_frequentie"
     sensor_supply_temp: str = "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
     sensor_return_temp: str = "sensor.ecodan_heatpump_ca09ec_retour_temp"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"

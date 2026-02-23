@@ -39,9 +39,6 @@ class HAClient:
     def get_dhw_setpoint(self):
         return float(self.data.get("dhw_setpoint", 50.0))
 
-    def get_compressor_freq(self):
-        return self.data.get("compressor_freq", 0.0)
-
     def get_supply_temp(self):
         return self.data.get("supply_temp", 0.0)
 
