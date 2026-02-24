@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from config import Config
-from context import Context, HvacMode
+from context import Context
 from collector import Collector
 from client import HAClient
 from database import Database
@@ -62,94 +62,11 @@ class Coordinator:
                 logger.info(f"Doel Elektrisch Vermogen: {result.get('target_pel_kw')} kW")
                 logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
 
-            # Stap 2: Detailoverzicht genereren (het 24-uurs plan)
-            mpc = self.optimizer.mpc
+            # Print tabel in de console
+            print(pd.DataFrame(result.get('plan')).to_string(index=False))
 
-            if hasattr(mpc, 'p_el_ufh') and mpc.p_el_ufh.value is not None:
-                logger.info("\nPlan details (Gebaseerd op zelflerende hydrauliek):")
-
-                # Haal de ruwe data uit de solver
-                p_u = mpc.p_el_ufh.value
-                p_d = mpc.p_el_dhw.value
-                t_r = mpc.t_room.value
-                t_d = mpc.t_dhw.value
-                t_out = mpc.P_temp_out.value
-                solar = mpc.P_solar.value
-                load = mpc.P_base_load.value
-
-                # Haal de 'Solver COP' op (de voorspelling waarmee de optimalisatie is gedaan)
-                solver_cop_u = mpc.P_cop_ufh.value
-                solver_cop_d = mpc.P_cop_dhw.value
-
-                tz = datetime.now().astimezone().tzinfo
-                plan_data = []
-
-                for i in range(mpc.horizon):
-                    active_kw = 0.0
-                    display_cop = 0.0
-                    t_sup = 0.0
-                    mode = "OFF"
-
-                    if p_u[i] > 0.1:
-                        mode = "UFH"
-                        active_kw = p_u[i]
-
-                        # 1. Bepaal thermisch vermogen met de solver-COP
-                        p_th = active_kw * solver_cop_u[i]
-
-                        # 2. Vraag aan het zelflerende model: Welke aanvoertemperatuur hoort hierbij?
-                        # We gebruiken de HydraulicPredictor i.p.v. handmatige formules
-                        t_sup = self.optimizer.hydraulic.predict_supply(
-                            "UFH", p_th, t_out[i], t_r[i]
-                        )
-
-                        # 3. Herbereken de COP o.b.v. deze door ML voorspelde T_sup
-                        display_cop = self.optimizer.perf_map.predict_cop(
-                            t_out[i], t_sup, HvacMode.HEATING.value
-                        )
-
-                    elif p_d[i] > 0.1:
-                        mode = "DHW"
-                        active_kw = p_d[i]
-
-                        # Thermisch vermogen
-                        p_th = active_kw * solver_cop_d[i]
-
-                        # Vraag aan het zelflerende model voor Boiler aanvoer
-                        t_sup = self.optimizer.hydraulic.predict_supply(
-                            "DHW", p_th, t_out[i], t_d[i]
-                        )
-
-                        # Herbereken de COP bij deze supply temp
-                        display_cop = self.optimizer.perf_map.predict_cop(
-                            t_out[i], t_sup, HvacMode.DHW.value
-                        )
-
-                    plan_data.append(
-                        {
-                            "time": self.context.forecast_df["timestamp"]
-                            .iloc[i]
-                            .tz_convert(tz)
-                            .strftime("%H:%M"),
-                            "mode": mode,
-                            "p_el_kw": f"{active_kw:.2f}",
-                            "cop": f"{display_cop:.2f}",
-                            "t_sup": f"{t_sup:.1f}" if mode != "OFF" else "-",
-                            "t_out": f"{t_out[i]:.1f}",
-                            "p_solar": f"{solar[i]:.2f}",
-                            "p_load": f"{load[i]:.2f}",
-                            "t_room": f"{t_r[i]:.2f}",
-                            "t_dhw": f"{t_d[i]:.1f}",
-                        }
-                    )
-
-                # Print tabel in de console
-                print(pd.DataFrame(plan_data).to_string(index=False))
-
-                # Sla het plan op in de context voor de UI of verdere verwerking
-                self.context.optimization_plan = plan_data
-
-            self.context.result = result
+        # Sla het plan op in de context voor de UI of verdere verwerking
+        self.context.result = result
 
     def train(self):
         self.solar.train()
@@ -165,7 +82,7 @@ if __name__ == "__main__":
     try:
         config = Config.load()
         context = Context(
-            now=datetime.now(timezone.utc).replace(day=14, month=1, year=2026, hour=12)
+            now=datetime.now(timezone.utc).replace(day=14, month=1, year=2026, hour=12,minute=0, second=0)
         )
         client = HAClient(config)
         database = Database(config)

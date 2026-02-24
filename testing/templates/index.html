@@ -485,7 +485,6 @@
     </div>
     {% endif %}
 
-    <!-- WARMTEPOMP PLANNING TABEL -->
     {% if optimization_plan and is_today %}
     <div class="card">
         <div class="header">
@@ -498,11 +497,13 @@
                 <tr>
                     <th>Tijd</th>
                     <th style="text-align: center;">Mode</th>
-                    <th>Freq</th>
+                    <th>Supply (°C)</th>
+                    <th>P_el (kW)</th>
+                    <th>COP</th>
                     <th>Temp (°C)</th>
                     <th>Solar (kW)</th>
                     <th>Load (kW)</th>
-                    <th>Room (°C)
+                    <th>Room (°C)</th>
                     <th>DHW (°C)</th>
                 </tr>
                 </thead>
@@ -512,29 +513,57 @@
                     <td>{{ row.time }}</td>
 
                     <!-- MODE KOLOM -->
-                    <!-- UFH = Bright Purple (#d05ce3) -->
-                    <!-- DHW = Electric Cyan (#00e5ff) -->
                     <td style="text-align: center; font-weight: bold;
                             color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
                         {{ row.mode }}
                     </td>
 
-                    <td style="color: {% if row.freq|float == 0 %}var(--text-muted){% endif %}">{{ row.freq }}</td>
+                    <!-- SUPPLY TEMP: Toon UFH of DHW waarde afhankelijk van mode -->
+                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                        {% if row.mode == 'UFH' %}
+                            {{ "%.1f"|format(row.supply_ufh|float) }}
+                        {% elif row.mode == 'DHW' %}
+                            {{ "%.1f"|format(row.supply_dhw|float) }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+
+                    <!-- P_EL (kW): Toon actief vermogen -->
+                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                        {% if row.mode == 'UFH' %}
+                            {{ "%.2f"|format(row.p_el_ufh|float) }}
+                        {% elif row.mode == 'DHW' %}
+                            {{ "%.2f"|format(row.p_el_dhw|float) }}
+                        {% else %}
+                            0.00
+                        {% endif %}
+                    </td>
+
+                    <!-- COP: Toon actieve COP -->
+                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                        {% if row.mode == 'UFH' %}
+                            {{ "%.1f"|format(row.cop_ufh|float) }}
+                        {% elif row.mode == 'DHW' %}
+                            {{ "%.1f"|format(row.cop_dhw|float) }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+
+                    <!-- Overige kolommen -->
                     <td style="color: var(--text-muted);">{{ row.t_out }}</td>
 
-                    <!-- Solar blijft de originele Amber/Goud kleur -->
                     <td style="color: {% if row.p_solar|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">
                         {{ row.p_solar }}
                     </td>
 
                     <td style="color: var(--text-muted);">{{ row.p_load }}</td>
 
-                    <!-- T_ROOM: Kleurt mee met UFH (Paars) -->
                     <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% endif %};">
                         {{ row.t_room }}
                     </td>
 
-                    <!-- T_DHW: Kleurt mee met DHW (Cyaan) -->
                     <td style="color: {% if row.mode == 'DHW' %}#00e5ff{% endif %};">
                         {{ row.t_dhw }}
                     </td>

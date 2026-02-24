@@ -340,7 +340,7 @@ class SystemIdentificator:
         # --- LEER K_emit & K_tank (Als fallback of validatie) ---
         mask_ufh = (
                 (df_proc["hvac_mode"] == HvacMode.HEATING.value)
-                & (df_proc["wp_output"] > 0.7)
+                & (df_proc["wp_output"] > 0.5)
                 & (df_proc["supply_temp"] < 30)  # Niet te heet (voorkom overshoot data)
                 & (df_proc["supply_temp"] > df_proc["room_temp"] + 1)  # Zinvolle delta T
         )
@@ -360,7 +360,7 @@ class SystemIdentificator:
         # ============================
         mask_dhw = (
                 (df_proc["hvac_mode"] == HvacMode.DHW.value)
-                & (df_proc["wp_output"] > 1.0)
+                & (df_proc["wp_output"] > 0.8)
                 & (df_proc["supply_temp"] > df_proc["dhw_bottom"] + 1)
 
         )
@@ -485,6 +485,10 @@ class HydraulicPredictor:
         self.learned_factor_dhw = FACTOR_DHW
         self.learned_lift_ufh = 0.5           # Minimaal verschil Retour -> Kamer
         self.learned_lift_dhw = 3.0           # Minimaal verschil Retour -> Tank
+        self.learned_ufh_slope = 0.4  # Veilige default
+        self.learned_lift_dhw = 3.0
+        self.dhw_delta_slope = 0.0
+        self.dhw_delta_base = 5.0
 
         self.features = ["wp_output", "temp", "sink_temp"]
         self._load()
@@ -501,6 +505,9 @@ class HydraulicPredictor:
                 self.learned_factor_dhw = data.get("factor_dhw", FACTOR_DHW)
                 self.learned_lift_ufh = data.get("lift_ufh", 0.5)
                 self.learned_lift_dhw = data.get("lift_dhw", 3.0)
+                self.learned_ufh_slope = data.get("ufh_slope", 0.4)
+                self.dhw_delta_slope = data.get("dhw_slope", 0.0)
+                self.dhw_delta_base = data.get("dhw_base", 5.0)
 
                 self.is_fitted = True
                 logger.info("[Hydraulic] Zelflerend aanvoertemperatuur model geladen.")
@@ -523,7 +530,7 @@ class HydraulicPredictor:
         # --- Filteren voor UFH (Verwarming) ---
         mask_ufh = (
             (df["hvac_mode"] == HvacMode.HEATING.value) &
-            (df["wp_output"] > 0.6) &
+            (df["wp_output"] > 0.5) &
             (df["supply_temp"] > df["room_temp"] + 1.0) &
             (df["delta_t"] > 0.5)
         )
@@ -540,6 +547,34 @@ class HydraulicPredictor:
             actual_lift = df_ufh["return_temp"] - df_ufh["room_temp"]
             self.learned_lift_ufh = max(0.2, actual_lift.quantile(0.05))
 
+            # --- NIEUW: Leer de Stooklijn (Heating Curve) ---
+            # Filteren: We kijken alleen naar momenten dat het buiten koud is (< 15 graden)
+            # en de warmtepomp stabiel draait.
+            mask_curve = (
+                    (df["hvac_mode"] == HvacMode.HEATING.value) &
+                    (df["wp_output"] > 0.5) &
+                    (df["temp"] < 15.0) &  # Alleen als er echt verwarmd moet worden
+                    (df["supply_temp"] > df["room_temp"] + 2.0)
+            )
+            df_curve = df[mask_curve].copy()
+
+            if len(df_curve) > 50:
+                # Formule: Extra_Temp = Slope * (20 - Buiten_Temp)
+                # Dus: Slope = Extra_Temp / (20 - Buiten_Temp)
+
+                delta_t_buiten = (20.0 - df_curve["temp"])
+                # De 'lift' trekken we er eerst af, we willen alleen de weersafhankelijke stijging weten
+                extra_supply = (df_curve["supply_temp"] - df_curve["room_temp"] - self.learned_lift_ufh)
+
+                # Bereken slope per datapunt
+                slopes = extra_supply / delta_t_buiten
+
+                # Pak de mediaan (robuust tegen uitschieters) en begrens hem logisch (0.1 tot 1.5)
+                self.learned_ufh_slope = float(np.clip(slopes.median(), 0.1, 1.5))
+
+                logger.info(
+                    f"[Hydraulic] NIEUWE Stooklijn geleerd: {self.learned_ufh_slope:.2f} (supply stijgt zoveel graden per graad kouder buiten)")
+
             # Train ML Model
             self.model_supply_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_ufh[self.features], df_ufh["supply_temp"])
             logger.info(f"[Hydraulic] UFH Geleerd: Factor={self.learned_factor_ufh:.2f} kW/K, MinLift={self.learned_lift_ufh:.2f}C")
@@ -547,7 +582,7 @@ class HydraulicPredictor:
         # --- DHW TRAINING & PARAMETER EXTRACTIE ---
         mask_dhw = (
             (df["hvac_mode"] == HvacMode.DHW.value) &
-            (df["wp_output"] > 1.0) &
+            (df["wp_output"] > 0.8) &
             (df["supply_temp"] > df["dhw_bottom"] + 2.0)
         )
         df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"])
@@ -562,6 +597,26 @@ class HydraulicPredictor:
 
             # Train ML Model
             self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features], df_dhw["supply_temp"])
+
+            X = df_dhw[["temp"]]  # Buitentemperatuur
+            y = df_dhw["delta_t"]  # Werkelijke Delta T
+
+            reg = LinearRegression().fit(X, y)
+
+            self.dhw_delta_slope = float(reg.coef_[0])
+            self.dhw_delta_base = float(reg.intercept_)
+
+            logger.info(
+                f"[Hydraulic] DHW Delta-Slope geleerd: {self.dhw_delta_slope:.3f} K/graad_buiten (Base={self.dhw_delta_base:.2f}K)")
+
+            # Sanity Check: De slope moet positief zijn (warmer buiten = meer vermogen = grotere delta)
+            # Als hij negatief is, is de data waarschijnlijk ruis, zet op 0 (constant)
+            if self.dhw_delta_slope < -0.1:
+                logger.warning("[Hydraulic] Onlogische negatieve DHW slope. Fallback naar constant.")
+                self.dhw_delta_slope = 0.0
+                self.dhw_delta_base = df_dhw["delta_t"].median()
+
+
             logger.info(f"[Hydraulic] DHW Geleerd: Factor={self.learned_factor_dhw:.2f} kW/K, MinLift={self.learned_lift_dhw:.2f}C")
 
         self.is_fitted = True
@@ -572,7 +627,10 @@ class HydraulicPredictor:
             "factor_ufh": self.learned_factor_ufh,
             "factor_dhw": self.learned_factor_dhw,
             "lift_ufh": self.learned_lift_ufh,
-            "lift_dhw": self.learned_lift_dhw
+            "lift_dhw": self.learned_lift_dhw,
+            "ufh_slope": self.learned_ufh_slope,
+            "dhw_slope": self.dhw_delta_slope,
+            "dhw_base": self.dhw_delta_base
         }, self.path)
 
     def predict_supply(self, mode, p_th, t_out, t_sink):
@@ -629,6 +687,11 @@ class HydraulicPredictor:
         # Gebruik de geleerde factor voor de delta T voorspelling
         factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
         return p_th / factor if p_th > 0 else 0.0
+
+    def get_ufh_slope(self, t_out):
+        """Geeft de extra graden aanvoer terug o.b.v. buitentemperatuur."""
+        diff = max(0.0, 20.0 - t_out)
+        return diff * self.learned_ufh_slope
 
 # =========================================================
 # 3. ML RESIDUALS
@@ -914,69 +977,82 @@ class ThermalMPC:
         # Arrays voor het VASTE vermogen (geleerd gedrag)
         fixed_p_ufh, fixed_p_dhw = np.zeros(T), np.zeros(T)
 
-        MAX_SUPPLY_LIMIT_UFH = 30.0
-        MAX_SUPPLY_LIMIT_DHW = 60.0
+        # [NIEUW] Arrays om de supply temperaturen in op te slaan
+        self.plan_t_sup_ufh = np.zeros(T)
+        self.plan_t_sup_dhw = np.zeros(T)
 
         for t in range(T):
             t_out = forecast_df.temp.values[t]
             t_room_target = r_min[t]
+            t_dhw_bottom = state["dhw_bottom"]
 
-            # 1. GRENZEN VAN DE MACHINE (Elektrisch kW)
+            # Haal geleerde parameters op uit de modellen
+            k_emit = self.ident.K_emit
+            k_tank = self.ident.K_tank
+            f_ufh = self.hydraulic.learned_factor_ufh  # Liter/min * Cp
+            f_dhw = self.hydraulic.learned_factor_dhw
+
+            # ==========================================================
+            # STAP A: VLOERVERWARMING (UFH) - Consistent Opgelost
+            # ==========================================================
+            # 1. Bepaal Target Supply Temp (Geleerde Stooklijn)
+            ufh_slope = self.hydraulic.get_ufh_slope(t_out)
+            t_sup_u = t_room_target + self.hydraulic.learned_lift_ufh + ufh_slope
+
+            # 2. Bereken Q consistent (Waterzijdig + Afgiftezijdig)
+            # Formule: Q = (K * dT_base) / (1 + K / 2F)
+            numerator_u = k_emit * (t_sup_u - t_room_target)
+            denominator_u = 1 + (k_emit / (2 * f_ufh))
+            p_th_ufh = max(0.0, numerator_u / denominator_u)
+
+            # 3. Bereken de resulterende Delta T en Mean Water Temp
+            dt_u = p_th_ufh / f_ufh if p_th_ufh > 0 else 0
+            t_mean_u = t_sup_u - (dt_u / 2.0)
+
+            # 4. Voorspel COP op basis van de ECHTE gemiddelde watertemperatuur
+            cop_u[t] = self.perf_map.predict_cop(t_out, t_mean_u, HvacMode.HEATING.value)
+            fixed_p_ufh[t] = p_th_ufh / cop_u[t] if cop_u[t] > 0 else 0.0
+            self.plan_t_sup_ufh[t] = t_sup_u
+            # ==========================================================
+            # STAP B: BOILER (DHW) - Consistent Opgelost
+            # ==========================================================
+            # 1. Bepaal Target Supply Temp
+            # De aanvoer is de tankbodem + de lift van de warmtewisselaar + een overwaarde
+            predicted_delta_dhw = self.hydraulic.dhw_delta_base + (self.hydraulic.dhw_delta_slope * t_out)
+
+            t_sup_d = t_dhw_bottom + self.hydraulic.learned_lift_dhw + predicted_delta_dhw
+
+            # 2. Bereken Q consistent voor de spiraal
+            numerator_d = k_tank * (t_sup_d - t_dhw_bottom)
+            denominator_d = 1 + (k_tank / (2 * f_dhw))
+            p_th_dhw = max(0.0, numerator_d / denominator_d)
+
+            # 3. Bereken Delta T en Mean Temp in de spiraal
+            dt_d = p_th_dhw / f_dhw if p_th_dhw > 0 else 0
+            t_mean_d = t_sup_d - (dt_d / 2.0)
+
+            # 4. Voorspel COP
+            cop_d[t] = self.perf_map.predict_cop(t_out, t_mean_d, HvacMode.DHW.value)
+            fixed_p_dhw[t] = p_th_dhw / cop_d[t] if cop_d[t] > 0 else 0.0
+            self.plan_t_sup_dhw[t] = t_sup_d
+            # ==========================================================
+            # STAP C: Veiligheidsnet (Voorkomen van wiskundige onzin)
+            # ==========================================================
+            # We raden het vermogen niet meer met 'get_pel_limits', maar we
+            # gebruiken het enkel om te voorkomen dat het model bijv. 0.01 kW of 10 kW
+            # voorspelt bij extreme stooklijn- of sensorafwijkingen.
             min_kw_el, max_kw_el = self.perf_map.get_pel_limits(t_out)
 
-            # ==========================================================
-            # STAP A: VLOERVERWARMING (UFH) - ZELF LEREND
-            # ==========================================================
-            # 1. Eerste schatting COP op basis van kamer temperatuur
-            cop_guess_u = self.perf_map.predict_cop(t_out, t_room_target, HvacMode.HEATING.value)
+            # Geef de berekende fysica de ruimte, maar clip afwijkingen
+            if fixed_p_ufh[t] > 0.05:
+                fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw_el * 0.8, max_kw_el * 1.1)
 
-            # 2. Bepaal thermisch doel (Verlies dekken of machine minimum)
-            heat_loss_kw = max(0, (t_room_target - t_out) / self.ident.R)
-            p_th_ufh_target = max(min_kw_el * cop_guess_u, heat_loss_kw)
+            if fixed_p_dhw[t] > 0.05:
+                fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw_el * 0.8, max_kw_el * 1.1)
 
-            # 3. Bereken hydrauliek op basis van dit thermisch vermogen
-            t_sup_u = self.hydraulic.predict_supply("UFH", p_th_ufh_target, t_out, t_room_target)
-            dt_u = self.hydraulic.predict_delta("UFH", p_th_ufh_target)
-
-            # 4. Verfijn COP op basis van de voorspelde effectieve temperatuur
-            t_eff_u = t_sup_u - (dt_u / 2.0)
-            cop_u[t] = self.perf_map.predict_cop(t_out, t_eff_u, HvacMode.HEATING.value)
-
-            # 5. Finale Elektrische vastlegging
-            req_pel_ufh = heat_loss_kw / cop_u[t] if cop_u[t] > 0 else 0
-
-            # Limiet check (Vloer mag niet te heet worden)
-            delta_t_cap = max(0, MAX_SUPPLY_LIMIT_UFH - state["room_temp"])
-            max_pel_floor = (delta_t_cap * self.ident.K_emit) / cop_u[t] if cop_u[t] > 0 else 0
-
-            target_p_u = max(min_kw_el, req_pel_ufh)
-            fixed_p_ufh[t] = np.clip(target_p_u, min_kw_el, min(max_kw_el, max_pel_floor))
-
-            # ==========================================================
-            # STAP B: BOILER (DHW) - ZELF LEREND
-            # ==========================================================
-            # 1. Eerste schatting COP op basis van huidige tank bodem
-            cop_guess_d = self.perf_map.predict_cop(t_out, state["dhw_bottom"], HvacMode.DHW.value)
-
-            # 2. Voor boiler gaan we uit van vol vermogen (max_kw_el)
-            p_th_dhw_target = max_kw_el * cop_guess_d
-
-            # 3. Bereken hydrauliek
-            t_sup_d = self.hydraulic.predict_supply("DHW", p_th_dhw_target, t_out, state["dhw_bottom"])
-            dt_d = self.hydraulic.predict_delta("DHW", p_th_dhw_target)
-
-            # 4. Verfijn COP op basis van effectieve temperatuur in de spiraal
-            t_eff_d = t_sup_d - (dt_d / 2.0)
-            cop_d[t] = self.perf_map.predict_cop(t_out, t_eff_d, HvacMode.DHW.value)
-
-            # 5. Finale Elektrische vastlegging
-            fixed_p_dhw[t] = max_kw_el
-
-            # Veiligheid: als berekende COP onzinnig is of p_el te klein
-            if fixed_p_ufh[t] < 0.1: fixed_p_ufh[t] = 0.0
-            if fixed_p_dhw[t] < 0.1: fixed_p_dhw[t] = 0.0
-
-            logger.debug(f"Time {t}: T_out={t_out:.1f}C, RoomTarget={t_room_target:.1f}C | UFH: COP={cop_u[t]:.2f}, T_sup={t_sup_u:.1f}C, P_el={fixed_p_ufh[t]:.2f}kW | DHW: COP={cop_d[t]:.2f}, T_sup={t_sup_d:.1f}C, P_el={fixed_p_dhw[t]:.2f}kW U_Delta={dt_u:.1f}C, D_Delta={dt_d:.1f}C")
+            logger.debug(f"Time {t}: T_out={t_out:.1f}C | "
+                         f"UFH: T_sup={t_sup_u:.1f}C, dT={dt_u:.1f}C, P_th={p_th_ufh:.2f}kW, COP={cop_u[t]:.2f}, P_el={fixed_p_ufh[t]:.2f}kW | "
+                         f"DHW: T_sup={t_sup_d:.1f}C, dT={dt_d:.1f}C, P_th={p_th_dhw:.2f}kW, COP={cop_d[t]:.2f}, P_el={fixed_p_dhw[t]:.2f}kW")
 
         # Parameters laden in solver
         self.P_cop_ufh.value = np.clip(cop_u, 1.5, 9.0)
@@ -1002,13 +1078,9 @@ class ThermalMPC:
             self.problem.solve(solver=cp.HIGHS)
         except Exception as e:
             logger.error(f"Solver exception: {e}")
-            return None, None
 
         if self.problem.status not in ["optimal", "optimal_inaccurate"]:
             logger.warning(f"Solver status not optimal: {self.problem.status}")
-            return None, None
-
-        return self.p_el_ufh.value, self.p_el_dhw.value
 
 
 # =========================================================
@@ -1066,17 +1138,15 @@ class Optimizer:
         # FIX: Voorspel de zon-opwarming vooraf via het getrainde ML model
         solar_gains = self.res_ufh.predict(context.forecast_df)
 
-        temp_out = context.forecast_df.temp.values[0]
-
         # Geef de solar_gains ook mee aan de solver
-        p_el_ufh_plan, p_el_dhw_plan = self.mpc.solve(state, context.forecast_df, recent_history_df, solar_gains)
+        self.mpc.solve(state, context.forecast_df, recent_history_df, solar_gains)
 
-        if p_el_ufh_plan is None:
-            return {"mode": "OFF", "target_pel_kw": 0.0, "target_supply_temp": 0.0}
+        if self.mpc.p_el_ufh.value is None:
+            return {"mode": "OFF", "target_pel_kw": 0.0, "target_supply_temp": 0.0, "plan": []}
 
         # Wat doen we NU (index 0)
-        p_el_ufh_now = p_el_ufh_plan[0]
-        p_el_dhw_now = p_el_dhw_plan[0]
+        p_el_ufh_now =  self.mpc.p_el_ufh.value[0]
+        p_el_dhw_now = self.mpc.p_el_dhw.value[0]
 
         mode = "OFF"
         target_pel = 0.0
@@ -1086,26 +1156,62 @@ class Optimizer:
         if p_el_dhw_now > 0.1:
             mode = "DHW"
             target_pel = p_el_dhw_now
-            cop_now = self.perf_map.predict_cop(temp_out, context.dhw_bottom, HvacMode.DHW.value)
-            p_th_dhw = target_pel * cop_now
-            target_supply_temp = self.hydraulic.predict_supply("DHW", p_th_dhw, temp_out, context.dhw_bottom)
-            delta_t = self.hydraulic.predict_delta("DHW", p_th_dhw)
-
-            logger.debug(f"DHW: COP={cop_now:.2f}, T_sup={target_supply_temp:.1f}C, P_el={target_pel:.2f}kW | DeltaT={delta_t:.1f}C")
+            target_supply_temp = self.mpc.plan_t_sup_dhw[0]
 
         elif p_el_ufh_now > 0.1:
             mode = "UFH"
             target_pel = p_el_ufh_now
-            cop_now = self.perf_map.predict_cop(temp_out, context.room_temp, HvacMode.HEATING.value)
-            p_th_ufh = target_pel * cop_now
-            target_supply_temp = self.hydraulic.predict_supply("UFH", p_th_ufh, temp_out, context.room_temp)
-            delta_t = self.hydraulic.predict_delta("UFH", p_th_ufh)
-
-            logger.debug(f"UFH: COP={cop_now:.2f}, T_sup={target_supply_temp:.1f}C, P_el={target_pel:.2f}kW | DeltaT={delta_t:.1f}C")
+            target_supply_temp = self.mpc.plan_t_sup_ufh[0]
 
         return {
             "mode": mode,
             "target_pel_kw": round(target_pel, 2),
             "target_supply_temp": round(target_supply_temp, 1),
-            "status": self.mpc.problem.status
+            "status": self.mpc.problem.status,
+            "plan": self.get_plan(context)
         }
+
+    def get_plan(self, context):
+        if self.mpc.p_el_ufh.value is None:
+            return []
+
+        plan = []
+        T = self.mpc.horizon
+        now = context.now
+
+        u_on = self.mpc.ufh_on.value
+        d_on = self.mpc.dhw_on.value
+        p_u = self.mpc.p_el_ufh.value
+        p_d = self.mpc.p_el_dhw.value
+        t_r = self.mpc.t_room.value
+        t_d = self.mpc.t_dhw.value
+        u_cop = self.mpc.P_cop_ufh.value
+        d_cop = self.mpc.P_cop_dhw.value
+        u_sup = self.mpc.plan_t_sup_ufh
+        d_sup = self.mpc.plan_t_sup_dhw
+
+        for t in range(T):
+            ts = now + timedelta(hours=t * 0.25)
+            mode_str = "-"
+            if d_on[t] > 0.5:
+                mode_str = "DHW"
+            elif u_on[t] > 0.5:
+                mode_str = "UFH"
+
+            plan.append({
+                "time": ts.strftime("%H:%M"),
+                "mode": mode_str,
+                "t_out": f"{context.forecast_df.temp.iloc[t]:.1f}",
+                "p_solar": f"{context.forecast_df.power_corrected.iloc[t]:.2f}",
+                "p_load": f"{context.forecast_df.load_corrected.iloc[t]:.2f}",
+                "t_room": f"{t_r[t + 1]:.1f}",
+                "t_dhw": f"{t_d[t + 1]:.1f}",
+                "p_el_ufh": f"{p_u[t]:.2f}",
+                "p_el_dhw": f"{p_d[t]:.2f}",
+                "cop_ufh": f"{u_cop[t]:.2f}",
+                "cop_dhw": f"{d_cop[t]:.2f}",
+                "supply_ufh": f"{u_sup[t]:.2f}",
+                "supply_dhw": f"{d_sup[t]:.2f}",
+            })
+
+        return plan
