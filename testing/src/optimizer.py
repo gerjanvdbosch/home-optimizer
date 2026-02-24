@@ -957,130 +957,121 @@ class ThermalMPC:
         T = self.horizon
         r_min, r_max, d_min, d_max = self._get_targets(state["now"], T)
 
-        # Vul basis parameters
         self.P_t_room_init.value = state["room_temp"]
         self.P_t_dhw_init.value = (state["dhw_top"] + state["dhw_bottom"]) / 2.0
         self.P_temp_out.value = forecast_df.temp.values[:T]
-        self.P_prices.value = np.full(T, 0.25)       # TODO: Dynamische prijzen hier koppelen
+        self.P_prices.value = np.full(T, 0.25)
         self.P_export_prices.value = np.full(T, 0.07)
         self.P_solar.value = forecast_df.power_corrected.values[:T]
         self.P_base_load.value = forecast_df.load_corrected.values[:T]
         self.P_room_min.value, self.P_room_max.value = r_min, r_max
         self.P_dhw_min.value, self.P_dhw_max.value = d_min, d_max
-
-        # --- FYSIEKE PARAMETERS VOORBEIDEIDING ---
-        cop_u, cop_d, max_p, min_p = np.zeros(T), np.zeros(T), np.zeros(T), np.zeros(T)
         self.P_solar_gain.value = solar_gains[:T]
 
-        cop_u, cop_d = np.zeros(T), np.zeros(T)
+        # --- SLP LOOP: 2 Iteraties voor perfecte fysica per stap ---
+        # Start gok: We nemen aan dat de temperaturen starten op wat ze nu zijn
+        guessed_t_room = np.full(T, state["room_temp"])
+        guessed_t_dhw = np.full(T, state["dhw_bottom"])
 
-        # Arrays voor het VASTE vermogen (geleerd gedrag)
-        fixed_p_ufh, fixed_p_dhw = np.zeros(T), np.zeros(T)
+        for iteration in range(2):
+            cop_u, cop_d = np.zeros(T), np.zeros(T)
+            fixed_p_ufh, fixed_p_dhw = np.zeros(T), np.zeros(T)
 
-        # [NIEUW] Arrays om de supply temperaturen in op te slaan
-        self.plan_t_sup_ufh = np.zeros(T)
-        self.plan_t_sup_dhw = np.zeros(T)
+            self.plan_t_sup_ufh = np.zeros(T)
+            self.plan_t_sup_dhw = np.zeros(T)
 
-        for t in range(T):
-            t_out = forecast_df.temp.values[t]
-            t_room_target = r_min[t]
-            t_dhw_bottom = state["dhw_bottom"]
+            for t in range(T):
+                t_out = forecast_df.temp.values[t]
 
-            # Haal geleerde parameters op uit de modellen
-            k_emit = self.ident.K_emit
-            k_tank = self.ident.K_tank
-            f_ufh = self.hydraulic.learned_factor_ufh  # Liter/min * Cp
-            f_dhw = self.hydraulic.learned_factor_dhw
+                # We pakken de temperatuur zoals gepland voor DIT specifieke kwartier!
+                t_room_current = guessed_t_room[t]
+                t_dhw_current = guessed_t_dhw[t]
 
-            # ==========================================================
-            # STAP A: VLOERVERWARMING (UFH) - Consistent Opgelost
-            # ==========================================================
-            # 1. Bepaal Target Supply Temp (Geleerde Stooklijn)
-            ufh_slope = self.hydraulic.get_ufh_slope(t_out)
-            t_sup_u = t_room_target + self.hydraulic.learned_lift_ufh + ufh_slope
+                k_emit = self.ident.K_emit
+                k_tank = self.ident.K_tank
+                f_ufh = self.hydraulic.learned_factor_ufh
+                f_dhw = self.hydraulic.learned_factor_dhw
 
-            # 2. Bereken Q consistent (Waterzijdig + Afgiftezijdig)
-            # Formule: Q = (K * dT_base) / (1 + K / 2F)
-            numerator_u = k_emit * (t_sup_u - t_room_target)
-            denominator_u = 1 + (k_emit / (2 * f_ufh))
-            p_th_ufh = max(0.0, numerator_u / denominator_u)
+                # ==========================================================
+                # STAP A: UFH Logic (Per stap fysisch)
+                # ==========================================================
+                ufh_slope = self.hydraulic.get_ufh_slope(t_out)
+                t_sup_u = t_room_current + self.hydraulic.learned_lift_ufh + ufh_slope
 
-            # 3. Bereken de resulterende Delta T en Mean Water Temp
-            dt_u = p_th_ufh / f_ufh if p_th_ufh > 0 else 0
-            t_mean_u = t_sup_u - (dt_u / 2.0)
+                numerator_u = k_emit * (t_sup_u - t_room_current)
+                denominator_u = 1 + (k_emit / (2 * f_ufh))
+                p_th_ufh = max(0.0, numerator_u / denominator_u)
 
-            # 4. Voorspel COP op basis van de ECHTE gemiddelde watertemperatuur
-            cop_u[t] = self.perf_map.predict_cop(t_out, t_mean_u, HvacMode.HEATING.value)
-            fixed_p_ufh[t] = p_th_ufh / cop_u[t] if cop_u[t] > 0 else 0.0
-            self.plan_t_sup_ufh[t] = t_sup_u
-            # ==========================================================
-            # STAP B: BOILER (DHW) - Consistent Opgelost
-            # ==========================================================
-            # 1. Bepaal Target Supply Temp
-            # De aanvoer is de tankbodem + de lift van de warmtewisselaar + een overwaarde
-            predicted_delta_dhw = self.hydraulic.dhw_delta_base + (self.hydraulic.dhw_delta_slope * t_out)
+                dt_u = p_th_ufh / f_ufh if p_th_ufh > 0 else 0
+                t_mean_u = t_sup_u - (dt_u / 2.0)
 
-            t_sup_d = t_dhw_bottom + self.hydraulic.learned_lift_dhw + predicted_delta_dhw
+                cop_u[t] = self.perf_map.predict_cop(t_out, t_mean_u, HvacMode.HEATING.value)
+                fixed_p_ufh[t] = p_th_ufh / cop_u[t] if cop_u[t] > 0 else 0.0
+                self.plan_t_sup_ufh[t] = t_sup_u
 
-            # 2. Bereken Q consistent voor de spiraal
-            numerator_d = k_tank * (t_sup_d - t_dhw_bottom)
-            denominator_d = 1 + (k_tank / (2 * f_dhw))
-            p_th_dhw = max(0.0, numerator_d / denominator_d)
+                # ==========================================================
+                # STAP B: DHW Logic (Per stap fysisch!)
+                # ==========================================================
+                predicted_delta_dhw = self.hydraulic.dhw_delta_base + (self.hydraulic.dhw_delta_slope * t_out)
 
-            # 3. Bereken Delta T en Mean Temp in de spiraal
-            dt_d = p_th_dhw / f_dhw if p_th_dhw > 0 else 0
-            t_mean_d = t_sup_d - (dt_d / 2.0)
+                # Exacte fysica op basis van de oplopende temperatuur in de tank
+                t_sup_d = t_dhw_current + self.hydraulic.learned_lift_dhw + predicted_delta_dhw
 
-            # 4. Voorspel COP
-            cop_d[t] = self.perf_map.predict_cop(t_out, t_mean_d, HvacMode.DHW.value)
-            fixed_p_dhw[t] = p_th_dhw / cop_d[t] if cop_d[t] > 0 else 0.0
-            self.plan_t_sup_dhw[t] = t_sup_d
-            # ==========================================================
-            # STAP C: Veiligheidsnet (Voorkomen van wiskundige onzin)
-            # ==========================================================
-            # We raden het vermogen niet meer met 'get_pel_limits', maar we
-            # gebruiken het enkel om te voorkomen dat het model bijv. 0.01 kW of 10 kW
-            # voorspelt bij extreme stooklijn- of sensorafwijkingen.
-            min_kw_el, max_kw_el = self.perf_map.get_pel_limits(t_out)
+                numerator_d = k_tank * (t_sup_d - t_dhw_current)
+                denominator_d = 1 + (k_tank / (2 * f_dhw))
+                p_th_dhw = max(0.0, numerator_d / denominator_d)
 
-            # Geef de berekende fysica de ruimte, maar clip afwijkingen
-            if fixed_p_ufh[t] > 0.05:
-                fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw_el * 0.8, max_kw_el * 1.1)
+                dt_d = p_th_dhw / f_dhw if p_th_dhw > 0 else 0
+                t_mean_d = t_sup_d - (dt_d / 2.0)
 
-            if fixed_p_dhw[t] > 0.05:
-                fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw_el * 0.8, max_kw_el * 1.1)
+                cop_d[t] = self.perf_map.predict_cop(t_out, t_mean_d, HvacMode.DHW.value)
+                fixed_p_dhw[t] = p_th_dhw / cop_d[t] if cop_d[t] > 0 else 0.0
 
-            logger.debug(f"Time {t}: T_out={t_out:.1f}C | "
-                         f"UFH: T_sup={t_sup_u:.1f}C, dT={dt_u:.1f}C, P_th={p_th_ufh:.2f}kW, COP={cop_u[t]:.2f}, P_el={fixed_p_ufh[t]:.2f}kW | "
-                         f"DHW: T_sup={t_sup_d:.1f}C, dT={dt_d:.1f}C, P_th={p_th_dhw:.2f}kW, COP={cop_d[t]:.2f}, P_el={fixed_p_dhw[t]:.2f}kW")
+                self.plan_t_sup_dhw[t] = t_sup_d
 
-        # Parameters laden in solver
-        self.P_cop_ufh.value = np.clip(cop_u, 1.5, 9.0)
-        self.P_cop_dhw.value = np.clip(cop_d, 1.1, 5.0)
-        self.P_fixed_pel_ufh.value = fixed_p_ufh
-        self.P_fixed_pel_dhw.value = fixed_p_dhw
+                # Limits (safety)
+                min_kw, max_kw = self.perf_map.get_pel_limits(t_out)
+                if fixed_p_ufh[t] > 0.05:
+                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.8, max_kw * 1.1)
+                if fixed_p_dhw[t] > 0.05:
+                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.8, max_kw * 1.1)
 
-        # --- VUL HISTORISCHE WARMTE (LAG) ---
-        lag = self.ident.ufh_lag_steps
-        hist_heat = np.zeros(lag)
+                logger.debug(f"Time {t}: T_out={t_out:.1f}C | "
+                             f"UFH: T_sup={t_sup_u:.1f}C, dT={dt_u:.1f}C, P_th={p_th_ufh:.2f}kW, COP={cop_u[t]:.2f}, P_el={fixed_p_ufh[t]:.2f}kW | "
+                             f"DHW: T_sup={t_sup_d:.1f}C, dT={dt_d:.1f}C, P_th={p_th_dhw:.2f}kW, COP={cop_d[t]:.2f}, P_el={fixed_p_dhw[t]:.2f}kW")
 
-        # Check of dataframe geldig is en wp_output bevat
-        if not recent_history_df.empty and 'wp_output' in recent_history_df.columns:
-            vals = recent_history_df['wp_output'].tail(lag).values
-            if len(vals) > 0:
-                # Vul de array van achteren aan (meest recente historie achteraan)
-                hist_heat[-len(vals):] = vals
+            self.P_cop_ufh.value = np.clip(cop_u, 1.5, 9.0)
+            self.P_cop_dhw.value = np.clip(cop_d, 1.1, 5.0)
+            self.P_fixed_pel_ufh.value = fixed_p_ufh
+            self.P_fixed_pel_dhw.value = fixed_p_dhw
 
-        self.P_hist_heat.value = hist_heat
+            # Historie laden
+            lag = self.ident.ufh_lag_steps
+            hist_heat = np.zeros(lag)
+            if not recent_history_df.empty and 'wp_output' in recent_history_df.columns:
+                vals = recent_history_df['wp_output'].tail(lag).values
+                if len(vals) > 0:
+                    hist_heat[-len(vals):] = vals
+            self.P_hist_heat.value = hist_heat
 
-        # --- LOS HET PROBLEEM OP ---
-        try:
-            self.problem.solve(solver=cp.HIGHS)
-        except Exception as e:
-            logger.error(f"Solver exception: {e}")
+            # --- SOLVER AANROEPEN ---
+            try:
+                self.problem.solve(solver=cp.HIGHS)
+            except Exception as e:
+                logger.error(f"Solver exception in iteratie {iteration}: {e}")
+                break
 
-        if self.problem.status not in ["optimal", "optimal_inaccurate"]:
-            logger.warning(f"Solver status not optimal: {self.problem.status}")
+            if self.problem.status not in ["optimal", "optimal_inaccurate"]:
+                logger.warning(f"Solver status not optimal in iteratie {iteration}: {self.problem.status}")
+                break
+
+            # --- UPDATE GOK VOOR ITERATIE 2 ---
+            if iteration == 0:
+                # We pakken het verloop van de tank zoals in ronde 1 is berekend.
+                # Als hij om 14:00 start met stoken, zal t_dhw_current in ronde 2
+                # om 14:15 hoger zijn, en stijgt de supply temp netjes mee!
+                guessed_t_room = self.t_room.value[:-1]
+                guessed_t_dhw = self.t_dhw.value[:-1]
 
 
 # =========================================================
