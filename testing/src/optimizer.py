@@ -510,7 +510,7 @@ class HydraulicPredictor:
                 self.dhw_delta_base = data.get("dhw_base", 5.0)
 
                 self.is_fitted = True
-                logger.info(f"[Hydraulic] Model geladen. Geleerde parameters: UFH Factor={self.learned_factor_ufh:.2f}, DHW Factor={self.learned_factor_dhw:.2f}, UFH Lift={self.learned_lift_ufh:.2f}C, DHW Lift={self.learned_lift_dhw:.2f}C, UFH Slope={self.learned_ufh_slope:.2f}")
+                logger.info(f"[Hydraulic] Model geladen. Geleerde parameters: UFH Factor={self.learned_factor_ufh:.2f}, DHW Factor={self.learned_factor_dhw:.2f}, UFH Lift={self.learned_lift_ufh:.2f}C, DHW Lift={self.learned_lift_dhw:.2f}C, UFH Slope={self.learned_ufh_slope:.2f} DHW Slope={self.dhw_delta_slope:.3f} Base={self.dhw_delta_base:.1f}")
             except Exception as e:
                 logger.warning(f"[Hydraulic] Model laden mislukt: {e}")
 
