@@ -1148,14 +1148,8 @@ class Optimizer:
         # BUGFIX: Calculate wp_output before passing to MPC so lag works properly!
         recent_history_df = pd.DataFrame()
         if not raw_hist.empty:
-            raw_hist = raw_hist.copy() # BUGFIX: Voorkomt SetWithCopyWarnings
-            raw_hist["delta_t"] = (raw_hist["supply_temp"] - raw_hist["return_temp"]).clip(lower=0.0)
-            raw_hist["wp_output"] = np.where(
-                raw_hist["hvac_mode"] == HvacMode.HEATING.value, raw_hist["delta_t"] * FACTOR_UFH,
-                np.where(raw_hist["hvac_mode"] == HvacMode.DHW.value, raw_hist["delta_t"] * FACTOR_DHW, 0.0)
-            )
+            raw_hist = raw_hist.copy()
             raw_hist.set_index("timestamp", inplace=True)
-            # BUGFIX: numeric_only=True weghalen warning
             recent_history_df = raw_hist.resample("15min").mean(numeric_only=True).fillna(0).reset_index()
 
         # FIX: Voorspel de zon-opwarming vooraf via het getrainde ML model
@@ -1168,7 +1162,7 @@ class Optimizer:
             return {"mode": "OFF", "target_pel_kw": 0.0, "target_supply_temp": 0.0, "plan": []}
 
         # Wat doen we NU (index 0)
-        p_el_ufh_now =  self.mpc.p_el_ufh.value[0]
+        p_el_ufh_now = self.mpc.p_el_ufh.value[0]
         p_el_dhw_now = self.mpc.p_el_dhw.value[0]
 
         mode = "OFF"
