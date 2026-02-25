@@ -148,7 +148,7 @@ class SystemIdentificator:
         self.K_tank = 0.25  # kW/K (Afgifte spiraal)
         self.K_loss_dhw = 0.01  # °C/uur verlies
         self.C_tank = 0.232  # kWh/K (200L water)
-        self.T_max_wp = 58.0  # Max aanvoertemperatuur van de machine (voor veiligheid in optimalisatie)
+        self.T_max_dhw = 58.0  # Max aanvoertemperatuur van de machine (voor veiligheid in optimalisatie)
         self.ufh_lag_steps = 4  # Aantal 15-minuten stappen traagheid (default 1 uur)
         self._load()
 
@@ -162,7 +162,7 @@ class SystemIdentificator:
                 self.K_tank = data.get("K_tank", 0.25)
                 self.K_loss_dhw = data.get("K_loss_dhw", 0.01)
                 self.C_tank = data.get("C_tank", 0.232)
-                self.T_max_wp = data.get("T_max_wp", 58.0)
+                self.T_max_dhw = data.get("T_max_dhw", 58.0)
                 self.ufh_lag_steps = data.get("ufh_lag_steps", 4)
                 logger.info(
                     f"[SysID] Geladen: Lag={self.ufh_lag_steps * 15}m, K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f} R={self.R:.1f} C={self.C:.1f} K_loss_dhw={self.K_loss_dhw:.3f}"
@@ -414,8 +414,8 @@ class SystemIdentificator:
         df_dhw = df_proc[df_proc["hvac_mode"] == HvacMode.DHW.value].copy()
         if len(df_dhw) > 10:
             # Wat is de hoogste supply_temp die we ooit in DHW mode hebben gezien?
-            self.T_max_wp = float(df_dhw['supply_temp'].quantile(0.99))
-            logger.info(f"[SysID] Geleerde Max WP Temp: {self.T_max_wp:.1f}C")
+            self.T_max_dhw = float(df_dhw['supply_temp'].max())
+            logger.info(f"[SysID] Geleerde Max DHW Temp: {self.T_max_dhw:.1f}C")
 
         df_dhw_all = df_proc.copy()
         # Markeer elke keer dat de modus verandert
@@ -430,39 +430,55 @@ class SystemIdentificator:
         for run_id, run_data in df_dhw_runs.groupby('run_id'):
             if len(run_data) < 4: continue  # Te korte run (minder dan een uur)
 
+            # FILTER 1: Tappen tijdens opwarmen
+            # Als de bovenste sensor meer dan 1 graad daalt tijdens de run,
+            # wordt er warm water verbruikt. Dit verpest de energiebalans.
+            t_top_start = run_data['dhw_top'].iloc[0]
+            if run_data['dhw_top'].min() < t_top_start - 1.0:
+                continue # Sla deze run over, data is vervuild door tapwatergebruik
+
             # Energie die erin ging (Vermogen * tijd in uren)
-            # We nemen aan dat data 15min (0.25h) is, of bereken exact verschil
             dt_hours = run_data['timestamp'].diff().dt.total_seconds().fillna(900) / 3600.0
+
             total_energy_in = (run_data['wp_output'] * dt_hours).sum()
 
             # Temperatuurstijging (Einde - Begin)
-            # We nemen een gemiddelde van de eerste 2 en laatste 2 metingen voor stabiliteit
             t_start = (run_data['dhw_top'].iloc[:2].mean() + run_data['dhw_bottom'].iloc[:2].mean()) / 2.0
-            t_end = (run_data['dhw_top'].iloc[-2:].mean() + run_data['dhw_bottom'].iloc[-2:].mean()) / 2.0
+
+            # Sensoren lopen altijd wat achter op het water (traagheid van de huls).
+            # We pakken het MAXIMUM van de laatste paar metingen in de run.
+            t_end_top = run_data['dhw_top'].iloc[-3:].max()
+            t_end_bot = run_data['dhw_bottom'].iloc[-3:].max()
+            t_end = (t_end_top + t_end_bot) / 2.0
 
             delta_T_total = t_end - t_start
 
             # Alleen valideren als er serieus gestookt is (> 5 graden erbij en > 1 kWh erin)
             if delta_T_total > 5.0 and total_energy_in > 1.0:
                 c_calc = total_energy_in / delta_T_total
-                calculated_cs.append(c_calc)
+
+                # Uitschieters filteren: Een huishoudelijke boiler is tussen de 100L en 300L.
+                # 100L = ~0.116 kWh/K  |  300L = ~0.348 kWh/K
+                if 0.100 < c_calc < 0.350:
+                    calculated_cs.append(c_calc)
+                    logger.info(
+                        f"[SysID] DHW Run: C={c_calc:.3f} kWh/K, T_start={t_start:.1f}C, T_end={t_end:.1f}C, T_diff={delta_T_total:.1f}C, total_energy_in={total_energy_in:.1f}kWh")
 
         if len(calculated_cs) > 0:
-            # Pak de mediaan om uitschieters (bijv. water tappen tijdens run) te negeren
+            # Pak de mediaan om uitschieters te negeren
             c_median = float(np.median(calculated_cs))
 
-            # Clip tussen realistische waarden voor 150L - 250L effectief
-            # 0.232 is exact 200L. We staan toe dat het iets lager is (dode zones) of iets hoger (vat warmt op)
-            self.C_tank = float(np.clip(c_median, 0.100, 0.500))
+            # Fysieke clip: we staan maximaal 300L toe (0.350 kWh/K)
+            self.C_tank = float(np.clip(c_median, 0.150, 0.350))
             logger.info(
                 f"[SysID] Geleerde Boiler Massa (Integraal): {self.C_tank:.3f} kWh/K (o.b.v. {len(calculated_cs)} runs)")
 
         logger.info(
             f"[Optimizer] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
-            f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f} C_tank={self.C_tank:.3f} T_max_wp={self.T_max_wp:.1f}"
+            f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f} C_tank={self.C_tank:.3f} T_max_dhw={self.T_max_dhw:.1f}"
         )
         joblib.dump(
-            {"R": self.R, "C": self.C, "K_emit": self.K_emit, "K_tank": self.K_tank, "K_loss_dhw": self.K_loss_dhw, "C_tank": self.C_tank, "T_max_wp": self.T_max_wp,
+            {"R": self.R, "C": self.C, "K_emit": self.K_emit, "K_tank": self.K_tank, "K_loss_dhw": self.K_loss_dhw, "C_tank": self.C_tank, "T_max_dhw": self.T_max_dhw,
              "ufh_lag_steps": self.ufh_lag_steps}, self.path)
 
 
@@ -590,6 +606,9 @@ class HydraulicPredictor:
 
                 df_tops = pd.DataFrame({"temp": top_temps, "p_th_raw": top_powers})
 
+                power_slope = 0.0
+                power_base = median_delta_t * self.learned_factor_dhw  # Fallback base
+
                 if len(df_tops) >= 3:
                     X_power = df_tops[["temp"]]
                     y_power = df_tops["p_th_raw"]
@@ -599,7 +618,32 @@ class HydraulicPredictor:
                     power_base = float(reg.intercept_)
                     logger.info(f"[Hydraulic] DHW curve Linear: Slope={power_slope:.2f}, Base={power_base:.1f}")
 
-                self.dhw_delta_base = median_delta_t
+                    # ==========================================================
+                    # D. Validatie & Heuristische grenzen (Empirisch capaciteitsmodel)
+                    # ==========================================================
+                    # We accepteren de geleerde slope als het werkelijke systeemgedrag
+                    # (inclusief interne modulatie en compressor-begrenzing door de warmtepomp-software).
+                    # Dit is een identificatie van de operationele envelop, geen natuurwet.
+
+                    # Heuristische modelkeuzes: begrens de helling om extreme extrapolatie
+                    # buiten het gemeten temperatuurbereik te voorkomen.
+                    power_slope = float(np.clip(power_slope, -0.15, 0.25))
+
+                    # Koppel terug aan de energiebalans via de effectieve, constante flow-factor
+                    self.dhw_delta_slope = power_slope / self.learned_factor_dhw
+                    self.dhw_delta_base = power_base / self.learned_factor_dhw
+
+                    # Veiligheidsheuristiek: garandeer een realistische minimum ΔT (en dus >0 P_th)
+                    # bij hoge buitentemperaturen (35 °C). Dit voorkomt dat de wiskundige solver
+                    # een nul-vermogen staat plant in de zomer.
+                    min_delta_at_35C = self.dhw_delta_base + (self.dhw_delta_slope * 35.0)
+                    if min_delta_at_35C < 1.5:
+                        logger.warning(
+                            f"[Hydraulic] Geëxtrapoleerde curve duikt te laag bij 35C. Base heuristisch verschoven.")
+                        self.dhw_delta_base += (1.5 - min_delta_at_35C)
+
+                    logger.info(
+                        f"[Hydraulic] Empirisch DHW capaciteitsmodel geaccepteerd: PowerSlope={power_slope:.2f} -> DeltaSlope={self.dhw_delta_slope:.3f}")
 
                 # Train ML Model voor Supply Temp (dit model leert ook evt niet-lineair gedrag)
                 self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features],
