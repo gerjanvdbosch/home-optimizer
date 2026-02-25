@@ -102,7 +102,7 @@ class HPPerformanceMap:
         df_f["t_rounded"] = df_f["temp"].round()
 
         # Wat is het maximale en minimale elektrische vermogen per buitentemperatuur?
-        max_stats = df_f.groupby("t_rounded")["wp_actual"].quantile(0.98).reset_index()
+        max_stats = df_f.groupby("t_rounded")["wp_actual"].quantile(0.99).reset_index()
         min_stats = df_f.groupby("t_rounded")["wp_actual"].quantile(0.05).reset_index()
 
         if not max_stats.empty:
@@ -588,8 +588,9 @@ class HydraulicPredictor:
             df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"]).copy()
 
             if len(df_dhw) > 10:
-                self.learned_factor_dhw = FACTOR_DHW
                 actual_lift_dhw = df_dhw["return_temp"] - df_dhw["dhw_bottom"]
+
+                self.learned_factor_dhw = FACTOR_DHW
                 self.learned_lift_dhw = max(1.0, actual_lift_dhw.quantile(0.10))
 
                 # Bepaal gemiddelden (robuust tegen uitschieters)
@@ -629,28 +630,26 @@ class HydraulicPredictor:
                     # buiten het gemeten temperatuurbereik te voorkomen.
                     power_slope = float(np.clip(power_slope, -0.15, 0.25))
 
-                    # Koppel terug aan de energiebalans via de effectieve, constante flow-factor
-                    self.dhw_delta_slope = power_slope / self.learned_factor_dhw
-                    self.dhw_delta_base = power_base / self.learned_factor_dhw
+                # Koppel terug aan de energiebalans via de effectieve, constante flow-factor
+                self.dhw_delta_slope = power_slope / self.learned_factor_dhw
+                self.dhw_delta_base = power_base / self.learned_factor_dhw
 
-                    # Veiligheidsheuristiek: garandeer een realistische minimum ΔT (en dus >0 P_th)
-                    # bij hoge buitentemperaturen (35 °C). Dit voorkomt dat de wiskundige solver
-                    # een nul-vermogen staat plant in de zomer.
-                    min_delta_at_35C = self.dhw_delta_base + (self.dhw_delta_slope * 35.0)
-                    if min_delta_at_35C < 1.5:
-                        logger.warning(
-                            f"[Hydraulic] Geëxtrapoleerde curve duikt te laag bij 35C. Base heuristisch verschoven.")
-                        self.dhw_delta_base += (1.5 - min_delta_at_35C)
-
-                    logger.info(
-                        f"[Hydraulic] Empirisch DHW capaciteitsmodel geaccepteerd: PowerSlope={power_slope:.2f} -> DeltaSlope={self.dhw_delta_slope:.3f}")
-
-                # Train ML Model voor Supply Temp (dit model leert ook evt niet-lineair gedrag)
-                self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features],
-                                                                                                df_dhw["supply_temp"])
+                # Veiligheidsheuristiek: garandeer een realistische minimum ΔT (en dus >0 P_th)
+                # bij hoge buitentemperaturen (35 °C). Dit voorkomt dat de wiskundige solver
+                # een nul-vermogen staat plant in de zomer.
+                min_delta_at_35C = self.dhw_delta_base + (self.dhw_delta_slope * 35.0)
+                if min_delta_at_35C < 1.5:
+                    logger.warning(
+                        f"[Hydraulic] Geëxtrapoleerde curve duikt te laag bij 35C. Base heuristisch verschoven.")
+                    self.dhw_delta_base += (1.5 - min_delta_at_35C)
 
                 logger.info(
-                    f"[Hydraulic] DHW Final: Lift={self.learned_lift_dhw:.1f}C, Base DeltaT={self.dhw_delta_base:.1f}C")
+                    f"[Hydraulic] Empirisch DHW capaciteitsmodel geaccepteerd: PowerSlope={power_slope:.2f} -> DeltaSlope={self.dhw_delta_slope:.3f}")
+
+                # Train ML Model voor Supply Temp (dit model leert ook evt niet-lineair gedrag)
+                self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features], df_dhw["supply_temp"])
+
+                logger.info(f"[Hydraulic] DHW Final: Lift={self.learned_lift_dhw:.1f}C, Base DeltaT={self.dhw_delta_base:.1f}C")
 
         self.is_fitted = True
         joblib.dump({
@@ -1064,9 +1063,9 @@ class ThermalMPC:
                 # Limits (safety)
                 min_kw, max_kw = self.perf_map.get_pel_limits(t_out)
                 if fixed_p_ufh[t] > 0.05:
-                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.8, max_kw * 1.1)
+                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.8, max_kw * 1.2)
                 if fixed_p_dhw[t] > 0.05:
-                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.8, max_kw * 1.1)
+                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.8, max_kw * 1.2)
 
                 logger.debug(f"Time {t}: T_out={t_out:.1f}C | "
                              f"UFH: T_sup={t_sup_u:.1f}C, dT={dt_u:.1f}C, P_th={p_th_ufh:.2f}kW, COP={cop_u[t]:.2f}, P_el={fixed_p_ufh[t]:.2f}kW | "
