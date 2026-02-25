@@ -133,7 +133,7 @@ class HPPerformanceMap:
         max_p = float(self.max_pel_model.predict(t_df)[0])
 
         # Zorg voor logische grenzen
-        return np.clip(min_p, 0.2, 1.0), np.clip(max_p, 1.5, 4.0)
+        return np.clip(min_p, 0.5, 1.5), np.clip(max_p, 1.5, 4.0)
 
 
 # =========================================================
@@ -510,7 +510,7 @@ class HydraulicPredictor:
                 self.dhw_delta_base = data.get("dhw_base", 5.0)
 
                 self.is_fitted = True
-                logger.info("[Hydraulic] Zelflerend aanvoertemperatuur model geladen.")
+                logger.info(f"[Hydraulic] Model geladen. Geleerde parameters: UFH Factor={self.learned_factor_ufh:.2f}, DHW Factor={self.learned_factor_dhw:.2f}, UFH Lift={self.learned_lift_ufh:.2f}C, DHW Lift={self.learned_lift_dhw:.2f}C, UFH Slope={self.learned_ufh_slope:.2f}")
             except Exception as e:
                 logger.warning(f"[Hydraulic] Model laden mislukt: {e}")
 
