@@ -516,111 +516,99 @@ class HydraulicPredictor:
 
     def train(self, df: pd.DataFrame):
         df = df.copy()
-        df["delta_t"] = (df["supply_temp"] - df["return_temp"]).clip(lower=0.1) # Voorkom delen door nul
 
-        # Bepaal sink temp
+        # 1. Bereken fysieke Delta T en check sensoren
+        df["delta_t"] = (df["supply_temp"] - df["return_temp"])
+        df = df[(df["delta_t"] > 0.1) & (df["delta_t"] < 15.0)].copy()
+
+        # 2. Bepaal sink temp & HVAC mode logica
         conditions = [df["hvac_mode"] == HvacMode.HEATING.value, df["hvac_mode"] == HvacMode.DHW.value]
         choices_sink = [df["room_temp"], df["dhw_bottom"]]
         df["sink_temp"] = np.select(conditions, choices_sink, default=20.0)
 
-        # Bereken vermogen op basis van vaste constanten (om te labelen)
-        # of gebruik wp_output uit data als je een echte warmtemeter hebt.
-        df["wp_output"] = np.select(conditions, [df["delta_t"] * FACTOR_UFH, df["delta_t"] * FACTOR_DHW], default=0.0)
-        df_proc = df.copy()
-        # --- Filteren voor UFH (Verwarming) ---
+        # 3. Bereken Vermogen (p_th_raw) voor filtering
+        # We gebruiken de vaste factors als referentie
+        choices_p = [df["delta_t"] * FACTOR_UFH, df["delta_t"] * FACTOR_DHW]
+        df["p_th_raw"] = np.select(conditions, choices_p, default=0.0)
+        df["wp_output"] = df["p_th_raw"]  # Voor backwards compatibility features
+
+        # =========================================================================
+        # UFH TRAINING (VLOERVERWARMING) - Ongewijzigd, dit werkte goed
+        # =========================================================================
         mask_ufh = (
-            (df["hvac_mode"] == HvacMode.HEATING.value) &
-            (df["wp_output"] > 0.5) &
-            (df["supply_temp"] > df["room_temp"] + 1.0) &
-            (df["delta_t"] > 0.5)
+                (df["hvac_mode"] == HvacMode.HEATING.value) &
+                (df["p_th_raw"] > 0.5) &
+                (df["supply_temp"] > df["room_temp"] + 1.0)
         )
         df_ufh = df[mask_ufh].dropna(subset=self.features + ["supply_temp", "return_temp"])
 
         if len(df_ufh) > 15:
-            # 1. Leer de FLOW Factor (Vermogen / DeltaT)
-            # We pakken de mediaan omdat flow vaak constant is bij vloerverwarming
-            self.learned_factor_ufh = (df_ufh["wp_output"] / df_ufh["delta_t"]).median()
-
-            # 2. Leer de Minimale Lift (Retour - Kamer)
-            # We pakken het 5e percentiel: wat is het minimale verschil dat we nodig hebben?
-            # Dit vertegenwoordigt de situatie "net genoeg warmteafgifte".
+            self.learned_factor_ufh = (df_ufh["p_th_raw"] / df_ufh["delta_t"]).median()
             actual_lift = df_ufh["return_temp"] - df_ufh["room_temp"]
             self.learned_lift_ufh = max(0.2, actual_lift.quantile(0.05))
 
-            # --- NIEUW: Leer de Stooklijn (Heating Curve) ---
-            # Filteren: We kijken alleen naar momenten dat het buiten koud is (< 15 graden)
-            # en de warmtepomp stabiel draait.
-            mask_curve = (
-                    (df["hvac_mode"] == HvacMode.HEATING.value) &
-                    (df["wp_output"] > 0.5) &
-                    (df["temp"] < 15.0) &  # Alleen als er echt verwarmd moet worden
-                    (df["supply_temp"] > df["room_temp"] + 2.0)
-            )
+            mask_curve = (mask_ufh & (df["temp"] < 15.0) & (df["supply_temp"] > df["room_temp"] + 2.0))
             df_curve = df[mask_curve].copy()
-
             if len(df_curve) > 50:
-                # Formule: Extra_Temp = Slope * (20 - Buiten_Temp)
-                # Dus: Slope = Extra_Temp / (20 - Buiten_Temp)
-
                 delta_t_buiten = (20.0 - df_curve["temp"])
-                # De 'lift' trekken we er eerst af, we willen alleen de weersafhankelijke stijging weten
                 extra_supply = (df_curve["supply_temp"] - df_curve["room_temp"] - self.learned_lift_ufh)
-
-                # Bereken slope per datapunt
                 slopes = extra_supply / delta_t_buiten
-
-                # Pak de mediaan (robuust tegen uitschieters) en begrens hem logisch (0.1 tot 1.5)
                 self.learned_ufh_slope = float(np.clip(slopes.median(), 0.1, 1.5))
 
-                logger.info(
-                    f"[Hydraulic] NIEUWE Stooklijn geleerd: {self.learned_ufh_slope:.2f} (supply stijgt zoveel graden per graad kouder buiten)")
-
-            # Train ML Model
-            self.model_supply_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_ufh[self.features], df_ufh["supply_temp"])
-            logger.info(f"[Hydraulic] UFH Geleerd: Factor={self.learned_factor_ufh:.2f} kW/K, MinLift={self.learned_lift_ufh:.2f}C")
-
-        # --- DHW TRAINING & PARAMETER EXTRACTIE ---
-        mask_dhw = (
-            (df["hvac_mode"] == HvacMode.DHW.value) &
-            (df["wp_output"] > 0.8) &
-            (df["supply_temp"] > df["dhw_bottom"] + 2.0)
-        )
-        df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"])
-
-        if len(df_dhw) > 10:
-            # 1. Leer Flow Factor
-            self.learned_factor_dhw = (df_dhw["wp_output"] / df_dhw["delta_t"]).median()
-
-            # 2. Leer Lift (Retour - TankBodem)
-            actual_lift_dhw = df_dhw["return_temp"] - df_dhw["dhw_bottom"]
-            self.learned_lift_dhw = max(1.0, actual_lift_dhw.quantile(0.05))
-
-            # Train ML Model
-            self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features], df_dhw["supply_temp"])
-
-            X = df_dhw[["temp"]]  # Buitentemperatuur
-            y = df_dhw["delta_t"]  # Werkelijke Delta T
-
-            reg = LinearRegression().fit(X, y)
-
-            self.dhw_delta_slope = float(reg.coef_[0])
-            self.dhw_delta_base = float(reg.intercept_)
-
+            self.model_supply_ufh = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_ufh[self.features],
+                                                                                            df_ufh["supply_temp"])
             logger.info(
-                f"[Hydraulic] DHW Delta-Slope geleerd: {self.dhw_delta_slope:.3f} K/graad_buiten (Base={self.dhw_delta_base:.2f}K)")
+                f"[Hydraulic] UFH Geleerd: Factor={self.learned_factor_ufh:.2f}, Slope={self.learned_ufh_slope:.2f}")
 
-            # Sanity Check: De slope moet positief zijn (warmer buiten = meer vermogen = grotere delta)
-            # Als hij negatief is, is de data waarschijnlijk ruis, zet op 0 (constant)
-            if self.dhw_delta_slope < -0.1:
-                logger.warning("[Hydraulic] Onlogische negatieve DHW slope. Fallback naar constant.")
-                self.dhw_delta_slope = 0.0
-                self.dhw_delta_base = df_dhw["delta_t"].median()
+            # =========================================================================
+            # DHW TRAINING (ROBUUST & SIMPEL)
+            # =========================================================================
+            mask_dhw = (
+                    (df["hvac_mode"] == HvacMode.DHW.value) &
+                    (df["p_th_raw"] > 1.5) &  # Alleen actief draaiend
+                    (df["delta_t"] > 2.0) &
+                    (df["supply_temp"] > df["dhw_bottom"] + 3.0)
+            )
+            df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"]).copy()
 
+            if len(df_dhw) > 10:
+                self.learned_factor_dhw = FACTOR_DHW
+                actual_lift_dhw = df_dhw["return_temp"] - df_dhw["dhw_bottom"]
+                self.learned_lift_dhw = max(1.0, actual_lift_dhw.quantile(0.10))
 
-            logger.info(f"[Hydraulic] DHW Geleerd: Factor={self.learned_factor_dhw:.2f} kW/K, MinLift={self.learned_lift_dhw:.2f}C")
+                # Bepaal gemiddelden (robuust tegen uitschieters)
+                median_delta_t = df_dhw["delta_t"].median()
+
+                df_dhw["t_bin"] = df_dhw["temp"].round()
+                top_powers = []
+                top_temps = []
+
+                for t_val, group in df_dhw.groupby("t_bin"):
+                    if len(group) >= 3:
+                        top_powers.append(group["p_th_raw"].quantile(0.90))
+                        top_temps.append(t_val)
+
+                df_tops = pd.DataFrame({"temp": top_temps, "p_th_raw": top_powers})
+
+                if len(df_tops) >= 3:
+                    X_power = df_tops[["temp"]]
+                    y_power = df_tops["p_th_raw"]
+
+                    reg = LinearRegression().fit(X_power, y_power)
+                    power_slope = float(reg.coef_[0])
+                    power_base = float(reg.intercept_)
+                    logger.info(f"[Hydraulic] DHW curve Linear: Slope={power_slope:.2f}, Base={power_base:.1f}")
+
+                self.dhw_delta_base = median_delta_t
+
+                # Train ML Model voor Supply Temp (dit model leert ook evt niet-lineair gedrag)
+                self.model_supply_dhw = RandomForestRegressor(n_estimators=50, max_depth=6).fit(df_dhw[self.features],
+                                                                                                df_dhw["supply_temp"])
+
+                logger.info(
+                    f"[Hydraulic] DHW Final: Lift={self.learned_lift_dhw:.1f}C, Base DeltaT={self.dhw_delta_base:.1f}C")
 
         self.is_fitted = True
-        # Sla alles op, inclusief de geleerde constanten
         joblib.dump({
             "supply_ufh": self.model_supply_ufh,
             "supply_dhw": self.model_supply_dhw,
