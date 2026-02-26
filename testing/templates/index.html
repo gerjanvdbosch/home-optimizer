@@ -376,6 +376,52 @@
             margin: 0;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
+
+         .badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            display: inline-block;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        .badge-ufh {
+            background: rgba(208, 92, 227, 0.15);
+            color: #d05ce3;
+            border: 1px solid rgba(208, 92, 227, 0.3);
+        }
+
+        .badge-dhw {
+            background: rgba(0, 229, 255, 0.15);
+            color: #00e5ff;
+            border: 1px solid rgba(0, 229, 255, 0.3);
+        }
+
+        .badge-off {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Maak inactieve rijen iets transparanter voor meer rust */
+        .row-off {
+            opacity: 0.6;
+        }
+
+        /* Zorg dat de tabel op mobiel niet breekt */
+        .data-table th, .data-table td {
+            white-space: nowrap;
+        }
+
+        .unit {
+            font-size: 0.75em; /* Nog ietsje kleiner */
+            color: rgba(225, 225, 225, 0.35); /* Stuk lichter dan de rest van de tekst (35% zichtbaar) */
+            font-weight: normal;
+            margin-left: 2px; /* Klein beetje ademruimte tussen getal en eenheid */
+        }
     </style>
 </head>
 <body>
@@ -492,80 +538,66 @@
         </div>
 
         <div class="table-container">
-            <table class="data-table">
+           <table class="data-table">
                 <thead>
                 <tr>
-                    <th>Tijd</th>
+                    <th style="text-align: left;">Tijd</th>
+                    <th>Buiten</th>
+                    <th>Zon</th>
+                    <th>Load</th>
+                    <th>Kamer</th>
+                    <th>Boiler</th>
                     <th style="text-align: center;">Mode</th>
-                    <th>Supply (°C)</th>
-                    <th>Power (kW)</th>
+                    <th>Aanvoer</th>
                     <th>COP</th>
-                    <th>Temp (°C)</th>
-                    <th>Solar (kW)</th>
-                    <th>Load (kW)</th>
-                    <th>Room (°C)</th>
-                    <th>DHW (°C)</th>
+                    <th>Verbruik</th>
                 </tr>
                 </thead>
                 <tbody>
                 {% for row in plan %}
-                <tr>
-                    <td>{{ row.time }}</td>
+                <tr class="{% if row.mode == '-' %}row-off{% endif %}">
+                    <!-- Tijd -->
+                    <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
 
-                    <!-- MODE KOLOM -->
-                    <td style="text-align: center; font-weight: bold;
-                            color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
-                        {{ row.mode }}
+                    <!-- Weer & Stroom (Context) -->
+                    <td style="color: var(--text-muted);">{{ row.t_out }} <span class="unit">&deg;C</span></td>
+
+                    <td style="color: {% if row.p_solar|float > 0.1 %}#FF9100{% else %}var(--text-muted){% endif %};">
+                        {{ row.p_solar }} <span class="unit">kW</span>
                     </td>
 
-                    <!-- SUPPLY TEMP: Toon UFH of DHW waarde afhankelijk van mode -->
-                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
-                        {% if row.mode == 'UFH' %}
-                            {{ "%.1f"|format(row.supply_ufh|float) }}
-                        {% elif row.mode == 'DHW' %}
-                            {{ "%.1f"|format(row.supply_dhw|float) }}
-                        {% else %}
-                            -
-                        {% endif %}
+                    <td style="color: {% if row.p_load|float > 0.5 %}#F50057{% else %}var(--text-muted){% endif %};">
+                        {{ row.p_load }} <span class="unit">kW</span>
                     </td>
 
-                    <!-- P_EL (kW): Toon actief vermogen -->
-                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
-                        {% if row.mode == 'UFH' %}
-                            {{ "%.2f"|format(row.p_el_ufh|float) }}
-                        {% elif row.mode == 'DHW' %}
-                            {{ "%.2f"|format(row.p_el_dhw|float) }}
-                        {% else %}
-                            0.00
-                        {% endif %}
+                    <!-- Temperaturen (Status) -->
+                    <td style="font-weight: 500;">{{ row.t_room }} <span class="unit">&deg;C</span></td>
+                    <td style="font-weight: 500;">{{ row.t_dhw }} <span class="unit">&deg;C</span></td>
+
+                    <!-- Modus (Actie) -->
+                    <td style="text-align: center;">
+                        <span class="badge {% if row.mode == 'UFH' %}badge-ufh{% elif row.mode == 'DHW' %}badge-dhw{% else %}badge-off{% endif %}">
+                            {{ row.mode }}
+                        </span>
                     </td>
 
-                    <!-- COP: Toon actieve COP -->
-                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
-                        {% if row.mode == 'UFH' %}
-                            {{ "%.1f"|format(row.cop_ufh|float) }}
-                        {% elif row.mode == 'DHW' %}
-                            {{ "%.1f"|format(row.cop_dhw|float) }}
-                        {% else %}
-                            -
-                        {% endif %}
+                    <!-- Warmtepomp Data -->
+                    <td style="color: var(--text-muted);">
+                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.supply_ufh|float) }} <span class="unit">&deg;C</span>
+                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.supply_dhw|float) }} <span class="unit">&deg;C</span>
+                        {% else %}-{% endif %}
                     </td>
 
-                    <!-- Overige kolommen -->
-                    <td style="color: var(--text-muted);">{{ row.t_out }}</td>
-
-                    <td style="color: {% if row.p_solar|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">
-                        {{ row.p_solar }}
+                    <td style="color: var(--text-muted);">
+                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.cop_ufh|float) }}
+                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.cop_dhw|float) }}
+                        {% else %}-{% endif %}
                     </td>
 
-                    <td style="color: var(--text-muted);">{{ row.p_load }}</td>
-
-                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% endif %};">
-                        {{ row.t_room }}
-                    </td>
-
-                    <td style="color: {% if row.mode == 'DHW' %}#00e5ff{% endif %};">
-                        {{ row.t_dhw }}
+                    <td style="font-weight: {% if row.mode != '-' %}600{% else %}normal{% endif %}; color: {% if row.mode != '-' %}var(--text-color){% else %}var(--text-muted){% endif %};">
+                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.p_el_ufh|float) }} <span class="unit">kW</span>
+                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.p_el_dhw|float) }} <span class="unit">kW</span>
+                        {% else %}-{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -600,35 +632,66 @@
 
         <div class="table-container">
             {% if measurements %}
-            <table class="data-table">
+           <table class="data-table">
                 <thead>
                 <tr>
-                    <!-- Dynamische headers op basis van view -->
                     {% set unit = 'kWh' if current_view == 'hour' else 'kW' %}
-                    <th>Tijd</th>
-                    <th>PV ({{ unit }})</th>
-                    <th>Import ({{ unit }})</th>
-                    <th>Export ({{ unit }})</th>
-                    <th>Totaal ({{ unit }})</th>
-                    <th>WP ({{ unit }})</th>
-                    <th>Base ({{ unit }})</th>
+                    <th style="text-align: left;">Tijd</th>
+                    <th>Zon</th>
+                    <th>Basis</th>
+                    <th style="text-align: center;">WP Mode</th>
+                    <th>WP Verbruik</th>
+                    <th>Totaal</th>
+                    <th>Import</th>
+                    <th>Export</th>
                 </tr>
                 </thead>
-                <tbody>
+               <tbody>
                 {% for row in measurements %}
-                <tr>
-                    <td>{{ row.time }}</td>
-                    <td style="color: {% if row.pv|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">{{
-                            row.pv
-                        }}
+                <tr class="{% if row.base == row.import %}row-off{% endif %}">
+                    <!-- Tijd -->
+                    <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
+
+                    <!-- Zon -->
+                    <td style="color: {% if row.pv|float > 0.05 %}#FF9100{% else %}var(--text-muted){% endif %};">
+                        {{ row.pv }} <span class="unit">{{ unit }}</span>
                     </td>
-                    <td>{{ row.import }}</td>
-                    <td>{{ row.export }}</td>
-                    <td style="font-weight: bold;">{{ row.total }}</td>
-                    <td style="color: {% if row.mode == 1 %}#00e5ff{% elif row.mode == 4 %}#00e5ff{% elif row.mode == 2 %}#d05ce3{% else %}var(--text-muted){% endif %};">
-                        {{ row.wp }}
+
+                    <!-- Basis Load (Huis) -->
+                    <td style="color: {% if row.base|float > 0.1 %}#F50057{% else %}var(--text-muted){% endif %};">
+                        {{ row.base }} <span class="unit">{{ unit }}</span>
                     </td>
-                    <td>{{ row.base }}</td>
+
+                    <!-- WP Mode Badge -->
+                    <td style="text-align: center;">
+                        {% if row.mode == 2 %}
+                            <span class="badge badge-ufh">UFH</span>
+                        {% elif row.mode == 1 or row.mode == 4 %}
+                            <span class="badge badge-dhw">DHW</span>
+                        {% else %}
+                            <span class="badge badge-off">-</span>
+                        {% endif %}
+                    </td>
+
+                    <!-- WP Verbruik -->
+                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 2 %}#d05ce3{% elif row.mode == 1 or row.mode == 4 %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                        {{ row.wp }} <span class="unit">{{ unit }}</span>
+                    </td>
+
+                    <!-- Totaal Huis Verbruik -->
+                    <td style="font-weight: bold; color: var(--text-color);">
+                        {{ row.total }} <span class="unit">{{ unit }}</span>
+                    </td>
+
+                    <!-- Grid Import (Nu Neuraal) -->
+                    <td style="color: {% if row.import|float > 0.05 %}var(--text-color){% else %}var(--text-muted){% endif %};">
+                        {{ row.import }} <span class="unit">{{ unit }}</span>
+                    </td>
+
+                    <!-- Grid Export (Nu Neutraal) -->
+                    <td style="color: {% if row.export|float > 0.05 %}var(--text-color){% else %}var(--text-muted){% endif %};">
+                        {{ row.export }} <span class="unit">{{ unit }}</span>
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>

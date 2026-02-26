@@ -732,6 +732,9 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
     table_data = []
     for _, row in df.iterrows():
+        raw_mode = row.get("hvac_mode", 0)
+        mode = int(round(raw_mode)) if pd.notna(raw_mode) else 0
+
         table_data.append(
             {
                 "time": row["timestamp"].strftime("%H:%M"),
@@ -742,7 +745,7 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
                 "export": f"{row['grid_export']:.2f}",
                 "total": f"{row['total_calc']:.2f}",
                 "base": f"{row['base_calc']:.2f}",
-                "mode": int(round(row.get("hvac_mode", 0))),
+                "mode": mode,
             }
         )
 
