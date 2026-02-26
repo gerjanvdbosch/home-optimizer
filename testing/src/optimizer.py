@@ -414,7 +414,7 @@ class SystemIdentificator:
         df_dhw = df_proc[df_proc["hvac_mode"] == HvacMode.DHW.value].copy()
         if len(df_dhw) > 10:
             # Wat is de hoogste supply_temp die we ooit in DHW mode hebben gezien?
-            self.T_max_dhw = float(df_dhw['supply_temp'].max())
+            self.T_max_dhw = float(df_dhw['supply_temp'].quantile(0.999))
             logger.info(f"[SysID] Geleerde Max DHW Temp: {self.T_max_dhw:.1f}C")
 
         df_dhw_all = df_proc.copy()
@@ -428,7 +428,8 @@ class SystemIdentificator:
 
         # Loop per run (bijv. elke dag 1 run)
         for run_id, run_data in df_dhw_runs.groupby('run_id'):
-            if len(run_data) < 4: continue  # Te korte run (minder dan een uur)
+            if len(run_data) < 4:
+                continue  # Te korte run (minder dan een uur)
 
             # FILTER 1: Tappen tijdens opwarmen
             # Als de bovenste sensor meer dan 1 graad daalt tijdens de run,
@@ -959,12 +960,15 @@ class ThermalMPC:
         comfort = cp.sum(self.s_room_low * 20.0 + self.s_dhw_low * 5.0 + self.s_room_high * 2.0)
 
         # Penalty voor ELKE KEER dat de modus van 0 naar 1 gaat (starten)
-        start_dhw_penalty = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])) * 10.0  # Zeer zware straf
-        start_ufh_penalty = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) * 0.5
+        start_dhw_penalty = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])) * 100.0  # Zeer zware straf
+        start_ufh_penalty = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) * 5.0
 
         switching = start_ufh_penalty + start_dhw_penalty
 
-        self.problem = cp.Problem(cp.Minimize(net_cost + comfort + switching), constraints)
+        # 2. RENDABILITEITS CHECK (SoC Reward)
+        stored_heat_value = cp.sum(self.t_dhw) * 0.0005
+
+        self.problem = cp.Problem(cp.Minimize(net_cost + comfort + switching - stored_heat_value), constraints)
 
     def _get_targets(self, now, T):
         """Bepaal de comfort-grenzen per tijdslot"""
