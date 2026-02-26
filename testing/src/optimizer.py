@@ -590,7 +590,7 @@ class HydraulicPredictor:
             if len(df_dhw) > 10:
                 actual_lift_dhw = df_dhw["return_temp"] - df_dhw["dhw_bottom"]
 
-                self.learned_factor_dhw = FACTOR_DHW
+                self.learned_factor_dhw = (df_dhw["wp_output"] / df_dhw["delta_t"]).median()
                 self.learned_lift_dhw = max(1.0, actual_lift_dhw.quantile(0.10))
 
                 # Bepaal gemiddelden (robuust tegen uitschieters)
@@ -979,7 +979,7 @@ class ThermalMPC:
 
             # Boiler: Warm hebben voor de avonddouche (17:00-21:00)
             # Rest van de dag mag hij zakken tot 40, maar 's middags boosten we vaak op zon
-            d_min[t] = 50.0 if 16 <= h <= 21 else 10.0
+            d_min[t] = 50.0 if 17 <= h <= 21 else 10.0
             d_max[t] = 55.0 # Max boiler temp (voor COP behoud)
 
         return r_min, r_max, d_min, d_max
@@ -1047,6 +1047,7 @@ class ThermalMPC:
 
                 # Exacte fysica op basis van de oplopende temperatuur in de tank
                 t_sup_d = t_dhw_current + self.hydraulic.learned_lift_dhw + predicted_delta_dhw
+                t_sup_d = min(t_sup_d, self.ident.T_max_dhw)
 
                 numerator_d = k_tank * (t_sup_d - t_dhw_current)
                 denominator_d = 1 + (k_tank / (2 * f_dhw))
