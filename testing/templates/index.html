@@ -422,6 +422,48 @@
             font-weight: normal;
             margin-left: 2px; /* Klein beetje ademruimte tussen getal en eenheid */
         }
+
+        /* --- TOON MEER / GRADIENT STYLING --- */
+        .hidden-row {
+            display: none;
+        }
+
+        .table-fade-container {
+            position: relative;
+        }
+
+        .table-fade-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+            /* Gradient die perfect overloopt in de achtergrondkleur van je card (rgb 28,28,28) */
+            background: linear-gradient(to bottom, rgba(28, 28, 28, 0) 0%, rgba(28, 28, 28, 0.8) 50%, rgba(28, 28, 28, 1) 100%);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 10px;
+            pointer-events: none; /* Klikken gaat door de gradient heen... */
+        }
+
+        .show-more-btn {
+            pointer-events: auto; /* ...behalve op de knop zelf */
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 24px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .show-more-btn:active {
+            transform: translateY(1px);
+        }
     </style>
 </head>
 <body>
@@ -537,7 +579,7 @@
             <h3 style="margin: 0;">Planning</h3>
         </div>
 
-        <div class="table-container">
+       <div class="table-container table-fade-container">
            <table class="data-table">
                 <thead>
                 <tr>
@@ -555,7 +597,7 @@
                 </thead>
                 <tbody>
                 {% for row in plan %}
-                <tr class="{% if row.mode == '-' %}row-off{% endif %}">
+                <tr class="{% if row.mode == '-' %}row-off{% endif %} {% if loop.index > 10 %}hidden-plan-row hidden-row{% endif %}">
                     <!-- Tijd -->
                     <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
 
@@ -603,6 +645,13 @@
                 {% endfor %}
                 </tbody>
             </table>
+
+            <!-- Laat overlay alleen zien als er meer dan 20 rijen zijn -->
+            {% if plan|length > 10 %}
+            <div class="table-fade-overlay" id="plan-overlay">
+                <button class="show-more-btn" onclick="showMore('plan')">Toon meer</button>
+            </div>
+            {% endif %}
         </div>
     </div>
     {% endif %}
@@ -630,7 +679,7 @@
             </div>
         </div>
 
-        <div class="table-container">
+       <div class="table-container table-fade-container">
             {% if measurements %}
            <table class="data-table">
                 <thead>
@@ -648,7 +697,7 @@
                 </thead>
                <tbody>
                 {% for row in measurements %}
-                <tr class="{% if row.base == row.import %}row-off{% endif %}">
+                <tr class="{% if row.base == row.import %}row-off{% endif %} {% if loop.index > 10 %}hidden-meas-row hidden-row{% endif %}">
                     <!-- Tijd -->
                     <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
 
@@ -696,6 +745,12 @@
                 {% endfor %}
                 </tbody>
             </table>
+            <!-- Laat overlay alleen zien als er meer dan 20 rijen zijn -->
+            {% if measurements|length > 10 %}
+            <div class="table-fade-overlay" id="meas-overlay">
+                <button class="show-more-btn" onclick="showMore('meas')">Toon meer</button>
+            </div>
+            {% endif %}
             {% else %}
             <div class="empty-msg">Geen metingen beschikbaar.</div>
             {% endif %}
@@ -731,6 +786,22 @@
 
             window.location.href = url.toString();
         }, 10);
+    }
+
+    function showMore(type) {
+        // Haal de verborgen rijen op voor deze tabel (plan of meas)
+        const hiddenRows = document.querySelectorAll('.hidden-' + type + '-row');
+
+        // Verwijder de .hidden-row class om ze zichtbaar te maken
+        hiddenRows.forEach(row => {
+            row.classList.remove('hidden-row');
+        });
+
+        // Verberg de gradient overlay met de knop
+        const overlay = document.getElementById(type + '-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
     }
 </script>
 </body>

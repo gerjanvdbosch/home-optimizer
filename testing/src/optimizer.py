@@ -1219,6 +1219,8 @@ class Optimizer:
         plan = []
         T = self.mpc.horizon
         now = context.now
+        minute = (now.minute // 15) * 15
+        start_time = now.replace(minute=minute, second=0, microsecond=0)
 
         u_on = self.mpc.ufh_on.value
         d_on = self.mpc.dhw_on.value
@@ -1232,7 +1234,7 @@ class Optimizer:
         d_sup = self.mpc.plan_t_sup_dhw
 
         for t in range(T):
-            ts = now + timedelta(hours=t * 0.25)
+            ts = start_time + timedelta(minutes=t * 15)
             mode_str = "-"
             if d_on[t] > 0.5:
                 mode_str = "DHW"
