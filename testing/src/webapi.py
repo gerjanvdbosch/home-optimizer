@@ -58,6 +58,7 @@ def index(
     importance_html = ""
 
     result = context.result if hasattr(context, "result") else None
+    plan = result.get("plan") if result else None
 
     details = {
         "Mode": result["mode"] if result is not None else "-",
@@ -98,7 +99,7 @@ def index(
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
-            "optimization_plan": getattr(context, "optimization_plan", None),
+            "plan": plan,
             "current_view": view_mode,
             "target_date": target_date,
             "prev_date": prev_date,
@@ -139,8 +140,6 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
-    is_night = df["timestamp_local"].dt.hour.isin([23, 0, 1, 2, 3, 4, 5])
-
     for col in [
         "pv_estimate",
         "pv_actual",
@@ -151,8 +150,6 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     ]:
         if col in df.columns:
             df[col] = df[col].round(2)
-            if col.startswith("power"):
-                df.loc[is_night, col] = 0.0
 
     if df.empty:
         return ""

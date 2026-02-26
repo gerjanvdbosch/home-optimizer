@@ -956,8 +956,24 @@ class ThermalMPC:
         # --- OBJECTIVE FUNCTION ---
         net_cost = cp.sum(cp.multiply(self.p_grid, self.P_prices) - cp.multiply(self.p_export, self.P_export_prices)) * self.dt
 
-        # Comfort penalties
-        comfort = cp.sum(self.s_room_low * 20.0 + self.s_dhw_low * 5.0 + self.s_room_high * 2.0)
+        # 1. Basisstraf: Elke graad afwijking kost een beetje (2.0 punten).
+        # Dit zorgt dat hij liever 0.1 afwijkt dan 0.2.
+        base_penalty = self.s_room_low * 2.0
+
+        # 2. Extra Straf (De "Hockey Stick"):
+        # Zodra de afwijking groter is dan 0.3 graden, komt er een GROTE straf bovenop.
+        # cp.pos(x) betekent: max(0, x).
+        # Dus: als s_room_low 0.2 is -> (0.2 - 0.3) is negatief -> pos() maakt er 0 van. Geen extra straf.
+        # Als s_room_low 0.5 is -> (0.5 - 0.3) is 0.2 -> pos() ziet 0.2 -> keer 100 = 20 strafpunten!
+        extra_penalty = cp.pos(self.s_room_low - 0.3) * 100.0
+
+        # Totale comfort kosten
+        comfort = cp.sum(
+            base_penalty +
+            extra_penalty +
+            self.s_room_high * 2.0 +  # Te warm: lichte straf
+            self.s_dhw_low * 2.0  # Boiler: lichte straf (lineair is prima)
+        )
 
         # Penalty voor ELKE KEER dat de modus van 0 naar 1 gaat (starten)
         start_dhw_penalty = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])) * 100.0  # Zeer zware straf
@@ -978,8 +994,12 @@ class ThermalMPC:
             h = fut_time.hour
 
             # Vloerverwarming: Overdag en 's avonds comfort, 's nachts iets lager
-            r_min[t] = 20.0 if 7 <= h <= 23 else 19.0
-            r_max[t] = 21.5 if 8 <= h <= 20 else 20.5 # Sta lichte "overheating" toe bij zon
+            if 17 <= h < 22:
+                r_min[t], r_max[t] = 20.0, 21.5 # Avond
+            elif 11 <= h < 17:
+                r_min[t], r_max[t] = 19.5, 22.0 # Overdag
+            else:
+                r_min[t], r_max[t] = 19.0, 19.5 # Nacht
 
             # Boiler: Warm hebben voor de avonddouche (17:00-21:00)
             # Rest van de dag mag hij zakken tot 40, maar 's middags boosten we vaak op zon

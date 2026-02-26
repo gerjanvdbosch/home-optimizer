@@ -485,7 +485,7 @@
     </div>
     {% endif %}
 
-    {% if optimization_plan and is_today %}
+    {% if plan and is_today %}
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Planning</h3>
@@ -498,7 +498,7 @@
                     <th>Tijd</th>
                     <th style="text-align: center;">Mode</th>
                     <th>Supply (°C)</th>
-                    <th>P_el (kW)</th>
+                    <th>Power (kW)</th>
                     <th>COP</th>
                     <th>Temp (°C)</th>
                     <th>Solar (kW)</th>
@@ -508,7 +508,7 @@
                 </tr>
                 </thead>
                 <tbody>
-                {% for row in optimization_plan %}
+                {% for row in plan %}
                 <tr>
                     <td>{{ row.time }}</td>
 
