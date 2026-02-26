@@ -506,12 +506,17 @@
         </div>
     </div>
 
-    {% if details and is_today %}
+   {% if details and is_today %}
     <div class="details-grid">
-        {% for key, value in details.items() %}
+        {% for item in details %}
         <div class="stat-item">
-            <span class="stat-label">{{ key }}</span>
-            <span class="stat-value">{{ value }}</span>
+            <span class="stat-label">{{ item.label }}</span>
+            <span class="stat-value" {% if item.color %}style="color: {{ item.color }};"{% endif %}>
+                {{ item.value }}
+                {% if item.unit %}
+                    <span class="unit">{{ item.unit }}</span>
+                {% endif %}
+            </span>
         </div>
         {% endfor %}
     </div>
@@ -631,8 +636,8 @@
                     </td>
 
                     <td style="color: var(--text-muted);">
-                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.cop_ufh|float) }}
-                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.cop_dhw|float) }}
+                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.cop_ufh|float) }}
+                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.cop_dhw|float) }}
                         {% else %}-{% endif %}
                     </td>
 
