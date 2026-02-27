@@ -1459,7 +1459,7 @@ class Optimizer:
 
             plan.append(
                 {
-                    "time": ts.strftime("%H:%M"),
+                    "time": ts,
                     "mode": mode_str,
                     "t_out": f"{context.forecast_df.temp.iloc[t]:.1f}",
                     "p_solar": f"{context.forecast_df.power_corrected.iloc[t]:.2f}",

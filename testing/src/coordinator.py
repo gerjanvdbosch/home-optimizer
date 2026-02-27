@@ -65,7 +65,14 @@ class Coordinator:
                 logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
 
             # Print tabel in de console
-            print(pd.DataFrame(result.get("plan")).to_string(index=False))
+            df_plan = pd.DataFrame(result.get("plan"))
+
+            if not df_plan.empty:
+                df_display = df_plan.copy()
+                df_display["time"] = df_display["time"].dt.strftime("%H:%M")
+
+                # Print de tabel
+                print(df_display.to_string(index=False))
 
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result

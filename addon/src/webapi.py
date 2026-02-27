@@ -54,6 +54,14 @@ def index(
     result = context.result if hasattr(context, "result") else None
     plan = result.get("plan") if result else None
 
+    plan_display = []
+    if plan:
+        for p in plan:
+            p_copy = p.copy()
+            # Zet het object om naar tekst voor de tabel
+            p_copy["time"] = p["time"].strftime("%H:%M")
+            plan_display.append(p_copy)
+
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request, target_date, plan)
     view_mode = "15min" if view == "15min" else "hour"
@@ -155,7 +163,7 @@ def index(
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
-            "plan": plan,
+            "plan": plan_display,
             "current_view": view_mode,
             "target_date": target_date,
             "prev_date": prev_date,
@@ -425,49 +433,57 @@ def _get_solar_forecast_plot(
             )
         )
 
-        # --- PLANNING MET STRAKKE VERTICALE JUMPS ---
+        # --- PLANNING: ALLEEN TOEKOMST TONEN ---
         if plan and is_today:
-            plan_times = [
-                datetime.strptime(p["time"], "%H:%M").replace(
-                    year=target_date.year, month=target_date.month, day=target_date.day
-                )
-                for p in plan
-            ]
-
             for mode_key, color, fill, label in [
                 ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "Plan UFH"),
                 ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "Plan DHW"),
             ]:
                 x_vals = []
                 y_vals = []
+                first_point = True
 
                 for i in range(len(plan)):
+                    slot_time = plan[i]["time"].replace(tzinfo=None)
+
+                    # STAP 1: Filter het verleden eruit (negeer alles voor 'nu')
+                    if slot_time < local_now:
+                        continue
+
                     val = float(plan[i][f"p_el_{mode_key.lower()}"])
                     is_active = plan[i]["mode"] == mode_key
-                    was_active = i > 0 and plan[i - 1]["mode"] == mode_key
+                    # Check of het vorige slot (in de gefilterde lijst) ook actief was
+                    was_active = not first_point and (
+                        i > 0 and plan[i - 1]["mode"] == mode_key
+                    )
                     is_last_active = is_active and (
                         i == len(plan) - 1 or plan[i + 1]["mode"] != mode_key
                     )
 
-                    if is_active and not was_active:
-                        # START: 1 seconde voor de start op 0, dan direct omhoog
-                        # Dit haalt het zichtbare streepje links weg
-                        x_vals.append(plan_times[i] - timedelta(seconds=1))
-                        y_vals.append(0.0)
-                        x_vals.append(plan_times[i])
-                        y_vals.append(val)
-                    elif is_active:
-                        x_vals.append(plan_times[i])
-                        y_vals.append(val)
+                    if is_active:
+                        if not was_active:
+                            # START: verticale muur omhoog op de huidige tijd of start van slot
+                            # We zetten een punt 1 seconde voor de start op 0
+                            start_ts = (
+                                max(slot_time, local_now) if is_today else slot_time
+                            )
+                            x_vals.append(start_ts - timedelta(seconds=1))
+                            y_vals.append(0.0)
+                            x_vals.append(start_ts)
+                            y_vals.append(val)
+                        else:
+                            x_vals.append(slot_time)
+                            y_vals.append(val)
+
+                        first_point = False
 
                     if is_last_active:
-                        # EINDE: Naar 0 aan het einde van het huidige 15-minuten slot
-                        end_of_slot = plan_times[i] + timedelta(minutes=15)
+                        # EINDE: verticale muur omlaag
+                        end_of_slot = slot_time + timedelta(minutes=15)
                         x_vals.append(end_of_slot)
                         y_vals.append(0.0)
-                        # Break de lijn zodat hij niet over de bodem naar het volgende blok loopt
                         x_vals.append(end_of_slot)
-                        y_vals.append(None)
+                        y_vals.append(None)  # Pen van papier
 
                 if x_vals:
                     fig.add_trace(
