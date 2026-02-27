@@ -1130,8 +1130,7 @@ class ThermalMPC:
 
         # 2. RENDABILITEITS CHECK (SoC Reward)
         # We belonen de temperatuur in de boiler én in het beton aan het EINDE van de horizon (T).
-        # Boiler: ~1.5 cent per graad. Vloer: 50 cent per graad (want 15 ton beton).
-        stored_heat_value = (self.t_dhw[T] * 0.015) + (self.t_room[T] * 0.05)
+        stored_heat_value = (self.t_dhw[T] * 0.005) + (self.t_room[T] * 0.20)
 
         self.problem = cp.Problem(
             cp.Minimize(net_cost + comfort + switching - stored_heat_value), constraints
@@ -1158,7 +1157,7 @@ class ThermalMPC:
 
             # Boiler: Warm hebben voor de avonddouche (17:00-18:00)
             # Rest van de dag mag hij zakken tot 40, maar 's middags boosten we vaak op zon
-            d_min[t] = 50.0 if 17 <= h <= 18 else 10.0
+            d_min[t] = 50.0 if 16 <= h <= 19 else 10.0
             d_max[t] = 55.0  # Max boiler temp (voor COP behoud)
 
         return r_min, r_max, d_min, d_max
