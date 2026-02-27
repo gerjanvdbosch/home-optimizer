@@ -1384,9 +1384,12 @@ class Optimizer:
 
         plan = []
         T = self.mpc.horizon
-        now = context.now
-        minute = (now.minute // 15) * 15
-        start_time = now.replace(minute=minute, second=0, microsecond=0)
+
+        local_tz = datetime.now().astimezone().tzinfo
+        now_local = context.now.astimezone(local_tz)
+
+        minute = (now_local.minute // 15) * 15
+        start_time = now_local.replace(minute=minute, second=0, microsecond=0)
 
         u_on = self.mpc.ufh_on.value
         d_on = self.mpc.dhw_on.value
