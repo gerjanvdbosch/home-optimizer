@@ -1123,14 +1123,13 @@ class ThermalMPC:
         start_dhw_future = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
 
         # 3. Totale straf
-        start_ufh_penalty = (start_ufh_now + start_ufh_future) * 30.0
-        start_dhw_penalty = (start_dhw_now + start_dhw_future) * 100.0
+        start_ufh_penalty = (start_ufh_now + start_ufh_future) * 50.0
+        start_dhw_penalty = (start_dhw_now + start_dhw_future) * 150.0
 
         switching = start_ufh_penalty + start_dhw_penalty
 
         # 2. RENDABILITEITS CHECK (SoC Reward)
-        # We belonen de temperatuur in de boiler én in het beton aan het EINDE van de horizon (T).
-        stored_heat_value = (self.t_dhw[T] * 0.005) + (self.t_room[T] * 0.20)
+        stored_heat_value = (self.t_dhw[T] * 0.012) + (self.t_room[T] * 0.20)
 
         self.problem = cp.Problem(
             cp.Minimize(net_cost + comfort + switching - stored_heat_value), constraints
