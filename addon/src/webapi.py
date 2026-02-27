@@ -253,20 +253,51 @@ def _get_solar_forecast_plot(
     fig = go.Figure()
 
     # A. Raw Solcast (Grijs, dashed)
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp_local"],
-            y=df["pv_estimate"],
-            mode="lines",
-            name="Solcast",
-            legendgroup="solcast",
-            line=dict(color="#888888", dash="dash", width=1),
-            opacity=0.7,
-            hovertemplate="%{y:.2f} kW<extra></extra>",
-            showlegend=False,
-            # hoverinfo="skip",
+    if not df_hist_plot.empty:
+        last_hist_ts = df_hist_plot["timestamp_local"].max()
+    else:
+        last_hist_ts = local_now
+
+    # --- 2. SOLCAST FORECAST (TOEKOMST) ---
+    # We pakken alle data van Solcast die op of na het laatste historie-punt ligt
+    df_future_sol = df[df["timestamp_local"] >= last_hist_ts].copy()
+
+    solcast_x = []
+    solcast_y = []
+    for i in range(len(df_future_sol)):
+        val = df_future_sol.iloc[i]["pv_estimate"]
+        ts = df_future_sol.iloc[i]["timestamp_local"]
+
+        is_active = val > 0.01
+        next_is_active = (
+            i < len(df_future_sol) - 1
+            and df_future_sol.iloc[i + 1]["pv_estimate"] > 0.01
         )
-    )
+        prev_is_active = i > 0 and df_future_sol.iloc[i - 1]["pv_estimate"] > 0.01
+
+        if is_active or next_is_active or prev_is_active:
+            solcast_x.append(ts)
+            solcast_y.append(val)
+        else:
+            if solcast_x and solcast_y[-1] is not None:
+                solcast_x.append(ts)
+                solcast_y.append(None)
+
+    if solcast_x:
+        fig.add_trace(
+            go.Scatter(
+                x=solcast_x,
+                y=solcast_y,
+                mode="lines",
+                name="Solcast",
+                legendgroup="solcast",
+                line=dict(color="#888888", dash="dash", width=1),
+                opacity=0.7,
+                connectgaps=False,
+                hovertemplate="%{y:.2f} kW (Solcast Forecast)<extra></extra>",
+                showlegend=False,
+            )
+        )
 
     if "power_ml_raw" in df.columns and is_today:
         fig.add_trace(
@@ -299,19 +330,44 @@ def _get_solar_forecast_plot(
 
     if not df_hist_plot.empty:
         # A. Raw Solcast (Grijs, dashed)
-        fig.add_trace(
-            go.Scatter(
-                x=df_hist_plot["timestamp_local"],
-                y=df_hist_plot["pv_estimate"],
-                mode="lines",
-                name="Solcast",
-                legendgroup="solcast",
-                line=dict(color="#888888", dash="dash", width=1),
-                opacity=0.7,
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-                # hoverinfo="skip",
+        df_hist_sol = df_hist_plot[df_hist_plot["timestamp_local"] <= local_now].copy()
+
+        hist_solcast_x = []
+        hist_solcast_y = []
+        for i in range(len(df_hist_sol)):
+            val = df_hist_sol.iloc[i]["pv_estimate"]
+            ts = df_hist_sol.iloc[i]["timestamp_local"]
+
+            is_active = val > 0.01
+            next_active = (
+                i < len(df_hist_sol) - 1
+                and df_hist_sol.iloc[i + 1]["pv_estimate"] > 0.01
             )
-        )
+            prev_active = i > 0 and df_hist_sol.iloc[i - 1]["pv_estimate"] > 0.01
+
+            if is_active or next_active or prev_active:
+                hist_solcast_x.append(ts)
+                hist_solcast_y.append(val)
+            else:
+                if hist_solcast_x and hist_solcast_y[-1] is not None:
+                    hist_solcast_x.append(ts)
+                    hist_solcast_y.append(None)
+
+        if hist_solcast_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=hist_solcast_x,
+                    y=hist_solcast_y,
+                    mode="lines",
+                    name="Solcast",
+                    legendgroup="solcast",
+                    line=dict(color="#888888", dash="dash", width=1),
+                    opacity=0.7,
+                    connectgaps=False,
+                    showlegend=False,
+                    hovertemplate="%{y:.2f} kW<extra></extra>",
+                )
+            )
 
         fig.add_trace(
             go.Scatter(
@@ -340,73 +396,117 @@ def _get_solar_forecast_plot(
             )
         )
 
-        fig.add_trace(
-            go.Scatter(
-                x=df_hist_plot["timestamp_local"],
-                y=df_hist_plot["pv_actual"],
-                name="Solar",
-                mode="lines",
-                legendgroup="solar",
-                line=dict(color="#FF9100", width=1.5),
-                fill="tozeroy",
-                fillcolor="rgba(255, 145, 0, 0.07)",
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-            )
-        )
+        # --- 1. HISTORISCHE SOLAR (pv_actual) ZONDER 0-LIJN ---
+        pv_x = []
+        pv_y = []
+        for i in range(len(df_hist_plot)):
+            val = df_hist_plot.iloc[i]["pv_actual"]
+            ts = df_hist_plot.iloc[i]["timestamp_local"]
 
-        fig.add_trace(
-            go.Scatter(
-                x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
-                y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
-                mode="lines",
-                line=dict(color="#FF9100", width=1.5),
-                fill="tozeroy",
-                fillcolor="rgba(255, 145, 0, 0.07)",
-                showlegend=False,
-                hoverinfo="skip",
-                legendgroup="solar",
+            # Check of dit punt, het volgende of het vorige punt positief is
+            is_active = val > 0.01
+            next_is_active = (
+                i < len(df_hist_plot) - 1
+                and df_hist_plot.iloc[i + 1]["pv_actual"] > 0.01
             )
-        )
+            prev_is_active = i > 0 and df_hist_plot.iloc[i - 1]["pv_actual"] > 0.01
 
-    # C. Actuele PV Meting (Stip)
-    # We tekenen alleen de stip, de horizontale stippellijn doen we via shapes of een losse trace als je wilt
-    fig.add_trace(
-        go.Scatter(
-            x=[local_now],
-            y=[context.stable_pv],
-            mode="markers",
-            name="Now",
-            showlegend=False,
-            marker=dict(color="#FF9100", size=12, line=dict(color="white", width=1)),
-            zorder=10,
-            hoverinfo="skip",
-        )
-    )
+            # We nemen het punt mee als het zelf actief is,
+            # OF als het de 0 is die direct naast een actief blok ligt (voor de ramp)
+            if is_active or next_is_active or prev_is_active:
+                pv_x.append(ts)
+                pv_y.append(val)
+            else:
+                # Alleen None toevoegen als we net uit een actieve zone komen
+                # Dit breekt de lijn zodat hij 's nachts niet over de bodem loopt
+                if pv_x and pv_y[-1] is not None:
+                    pv_x.append(ts)
+                    pv_y.append(None)
+
+        if pv_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=pv_x,
+                    y=pv_y,
+                    name="Solar",
+                    mode="lines",
+                    legendgroup="solar",
+                    line=dict(color="#FF9100", width=1.5),
+                    fill="tozeroy",
+                    fillcolor="rgba(255, 145, 0, 0.07)",
+                    connectgaps=False,  # Zorg dat de Nones de lijn echt breken
+                    hovertemplate="%{y:.2f} kW<extra></extra>",
+                )
+            )
+
+        # --- 2. VERBINDING NAAR 'NU' (Alleen als er productie is) ---
+        if not df_hist_plot.empty and (
+            df_hist_plot["pv_actual"].iloc[-1] > 0.01 or context.stable_pv > 0.01
+        ):
+            last_ts = df_hist_plot["timestamp_local"].iloc[-1]
+            last_val = df_hist_plot["pv_actual"].iloc[-1]
+
+            # Alleen tekenen als we niet al een 'None' hebben aan het einde
+            fig.add_trace(
+                go.Scatter(
+                    x=[last_ts, local_now],
+                    y=[last_val, context.stable_pv],
+                    mode="lines",
+                    line=dict(color="#FF9100", width=1.5),
+                    fill="tozeroy",
+                    fillcolor="rgba(255, 145, 0, 0.07)",
+                    showlegend=False,
+                    hoverinfo="skip",
+                    legendgroup="solar",
+                )
+            )
 
     if "power_corrected" in df.columns:
-        # D. Corrected Solar
-        df_future = df[df["timestamp_local"] >= local_now]
+        df_future = df[df["timestamp_local"] >= local_now].copy()
 
-        # Om de lijn visueel aan het 'Huidig PV' bolletje te knopen,
-        # plakken we het huidige punt vooraan de lijst.
-        x_future = [local_now] + df_future["timestamp_local"].tolist()
-        y_future = [context.stable_pv] + df_future["power_corrected"].tolist()
+        # We beginnen bij het huidige bolletje (Now)
+        corr_x = [local_now]
+        corr_y = [context.stable_pv]
 
-        fig.add_trace(
-            go.Scatter(
-                x=x_future,
-                y=y_future,
-                mode="lines",
-                showlegend=False,
-                legendgroup="solar",
-                line=dict(color="#ffffff", dash="dash", width=1.5),
-                fill="tozeroy",  # Vul tot aan de X-as (0)
-                fillcolor="rgba(255, 255, 255, 0.05)",
-                opacity=0.8,
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-                # hoverinfo="skip",
+        for i in range(len(df_future)):
+            val = df_future.iloc[i]["power_corrected"]
+            ts = df_future.iloc[i]["timestamp_local"]
+
+            is_active = val > 0.01
+            # Check buren voor natuurlijke helling (ramp)
+            next_active = (
+                i < len(df_future) - 1
+                and df_future.iloc[i + 1]["power_corrected"] > 0.01
             )
-        )
+            prev_active = (
+                i > 0 and df_future.iloc[i - 1]["power_corrected"] > 0.01
+            ) or (context.stable_pv > 0.01 and i == 0)
+
+            if is_active or next_active or prev_active:
+                corr_x.append(ts)
+                corr_y.append(val)
+            else:
+                # Breekt de lijn als het donker is
+                if corr_x and corr_y[-1] is not None:
+                    corr_x.append(ts)
+                    corr_y.append(None)
+
+        if len(corr_x) > 1:
+            fig.add_trace(
+                go.Scatter(
+                    x=corr_x,
+                    y=corr_y,
+                    mode="lines",
+                    showlegend=False,
+                    legendgroup="solar",
+                    line=dict(color="#ffffff", dash="dash", width=1.5),
+                    fill="tozeroy",
+                    opacity=0.8,
+                    fillcolor="rgba(255, 255, 255, 0.05)",
+                    connectgaps=False,  # Zorg dat de Nones de lijn echt verbreken
+                    hovertemplate="%{y:.2f} kW (Forecast)<extra></extra>",
+                )
+            )
 
     # E. Load Forecast (Rood)
     if "load_corrected" in df.columns:
@@ -436,8 +536,8 @@ def _get_solar_forecast_plot(
         # --- PLANNING: ALLEEN TOEKOMST TONEN ---
         if plan and is_today:
             for mode_key, color, fill, label in [
-                ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "Plan UFH"),
-                ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "Plan DHW"),
+                ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "UFH"),
+                ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "DHW"),
             ]:
                 x_vals = []
                 y_vals = []
