@@ -58,12 +58,14 @@ class Coordinator:
             logger.info(f"Status: {result.get('status', 'FAIL')}")
             logger.info(f"Gekozen Modus: {result.get('mode', 'OFF')}")
 
-            if result.get('mode') != "OFF":
-                logger.info(f"Doel Elektrisch Vermogen: {result.get('target_pel_kw')} kW")
+            if result.get("mode") != "OFF":
+                logger.info(
+                    f"Doel Elektrisch Vermogen: {result.get('target_pel_kw')} kW"
+                )
                 logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
 
             # Print tabel in de console
-            print(pd.DataFrame(result.get('plan')).to_string(index=False))
+            print(pd.DataFrame(result.get("plan")).to_string(index=False))
 
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
@@ -82,7 +84,9 @@ if __name__ == "__main__":
     try:
         config = Config.load()
         context = Context(
-            now=datetime.now(timezone.utc).replace(day=14, month=1, year=2026, hour=12,minute=0, second=0)
+            now=datetime.now(timezone.utc).replace(
+                day=14, month=1, year=2026, hour=12, minute=0, second=0
+            )
         )
         client = HAClient(config)
         database = Database(config)

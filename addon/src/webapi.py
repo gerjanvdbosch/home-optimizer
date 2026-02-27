@@ -62,7 +62,9 @@ def index(
 
     # Huidige temperaturen veilig ophalen
     room_t = getattr(context, "room_temp", 0.0)
-    dhw_t = (getattr(context, "dhw_top", 0.0) + getattr(context, "dhw_bottom", 0.0)) / 2.0
+    dhw_t = (
+        getattr(context, "dhw_top", 0.0) + getattr(context, "dhw_bottom", 0.0)
+    ) / 2.0
 
     # Actuele COP bepalen uit het plan (rij 0 is 'nu')
     current_cop = "-"
@@ -76,23 +78,43 @@ def index(
     # Gestructureerde lijst maken
     details = []
     if result:
-        details.extend([
-            {"label": "Modus", "value": result.get("mode", "-")},
-            {"label": "Zon Actueel",
-             "value": f"{context.stable_pv:.2f}" if getattr(context, "stable_pv", None) is not None else "-",
-             "unit": "kW",
-             # "color": "#FF9100"
-            },
-            {"label": "Huis Actueel",
-             "value": f"{context.stable_load:.2f}" if getattr(context, "stable_load", None) is not None else "-",
-             "unit": "kW",
-             # "color": "#F50057"
-             },
-            {"label": "Kamer Temp", "value": f"{room_t:.1f}", "unit": "°C"},
-            {"label": "Boiler Temp", "value": f"{dhw_t:.1f}", "unit": "°C"},
-            {"label": "Doel Aanvoer", "value": f"{result.get('target_supply_temp', 0):.1f}", "unit": "°C"},
-            {"label": "Doel Vermogen", "value": f"{result.get('target_pel_kw', 0):.2f}", "unit": "kW"}
-        ])
+        details.extend(
+            [
+                {"label": "Modus", "value": result.get("mode", "-")},
+                {
+                    "label": "Zon Actueel",
+                    "value": (
+                        f"{context.stable_pv:.2f}"
+                        if getattr(context, "stable_pv", None) is not None
+                        else "-"
+                    ),
+                    "unit": "kW",
+                    # "color": "#FF9100"
+                },
+                {
+                    "label": "Huis Actueel",
+                    "value": (
+                        f"{context.stable_load:.2f}"
+                        if getattr(context, "stable_load", None) is not None
+                        else "-"
+                    ),
+                    "unit": "kW",
+                    # "color": "#F50057"
+                },
+                {"label": "Kamer Temp", "value": f"{room_t:.1f}", "unit": "°C"},
+                {"label": "Boiler Temp", "value": f"{dhw_t:.1f}", "unit": "°C"},
+                {
+                    "label": "Doel Aanvoer",
+                    "value": f"{result.get('target_supply_temp', 0):.1f}",
+                    "unit": "°C",
+                },
+                {
+                    "label": "Doel Vermogen",
+                    "value": f"{result.get('target_pel_kw', 0):.2f}",
+                    "unit": "kW",
+                },
+            ]
+        )
 
         # Alleen de COP tonen als hij daadwerkelijk draait
         if current_cop != "-":
@@ -100,9 +122,17 @@ def index(
 
     # Optionele debug/ML informatie toevoegen
     if hasattr(context, "solar_bias"):
-        details.append({"label": "Zon Bias", "value": f"{context.solar_bias * 100:.1f}", "unit": "%"})
+        details.append(
+            {
+                "label": "Zon Bias",
+                "value": f"{context.solar_bias * 100:.1f}",
+                "unit": "%",
+            }
+        )
     if hasattr(context, "load_bias"):
-        details.append({"label": "Load Bias", "value": f"{context.load_bias:.2f}", "unit": "kW"})
+        details.append(
+            {"label": "Load Bias", "value": f"{context.load_bias:.2f}", "unit": "kW"}
+        )
 
     # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
     explanation = {}
