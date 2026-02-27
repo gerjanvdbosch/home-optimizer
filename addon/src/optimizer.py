@@ -52,7 +52,7 @@ class HPPerformanceMap:
                 self.max_pel_model = data.get("max_pel_model")
                 self.min_pel_model = data.get("min_pel_model")
                 self.is_fitted = True
-                logger.info("[Optimizer] Performance map (Zonder frequentie) geladen.")
+                logger.info("[Optimizer] Performance map geladen.")
             except Exception as e:
                 logger.warning(f"[Optimizer] Performance map laden mislukt: {e}")
 
@@ -127,9 +127,7 @@ class HPPerformanceMap:
             },
             self.path,
         )
-        logger.info(
-            "[Optimizer] Performance Map getraind (Machine Learning over fysica)."
-        )
+        logger.info("[Optimizer] Performance Map getraind.")
 
     def predict_cop(self, t_out, t_sink, mode_idx):
         if not self.is_fitted:
@@ -996,6 +994,8 @@ class ThermalMPC:
         self.P_dhw_min = cp.Parameter(T, nonneg=True)
         self.P_dhw_max = cp.Parameter(T, nonneg=True)
 
+        self.P_strictness = cp.Parameter(T, nonneg=True)
+
         # Dynamisch berekende fysica (COP & Limits)
         self.P_cop_ufh = cp.Parameter(T, nonneg=True)
         self.P_cop_dhw = cp.Parameter(T, nonneg=True)
@@ -1100,12 +1100,9 @@ class ThermalMPC:
         # Dit zorgt dat hij liever 0.1 afwijkt dan 0.2.
         base_penalty = self.s_room_low * 2.0
 
-        # 2. Extra Straf (De "Hockey Stick"):
-        # Zodra de afwijking groter is dan 0.3 graden, komt er een GROTE straf bovenop.
-        # cp.pos(x) betekent: max(0, x).
-        # Dus: als s_room_low 0.2 is -> (0.2 - 0.3) is negatief -> pos() maakt er 0 van. Geen extra straf.
-        # Als s_room_low 0.5 is -> (0.5 - 0.3) is 0.2 -> pos() ziet 0.2 -> keer 100 = 20 strafpunten!
-        extra_penalty = cp.pos(self.s_room_low - 0.3) * 100.0
+        # 2. Extra Straf (De "Hockey Stick") is nu DYNAMISCH
+        # Vermenigvuldig met P_strictness in plaats van hardcoded 100.0
+        extra_penalty = cp.multiply(cp.pos(self.s_room_low - 0.25), self.P_strictness)
 
         # Totale comfort kosten
         comfort = cp.sum(
@@ -1145,9 +1142,9 @@ class ThermalMPC:
             else:
                 r_min[t], r_max[t] = 19.0, 19.5  # Nacht
 
-            # Boiler: Warm hebben voor de avonddouche (17:00-21:00)
+            # Boiler: Warm hebben voor de avonddouche (17:00-18:00)
             # Rest van de dag mag hij zakken tot 40, maar 's middags boosten we vaak op zon
-            d_min[t] = 50.0 if 17 <= h <= 21 else 10.0
+            d_min[t] = 50.0 if 17 <= h <= 18 else 10.0
             d_max[t] = 55.0  # Max boiler temp (voor COP behoud)
 
         return r_min, r_max, d_min, d_max
@@ -1159,13 +1156,29 @@ class ThermalMPC:
         self.P_t_room_init.value = state["room_temp"]
         self.P_t_dhw_init.value = (state["dhw_top"] + state["dhw_bottom"]) / 2.0
         self.P_temp_out.value = forecast_df.temp.values[:T]
-        self.P_prices.value = np.full(T, 0.25)
-        self.P_export_prices.value = np.full(T, 0.07)
+        self.P_prices.value = np.full(T, 0.22)
+        self.P_export_prices.value = np.full(T, 0.05)
         self.P_solar.value = forecast_df.power_corrected.values[:T]
         self.P_base_load.value = forecast_df.load_corrected.values[:T]
         self.P_room_min.value, self.P_room_max.value = r_min, r_max
         self.P_dhw_min.value, self.P_dhw_max.value = d_min, d_max
         self.P_solar_gain.value = solar_gains[:T]
+
+        temps = forecast_df.temp.values[:T]
+        strictness_values = []
+        for t_out in temps:
+            if t_out < 0:
+                strictness_values.append(
+                    150.0
+                )  # Vrieskou: Heel streng (snel koud in huis)
+            elif t_out < 10:
+                strictness_values.append(80.0)  # Normaal winter: Streng
+            elif t_out < 15:
+                strictness_values.append(40.0)  # Fris: Milder, huis koelt traag
+            else:
+                strictness_values.append(5.0)  # Warm: Heel relaxed
+
+        self.P_strictness.value = np.array(strictness_values)
 
         # --- SLP LOOP: 2 Iteraties voor perfecte fysica per stap ---
         # Start gok: We nemen aan dat de temperaturen starten op wat ze nu zijn
@@ -1401,6 +1414,7 @@ class Optimizer:
         d_cop = self.mpc.P_cop_dhw.value
         u_sup = self.mpc.plan_t_sup_ufh
         d_sup = self.mpc.plan_t_sup_dhw
+        strictness = self.mpc.P_strictness.value
 
         for t in range(T):
             ts = start_time + timedelta(minutes=t * 15)
@@ -1425,6 +1439,7 @@ class Optimizer:
                     "cop_dhw": f"{d_cop[t]:.2f}",
                     "supply_ufh": f"{u_sup[t]:.2f}",
                     "supply_dhw": f"{d_sup[t]:.2f}",
+                    "strictness": f"{strictness[t]:.0f}",
                 }
             )
 
