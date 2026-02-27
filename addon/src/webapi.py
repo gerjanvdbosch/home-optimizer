@@ -58,24 +58,51 @@ def index(
     importance_html = ""
 
     result = context.result if hasattr(context, "result") else None
+    plan = result.get("plan") if result else None
 
-    details = {
-        "Mode": result["mode"] if result is not None else "-",
-        "PV Huidig": (
-            f"{context.stable_pv:.2f} kW" if context.stable_pv is not None else "-"
-        ),
-        "Load Huidig": (
-            f"{context.stable_load:.2f} kW" if context.stable_load is not None else "-"
-        ),
-        "Boiler Solar": f"{getattr(context, 'boiler_solar_kwh', 0.0):.2f} kWh",
-        "Verwachte Load": f"{getattr(context, 'predicted_load_now', 0.0):.2f} kW",
-    }
+    # Huidige temperaturen veilig ophalen
+    room_t = getattr(context, "room_temp", 0.0)
+    dhw_t = (getattr(context, "dhw_top", 0.0) + getattr(context, "dhw_bottom", 0.0)) / 2.0
 
-    # Bias info toevoegen indien beschikbaar
+    # Actuele COP bepalen uit het plan (rij 0 is 'nu')
+    current_cop = "-"
+    if plan and len(plan) > 0:
+        current_mode = result.get("mode", "OFF")
+        if current_mode == "UFH":
+            current_cop = plan[0].get("cop_ufh", "-")
+        elif current_mode == "DHW":
+            current_cop = plan[0].get("cop_dhw", "-")
+
+    # Gestructureerde lijst maken
+    details = []
+    if result:
+        details.extend([
+            {"label": "Modus", "value": result.get("mode", "-")},
+            {"label": "Zon Actueel",
+             "value": f"{context.stable_pv:.2f}" if getattr(context, "stable_pv", None) is not None else "-",
+             "unit": "kW",
+             # "color": "#FF9100"
+            },
+            {"label": "Huis Actueel",
+             "value": f"{context.stable_load:.2f}" if getattr(context, "stable_load", None) is not None else "-",
+             "unit": "kW",
+             # "color": "#F50057"
+             },
+            {"label": "Kamer Temp", "value": f"{room_t:.1f}", "unit": "°C"},
+            {"label": "Boiler Temp", "value": f"{dhw_t:.1f}", "unit": "°C"},
+            {"label": "Doel Aanvoer", "value": f"{result.get('target_supply_temp', 0):.1f}", "unit": "°C"},
+            {"label": "Doel Vermogen", "value": f"{result.get('target_pel_kw', 0):.2f}", "unit": "kW"}
+        ])
+
+        # Alleen de COP tonen als hij daadwerkelijk draait
+        if current_cop != "-":
+            details.append({"label": "Verwachte COP", "value": current_cop, "unit": ""})
+
+    # Optionele debug/ML informatie toevoegen
     if hasattr(context, "solar_bias"):
-        details["Solar Bias"] = f"{context.solar_bias * 100:.1f} %"
+        details.append({"label": "Zon Bias", "value": f"{context.solar_bias * 100:.1f}", "unit": "%"})
     if hasattr(context, "load_bias"):
-        details["Load Bias"] = f"{context.load_bias:.2f} kW"
+        details.append({"label": "Load Bias", "value": f"{context.load_bias:.2f}", "unit": "kW"})
 
     # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
     explanation = {}
@@ -98,7 +125,7 @@ def index(
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
-            "optimization_plan": getattr(context, "optimization_plan", None),
+            "plan": plan,
             "current_view": view_mode,
             "target_date": target_date,
             "prev_date": prev_date,
@@ -139,8 +166,6 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
-    is_night = df["timestamp_local"].dt.hour.isin([23, 0, 1, 2, 3, 4, 5])
-
     for col in [
         "pv_estimate",
         "pv_actual",
@@ -151,8 +176,6 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
     ]:
         if col in df.columns:
             df[col] = df[col].round(2)
-            if col.startswith("power"):
-                df.loc[is_night, col] = 0.0
 
     if df.empty:
         return ""
@@ -735,6 +758,9 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
     table_data = []
     for _, row in df.iterrows():
+        raw_mode = row.get("hvac_mode", 0)
+        mode = int(round(raw_mode)) if pd.notna(raw_mode) else 0
+
         table_data.append(
             {
                 "time": row["timestamp"].strftime("%H:%M"),
@@ -745,7 +771,7 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
                 "export": f"{row['grid_export']:.2f}",
                 "total": f"{row['total_calc']:.2f}",
                 "base": f"{row['base_calc']:.2f}",
-                "mode": int(round(row.get("hvac_mode", 0))),
+                "mode": mode,
             }
         )
 

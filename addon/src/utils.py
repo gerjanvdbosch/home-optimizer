@@ -43,7 +43,6 @@ def add_cyclic_time_features(df: pd.DataFrame, col_name="timestamp") -> pd.DataF
     # We voegen minuten toe voor precisie (bv. 14:30 wordt 14.5)
     precise_hour = dt.hour + (dt.minute / 60.0)
 
-    df["hour"] = dt.hour
     df["hour_sin"] = np.sin(2 * np.pi * precise_hour / 24.0)
     df["hour_cos"] = np.cos(2 * np.pi * precise_hour / 24.0)
 

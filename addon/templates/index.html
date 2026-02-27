@@ -226,8 +226,8 @@
         }
 
         .data-table th, .data-table td {
-            padding: 10px;
-            text-align: right; /* Getallen rechts uitlijnen */
+            padding: 8px 10px;
+            text-align: right;
             border-bottom: 1px solid var(--border-color);
         }
 
@@ -376,6 +376,94 @@
             margin: 0;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
+
+        .badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            display: inline-block;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        .badge-ufh {
+            background: rgba(208, 92, 227, 0.15);
+            color: #d05ce3;
+            border: 1px solid rgba(208, 92, 227, 0.3);
+        }
+
+        .badge-dhw {
+            background: rgba(0, 229, 255, 0.15);
+            color: #02cfe7;
+            border: 1px solid rgba(0, 229, 255, 0.3);
+        }
+
+        .badge-off {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Maak inactieve rijen iets transparanter voor meer rust */
+        .row-off {
+            opacity: 0.6;
+        }
+
+        /* Zorg dat de tabel op mobiel niet breekt */
+        .data-table th, .data-table td {
+            white-space: nowrap;
+        }
+
+        .unit {
+            font-size: 0.75em; /* Nog ietsje kleiner */
+            color: rgba(225, 225, 225, 0.35); /* Stuk lichter dan de rest van de tekst (35% zichtbaar) */
+            font-weight: normal;
+            margin-left: 2px; /* Klein beetje ademruimte tussen getal en eenheid */
+        }
+
+        /* --- TOON MEER / GRADIENT STYLING --- */
+        .hidden-row {
+            display: none;
+        }
+
+        .table-fade-container {
+            position: relative;
+        }
+
+        .table-fade-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+            /* Gradient die perfect overloopt in de achtergrondkleur van je card (rgb 28,28,28) */
+            background: linear-gradient(to bottom, rgba(28, 28, 28, 0) 0%, rgba(28, 28, 28, 0.8) 50%, rgba(28, 28, 28, 1) 100%);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 10px;
+            pointer-events: none; /* Klikken gaat door de gradient heen... */
+        }
+
+        .show-more-btn {
+            pointer-events: auto; /* ...behalve op de knop zelf */
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 24px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .show-more-btn:active {
+            transform: translateY(1px);
+        }
     </style>
 </head>
 <body>
@@ -420,10 +508,15 @@
 
     {% if details and is_today %}
     <div class="details-grid">
-        {% for key, value in details.items() %}
+        {% for item in details %}
         <div class="stat-item">
-            <span class="stat-label">{{ key }}</span>
-            <span class="stat-value">{{ value }}</span>
+            <span class="stat-label">{{ item.label }}</span>
+            <span class="stat-value" {% if item.color %}style="color: {{ item.color }};" {% endif %}>
+                {{ item.value }}
+                {% if item.unit %}
+                    <span class="unit">{{ item.unit }}</span>
+                {% endif %}
+            </span>
         </div>
         {% endfor %}
     </div>
@@ -485,63 +578,87 @@
     </div>
     {% endif %}
 
-    <!-- WARMTEPOMP PLANNING TABEL -->
-    {% if optimization_plan and is_today %}
+    {% if plan and is_today %}
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Planning</h3>
         </div>
 
-        <div class="table-container">
+        <div class="table-container table-fade-container">
             <table class="data-table">
                 <thead>
                 <tr>
-                    <th>Tijd</th>
+                    <th style="text-align: left;">Tijd</th>
+                    <th>Buiten</th>
+                    <th>Zon</th>
+                    <th>Load</th>
+                    <th>Kamer</th>
+                    <th>Boiler</th>
                     <th style="text-align: center;">Mode</th>
-                    <th>Freq</th>
-                    <th>Temp (°C)</th>
-                    <th>Solar (kW)</th>
-                    <th>Load (kW)</th>
-                    <th>Room (°C)
-                    <th>DHW (°C)</th>
+                    <th>Aanvoer</th>
+                    <th>COP</th>
+                    <th>Verbruik</th>
                 </tr>
                 </thead>
                 <tbody>
-                {% for row in optimization_plan %}
-                <tr>
-                    <td>{{ row.time }}</td>
+                {% for row in plan %}
+                <tr class="{% if row.mode == '-' %}row-off{% endif %} {% if loop.index > 10 %}hidden-plan-row hidden-row{% endif %}">
+                    <!-- Tijd -->
+                    <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
 
-                    <!-- MODE KOLOM -->
-                    <!-- UFH = Bright Purple (#d05ce3) -->
-                    <!-- DHW = Electric Cyan (#00e5ff) -->
-                    <td style="text-align: center; font-weight: bold;
-                            color: {% if row.mode == 'UFH' %}#d05ce3{% elif row.mode == 'DHW' %}#00e5ff{% else %}var(--text-muted){% endif %};">
-                        {{ row.mode }}
+                    <!-- Weer & Stroom (Context) -->
+                    <td style="color: var(--text-muted);">{{ row.t_out }} <span class="unit">&deg;C</span></td>
+
+                    <td style="color: {% if row.p_solar|float > 0.1 %}#FF9100{% else %}var(--text-muted){% endif %};">
+                        {{ row.p_solar }} <span class="unit">kW</span>
                     </td>
 
-                    <td style="color: {% if row.freq|float == 0 %}var(--text-muted){% endif %}">{{ row.freq }}</td>
-                    <td style="color: var(--text-muted);">{{ row.t_out }}</td>
-
-                    <!-- Solar blijft de originele Amber/Goud kleur -->
-                    <td style="color: {% if row.p_solar|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">
-                        {{ row.p_solar }}
+                    <td style="color: {% if row.p_load|float > 0.5 %}#F50057{% else %}var(--text-muted){% endif %};">
+                        {{ row.p_load }} <span class="unit">kW</span>
                     </td>
 
-                    <td style="color: var(--text-muted);">{{ row.p_load }}</td>
+                    <!-- Temperaturen (Status) -->
+                    <td style="font-weight: 500;">{{ row.t_room }} <span class="unit">&deg;C</span></td>
+                    <td style="font-weight: 500;">{{ row.t_dhw }} <span class="unit">&deg;C</span></td>
 
-                    <!-- T_ROOM: Kleurt mee met UFH (Paars) -->
-                    <td style="color: {% if row.mode == 'UFH' %}#d05ce3{% endif %};">
-                        {{ row.t_room }}
+                    <!-- Modus (Actie) -->
+                    <td style="text-align: center;">
+                        <span class="badge {% if row.mode == 'UFH' %}badge-ufh{% elif row.mode == 'DHW' %}badge-dhw{% else %}badge-off{% endif %}">
+                            {{ row.mode }}
+                        </span>
                     </td>
 
-                    <!-- T_DHW: Kleurt mee met DHW (Cyaan) -->
-                    <td style="color: {% if row.mode == 'DHW' %}#00e5ff{% endif %};">
-                        {{ row.t_dhw }}
+                    <!-- Warmtepomp Data -->
+                    <td style="color: var(--text-muted);">
+                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.supply_ufh | float) }} <span
+                            class="unit">&deg;C</span>
+                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.supply_dhw | float) }} <span class="unit">&deg;C</span>
+                        {% else %}-{% endif %}
+                    </td>
+
+                    <td style="color: var(--text-muted);">
+                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.cop_ufh | float) }}
+                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.cop_dhw | float) }}
+                        {% else %}-{% endif %}
+                    </td>
+
+                    <td style="font-weight: {% if row.mode != '-' %}600{% else %}normal{% endif %}; color: {% if row.mode != '-' %}var(--text-color){% else %}var(--text-muted){% endif %};">
+                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.p_el_ufh | float) }} <span class="unit">kW</span>
+                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.p_el_dhw | float) }} <span
+                            class="unit">kW</span>
+                        {% else %}-{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
                 </tbody>
             </table>
+
+            <!-- Laat overlay alleen zien als er meer dan 20 rijen zijn -->
+            {% if plan|length > 10 %}
+            <div class="table-fade-overlay" id="plan-overlay">
+                <button class="show-more-btn" onclick="showMore('plan')">Toon meer</button>
+            </div>
+            {% endif %}
         </div>
     </div>
     {% endif %}
@@ -569,41 +686,78 @@
             </div>
         </div>
 
-        <div class="table-container">
+        <div class="table-container table-fade-container">
             {% if measurements %}
             <table class="data-table">
                 <thead>
                 <tr>
-                    <!-- Dynamische headers op basis van view -->
                     {% set unit = 'kWh' if current_view == 'hour' else 'kW' %}
-                    <th>Tijd</th>
-                    <th>PV ({{ unit }})</th>
-                    <th>Import ({{ unit }})</th>
-                    <th>Export ({{ unit }})</th>
-                    <th>Totaal ({{ unit }})</th>
-                    <th>WP ({{ unit }})</th>
-                    <th>Base ({{ unit }})</th>
+                    <th style="text-align: left;">Tijd</th>
+                    <th>Zon</th>
+                    <th>Basis</th>
+                    <th style="text-align: center;">WP Mode</th>
+                    <th>WP Verbruik</th>
+                    <th>Totaal</th>
+                    <th>Import</th>
+                    <th>Export</th>
                 </tr>
                 </thead>
                 <tbody>
                 {% for row in measurements %}
-                <tr>
-                    <td>{{ row.time }}</td>
-                    <td style="color: {% if row.pv|float > 0 %}#ffb74d{% else %}var(--text-muted){% endif %};">{{
-                            row.pv
-                        }}
+                <tr class="{% if row.base == row.import %}row-off{% endif %} {% if loop.index > 10 %}hidden-meas-row hidden-row{% endif %}">
+                    <!-- Tijd -->
+                    <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
+
+                    <!-- Zon -->
+                    <td style="color: {% if row.pv|float > 0.05 %}#FF9100{% else %}var(--text-muted){% endif %};">
+                        {{ row.pv }} <span class="unit">{{ unit }}</span>
                     </td>
-                    <td>{{ row.import }}</td>
-                    <td>{{ row.export }}</td>
-                    <td style="font-weight: bold;">{{ row.total }}</td>
-                    <td style="color: {% if row.mode == 1 %}#00e5ff{% elif row.mode == 4 %}#00e5ff{% elif row.mode == 2 %}#d05ce3{% else %}var(--text-muted){% endif %};">
-                        {{ row.wp }}
+
+                    <!-- Basis Load (Huis) -->
+                    <td style="color: {% if row.base|float > 0.1 %}#F50057{% else %}var(--text-muted){% endif %};">
+                        {{ row.base }} <span class="unit">{{ unit }}</span>
                     </td>
-                    <td>{{ row.base }}</td>
+
+                    <!-- WP Mode Badge -->
+                    <td style="text-align: center;">
+                        {% if row.mode == 2 %}
+                        <span class="badge badge-ufh">UFH</span>
+                        {% elif row.mode == 1 or row.mode == 4 %}
+                        <span class="badge badge-dhw">DHW</span>
+                        {% else %}
+                        <span class="badge badge-off">-</span>
+                        {% endif %}
+                    </td>
+
+                    <!-- WP Verbruik -->
+                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 2 %}#d05ce3{% elif row.mode == 1 or row.mode == 4 %}#02cfe7{% else %}var(--text-muted){% endif %};">
+                        {{ row.wp }} <span class="unit">{{ unit }}</span>
+                    </td>
+
+                    <!-- Totaal Huis Verbruik -->
+                    <td style="font-weight: bold; color: var(--text-color);">
+                        {{ row.total }} <span class="unit">{{ unit }}</span>
+                    </td>
+
+                    <!-- Grid Import (Nu Neuraal) -->
+                    <td style="color: {% if row.import|float > 0.05 %}var(--text-color){% else %}var(--text-muted){% endif %};">
+                        {{ row.import }} <span class="unit">{{ unit }}</span>
+                    </td>
+
+                    <!-- Grid Export (Nu Neutraal) -->
+                    <td style="color: {% if row.export|float > 0.05 %}var(--text-color){% else %}var(--text-muted){% endif %};">
+                        {{ row.export }} <span class="unit">{{ unit }}</span>
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
             </table>
+            <!-- Laat overlay alleen zien als er meer dan 20 rijen zijn -->
+            {% if measurements|length > 10 %}
+            <div class="table-fade-overlay" id="meas-overlay">
+                <button class="show-more-btn" onclick="showMore('meas')">Toon meer</button>
+            </div>
+            {% endif %}
             {% else %}
             <div class="empty-msg">Geen metingen beschikbaar.</div>
             {% endif %}
@@ -639,6 +793,22 @@
 
             window.location.href = url.toString();
         }, 10);
+    }
+
+    function showMore(type) {
+        // Haal de verborgen rijen op voor deze tabel (plan of meas)
+        const hiddenRows = document.querySelectorAll('.hidden-' + type + '-row');
+
+        // Verwijder de .hidden-row class om ze zichtbaar te maken
+        hiddenRows.forEach(row => {
+            row.classList.remove('hidden-row');
+        });
+
+        // Verberg de gradient overlay met de knop
+        const overlay = document.getElementById(type + '-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
     }
 </script>
 </body>

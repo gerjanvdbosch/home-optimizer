@@ -51,9 +51,6 @@ class HAClient:
     def get_dhw_setpoint(self):
         return safe_float(self._get_state(self.config.sensor_dhw_setpoint))
 
-    def get_compressor_freq(self):
-        return safe_float(self._get_state(self.config.sensor_compressor_freq))
-
     def get_supply_temp(self):
         return safe_float(self._get_state(self.config.sensor_supply_temp))
 

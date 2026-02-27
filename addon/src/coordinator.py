@@ -48,57 +48,23 @@ class Coordinator:
         self.context.forecast_df = df
 
     def optimize(self):
+        # Stap 1: Los de MPC op via de optimizer
         result = self.optimizer.resolve(self.context)
 
         if result:
             logger.info("--- Resultaat ---")
-            logger.info(f"Status: {result['status']}")
-            logger.info(f"Gekozen Modus: {result['mode']}")
-            logger.info(f"Frequentie: {result['freq']} Hz")
+            logger.info(f"Status: {result.get('status', 'FAIL')}")
+            logger.info(f"Gekozen Modus: {result.get('mode', 'OFF')}")
 
-            # Toegang tot de interne solver variabelen via de mpc instantie
-            mpc = self.optimizer.mpc
+            if result.get('mode') != "OFF":
+                logger.info(f"Doel Elektrisch Vermogen: {result.get('target_pel_kw')} kW")
+                logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
 
-            if mpc.f_ufh.value is not None:
-                logger.info("\nPlan details:")
-                f_u = mpc.f_ufh.value
-                f_d = mpc.f_dhw.value
-                t_r = mpc.t_room.value
-                t_d = mpc.t_dhw.value  # De voorspelde DHW temp
+            # Print tabel in de console
+            print(pd.DataFrame(result.get('plan')).to_string(index=False))
 
-                t_out = mpc.P_temp_out.value
-                solar = mpc.P_solar.value
-                load = mpc.P_base_load.value
-
-                tz = datetime.now().astimezone().tzinfo
-
-                plan_data = []
-                # We lopen door de hele horizon (48 kwartieren / 12 uur)
-                for i in range(mpc.horizon):
-                    mode = "UFH" if f_u[i] > 5 else "DHW" if f_d[i] > 5 else "OFF"
-                    plan_data.append(
-                        {
-                            "time": self.context.forecast_df["timestamp"]
-                            .iloc[i]
-                            .tz_convert(tz)
-                            .strftime("%H:%M"),
-                            "mode": mode,
-                            "freq": round(max(f_u[i], f_d[i])),
-                            "t_out": f"{t_out[i]:.1f}",
-                            "p_solar": f"{solar[i]:.2f}",
-                            "p_load": f"{load[i]:.2f}",
-                            "t_room": f"{t_r[i]:.2f}",
-                            "t_dhw": f"{t_d[i]:.2f}",
-                        }
-                    )
-
-                # Gebruik pandas om een mooie tabel te printen
-                print(pd.DataFrame(plan_data).to_string(index=False))
-
-                self.context.optimization_plan = plan_data
-
-            # Sla het resultaat op in de context voor de Web API
-            self.context.result = result
+        # Sla het plan op in de context voor de UI of verdere verwerking
+        self.context.result = result
 
     def train(self):
         self.solar.train()
