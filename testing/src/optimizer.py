@@ -1296,12 +1296,7 @@ class Optimizer:
         self.db = database
         self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path)
-
-        # NIEUW: Hydraulisch model (Aanvoer/Retour/Flow gedrag leren)
-        self.hydraulic = HydraulicPredictor(
-            Path(config.hp_model_path).parent / "hydraulic_model.joblib"
-        )
-
+        self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
         self.res_ufh = MLResidualPredictor(config.ufh_model_path)
         self.res_dhw = MLResidualPredictor(config.dhw_model_path)
 
