@@ -396,7 +396,7 @@
 
         .badge-dhw {
             background: rgba(0, 229, 255, 0.15);
-            color: #00e5ff;
+            color: #02cfe7;
             border: 1px solid rgba(0, 229, 255, 0.3);
         }
 
@@ -730,7 +730,7 @@
                     </td>
 
                     <!-- WP Verbruik -->
-                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 2 %}#d05ce3{% elif row.mode == 1 or row.mode == 4 %}#00e5ff{% else %}var(--text-muted){% endif %};">
+                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 2 %}#d05ce3{% elif row.mode == 1 or row.mode == 4 %}#02cfe7{% else %}var(--text-muted){% endif %};">
                         {{ row.wp }} <span class="unit">{{ unit }}</span>
                     </td>
 
