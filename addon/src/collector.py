@@ -171,10 +171,14 @@ class Collector:
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
-            avg_import = sum(v for v in self.grid_slots if v > 0) / len(self.grid_slots)
-            avg_export = (
-                sum(v for v in self.grid_slots if v < 0) / len(self.grid_slots)
-            ) * -1.0
+
+            n_grid = len(self.grid_slots)
+            if n_grid > 0:
+                avg_import = sum(v for v in self.grid_slots if v > 0) / n_grid
+                avg_export = (sum(v for v in self.grid_slots if v < 0) / n_grid) * -1.0
+            else:
+                avg_import = 0.0
+                avg_export = 0.0
 
             self.pv_slots = []
             self.wp_slots = []

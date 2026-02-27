@@ -1129,7 +1129,9 @@ class ThermalMPC:
         switching = start_ufh_penalty + start_dhw_penalty
 
         # 2. RENDABILITEITS CHECK (SoC Reward)
-        stored_heat_value = cp.sum(self.t_dhw) * 0.0005
+        # We belonen de temperatuur in de boiler én in het beton aan het EINDE van de horizon (T).
+        # Boiler: ~1.5 cent per graad. Vloer: 50 cent per graad (want 15 ton beton).
+        stored_heat_value = (self.t_dhw[T] * 0.015) + (self.t_room[T] * 0.05)
 
         self.problem = cp.Problem(
             cp.Minimize(net_cost + comfort + switching - stored_heat_value), constraints
