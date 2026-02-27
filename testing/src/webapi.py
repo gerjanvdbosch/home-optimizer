@@ -166,7 +166,9 @@ def index(
     )
 
 
-def _get_solar_forecast_plot(request: Request, target_date: date, plan: list = None) -> str:
+def _get_solar_forecast_plot(
+    request: Request, target_date: date, plan: list = None
+) -> str:
     """
     Genereert de interactieve Plotly grafiek.
     Past smoothing toe op historische data voor mooie weergave.
@@ -423,37 +425,64 @@ def _get_solar_forecast_plot(request: Request, target_date: date, plan: list = N
             )
         )
 
-    # --- PLANNING TOEVOEGEN ---
-    if plan and is_today:
-        plan_times = [datetime.strptime(p["time"], "%H:%M").replace(year=target_date.year, month=target_date.month, day=target_date.day) for p in plan]
+        # --- PLANNING MET STRAKKE VERTICALE JUMPS ---
+        if plan and is_today:
+            plan_times = [
+                datetime.strptime(p["time"], "%H:%M").replace(
+                    year=target_date.year, month=target_date.month, day=target_date.day
+                )
+                for p in plan
+            ]
 
-        # Datapunten genereren voor UFH en DHW
-        p_ufh_clean = []
-        p_dhw_clean = []
+            for mode_key, color, fill, label in [
+                ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "Plan UFH"),
+                ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "Plan DHW"),
+            ]:
+                x_vals = []
+                y_vals = []
 
-        for i in range(len(plan)):
-            # UFH
-            if plan[i]["mode"] == "UFH":
-                p_ufh_clean.append(float(plan[i]["p_el_ufh"]))
-            elif (i > 0 and plan[i-1]["mode"] == "UFH") or (i < len(plan)-1 and plan[i+1]["mode"] == "UFH"):
-                p_ufh_clean.append(0.0) # Verticale zijkant
-            else:
-                p_ufh_clean.append(None) # Geen lijn op de bodem
+                for i in range(len(plan)):
+                    val = float(plan[i][f"p_el_{mode_key.lower()}"])
+                    is_active = plan[i]["mode"] == mode_key
+                    was_active = i > 0 and plan[i - 1]["mode"] == mode_key
+                    is_last_active = is_active and (
+                        i == len(plan) - 1 or plan[i + 1]["mode"] != mode_key
+                    )
 
-            # DHW
-            if plan[i]["mode"] == "DHW":
-                p_dhw_clean.append(float(plan[i]["p_el_dhw"]))
-            elif (i > 0 and plan[i-1]["mode"] == "DHW") or (i < len(plan)-1 and plan[i+1]["mode"] == "DHW"):
-                p_dhw_clean.append(0.0) # Verticale zijkant
-            else:
-                p_dhw_clean.append(None) # Geen lijn op de bodem
+                    if is_active and not was_active:
+                        # START: 1 seconde voor de start op 0, dan direct omhoog
+                        # Dit haalt het zichtbare streepje links weg
+                        x_vals.append(plan_times[i] - timedelta(seconds=1))
+                        y_vals.append(0.0)
+                        x_vals.append(plan_times[i])
+                        y_vals.append(val)
+                    elif is_active:
+                        x_vals.append(plan_times[i])
+                        y_vals.append(val)
 
-        if any(v is not None for v in p_ufh_clean):
-            fig.add_trace(go.Scatter(x=plan_times, y=p_ufh_clean, name="Plan UFH", mode="lines", line=dict(color="#d05ce3", width=2, shape="hv"), fill="tozeroy", fillcolor="rgba(208, 92, 227, 0.15)", connectgaps=False))
+                    if is_last_active:
+                        # EINDE: Naar 0 aan het einde van het huidige 15-minuten slot
+                        end_of_slot = plan_times[i] + timedelta(minutes=15)
+                        x_vals.append(end_of_slot)
+                        y_vals.append(0.0)
+                        # Break de lijn zodat hij niet over de bodem naar het volgende blok loopt
+                        x_vals.append(end_of_slot)
+                        y_vals.append(None)
 
-        if any(v is not None for v in p_dhw_clean):
-            fig.add_trace(go.Scatter(x=plan_times, y=p_dhw_clean, name="Plan DHW", mode="lines", line=dict(color="#02cfe7", width=2, shape="hv"), fill="tozeroy", fillcolor="rgba(0, 229, 255, 0.15)", connectgaps=False))
-
+                if x_vals:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_vals,
+                            y=y_vals,
+                            name=label,
+                            mode="lines",
+                            line=dict(color=color, width=1, shape="hv"),
+                            fill="tozeroy",
+                            fillcolor=fill,
+                            connectgaps=False,
+                            hovertemplate="%{y:.2f} kW<extra></extra>",
+                        )
+                    )
 
     fig.add_vline(
         x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6

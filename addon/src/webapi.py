@@ -51,14 +51,14 @@ def index(
     # Is het vandaag? (Voor UI highlight en auto-refresh logica)
     is_today = target_date == today
 
+    result = context.result if hasattr(context, "result") else None
+    plan = result.get("plan") if result else None
+
     # 1. Grafieken genereren
-    plot_html = _get_solar_forecast_plot(request, target_date)
+    plot_html = _get_solar_forecast_plot(request, target_date, plan)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
     importance_html = ""
-
-    result = context.result if hasattr(context, "result") else None
-    plan = result.get("plan") if result else None
 
     # Huidige temperaturen veilig ophalen
     room_t = getattr(context, "room_temp", 0.0)
@@ -166,7 +166,9 @@ def index(
     )
 
 
-def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
+def _get_solar_forecast_plot(
+    request: Request, target_date: date, plan: list = None
+) -> str:
     """
     Genereert de interactieve Plotly grafiek.
     Past smoothing toe op historische data voor mooie weergave.
@@ -236,18 +238,6 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
         df_hist_smooth["pv_actual"] = df_hist_smooth["pv_actual"].clip(lower=0).round(2)
 
         df_hist_plot = df_hist_smooth.reset_index()
-
-    # --- 3. BEREIK BEPALEN ---
-    # active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
-    # zon_uren = df[df[active_col] > 0]
-    # if not zon_uren.empty and not df_hist_plot.empty:
-    #     x_start = zon_uren["timestamp_local"].min() - timedelta(hours=2)
-    #     x_end = max(
-    #         zon_uren["timestamp_local"].max(), df_hist_plot["timestamp_local"].max()
-    #     ) + timedelta(hours=2)
-    # else:
-    #     x_start = df["timestamp_local"].min()
-    #     x_end = df["timestamp_local"].max()
 
     x_start = start_of_day
     x_end = end_of_day
@@ -364,8 +354,8 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
                 line=dict(color="#FF9100", width=1.5),
                 fill="tozeroy",
                 fillcolor="rgba(255, 145, 0, 0.07)",
-                showlegend=False,  # We hoeven deze niet apart in de legenda
-                hoverinfo="skip",  # Geen popup als je over het lijntje muist
+                showlegend=False,
+                hoverinfo="skip",
                 legendgroup="solar",
             )
         )
@@ -435,27 +425,68 @@ def _get_solar_forecast_plot(request: Request, target_date: date) -> str:
             )
         )
 
+        # --- PLANNING MET STRAKKE VERTICALE JUMPS ---
+        if plan and is_today:
+            plan_times = [
+                datetime.strptime(p["time"], "%H:%M").replace(
+                    year=target_date.year, month=target_date.month, day=target_date.day
+                )
+                for p in plan
+            ]
+
+            for mode_key, color, fill, label in [
+                ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "Plan UFH"),
+                ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "Plan DHW"),
+            ]:
+                x_vals = []
+                y_vals = []
+
+                for i in range(len(plan)):
+                    val = float(plan[i][f"p_el_{mode_key.lower()}"])
+                    is_active = plan[i]["mode"] == mode_key
+                    was_active = i > 0 and plan[i - 1]["mode"] == mode_key
+                    is_last_active = is_active and (
+                        i == len(plan) - 1 or plan[i + 1]["mode"] != mode_key
+                    )
+
+                    if is_active and not was_active:
+                        # START: 1 seconde voor de start op 0, dan direct omhoog
+                        # Dit haalt het zichtbare streepje links weg
+                        x_vals.append(plan_times[i] - timedelta(seconds=1))
+                        y_vals.append(0.0)
+                        x_vals.append(plan_times[i])
+                        y_vals.append(val)
+                    elif is_active:
+                        x_vals.append(plan_times[i])
+                        y_vals.append(val)
+
+                    if is_last_active:
+                        # EINDE: Naar 0 aan het einde van het huidige 15-minuten slot
+                        end_of_slot = plan_times[i] + timedelta(minutes=15)
+                        x_vals.append(end_of_slot)
+                        y_vals.append(0.0)
+                        # Break de lijn zodat hij niet over de bodem naar het volgende blok loopt
+                        x_vals.append(end_of_slot)
+                        y_vals.append(None)
+
+                if x_vals:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_vals,
+                            y=y_vals,
+                            name=label,
+                            mode="lines",
+                            line=dict(color=color, width=1, shape="hv"),
+                            fill="tozeroy",
+                            fillcolor=fill,
+                            connectgaps=False,
+                            hovertemplate="%{y:.2f} kW<extra></extra>",
+                        )
+                    )
+
     fig.add_vline(
         x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
     )
-
-    # F. Boiler Start Lijn (Direct uit Context)
-    planned_start = getattr(context, "planned_start", None)
-    if planned_start and isinstance(planned_start, datetime):
-        local_start = planned_start.astimezone(local_tz).replace(tzinfo=None)
-
-        # Check of starttijd in de grafiek past
-        if local_start >= x_start and local_start <= x_end + timedelta(hours=12):
-            fig.add_vline(
-                x=local_start,
-                line_width=2,
-                line_dash="dot",
-                line_color="#2ca02c",
-                annotation_text="Start",
-                annotation_position="top right",
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-                # hoverinfo="skip",
-            )
 
     fig.update_layout(
         template="plotly_dark",
