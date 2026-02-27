@@ -46,7 +46,7 @@ class HAClient:
         return self.data.get("return_temp", 0.0)
 
     def get_hvac_mode(self):
-        return HvacMode(HvacMode.OFF)
+        return HvacMode(HvacMode.DHW)
 
     def get_forecast(self):
         return self.data.get("solcast", {})

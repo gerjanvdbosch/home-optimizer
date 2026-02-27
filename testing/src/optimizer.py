@@ -980,6 +980,8 @@ class ThermalMPC:
         # --- PARAMETERS ---
         self.P_t_room_init = cp.Parameter()
         self.P_t_dhw_init = cp.Parameter()
+        self.P_init_ufh = cp.Parameter(nonneg=True)
+        self.P_init_dhw = cp.Parameter(nonneg=True)
 
         # Prijzen en Net
         self.P_prices = cp.Parameter(T, nonneg=True)
@@ -1112,11 +1114,17 @@ class ThermalMPC:
             + self.s_dhw_low * 2.0  # Boiler: lichte straf (lineair is prima)
         )
 
-        # Penalty voor ELKE KEER dat de modus van 0 naar 1 gaat (starten)
-        start_dhw_penalty = (
-            cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])) * 100.0
-        )  # Zeer zware straf
-        start_ufh_penalty = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) * 30.0
+        # 1. De start op T=0 (alleen straf als hij UIT was en nu AAN gaat)
+        start_ufh_now = cp.pos(self.ufh_on[0] - self.P_init_ufh)
+        start_dhw_now = cp.pos(self.dhw_on[0] - self.P_init_dhw)
+
+        # 2. De starts in de toekomst (T=0 -> T=1, etc.)
+        start_ufh_future = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1]))
+        start_dhw_future = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
+
+        # 3. Totale straf
+        start_ufh_penalty = (start_ufh_now + start_ufh_future) * 30.0
+        start_dhw_penalty = (start_dhw_now + start_dhw_future) * 100.0
 
         switching = start_ufh_penalty + start_dhw_penalty
 
@@ -1159,6 +1167,10 @@ class ThermalMPC:
 
         self.P_t_room_init.value = state["room_temp"]
         self.P_t_dhw_init.value = (state["dhw_top"] + state["dhw_bottom"]) / 2.0
+        self.P_init_ufh.value = (
+            1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
+        )
+        self.P_init_dhw.value = 1.0 if state["hvac_mode"] == HvacMode.DHW.value else 0.0
         self.P_temp_out.value = forecast_df.temp.values[:T]
         self.P_prices.value = np.full(T, 0.22)
         self.P_export_prices.value = np.full(T, 0.05)
@@ -1348,6 +1360,7 @@ class Optimizer:
     def resolve(self, context: Context):
         state = {
             "now": context.now,
+            "hvac_mode": context.hvac_mode.value,
             "room_temp": context.room_temp,
             "dhw_top": context.dhw_top,
             "dhw_bottom": context.dhw_bottom,
