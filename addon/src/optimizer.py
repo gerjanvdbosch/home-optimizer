@@ -846,8 +846,12 @@ class HydraulicPredictor:
 # 3. ML RESIDUALS
 # =========================================================
 class MLResidualPredictor:
-    def __init__(self, path):
+    def __init__(self, path, R, C, K_loss_dhw, C_tank):
         self.path = Path(path)
+        self.R = R
+        self.C = C
+        self.K_loss_dhw = K_loss_dhw
+        self.C_tank = C_tank
         self.model = None
         self.features = [
             "temp",
@@ -861,11 +865,7 @@ class MLResidualPredictor:
             "doy_cos",
         ]
 
-    def train(self, df, R, C, is_dhw=False, K_loss_dhw=0.0, C_tank=0.232):
-        self.R = R
-        self.C = C
-        self.K_loss_dhw = K_loss_dhw
-        self.C_tank = C_tank
+    def train(self, df, is_dhw=False):
         df_proc = df.copy().sort_values("timestamp")
 
         # Bereken wp_output voor de hele set
@@ -1130,8 +1130,12 @@ class ThermalMPC:
     def _get_targets(self, now, T):
         """Bepaal de comfort-grenzen per tijdslot"""
         r_min, r_max, d_min, d_max = np.zeros(T), np.zeros(T), np.zeros(T), np.zeros(T)
+
+        local_tz = datetime.now().astimezone().tzinfo
+        now_local = now.astimezone(local_tz)
+
         for t in range(T):
-            fut_time = now + timedelta(hours=t * self.dt)
+            fut_time = now_local + timedelta(hours=t * self.dt)
             h = fut_time.hour
 
             # Vloerverwarming: Overdag en 's avonds comfort, 's nachts iets lager
@@ -1310,8 +1314,20 @@ class Optimizer:
         self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path)
         self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
-        self.res_ufh = MLResidualPredictor(config.ufh_model_path)
-        self.res_dhw = MLResidualPredictor(config.dhw_model_path)
+        self.res_ufh = MLResidualPredictor(
+            config.ufh_model_path,
+            self.ident.R,
+            self.ident.C,
+            self.ident.K_loss_dhw,
+            self.ident.C_tank,
+        )
+        self.res_dhw = MLResidualPredictor(
+            config.dhw_model_path,
+            self.ident.R,
+            self.ident.C,
+            self.ident.K_loss_dhw,
+            self.ident.C_tank,
+        )
 
         # Geef de hydraulic predictor mee aan MPC
         self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic)
@@ -1324,7 +1340,9 @@ class Optimizer:
 
         self.perf_map.train(df)
         self.ident.train(df)
-        self.hydraulic.train(df)  # NIEUW: Train de hydrauliek
+        self.hydraulic.train(df)
+        self.res_ufh.train(df)
+        self.res_dhw.train(df, is_dhw=True)
         self.mpc._build_problem()
 
     def resolve(self, context: Context):
