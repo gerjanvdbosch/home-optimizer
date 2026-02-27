@@ -226,8 +226,8 @@
         }
 
         .data-table th, .data-table td {
-            padding: 10px;
-            text-align: right; /* Getallen rechts uitlijnen */
+            padding: 8px 10px;
+            text-align: right;
             border-bottom: 1px solid var(--border-color);
         }
 
@@ -377,9 +377,9 @@
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
 
-         .badge {
-            padding: 4px 10px;
-            border-radius: 12px;
+        .badge {
+            padding: 2px 8px;
+            border-radius: 10px;
             font-size: 0.75rem;
             font-weight: 600;
             letter-spacing: 0.5px;
@@ -506,12 +506,12 @@
         </div>
     </div>
 
-   {% if details and is_today %}
+    {% if details and is_today %}
     <div class="details-grid">
         {% for item in details %}
         <div class="stat-item">
             <span class="stat-label">{{ item.label }}</span>
-            <span class="stat-value" {% if item.color %}style="color: {{ item.color }};"{% endif %}>
+            <span class="stat-value" {% if item.color %}style="color: {{ item.color }};" {% endif %}>
                 {{ item.value }}
                 {% if item.unit %}
                     <span class="unit">{{ item.unit }}</span>
@@ -584,8 +584,8 @@
             <h3 style="margin: 0;">Planning</h3>
         </div>
 
-       <div class="table-container table-fade-container">
-           <table class="data-table">
+        <div class="table-container table-fade-container">
+            <table class="data-table">
                 <thead>
                 <tr>
                     <th style="text-align: left;">Tijd</th>
@@ -630,20 +630,22 @@
 
                     <!-- Warmtepomp Data -->
                     <td style="color: var(--text-muted);">
-                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.supply_ufh|float) }} <span class="unit">&deg;C</span>
-                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.supply_dhw|float) }} <span class="unit">&deg;C</span>
+                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.supply_ufh | float) }} <span
+                            class="unit">&deg;C</span>
+                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.supply_dhw | float) }} <span class="unit">&deg;C</span>
                         {% else %}-{% endif %}
                     </td>
 
                     <td style="color: var(--text-muted);">
-                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.cop_ufh|float) }}
-                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.cop_dhw|float) }}
+                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.cop_ufh | float) }}
+                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.cop_dhw | float) }}
                         {% else %}-{% endif %}
                     </td>
 
                     <td style="font-weight: {% if row.mode != '-' %}600{% else %}normal{% endif %}; color: {% if row.mode != '-' %}var(--text-color){% else %}var(--text-muted){% endif %};">
-                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.p_el_ufh|float) }} <span class="unit">kW</span>
-                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.p_el_dhw|float) }} <span class="unit">kW</span>
+                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.p_el_ufh | float) }} <span class="unit">kW</span>
+                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.p_el_dhw | float) }} <span
+                            class="unit">kW</span>
                         {% else %}-{% endif %}
                     </td>
                 </tr>
@@ -684,9 +686,9 @@
             </div>
         </div>
 
-       <div class="table-container table-fade-container">
+        <div class="table-container table-fade-container">
             {% if measurements %}
-           <table class="data-table">
+            <table class="data-table">
                 <thead>
                 <tr>
                     {% set unit = 'kWh' if current_view == 'hour' else 'kW' %}
@@ -700,7 +702,7 @@
                     <th>Export</th>
                 </tr>
                 </thead>
-               <tbody>
+                <tbody>
                 {% for row in measurements %}
                 <tr class="{% if row.base == row.import %}row-off{% endif %} {% if loop.index > 10 %}hidden-meas-row hidden-row{% endif %}">
                     <!-- Tijd -->
@@ -719,11 +721,11 @@
                     <!-- WP Mode Badge -->
                     <td style="text-align: center;">
                         {% if row.mode == 2 %}
-                            <span class="badge badge-ufh">UFH</span>
+                        <span class="badge badge-ufh">UFH</span>
                         {% elif row.mode == 1 or row.mode == 4 %}
-                            <span class="badge badge-dhw">DHW</span>
+                        <span class="badge badge-dhw">DHW</span>
                         {% else %}
-                            <span class="badge badge-off">-</span>
+                        <span class="badge badge-off">-</span>
                         {% endif %}
                     </td>
 
