@@ -977,7 +977,7 @@ class ThermalMPC:
 
         # Penalty voor ELKE KEER dat de modus van 0 naar 1 gaat (starten)
         start_dhw_penalty = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])) * 100.0  # Zeer zware straf
-        start_ufh_penalty = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) * 5.0
+        start_ufh_penalty = cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) * 30.0
 
         switching = start_ufh_penalty + start_dhw_penalty
 
