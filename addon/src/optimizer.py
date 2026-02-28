@@ -1274,9 +1274,9 @@ class ThermalMPC:
                 # Limits (safety)
                 min_kw, max_kw = self.perf_map.get_pel_limits(t_out)
                 if fixed_p_ufh[t] > 0.05:
-                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.1, max_kw * 1.9)
+                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.5, max_kw * 1.5)
                 if fixed_p_dhw[t] > 0.05:
-                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.1, max_kw * 1.9)
+                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.5, max_kw * 1.5)
 
                 logger.debug(
                     f"Time {t}: T_out={t_out:.1f}C | "
