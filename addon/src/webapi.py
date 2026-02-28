@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from datetime import timedelta, datetime, timezone, date
 from pathlib import Path
+from context import HvacMode
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +303,6 @@ def _get_solar_forecast_plot(
                 opacity=0.5,
                 connectgaps=False,
                 hovertemplate="%{y:.2f} kW<extra></extra>",
-                showlegend=False,
             )
         )
 
@@ -413,6 +413,77 @@ def _get_solar_forecast_plot(
                     legendgroup="solar",
                 )
             )
+
+        # --- HISTORISCH VERBRUIK WARMTEPOMP (DHW & UFH) ---
+        # 1. Zorg dat we met getallen werken en vang ontbrekende kolommen/data op
+        # Dit voorkomt de 'round' of 'float' errors in de lambda
+        temp_df = df_hist_plot.copy()
+        temp_df["hvac_mode"] = pd.to_numeric(
+            temp_df.get("hvac_mode", 0), errors="coerce"
+        ).fillna(0)
+        temp_df["wp_actual"] = pd.to_numeric(
+            temp_df.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+
+        for mode_id, mode_key, color, fill, label in [
+            (
+                HvacMode.HEATING.value,
+                "ufh",
+                "#d05ce3",
+                "rgba(208, 92, 227, 0.15)",
+                "UFH",
+            ),
+            (HvacMode.DHW.value, "dhw", "#02cfe7", "rgba(0, 229, 255, 0.15)", "DHW"),
+        ]:
+            hist_x = []
+            hist_y = []
+
+            # 2. Gebruik vectorized selection (veel sneller en veiliger dan .apply)
+            # We pakken wp_actual waar de mode matcht, anders 0
+            mask = temp_df["hvac_mode"].round() == mode_id
+            wp_mode_series = temp_df["wp_actual"].where(mask, 0)
+
+            # 3. Bouw de grafiekpunten op (exact hetzelfde als voorheen)
+            for i in range(len(temp_df)):
+                val = wp_mode_series.iloc[i]
+                ts = temp_df.iloc[i]["timestamp_local"]
+
+                is_active = val > 0.01
+                was_active = i > 0 and wp_mode_series.iloc[i - 1] > 0.01
+                is_last = i == len(temp_df) - 1 or wp_mode_series.iloc[i + 1] <= 0.01
+
+                if is_active:
+                    if not was_active:
+                        hist_x.append(ts - timedelta(seconds=1))
+                        hist_y.append(0.0)
+
+                    hist_x.append(ts)
+                    hist_y.append(val)
+
+                    if is_last:
+                        # Gebruik hier de echte volgende timestamp voor een strakke aansluiting
+                        end_ts = ts + timedelta(minutes=15)
+                        hist_x.append(end_ts)
+                        hist_y.append(0.0)
+                        hist_x.append(end_ts)
+                        hist_y.append(None)
+
+            if hist_x:
+                fig.add_trace(
+                    go.Scatter(
+                        x=hist_x,
+                        y=hist_y,
+                        name=f"{label}",
+                        legendgroup=label,
+                        showlegend=False,
+                        mode="lines",
+                        line=dict(color=color, width=1.5, shape="hv"),
+                        fill="tozeroy",
+                        fillcolor=fill,
+                        connectgaps=False,
+                        hovertemplate="%{y:.2f} kW<extra></extra>",
+                    )
+                )
 
     if "power_corrected" in df.columns:
         df_future = df[df["timestamp_local"] >= local_now].copy()
@@ -540,6 +611,7 @@ def _get_solar_forecast_plot(
                             fillcolor=fill,
                             connectgaps=False,
                             hovertemplate="%{y:.2f} kW<extra></extra>",
+                            legendgroup=label,
                         )
                     )
 
