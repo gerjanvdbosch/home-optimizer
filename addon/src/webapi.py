@@ -252,68 +252,61 @@ def _get_solar_forecast_plot(
 
     fig = go.Figure()
 
-    # A. Raw Solcast (Grijs, dashed)
+    # --- 1. SOLCAST TOTAAL (HISTORIE + TOEKOMST) ---
+    sol_x = []
+    sol_y = []
+
+    # Voeg historie toe
     if not df_hist_plot.empty:
-        last_hist_ts = df_hist_plot["timestamp_local"].max()
-    else:
-        last_hist_ts = local_now
+        df_hist_sol = df_hist_plot[df_hist_plot["timestamp_local"] <= local_now]
+        for i, row in df_hist_sol.iterrows():
+            sol_x.append(row["timestamp_local"])
+            sol_y.append(row["pv_estimate"])
 
-    # --- 2. SOLCAST FORECAST (TOEKOMST) ---
-    # We pakken alle data van Solcast die op of na het laatste historie-punt ligt
-    df_future_sol = df[df["timestamp_local"] >= last_hist_ts].copy()
+    # Voeg toekomst toe (vanaf het laatste punt in de historie of nu)
+    last_ts = sol_x[-1] if sol_x else local_now
+    df_future_sol = df[df["timestamp_local"] > last_ts]
 
-    solcast_x = []
-    solcast_y = []
-    for i in range(len(df_future_sol)):
-        val = df_future_sol.iloc[i]["pv_estimate"]
-        ts = df_future_sol.iloc[i]["timestamp_local"]
+    for i, row in df_future_sol.iterrows():
+        sol_x.append(row["timestamp_local"])
+        sol_y.append(row["pv_estimate"])
 
+    # --- 2. OPSCHONEN (VOOR DE NACHT-BREUK) ---
+    # Dezelfde logica als je al had: haal de 0-lijnen 's nachts weg
+    clean_sol_x = []
+    clean_sol_y = []
+
+    for i in range(len(sol_x)):
+        val = sol_y[i]
         is_active = val > 0.01
-        next_is_active = (
-            i < len(df_future_sol) - 1
-            and df_future_sol.iloc[i + 1]["pv_estimate"] > 0.01
-        )
-        prev_is_active = i > 0 and df_future_sol.iloc[i - 1]["pv_estimate"] > 0.01
+        next_active = i < len(sol_x) - 1 and sol_y[i + 1] > 0.01
+        prev_active = i > 0 and sol_y[i - 1] > 0.01
 
-        if is_active or next_is_active or prev_is_active:
-            solcast_x.append(ts)
-            solcast_y.append(val)
+        if is_active or next_active or prev_active:
+            clean_sol_x.append(sol_x[i])
+            clean_sol_y.append(val)
         else:
-            if solcast_x and solcast_y[-1] is not None:
-                solcast_x.append(ts)
-                solcast_y.append(None)
+            if clean_sol_x and clean_sol_y[-1] is not None:
+                clean_sol_x.append(sol_x[i])
+                clean_sol_y.append(None)
 
-    if solcast_x:
+    # --- 3. TEKEN DE GECOMBINEERDE LIJN ---
+    if clean_sol_x:
         fig.add_trace(
             go.Scatter(
-                x=solcast_x,
-                y=solcast_y,
+                x=clean_sol_x,
+                y=clean_sol_y,
                 mode="lines",
                 name="Solcast",
-                legendgroup="solcast",
                 line=dict(color="#888888", dash="dash", width=1),
-                opacity=0.7,
+                opacity=0.5,
                 connectgaps=False,
-                hovertemplate="%{y:.2f} kW (Solcast Forecast)<extra></extra>",
+                hovertemplate="%{y:.2f} kW<extra></extra>",
                 showlegend=False,
             )
         )
 
     if "power_ml_raw" in df.columns and is_today:
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp_local"],
-                y=df["power_ml_raw"],
-                mode="lines",
-                name="Model",
-                line=dict(color="#FF9100", dash="dot", width=1),
-                opacity=0.6,
-                visible="legendonly",
-                legendgroup="model",
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-            )
-        )
-
         fig.add_trace(
             go.Scatter(
                 x=df["timestamp_local"],
@@ -329,46 +322,6 @@ def _get_solar_forecast_plot(
         )
 
     if not df_hist_plot.empty:
-        # A. Raw Solcast (Grijs, dashed)
-        df_hist_sol = df_hist_plot[df_hist_plot["timestamp_local"] <= local_now].copy()
-
-        hist_solcast_x = []
-        hist_solcast_y = []
-        for i in range(len(df_hist_sol)):
-            val = df_hist_sol.iloc[i]["pv_estimate"]
-            ts = df_hist_sol.iloc[i]["timestamp_local"]
-
-            is_active = val > 0.01
-            next_active = (
-                i < len(df_hist_sol) - 1
-                and df_hist_sol.iloc[i + 1]["pv_estimate"] > 0.01
-            )
-            prev_active = i > 0 and df_hist_sol.iloc[i - 1]["pv_estimate"] > 0.01
-
-            if is_active or next_active or prev_active:
-                hist_solcast_x.append(ts)
-                hist_solcast_y.append(val)
-            else:
-                if hist_solcast_x and hist_solcast_y[-1] is not None:
-                    hist_solcast_x.append(ts)
-                    hist_solcast_y.append(None)
-
-        if hist_solcast_x:
-            fig.add_trace(
-                go.Scatter(
-                    x=hist_solcast_x,
-                    y=hist_solcast_y,
-                    mode="lines",
-                    name="Solcast",
-                    legendgroup="solcast",
-                    line=dict(color="#888888", dash="dash", width=1),
-                    opacity=0.7,
-                    connectgaps=False,
-                    showlegend=False,
-                    hovertemplate="%{y:.2f} kW<extra></extra>",
-                )
-            )
-
         fig.add_trace(
             go.Scatter(
                 x=df_hist_plot["timestamp_local"],
@@ -504,7 +457,7 @@ def _get_solar_forecast_plot(
                     opacity=0.8,
                     fillcolor="rgba(255, 255, 255, 0.05)",
                     connectgaps=False,  # Zorg dat de Nones de lijn echt verbreken
-                    hovertemplate="%{y:.2f} kW (Forecast)<extra></extra>",
+                    hovertemplate="%{y:.2f} kW<extra></extra>",
                 )
             )
 
