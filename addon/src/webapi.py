@@ -533,57 +533,45 @@ def _get_solar_forecast_plot(
             )
         )
 
-        # --- PLANNING: ALLEEN TOEKOMST TONEN ---
-        if plan and is_today:
+        # --- PLANNING: TOON VOLLEDIGE DAGPLANNING ---
+        if plan:
             for mode_key, color, fill, label in [
                 ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "UFH"),
                 ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "DHW"),
             ]:
                 x_vals = []
                 y_vals = []
-                first_point = True
 
                 for i in range(len(plan)):
                     slot_time = plan[i]["time"].replace(tzinfo=None)
-
-                    # STAP 1: Filter het verleden eruit (negeer alles voor 'nu')
-                    if slot_time < local_now:
-                        continue
-
                     val = float(plan[i][f"p_el_{mode_key.lower()}"])
                     is_active = plan[i]["mode"] == mode_key
-                    # Check of het vorige slot (in de gefilterde lijst) ook actief was
-                    was_active = not first_point and (
-                        i > 0 and plan[i - 1]["mode"] == mode_key
-                    )
+
+                    # Bepaal of dit het begin of einde is van een blok
+                    was_active = i > 0 and plan[i - 1]["mode"] == mode_key
                     is_last_active = is_active and (
                         i == len(plan) - 1 or plan[i + 1]["mode"] != mode_key
                     )
 
                     if is_active:
                         if not was_active:
-                            # START: verticale muur omhoog op de huidige tijd of start van slot
-                            # We zetten een punt 1 seconde voor de start op 0
-                            start_ts = (
-                                max(slot_time, local_now) if is_today else slot_time
-                            )
-                            x_vals.append(start_ts - timedelta(seconds=1))
+                            # Start van blok: verticaal omhoog vanaf 0
+                            x_vals.append(slot_time - timedelta(seconds=1))
                             y_vals.append(0.0)
-                            x_vals.append(start_ts)
-                            y_vals.append(val)
-                        else:
-                            x_vals.append(slot_time)
-                            y_vals.append(val)
 
-                        first_point = False
+                        # Voeg het datapunt toe (de hoogte uit de tabel)
+                        x_vals.append(slot_time)
+                        y_vals.append(val)
 
-                    if is_last_active:
-                        # EINDE: verticale muur omlaag
-                        end_of_slot = slot_time + timedelta(minutes=15)
-                        x_vals.append(end_of_slot)
-                        y_vals.append(0.0)
-                        x_vals.append(end_of_slot)
-                        y_vals.append(None)  # Pen van papier
+                        if is_last_active:
+                            # Einde van blok: verticaal omlaag naar 0
+                            end_of_slot = slot_time + timedelta(minutes=15)
+                            x_vals.append(end_of_slot)
+                            y_vals.append(0.0)
+                            x_vals.append(end_of_slot)
+                            y_vals.append(
+                                None
+                            )  # Onderbreek de lijn voor het volgende blok
 
                 if x_vals:
                     fig.add_trace(
@@ -592,7 +580,9 @@ def _get_solar_forecast_plot(
                             y=y_vals,
                             name=label,
                             mode="lines",
-                            line=dict(color=color, width=1, shape="hv"),
+                            line=dict(
+                                color=color, width=1.5, shape="hv"
+                            ),  # 'hv' zorgt voor strakke trappetjes
                             fill="tozeroy",
                             fillcolor=fill,
                             connectgaps=False,
