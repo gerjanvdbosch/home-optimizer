@@ -924,7 +924,7 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
     df["total_calc"] = (df["grid_import"] - df["grid_export"] + df["pv_actual"]).clip(
         lower=0.0
     )
-
+    df["wp_actual"] = df.get("wp_actual", 0.0).clip(lower=0.0)
     df["base_calc"] = (df["total_calc"] - df["wp_actual"]).clip(lower=0.0)
 
     # 3. Formatteren voor output
