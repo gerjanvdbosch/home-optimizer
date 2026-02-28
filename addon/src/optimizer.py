@@ -1123,13 +1123,13 @@ class ThermalMPC:
         start_dhw_future = cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
 
         # 3. Totale straf
-        start_ufh_penalty = (start_ufh_now + start_ufh_future) * 50.0
-        start_dhw_penalty = (start_dhw_now + start_dhw_future) * 150.0
+        start_ufh_penalty = (start_ufh_now + start_ufh_future) * 100.0
+        start_dhw_penalty = (start_dhw_now + start_dhw_future) * 100.0
 
         switching = start_ufh_penalty + start_dhw_penalty
 
         # 2. RENDABILITEITS CHECK (SoC Reward)
-        stored_heat_value = (self.t_dhw[T] * 0.012) + (self.t_room[T] * 0.20)
+        stored_heat_value = (self.t_dhw[T] * 0.008) + (self.t_room[T] * 0.25)
 
         self.problem = cp.Problem(
             cp.Minimize(net_cost + comfort + switching - stored_heat_value), constraints
@@ -1145,6 +1145,7 @@ class ThermalMPC:
         for t in range(T):
             fut_time = now_local + timedelta(hours=t * self.dt)
             h = fut_time.hour
+            m = fut_time.minute
 
             # Vloerverwarming: Overdag en 's avonds comfort, 's nachts iets lager
             if 17 <= h < 22:
@@ -1154,10 +1155,17 @@ class ThermalMPC:
             else:
                 r_min[t], r_max[t] = 19.0, 19.5  # Nacht
 
-            # Boiler: Warm hebben voor de avonddouche (17:00-18:00)
-            # Rest van de dag mag hij zakken tot 40, maar 's middags boosten we vaak op zon
-            d_min[t] = 50.0 if 16 <= h <= 19 else 10.0
-            d_max[t] = 55.0  # Max boiler temp (voor COP behoud)
+            # Boiler: Warm hebben voor de avonddouche
+            # We laten de grens heel langzaam oplopen vanaf 12:00
+            if 16 <= h <= 20:
+                d_min[t] = 50.0
+            elif 12 <= h < 16:
+                # Oploop van 10 naar 50 over 4 uur (3.75 gr/uur)
+                d_min[t] = 10.0 + (h - 12) * 3.75 + (m / 60) * 3.75
+            else:
+                d_min[t] = 10.0
+
+            d_max[t] = 55.0
 
         return r_min, r_max, d_min, d_max
 
@@ -1185,12 +1193,12 @@ class ThermalMPC:
         for t_out in temps:
             if t_out < 0:
                 strictness_values.append(
-                    150.0
+                    100.0
                 )  # Vrieskou: Heel streng (snel koud in huis)
             elif t_out < 10:
-                strictness_values.append(80.0)  # Normaal winter: Streng
+                strictness_values.append(60.0)  # Normaal winter: Streng
             elif t_out < 15:
-                strictness_values.append(40.0)  # Fris: Milder, huis koelt traag
+                strictness_values.append(20.0)  # Fris: Milder, huis koelt traag
             else:
                 strictness_values.append(5.0)  # Warm: Heel relaxed
 
@@ -1271,9 +1279,9 @@ class ThermalMPC:
                 # Limits (safety)
                 min_kw, max_kw = self.perf_map.get_pel_limits(t_out)
                 if fixed_p_ufh[t] > 0.05:
-                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.8, max_kw * 1.2)
+                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.5, max_kw * 1.5)
                 if fixed_p_dhw[t] > 0.05:
-                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.8, max_kw * 1.2)
+                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.5, max_kw * 1.5)
 
                 logger.debug(
                     f"Time {t}: T_out={t_out:.1f}C | "
