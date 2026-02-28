@@ -193,9 +193,6 @@ def _get_solar_forecast_plot(
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
 
-    today = context.now.astimezone(local_tz).date()
-    is_today = target_date == today
-
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
         tzinfo=local_tz
     )
@@ -303,21 +300,6 @@ def _get_solar_forecast_plot(
                 opacity=0.5,
                 connectgaps=False,
                 hovertemplate="%{y:.2f} kW<extra></extra>",
-            )
-        )
-
-    if "power_ml_raw" in df.columns and is_today:
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp_local"],
-                y=df["load_ml"],
-                mode="lines",
-                line=dict(color="#F50057", dash="dot", width=1, shape="hv"),
-                showlegend=False,
-                visible="legendonly",
-                legendgroup="model",
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-                opacity=0.6,
             )
         )
 
@@ -475,7 +457,6 @@ def _get_solar_forecast_plot(
                         y=hist_y,
                         name=f"{label}",
                         legendgroup=label,
-                        showlegend=False,
                         mode="lines",
                         line=dict(color=color, width=1.5, shape="hv"),
                         fill="tozeroy",
@@ -610,6 +591,7 @@ def _get_solar_forecast_plot(
                             fill="tozeroy",
                             fillcolor=fill,
                             connectgaps=False,
+                            showlegend=False,
                             hovertemplate="%{y:.2f} kW<extra></extra>",
                             legendgroup=label,
                         )
