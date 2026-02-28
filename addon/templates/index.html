@@ -589,14 +589,14 @@
                 <thead>
                 <tr>
                     <th style="text-align: left;">Tijd</th>
-                    <th>Buiten</th>
                     <th>Zon</th>
-                    <th>Load</th>
+                    <th>Basis</th>
+                    <th style="text-align: center;">Mode</th>
                     <th>Kamer</th>
                     <th>Boiler</th>
-                    <th style="text-align: center;">Mode</th>
                     <th>Aanvoer</th>
                     <th>COP</th>
+                    <th>Buiten</th>
                     <th>Verbruik</th>
                 </tr>
                 </thead>
@@ -606,9 +606,6 @@
                     <!-- Tijd -->
                     <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
 
-                    <!-- Weer & Stroom (Context) -->
-                    <td style="color: var(--text-muted);">{{ row.t_out }} <span class="unit">&deg;C</span></td>
-
                     <td style="color: {% if row.p_solar|float > 0.1 %}#FF9100{% else %}var(--text-muted){% endif %};">
                         {{ row.p_solar }} <span class="unit">kW</span>
                     </td>
@@ -617,16 +614,16 @@
                         {{ row.p_load }} <span class="unit">kW</span>
                     </td>
 
-                    <!-- Temperaturen (Status) -->
-                    <td style="font-weight: 500;">{{ row.t_room }} <span class="unit">&deg;C</span></td>
-                    <td style="font-weight: 500;">{{ row.t_dhw }} <span class="unit">&deg;C</span></td>
-
                     <!-- Modus (Actie) -->
                     <td style="text-align: center;">
                         <span class="badge {% if row.mode == 'UFH' %}badge-ufh{% elif row.mode == 'DHW' %}badge-dhw{% else %}badge-off{% endif %}">
                             {{ row.mode }}
                         </span>
                     </td>
+
+                    <!-- Temperaturen (Status) -->
+                    <td style="font-weight: 500;">{{ row.t_room }} <span class="unit">&deg;C</span></td>
+                    <td style="font-weight: 500;">{{ row.t_dhw }} <span class="unit">&deg;C</span></td>
 
                     <!-- Warmtepomp Data -->
                     <td style="color: var(--text-muted);">
@@ -641,6 +638,9 @@
                         {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.cop_dhw | float) }}
                         {% else %}-{% endif %}
                     </td>
+
+                    <!-- Weer & Stroom (Context) -->
+                    <td style="color: var(--text-muted);">{{ row.t_out }} <span class="unit">&deg;C</span></td>
 
                     <td style="font-weight: {% if row.mode != '-' %}600{% else %}normal{% endif %}; color: {% if row.mode != '-' %}var(--text-color){% else %}var(--text-muted){% endif %};">
                         {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.p_el_ufh | float) }} <span class="unit">kW</span>
@@ -730,7 +730,7 @@
                     </td>
 
                     <!-- WP Verbruik -->
-                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 2 %}#d05ce3{% elif row.mode == 1 or row.mode == 4 %}#02cfe7{% else %}var(--text-muted){% endif %};">
+                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 0 %}var(--text-muted){% endif %};">
                         {{ row.wp }} <span class="unit">{{ unit }}</span>
                     </td>
 
