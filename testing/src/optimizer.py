@@ -1129,7 +1129,7 @@ class ThermalMPC:
         switching = start_ufh_penalty + start_dhw_penalty
 
         # 2. RENDABILITEITS CHECK (SoC Reward)
-        stored_heat_value = (self.t_dhw[T] * 0.008) + (self.t_room[T] * 0.25)
+        stored_heat_value = (self.t_dhw[T] * 0.010) + (self.t_room[T] * 0.20)
 
         self.problem = cp.Problem(
             cp.Minimize(net_cost + comfort + switching - stored_heat_value), constraints
@@ -1145,7 +1145,6 @@ class ThermalMPC:
         for t in range(T):
             fut_time = now_local + timedelta(hours=t * self.dt)
             h = fut_time.hour
-            m = fut_time.minute
 
             # Vloerverwarming: Overdag en 's avonds comfort, 's nachts iets lager
             if 17 <= h < 22:
@@ -1156,12 +1155,8 @@ class ThermalMPC:
                 r_min[t], r_max[t] = 19.0, 19.5  # Nacht
 
             # Boiler: Warm hebben voor de avonddouche
-            # We laten de grens heel langzaam oplopen vanaf 12:00
             if 16 <= h <= 20:
                 d_min[t] = 50.0
-            elif 12 <= h < 16:
-                # Oploop van 10 naar 50 over 4 uur (3.75 gr/uur)
-                d_min[t] = 10.0 + (h - 12) * 3.75 + (m / 60) * 3.75
             else:
                 d_min[t] = 10.0
 
