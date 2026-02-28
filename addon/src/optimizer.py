@@ -1155,7 +1155,7 @@ class ThermalMPC:
                 r_min[t], r_max[t] = 19.0, 19.5  # Nacht
 
             # Boiler: Warm hebben voor de avonddouche
-            if 16 <= h <= 20:
+            if 11 <= h <= 15:
                 d_min[t] = 50.0
             else:
                 d_min[t] = 10.0
