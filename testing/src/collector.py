@@ -10,6 +10,7 @@ from collections import deque
 from weather import WeatherClient
 from database import Database
 from context import HvacMode
+from utils import generate_sunny_forecast
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class Collector:
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
-            hour=12, minute=0, second=0, microsecond=0, day=14, month=1, year=2026
+            hour=8, minute=0, second=0, microsecond=0, day=14, month=1, year=2027
         ).tz_convert("UTC")
         end_filter = start_filter + timedelta(days=1)
         full_index = pd.date_range(
@@ -87,8 +88,8 @@ class Collector:
         self.database.save_forecast(df_today)
 
         # forecast_df = df_today[df_today["timestamp"] >= self.context.now].copy()
-
-        self.context.forecast_df_raw = df_today
+        # self.context.forecast_df_raw = df_today
+        self.context.forecast_df_raw = generate_sunny_forecast(self.context.now)
 
         logger.info("[Collector] Forecast updated")
 

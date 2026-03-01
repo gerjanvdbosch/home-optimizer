@@ -1,7 +1,7 @@
 {
-  "room_temp": 19.0,
-  "dhw_top": 19.0,
-  "dhw_bottom": 19.0,
+  "room_temp": 21.0,
+  "dhw_top": 35.0,
+  "dhw_bottom": 25.0,
   "dhw_setpoint": 50.0,
   "supply_temp": 25.0,
   "return_temp": 20.0,
