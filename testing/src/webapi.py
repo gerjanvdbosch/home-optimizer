@@ -231,7 +231,11 @@ def _get_solar_forecast_plot(
 
         # --- A. HISTORIE: VLOEIENDE LIJN (FIX VOOR HET STUITEREN) ---
         # 1. Zet index
-        df_hist_smooth = df_hist.set_index("timestamp_local").sort_index().apply(pd.to_numeric, errors="coerce")
+        df_hist_smooth = (
+            df_hist.set_index("timestamp_local")
+            .sort_index()
+            .apply(pd.to_numeric, errors="coerce")
+        )
 
         df_hist_smooth["base_load"] = (
             df_hist_smooth["grid_import"]

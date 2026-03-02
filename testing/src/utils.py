@@ -111,13 +111,13 @@ def generate_sunny_forecast(start_time=None):
             "power_ml_raw": pv,
             "power_corrected": pv,
             "load_ml": load,
-            "load_corrected": load
+            "load_corrected": load,
         }
         data.append(row)
 
     df = pd.DataFrame(data)
 
     # Zorg dat de timestamp kolom echt datetime objecten bevat met UTC (of jouw locale zone)
-    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
     return df
