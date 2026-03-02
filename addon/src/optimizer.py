@@ -1107,7 +1107,7 @@ class ThermalMPC:
         valve_switches = (
                     cp.pos(self.ufh_on[0] - self.P_init_ufh) + cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1])) +
                     cp.pos(self.dhw_on[0] - self.P_init_dhw) + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1])))
-        switching = (cp.sum(self.comp_start) * 100.0) + (valve_switches * 5.0)
+        switching = (cp.sum(self.comp_start) * 100.0) + (valve_switches * 50.0)
 
         stored_heat_value = (self.t_dhw[T] * self.P_val_terminal_dhw) + (self.t_room[T] * self.P_val_terminal_room)
 
