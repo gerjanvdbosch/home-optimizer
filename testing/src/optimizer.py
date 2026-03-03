@@ -961,14 +961,88 @@ class MLResidualPredictor:
         return self.model.predict(df[self.features])
 
 
+class ShowerPredictor:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.model = None
+        self.features = ["hour_sin", "hour_cos", "day_sin", "day_cos"]
+        self._load()
+
+    def _load(self):
+        if self.path.exists():
+            try:
+                self.model = joblib.load(self.path)
+            except Exception:
+                self.model = None
+
+    def train(self, df: pd.DataFrame):
+        df = df.copy().sort_values("timestamp")
+
+        # 1. Detecteer 'taps' (douche beurten)
+        df["dhw_diff"] = df["dhw_top"].diff()
+
+        # Filter: Alleen dalingen (>0.5 graad) terwijl de HP NIET in DHW mode staat
+        mask_shower = (df["hvac_mode"] != HvacMode.DHW.value) & (df["dhw_diff"] < -0.5)
+
+        # Maak target variabele
+        df["demand"] = 0.0
+        df.loc[mask_shower, "demand"] = df["dhw_diff"].abs()
+
+        # 2. Features maken
+        df = add_cyclic_time_features(df, "timestamp")
+
+        # Selecteer data voor training
+        # We trainen op ALLES, zodat het model leert wanneer het 0 is (rust) én wanneer het hoog is (douchen)
+        X = df[self.features]
+        y = df["demand"]
+
+        if len(df) > 100:
+            # Random Forest Regressor
+            # min_samples_leaf=5 zorgt dat hij niet op 1 uniek incident traint (voorkomt overfitting)
+            self.model = RandomForestRegressor(
+                n_estimators=100, max_depth=10, min_samples_leaf=10, random_state=42
+            ).fit(X, y)
+
+            joblib.dump(self.model, self.path)
+            logger.info("[Shower] Douchemodel getraind.")
+        else:
+            logger.warning("[Shower] Te weinig data om te trainen.")
+
+    def predict(self, forecast_df):
+        """Geeft een array terug met de verwachte daling (graden) per tijdstap."""
+        if self.model is None:
+            return np.zeros(len(forecast_df))
+
+        # Maak features voor de forecast
+        df_feat = add_cyclic_time_features(forecast_df.copy(), "timestamp")
+
+        # Voorspel de daling
+        predictions = self.model.predict(df_feat[self.features])
+
+        # 3. Post-processing (Belangrijk voor MPC!)
+        # Een Random Forest smeert vaak uit: hij voorspelt 0.5 graden over 4 kwartieren
+        # in plaats van 2.0 graden in 1 kwartier.
+        # Voor de optimizer maakt dit niet heel veel uit (de integraal is hetzelfde),
+        # maar we willen ruis (0.1 graad continu) negeren.
+
+        # Filter: negeer alles onder de 0.8 graad daling per kwartier
+        predictions = np.where(predictions < 0.8, 0.0, predictions)
+
+        # Boost de pieken iets om zeker te zijn dat de buffer groot genoeg is
+        predictions = predictions * 1.5
+
+        return predictions
+
+
 # =========================================================
-# 4. THERMAL MPC (100% Lineair, Zonder Frequentie)
+# 4. THERMAL MPC
 # =========================================================
 class ThermalMPC:
-    def __init__(self, ident, perf_map, hydraulic):
+    def __init__(self, ident, perf_map, hydraulic, shower):
         self.ident = ident
         self.perf_map = perf_map
         self.hydraulic = hydraulic
+        self.shower = shower
         self.horizon = 96
         self.dt = 0.25
 
@@ -1016,13 +1090,13 @@ class ThermalMPC:
 
         self.P_hist_heat = cp.Parameter(self.ident.ufh_lag_steps, nonneg=True)
 
+        self.P_dhw_demand = cp.Parameter(T, nonneg=True)
+
         # --- VARIABELEN ---
         # Binary ON/OFF is de ENIGE keuze voor de solver
         self.ufh_on = cp.Variable(T, boolean=True)
         self.dhw_on = cp.Variable(T, boolean=True)
-        self.comp_start = cp.Variable(
-            T, nonneg=True
-        )  # NIEUW: Voor afstraffen koude start
+        self.comp_start = cp.Variable(T, nonneg=True)
 
         # Afgeleide variabelen (worden vastgezet via de booleans)
         self.p_el_ufh = cp.Variable(T, nonneg=True)
@@ -1079,7 +1153,8 @@ class ThermalMPC:
                     (p_th_dhw_now * self.dt) / self.ident.C_tank
                     - (self.t_dhw[t] - self.t_room[t])
                     * (self.ident.K_loss_dhw * self.dt)
-                ),
+                )
+                - self.P_dhw_demand[t],
                 # Fysieke Grenzen (Niet tegelijk vloer en boiler doen)
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
                 # JOUW ORIGINELE FIX: Vermogen is EXACT het weersafhankelijke profiel als hij aan staat!
@@ -1175,6 +1250,9 @@ class ThermalMPC:
 
         self.P_temp_out.value = forecast_df.temp.values[:T]
 
+        dhw_demand = self.shower.predict(forecast_df)
+        self.P_dhw_demand.value = dhw_demand[: self.horizon]
+
         prices = np.full(T, 0.22)
         self.P_prices.value = prices
         self.P_export_prices.value = np.full(T, 0.05)
@@ -1186,7 +1264,7 @@ class ThermalMPC:
 
         # Prijs dynamica instellen
         avg_price = max(float(np.mean(prices)), 0.10)
-        self.P_cost_room_under.value = 15.0 * self.ident.C * avg_price
+        self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
         self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
             10.0 * self.ident.C * avg_price
@@ -1320,6 +1398,7 @@ class Optimizer:
         self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path)
         self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
+        self.shower = ShowerPredictor(config.shower_model_path)
         self.res_ufh = MLResidualPredictor(
             config.ufh_model_path,
             self.ident.R,
@@ -1336,7 +1415,7 @@ class Optimizer:
         )
 
         # Geef de hydraulic predictor mee aan MPC
-        self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic)
+        self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic, self.shower)
 
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
@@ -1349,6 +1428,7 @@ class Optimizer:
         self.hydraulic.train(df)
         self.res_ufh.train(df)
         self.res_dhw.train(df, is_dhw=True)
+        self.shower.train(df)
         self.mpc._build_problem()
 
     def resolve(self, context: Context):
@@ -1377,6 +1457,13 @@ class Optimizer:
 
         # FIX: Voorspel de zon-opwarming vooraf via het getrainde ML model
         solar_gains = self.res_ufh.predict(context.forecast_df)
+
+        logger.info(
+            f"[Optimizer] Max solar gain in forecast: {np.max(solar_gains):.3f} K/kwartier"
+        )
+        logger.info(
+            f"[Optimizer] Gemiddelde solar gain: {np.mean(solar_gains):.3f} K/kwartier"
+        )
 
         # Geef de solar_gains ook mee aan de solver
         self.mpc.solve(state, context.forecast_df, recent_history_df, solar_gains)

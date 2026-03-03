@@ -36,6 +36,7 @@ class Config:
     solar_model_path: str = "/config/models/solar_model.joblib"
     hp_model_path: str = "/config/models/hp_model.joblib"
     hydraulic_model_path: str = "/config/models/hydraulic_model.joblib"
+    shower_model_path: str = "/config/models/shower_model.joblib"
 
     solar_model_ratio: float = 0.0
 
