@@ -1004,6 +1004,7 @@ class ThermalMPC:
         self.P_cost_room_under = cp.Parameter(nonneg=True)
         self.P_cost_room_over = cp.Parameter(nonneg=True)
         self.P_cost_dhw_under = cp.Parameter(nonneg=True)
+        self.P_cost_dhw_over = cp.Parameter(nonneg=True)
         self.P_val_terminal_room = cp.Parameter(nonneg=True)
         self.P_val_terminal_dhw = cp.Parameter(nonneg=True)
 
@@ -1037,6 +1038,7 @@ class ThermalMPC:
         self.s_room_low = cp.Variable(T, nonneg=True)
         self.s_room_high = cp.Variable(T, nonneg=True)
         self.s_dhw_low = cp.Variable(T, nonneg=True)
+        self.s_dhw_high = cp.Variable(T, nonneg=True)
 
         # --- CONSTRAINTS ---
         constraints = [
@@ -1087,7 +1089,7 @@ class ThermalMPC:
                 self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_room[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
-                self.t_dhw[t + 1] <= self.P_dhw_max[t],
+                self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
             ]
 
         # --- OBJECTIVE FUNCTION ---
@@ -1108,6 +1110,7 @@ class ThermalMPC:
             self.s_room_low * self.P_cost_room_under
             + self.s_room_high * self.P_cost_room_over
             + self.s_dhw_low * self.P_cost_dhw_under
+            + self.s_dhw_high * self.P_cost_dhw_over
             + extra_penalty
         )
 
@@ -1118,7 +1121,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 100.0) + (valve_switches * 50.0)
+        switching = (cp.sum(self.comp_start) * 200.0) + (valve_switches * 25.0)
 
         stored_heat_value = (self.t_dhw[T] * self.P_val_terminal_dhw) + (
             self.t_room[T] * self.P_val_terminal_room
@@ -1143,7 +1146,7 @@ class ThermalMPC:
             else:
                 r_min[t], r_max[t] = 19.0, 19.5
 
-            if 12 <= h <= 15:
+            if 14 <= h <= 15:
                 d_min[t] = 50.0
             else:
                 d_min[t] = 10.0
@@ -1186,8 +1189,9 @@ class ThermalMPC:
         self.P_cost_room_under.value = 15.0 * self.ident.C * avg_price
         self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
-            30.0 * self.ident.C * avg_price
+            10.0 * self.ident.C * avg_price
         )  # Boiler krijgt prioriteit bij vraag
+        self.P_cost_dhw_over.value = 2.0 * self.ident.C * avg_price
         self.P_val_terminal_room.value = self.ident.C * avg_price
         self.P_val_terminal_dhw.value = self.ident.C_tank * avg_price
 
