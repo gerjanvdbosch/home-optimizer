@@ -845,13 +845,11 @@ class HydraulicPredictor:
 # =========================================================
 # 3. ML RESIDUALS
 # =========================================================
-class MLResidualPredictor:
-    def __init__(self, path, R, C, K_loss_dhw, C_tank):
+class UfhResidualPredictor:
+    def __init__(self, path, R, C):
         self.path = Path(path)
         self.R = R
         self.C = C
-        self.K_loss_dhw = K_loss_dhw
-        self.C_tank = C_tank
         self.model = None
         self.features = [
             "temp",
@@ -865,7 +863,7 @@ class MLResidualPredictor:
             "doy_cos",
         ]
 
-    def train(self, df, is_dhw=False):
+    def train(self, df):
         df_proc = df.copy().sort_values("timestamp")
 
         # Bereken wp_output voor de hele set
@@ -884,49 +882,26 @@ class MLResidualPredictor:
 
         dt_hours = df_proc["timestamp"].diff().dt.total_seconds().shift(-1) / 3600
 
-        if not is_dhw:
-            # UFH: Alleen trainen op Heating of Standby (om afkoeling te leren)
-            mask = (df_proc["hvac_mode"] == HvacMode.HEATING.value) | (
-                df_proc["wp_output"] < 0.1
-            )
-            df_feat = df_proc[mask].copy()
-            dt = dt_hours[mask]
+        # UFH: Alleen trainen op Heating of Standby (om afkoeling te leren)
+        mask = (df_proc["hvac_mode"] == HvacMode.HEATING.value) | (
+            df_proc["wp_output"] < 0.1
+        )
+        df_feat = df_proc[mask].copy()
+        dt = dt_hours[mask]
 
-            t_curr = df_feat["room_temp"]
-            t_next = df_feat["room_temp"].shift(-1)
-            p_heat = df_feat["wp_output"]
-            t_out = df_feat["temp"]
+        t_curr = df_feat["room_temp"]
+        t_next = df_feat["room_temp"].shift(-1)
+        p_heat = df_feat["wp_output"]
+        t_out = df_feat["temp"]
 
-            # Fysische basis: T_next = T_curr + (P_heat - Verlies) * dt / C
-            t_model_next = t_curr + ((p_heat - (t_curr - t_out) / self.R) * dt / self.C)
-        else:
-            # DHW: JUIST trainen op ALLES (ook als HP uit staat) om sluipverbruik te leren
-            df_feat = df_proc.copy()
-            dt = dt_hours
-
-            t_curr = (df_feat["dhw_top"] + df_feat["dhw_bottom"]) / 2
-            t_next = t_curr.shift(-1)
-            p_heat = df_feat["wp_output"]
-            # Boiler verlies model: K_loss_dhw * (T_tank - T_room)
-            t_room = df_feat["room_temp"]
-
-            # Fysische basis inclusief het vaste K_loss uit je SysID
-            t_model_next = (
-                t_curr
-                + (p_heat * dt / self.C_tank)
-                - (self.K_loss_dhw * (t_curr - t_room) * dt)
-            )
+        # Fysische basis: T_next = T_curr + (P_heat - Verlies) * dt / C
+        t_model_next = t_curr + ((p_heat - (t_curr - t_out) / self.R) * dt / self.C)
 
         # Residu berekenen (K/u)
         target = (t_next - t_model_next) / dt
 
         # Ruis wegpoetsen
-        if is_dhw:
-            # Alles tussen -0.8 en +0.8 wordt 0.0
-            target = np.where(np.abs(target) < 0.2, 0, target)
-            target = np.where(target > 0, 0, target)
-        else:
-            target = np.where(np.abs(target) < 0.15, 0, target)
+        target = np.where(np.abs(target) < 0.15, 0, target)
 
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
         df_feat["solar"] = df_feat["pv_actual"]
@@ -934,13 +909,8 @@ class MLResidualPredictor:
 
         train_set = df_feat[self.features + ["target"]].dropna()
 
-        # DHW kan grotere afwijkingen hebben door taps, dus ruimere grenzen.
-        if is_dhw:
-            # Vangt sensorfouten op, 0.5 zorgt dat we niet leren van HP-opwarmfouten
-            train_set = train_set[train_set["target"].between(-1.0, 0.5)]
-        else:
-            # Vangt extreme situaties op zoals open ramen of directe zon op de sensor
-            train_set = train_set[train_set["target"].between(-1.2, 1.2)]
+        # Vangt extreme situaties op zoals open ramen of directe zon op de sensor
+        train_set = train_set[train_set["target"].between(-1.2, 1.2)]
 
         if len(train_set) > 10:
             self.model = RandomForestRegressor(
@@ -961,7 +931,7 @@ class MLResidualPredictor:
         return self.model.predict(df[self.features])
 
 
-class ShowerPredictor:
+class DhwResidualPredictor:
     def __init__(self, path):
         self.path = Path(path)
         self.model = None
@@ -1025,8 +995,8 @@ class ShowerPredictor:
         # Voor de optimizer maakt dit niet heel veel uit (de integraal is hetzelfde),
         # maar we willen ruis (0.1 graad continu) negeren.
 
-        # Filter: negeer alles onder de 0.8 graad daling per kwartier
-        predictions = np.where(predictions < 0.8, 0.0, predictions)
+        # Filter: negeer alles onder de 0.5 graad daling per kwartier
+        predictions = np.where(predictions < 0.5, 0.0, predictions)
 
         # Boost de pieken iets om zeker te zijn dat de buffer groot genoeg is
         predictions = predictions * 1.5
@@ -1038,11 +1008,11 @@ class ShowerPredictor:
 # 4. THERMAL MPC
 # =========================================================
 class ThermalMPC:
-    def __init__(self, ident, perf_map, hydraulic, shower):
+    def __init__(self, ident, perf_map, hydraulic, res_dhw):
         self.ident = ident
         self.perf_map = perf_map
         self.hydraulic = hydraulic
-        self.shower = shower
+        self.res_dhw = res_dhw
         self.horizon = 96
         self.dt = 0.25
 
@@ -1250,7 +1220,7 @@ class ThermalMPC:
 
         self.P_temp_out.value = forecast_df.temp.values[:T]
 
-        dhw_demand = self.shower.predict(forecast_df)
+        dhw_demand = self.res_dhw.predict(forecast_df)
         self.P_dhw_demand.value = dhw_demand[: self.horizon]
 
         prices = np.full(T, 0.22)
@@ -1398,24 +1368,13 @@ class Optimizer:
         self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path)
         self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
-        self.shower = ShowerPredictor(config.shower_model_path)
-        self.res_ufh = MLResidualPredictor(
-            config.ufh_model_path,
-            self.ident.R,
-            self.ident.C,
-            self.ident.K_loss_dhw,
-            self.ident.C_tank,
+        self.res_ufh = UfhResidualPredictor(
+            config.ufh_model_path, self.ident.R, self.ident.C
         )
-        self.res_dhw = MLResidualPredictor(
-            config.dhw_model_path,
-            self.ident.R,
-            self.ident.C,
-            self.ident.K_loss_dhw,
-            self.ident.C_tank,
-        )
+        self.res_dhw = DhwResidualPredictor(config.dhw_model_path)
 
         # Geef de hydraulic predictor mee aan MPC
-        self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic, self.shower)
+        self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic, self.res_dhw)
 
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
@@ -1427,8 +1386,7 @@ class Optimizer:
         self.ident.train(df)
         self.hydraulic.train(df)
         self.res_ufh.train(df)
-        self.res_dhw.train(df, is_dhw=True)
-        self.shower.train(df)
+        self.res_dhw.train(df)
         self.mpc._build_problem()
 
     def resolve(self, context: Context):
