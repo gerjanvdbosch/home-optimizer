@@ -1181,7 +1181,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 200.0) + (valve_switches * 10.0)
+        switching = (cp.sum(self.comp_start) * 30.0) + (valve_switches * 5.0)
 
         stored_heat_value = (self.t_dhw[T] * self.P_val_terminal_dhw) + (
             self.t_room[T] * self.P_val_terminal_room
@@ -1208,7 +1208,7 @@ class ThermalMPC:
 
             # Alleen een harde eis vlak voor het piekmoment
             if 20 <= h <= 21:
-                d_min[t] = 48.5
+                d_min[t] = 49.0
             else:
                 d_min[t] = 10.0
             d_max[t] = 55.0
@@ -1253,7 +1253,7 @@ class ThermalMPC:
         self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
         self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
-            15.0 * self.ident.C * avg_price
+            15.0 * self.ident.C_tank * avg_price
         )  # Boiler krijgt prioriteit bij vraag
         self.P_cost_dhw_over.value = 5.0 * self.ident.C * avg_price
 
