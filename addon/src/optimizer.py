@@ -1182,7 +1182,7 @@ class ThermalMPC:
             fut_time = now_local + timedelta(hours=t * self.dt)
             h = fut_time.hour
             if 17 <= h < 22:
-                r_min[t], r_max[t] = 20.0, 21.5
+                r_min[t], r_max[t] = 20.0, 21.0
             elif 11 <= h < 17:
                 r_min[t], r_max[t] = 19.5, 22.0
             else:
@@ -1232,13 +1232,19 @@ class ThermalMPC:
         # Prijs dynamica instellen
         avg_price = max(float(np.mean(prices)), 0.10)
         self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
-        self.P_cost_room_over.value = 1.0 * self.ident.C * avg_price
+        self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
             2.0 * self.ident.C * avg_price
         )  # Boiler krijgt prioriteit bij vraag
         self.P_cost_dhw_over.value = 5.0 * self.ident.C * avg_price
-        self.P_val_terminal_room.value = self.ident.C * avg_price
-        self.P_val_terminal_dhw.value = self.ident.C_tank * avg_price
+
+        # De woning lekt warmte, dus een graad nu is aan het eind van de 24u horizon minder waard.
+        # We geven de kamer 15% van de waarde van de energieprijs.
+        # Dit is genoeg om zon te verkiezen boven export, maar te weinig om duur stroom te kopen.
+        self.P_val_terminal_room.value = 0.15 * self.ident.C * avg_price
+
+        # De boiler is goed geïsoleerd en echt een batterij: die geven we 80% waarde.
+        self.P_val_terminal_dhw.value = 0.80 * self.ident.C_tank * avg_price
 
         temps = forecast_df.temp.values[:T]
 
