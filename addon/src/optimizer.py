@@ -1207,7 +1207,7 @@ class ThermalMPC:
                 r_min[t], r_max[t] = 19.0, 19.5
 
             # Alleen een harde eis vlak voor het piekmoment
-            if 20 <= h <= 21:
+            if 20 <= h < 21:
                 d_min[t] = 49.0
             else:
                 d_min[t] = 10.0
