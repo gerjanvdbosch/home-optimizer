@@ -1250,18 +1250,17 @@ class ThermalMPC:
 
         # Prijs dynamica instellen
         avg_price = max(float(np.mean(prices)), 0.10)
-        self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
-        self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
-        self.P_cost_dhw_under.value = (
-            30.0 * self.ident.C_tank * avg_price
-        )  # Boiler krijgt prioriteit bij vraag
-        self.P_cost_dhw_over.value = 5.0 * self.ident.C * avg_price
 
+        self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
+        self.P_cost_room_over.value = 1.0 * self.ident.C * avg_price
         # De woning lekt warmte, dus een graad nu is aan het eind van de 24u horizon minder waard.
         # We geven de kamer 15% van de waarde van de energieprijs.
         # Dit is genoeg om zon te verkiezen boven export, maar te weinig om duur stroom te kopen.
         self.P_val_terminal_room.value = 0.15 * self.ident.C * avg_price
 
+        # Boiler krijgt prioriteit bij vraag
+        self.P_cost_dhw_under.value = 15.0 * self.ident.C_tank * avg_price
+        self.P_cost_dhw_over.value = 5.0 * self.ident.C_tank * avg_price
         # De boiler is goed geïsoleerd en echt een batterij: die geven we 95% waarde.
         self.P_val_terminal_dhw.value = 0.95 * self.ident.C_tank * avg_price
 
@@ -1451,6 +1450,19 @@ class Optimizer:
 
         # Geef de solar_gains ook mee aan de solver
         self.mpc.solve(state, context.forecast_df, recent_history_df, solar_gains)
+
+        logger.info(f"[Optimizer] Totaal zonopbrengst: {np.sum(solar_gains):.3f} KWh")
+        logger.info(
+            f"[Optimizer] Eigen zonverbruik: {np.sum(self.mpc.p_solar_self.value * self.mpc.dt):.3f} KWh"
+        )
+        logger.info(
+            f"[Optimizer] Export: {np.sum(self.mpc.p_export.value * self.mpc.dt):.3f} KWh"
+        )
+        logger.info(
+            f"[Optimizer] Net verbruik: {np.sum(self.mpc.p_grid.value * self.mpc.dt):.3f} KWh"
+        )
+        # logger.info(f"[Optimizer] Comfort overtreding (K): {(np.sum(self.mpc.s_room_low.value) + np.sum(self.mpc.s_room_high.value) * self.mpc.dt):.2f} K-uur")
+        # logger.info(f"[Optimizer] Comfort overtreding DHW (K): {(np.sum(self.mpc.s_dhw_low.value) + np.sum(self.mpc.s_dhw_high.value) * self.mpc.dt):.2f} K-uur")
 
         if self.mpc.p_el_ufh.value is None:
             return {
