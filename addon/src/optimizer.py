@@ -851,6 +851,7 @@ class UfhResidualPredictor:
         self.R = R
         self.C = C
         self.model = None
+        self.is_fitted = False
         self.features = [
             "temp",
             "solar",
@@ -862,6 +863,16 @@ class UfhResidualPredictor:
             "doy_sin",
             "doy_cos",
         ]
+        self._load()
+
+    def _load(self):
+        if self.path.exists():
+            try:
+                self.model = joblib.load(self.path)
+                self.is_fitted = True
+                logger.info("[UFH] Model geladen.")
+            except Exception as e:
+                logger.warning(f"[UFH] Model laden mislukt: {e}")
 
     def train(self, df):
         df_proc = df.copy().sort_values("timestamp")
@@ -916,11 +927,13 @@ class UfhResidualPredictor:
             self.model = RandomForestRegressor(
                 n_estimators=100, max_depth=5, min_samples_leaf=15
             ).fit(train_set[self.features], train_set["target"])
-
+            self.is_fitted = True
             joblib.dump(self.model, self.path)
+            logger.info("[UFH] Model getraind.")
 
     def predict(self, forecast_df):
-        if self.model is None:
+        if self.model is None or not self.is_fitted:
+            logger.info("[UFH] Geen model beschikbaar, voorspel 0 residu.")
             return np.zeros(len(forecast_df))
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
         # FIX: Veilig data ophalen. PV is vaak 'pv_estimate' of 'power_corrected'
@@ -935,6 +948,7 @@ class DhwResidualPredictor:
     def __init__(self, path):
         self.path = Path(path)
         self.model = None
+        self.is_fitted = False
         self.features = ["hour_sin", "hour_cos", "day_sin", "day_cos"]
         self._load()
 
@@ -942,8 +956,10 @@ class DhwResidualPredictor:
         if self.path.exists():
             try:
                 self.model = joblib.load(self.path)
-            except Exception:
-                self.model = None
+                self.is_fitted = True
+                logger.info("[DHW] Model geladen.")
+            except Exception as e:
+                logger.warning(f"[DHW] Model laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
         df = df.copy().sort_values("timestamp")
@@ -973,14 +989,16 @@ class DhwResidualPredictor:
                 n_estimators=100, max_depth=10, min_samples_leaf=10, random_state=42
             ).fit(X, y)
 
+            self.is_fitted = True
             joblib.dump(self.model, self.path)
-            logger.info("[Shower] Douchemodel getraind.")
+            logger.info("[DHW] Douchemodel getraind.")
         else:
             logger.warning("[Shower] Te weinig data om te trainen.")
 
     def predict(self, forecast_df):
         """Geeft een array terug met de verwachte daling (graden) per tijdstap."""
-        if self.model is None:
+        if self.model is None or not self.is_fitted:
+            logger.info("[DHW] Geen model beschikbaar, voorspel 0 daling.")
             return np.zeros(len(forecast_df))
 
         # Maak features voor de forecast
@@ -1163,7 +1181,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 200.0) + (valve_switches * 15.0)
+        switching = (cp.sum(self.comp_start) * 200.0) + (valve_switches * 10.0)
 
         stored_heat_value = (self.t_dhw[T] * self.P_val_terminal_dhw) + (
             self.t_room[T] * self.P_val_terminal_room
