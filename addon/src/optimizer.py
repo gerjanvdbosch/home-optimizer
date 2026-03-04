@@ -1138,13 +1138,10 @@ class ThermalMPC:
             ]
 
         # --- OBJECTIVE FUNCTION ---
-        solar_bonus_rate = 0.05
-
         net_cost = (
             cp.sum(
                 cp.multiply(self.p_grid, self.P_prices)
                 - cp.multiply(self.p_export, self.P_export_prices)
-                - (self.p_solar_self * solar_bonus_rate)
             )
             * self.dt
         )
