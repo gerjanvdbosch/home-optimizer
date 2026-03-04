@@ -995,8 +995,8 @@ class DhwResidualPredictor:
         # Voor de optimizer maakt dit niet heel veel uit (de integraal is hetzelfde),
         # maar we willen ruis (0.1 graad continu) negeren.
 
-        # Filter: negeer alles onder de 0.5 graad daling per kwartier
-        predictions = np.where(predictions < 0.5, 0.0, predictions)
+        # Filter: negeer alles onder de 0.8 graad daling per kwartier
+        predictions = np.where(predictions < 0.8, 0.0, predictions)
 
         # Boost de pieken iets om zeker te zijn dat de buffer groot genoeg is
         predictions = predictions * 1.5
