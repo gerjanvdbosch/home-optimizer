@@ -1138,7 +1138,7 @@ class ThermalMPC:
             ]
 
         # --- OBJECTIVE FUNCTION ---
-        solar_bonus_rate = 0.03
+        solar_bonus_rate = 0.05
 
         net_cost = (
             cp.sum(
@@ -1235,26 +1235,30 @@ class ThermalMPC:
         # Prijs dynamica instellen
         avg_price = max(float(np.mean(prices)), 0.10)
         self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
-        self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
+        self.P_cost_room_over.value = 1.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
-            10.0 * self.ident.C * avg_price
+            2.0 * self.ident.C * avg_price
         )  # Boiler krijgt prioriteit bij vraag
-        self.P_cost_dhw_over.value = 2.0 * self.ident.C * avg_price
+        self.P_cost_dhw_over.value = 5.0 * self.ident.C * avg_price
         self.P_val_terminal_room.value = self.ident.C * avg_price
         self.P_val_terminal_dhw.value = self.ident.C_tank * avg_price
 
         temps = forecast_df.temp.values[:T]
-        strictness_values = []
-        for t_out in temps:
-            if t_out < 0:
-                strictness_values.append(100.0 * avg_price)
-            elif t_out < 10:
-                strictness_values.append(60.0 * avg_price)
-            elif t_out < 15:
-                strictness_values.append(20.0 * avg_price)
-            else:
-                strictness_values.append(5.0 * avg_price)
-        self.P_strictness.value = np.array(strictness_values)
+
+        # --- Slimme, vloeiende strictness curve ---
+        # 1. Bepaal het verschil tussen 'kamer' (ongeveer 20) en buiten.
+        # (Als het buiten warmer is dan 20, is het verschil 0)
+        delta_t = np.maximum(0.0, 20.0 - temps)
+
+        # 2. Kwadratische boete: hoe kouder, hoe exponentieel strenger.
+        # Bijv:
+        # T_out = 15 -> Delta 5 -> 5 + 0.25 * 25 = 11
+        # T_out = 10 -> Delta 10 -> 5 + 0.25 * 100 = 30
+        # T_out = 0 -> Delta 20 -> 5 + 0.25 * 400 = 105
+        # T_out = -5 -> Delta 25 -> 5 + 0.25 * 625 = 161
+        strictness_values = (5.0 + 0.25 * (delta_t**2)) * avg_price
+
+        self.P_strictness.value = strictness_values
 
         # --- SLP LOOP: 2 Iteraties voor de stooklijn/boilercurve simulatie ---
         guessed_t_room = np.full(T, state["room_temp"])
