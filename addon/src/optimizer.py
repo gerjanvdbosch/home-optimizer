@@ -1253,7 +1253,7 @@ class ThermalMPC:
         self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
         self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
-            2.0 * self.ident.C * avg_price
+            15.0 * self.ident.C * avg_price
         )  # Boiler krijgt prioriteit bij vraag
         self.P_cost_dhw_over.value = 5.0 * self.ident.C * avg_price
 
@@ -1262,8 +1262,8 @@ class ThermalMPC:
         # Dit is genoeg om zon te verkiezen boven export, maar te weinig om duur stroom te kopen.
         self.P_val_terminal_room.value = 0.15 * self.ident.C * avg_price
 
-        # De boiler is goed geïsoleerd en echt een batterij: die geven we 80% waarde.
-        self.P_val_terminal_dhw.value = 0.80 * self.ident.C_tank * avg_price
+        # De boiler is goed geïsoleerd en echt een batterij: die geven we 95% waarde.
+        self.P_val_terminal_dhw.value = 0.95 * self.ident.C_tank * avg_price
 
         temps = forecast_df.temp.values[:T]
 
