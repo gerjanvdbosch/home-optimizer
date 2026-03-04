@@ -1253,7 +1253,7 @@ class ThermalMPC:
         self.P_cost_room_under.value = 0.5 * self.ident.C * avg_price
         self.P_cost_room_over.value = 2.0 * self.ident.C * avg_price
         self.P_cost_dhw_under.value = (
-            15.0 * self.ident.C_tank * avg_price
+            30.0 * self.ident.C_tank * avg_price
         )  # Boiler krijgt prioriteit bij vraag
         self.P_cost_dhw_over.value = 5.0 * self.ident.C * avg_price
 
