@@ -36,6 +36,7 @@ class Config:
     solar_model_path: str = "data/solar_model.joblib"
     hp_model_path: str = "data/hp_model.joblib"
     hydraulic_model_path: str = "data/hydraulic_model.joblib"
+    shutter_model_path: str = "data/shutter_model.joblib"
 
     solar_model_ratio: float = 0.0
 

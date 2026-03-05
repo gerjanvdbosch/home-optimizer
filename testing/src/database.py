@@ -47,6 +47,8 @@ class Measurement(Base):
     return_temp = Column(Float)
     hvac_mode = Column(Integer)
 
+    shutter_room = Column(Integer)
+
 
 class Database:
     def __init__(self, config: Config):

@@ -57,6 +57,9 @@ class HAClient:
     def get_return_temp(self):
         return safe_float(self._get_state(self.config.sensor_return_temp))
 
+    def get_shutter_room(self):
+        return int(safe_float(self._get_state(self.config.sensor_shutter_room)))
+
     def get_hvac_mode(self):
         hvac = {
             "Uit": HvacMode.OFF,

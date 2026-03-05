@@ -23,6 +23,8 @@ class Config:
     sensor_return_temp: str = "sensor.ecodan_heatpump_ca09ec_retour_temp"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 
+    sensor_shutter_room: str = "sensor.woonkamer_rolluik"
+
     sensor_solcast_today: str = "sensor.solcast_pv_forecast_forecast_today"
     sensor_solcast_tomorrow: str = "sensor.solcast_pv_forecast_forecast_tomorrow"
     sensor_home: str = "zone.home"
@@ -36,6 +38,7 @@ class Config:
     solar_model_path: str = "/config/models/solar_model.joblib"
     hp_model_path: str = "/config/models/hp_model.joblib"
     hydraulic_model_path: str = "/config/models/hydraulic_model.joblib"
+    shutter_model_path: str = "/config/models/shutter_model.joblib"
 
     solar_model_ratio: float = 0.0
 

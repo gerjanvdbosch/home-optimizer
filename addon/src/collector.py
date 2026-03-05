@@ -189,6 +189,8 @@ class Collector:
             self.dhw_top_slots = []
             self.dhw_bottom_slots = []
 
+            shutter_room = self.client.get_shutter_room()
+
             # 4. Opslaan
             self.database.save_measurement(
                 ts=self.current_slot_start,
@@ -202,6 +204,7 @@ class Collector:
                 supply_temp=avg_supply,
                 return_temp=avg_return,
                 hvac_mode=int(self.context.hvac_mode.value),
+                shutter_room=shutter_room
             )
 
             self.current_slot_start = slot_start
