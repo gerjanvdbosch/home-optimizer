@@ -933,7 +933,7 @@ class UfhResidualPredictor:
             ).fit(train_set[self.features], train_set["target"])
             self.is_fitted = True
             joblib.dump(self.model, self.path)
-            logger.info("[Thermal] Model getraind.")
+            logger.info("[Thermal] UFH model getraind.")
 
     def predict(self, forecast_df, shutters):
         if self.model is None or not self.is_fitted:
@@ -969,7 +969,7 @@ class DhwResidualPredictor:
             try:
                 self.model = joblib.load(self.path)
                 self.is_fitted = True
-                logger.info("[Thermal] Model geladen.")
+                logger.info("[Thermal] DHW Model geladen.")
             except Exception as e:
                 logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
@@ -1003,7 +1003,7 @@ class DhwResidualPredictor:
 
             self.is_fitted = True
             joblib.dump(self.model, self.path)
-            logger.info("[Thermal] Douchemodel getraind.")
+            logger.info("[Thermal] DHW model getraind.")
         else:
             logger.warning("[Shower] Te weinig data om te trainen.")
 
