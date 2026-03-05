@@ -57,7 +57,7 @@ class ShutterPredictor:
 
         self.is_fitted = True
         joblib.dump(self.model, self.path)
-        logger.info("[Shutter] Rolluik-gedrag succesvol getraind op historische data.")
+        logger.info("[Shutter] Succesvol getraind op historische data.")
 
     def predict(self, forecast_df, current_shutter_open):
         """Voorspelt wat het rolluik de komende 24 uur gaat doen."""
