@@ -125,6 +125,39 @@ def index(
             ]
         )
 
+        if "pv_today" in result:
+            details.append(
+                {
+                    "label": "Zon opbrenst",
+                    "value": f"{result['pv_today']:.2f}",
+                    "unit": "kWh",
+                }
+            )
+        if "solar_self_today" in result:
+            details.append(
+                {
+                    "label": "Eigen verbruik",
+                    "value": f"{result['solar_self_today']:.2f}",
+                    "unit": "kWh",
+                }
+            )
+        if "export_today" in result:
+            details.append(
+                {
+                    "label": "Export net",
+                    "value": f"{result['export_today']:.2f}",
+                    "unit": "kWh",
+                }
+            )
+        if "grid_today" in result:
+            details.append(
+                {
+                    "label": "Import net",
+                    "value": f"{result['grid_today']:.2f}",
+                    "unit": "kWh",
+                }
+            )
+
         # Alleen de COP tonen als hij daadwerkelijk draait
         if current_cop != "-":
             details.append({"label": "Verwachte COP", "value": current_cop, "unit": ""})
