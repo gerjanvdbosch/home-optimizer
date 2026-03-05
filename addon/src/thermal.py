@@ -50,9 +50,9 @@ class HPPerformanceMap:
                 self.max_pel_model = data.get("max_pel_model")
                 self.min_pel_model = data.get("min_pel_model")
                 self.is_fitted = True
-                logger.info("[Optimizer] Performance map geladen.")
+                logger.info("[Thermal] Performance map geladen.")
             except Exception as e:
-                logger.warning(f"[Optimizer] Performance map laden mislukt: {e}")
+                logger.warning(f"[Thermal] Performance map laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
         df = df.copy()
@@ -86,7 +86,7 @@ class HPPerformanceMap:
 
         if len(df_clean) < 50:
             logger.warning(
-                "[Optimizer] Te weinig valide data voor performance map training."
+                "[Thermal] Te weinig valide data voor performance map training."
             )
             return
 
@@ -125,7 +125,7 @@ class HPPerformanceMap:
             },
             self.path,
         )
-        logger.info("[Optimizer] Performance Map getraind.")
+        logger.info("[Thermal] Performance Map getraind.")
 
     def predict_cop(self, t_out, t_sink, mode_idx):
         if not self.is_fitted:
@@ -175,7 +175,7 @@ class SystemIdentificator:
                 self.T_max_dhw = data.get("T_max_dhw", 58.0)
                 self.ufh_lag_steps = data.get("ufh_lag_steps", 4)
                 logger.info(
-                    f"[SysID] Geladen: Lag={self.ufh_lag_steps * 15}m, K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f} R={self.R:.1f} C={self.C:.1f} K_loss_dhw={self.K_loss_dhw:.3f}"
+                    f"[Thermal] Geladen: Lag={self.ufh_lag_steps * 15}m, K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f} R={self.R:.1f} C={self.C:.1f} K_loss_dhw={self.K_loss_dhw:.3f}"
                 )
             except Exception as e:
                 logger.error(f"Failed to load SystemID: {e}")
@@ -222,7 +222,7 @@ class SystemIdentificator:
         # ==========================================================
         # STRATEGIE 1: De Fysisch Gesplitste Methode (Voorkeur)
         # ==========================================================
-        logger.info("[SysID] Poging 1: Fysisch gesplitste R/C training.")
+        logger.info("[Thermal] Poging 1: Fysisch gesplitste R/C training.")
 
         # --- STAP 1A: Afkoeling (Bepaal Tau = R * C) ---
         # Filter (iets minder streng gemaakt dan uw voorbeeld)
@@ -247,23 +247,23 @@ class SystemIdentificator:
                 tau_inv = lr_cool.coef_[0]
                 tau = 1 / tau_inv
                 logger.info(
-                    f"[SysID] Afkoelfase geïdentificeerd met {len(df_cool)} datapunten. Geschatte Tau (RC) = {tau:.1f} uur."
+                    f"[Thermal] Afkoelfase geïdentificeerd met {len(df_cool)} datapunten. Geschatte Tau (RC) = {tau:.1f} uur."
                 )
 
                 # Sanity Check: Tau moet binnen realistische grenzen vallen
                 if not (20 < tau < 1000):
                     logger.warning(
-                        f"[SysID] Tau waarde ({tau:.1f}) is onrealistisch. Fallback naar gecombineerde methode."
+                        f"[Thermal] Tau waarde ({tau:.1f}) is onrealistisch. Fallback naar gecombineerde methode."
                     )
                     tau_inv = None  # Reset om de fallback te triggeren
             else:
                 logger.warning(
-                    "[SysID] Negatieve coëfficiënt gevonden in afkoelfase, data is waarschijnlijk te ruizig."
+                    "[Thermal] Negatieve coëfficiënt gevonden in afkoelfase, data is waarschijnlijk te ruizig."
                 )
 
         else:
             logger.warning(
-                f"[SysID] Te weinig data voor afkoelfase ({len(df_cool)} punten). Fallback naar gecombineerde methode."
+                f"[Thermal] Te weinig data voor afkoelfase ({len(df_cool)} punten). Fallback naar gecombineerde methode."
             )
 
         # --- STAP 1B: Verwarming (Bepaal C, en dan R) ---
@@ -288,23 +288,23 @@ class SystemIdentificator:
                         self.C = float(new_C)
                         self.R = float(new_R)
                         logger.info(
-                            f"[SysID] SUCCES (Gesplitste Methode): R={self.R:.2f}, C={self.C:.2f}"
+                            f"[Thermal] SUCCES (Gesplitste Methode): R={self.R:.2f}, C={self.C:.2f}"
                         )
                         # Sla model op en stop de training hier
                         # (de rest van K_emit etc. volgt na de if/else)
                     else:
                         logger.warning(
-                            f"[SysID] Gesplitste methode gaf onrealistische waarden (R={new_R:.1f}, C={new_C:.1f}). Fallback."
+                            f"[Thermal] Gesplitste methode gaf onrealistische waarden (R={new_R:.1f}, C={new_C:.1f}). Fallback."
                         )
                         tau_inv = None  # Forceer fallback
                 else:
                     logger.warning(
-                        "[SysID] Negatieve coëfficiënt gevonden in verwarmingsfase. Fallback."
+                        "[Thermal] Negatieve coëfficiënt gevonden in verwarmingsfase. Fallback."
                     )
                     tau_inv = None  # Forceer fallback
             else:
                 logger.warning(
-                    "[SysID] Niet genoeg data voor verwarmingsfase. Fallback."
+                    "[Thermal] Niet genoeg data voor verwarmingsfase. Fallback."
                 )
                 tau_inv = None  # Forceer fallback
 
@@ -313,7 +313,7 @@ class SystemIdentificator:
         # ==========================================================
         if tau_inv is None:  # Als de vorige methode niet slaagde
             logger.info(
-                "[SysID] Poging 2: Fallback naar gecombineerde multivariate regressie."
+                "[Thermal] Poging 2: Fallback naar gecombineerde multivariate regressie."
             )
             df_model_data = df_1h.dropna(subset=["dT_next", "wp_output", "delta_T_env"])
             mask = (df_model_data["wp_output"] > 0.1) | (
@@ -335,15 +335,15 @@ class SystemIdentificator:
                     self.C = float(np.clip(C_est, 10.0, 200.0))
                     self.R = float(np.clip(R_est, 2.0, 60.0))
                     logger.info(
-                        f"[SysID] SUCCES (Fallback Methode): R={self.R:.2f}, C={self.C:.2f}"
+                        f"[Thermal] SUCCES (Fallback Methode): R={self.R:.2f}, C={self.C:.2f}"
                     )
                 else:
                     logger.error(
-                        "[SysID] Beide trainingsmethodes mislukt. Coëfficiënten onlogisch. Defaults worden behouden."
+                        "[Thermal] Beide trainingsmethodes mislukt. Coëfficiënten onlogisch. Defaults worden behouden."
                     )
             else:
                 logger.error(
-                    "[SysID] Beide trainingsmethodes mislukt door te weinig data. Defaults worden behouden."
+                    "[Thermal] Beide trainingsmethodes mislukt door te weinig data. Defaults worden behouden."
                 )
 
         df_15m = (
@@ -387,7 +387,7 @@ class SystemIdentificator:
         # Dan pakken we een veilige fallback van 8 kwartieren (2 uur).
         if best_corr < 0.1:
             logger.warning(
-                f"[SysID] Geen duidelijke vloertraagheid gevonden (max corr={best_corr:.2f}). Fallback naar 1 uur."
+                f"[Thermal] Geen duidelijke vloertraagheid gevonden (max corr={best_corr:.2f}). Fallback naar 1 uur."
             )
             self.ufh_lag_steps = 4
         else:
@@ -395,7 +395,7 @@ class SystemIdentificator:
                 np.clip(best_lag, 2, 16)
             )  # Minimaal 30 min, max 4 uur
             logger.info(
-                f"[SysID] Vloertraagheid gedetecteerd: {self.ufh_lag_steps * 15} minuten (Corr={best_corr:.2f})"
+                f"[Thermal] Vloertraagheid gedetecteerd: {self.ufh_lag_steps * 15} minuten (Corr={best_corr:.2f})"
             )
 
         # --- LEER K_emit & K_tank (Als fallback of validatie) ---
@@ -475,7 +475,7 @@ class SystemIdentificator:
         if len(df_dhw) > 10:
             # Wat is de hoogste supply_temp die we ooit in DHW mode hebben gezien?
             self.T_max_dhw = float(df_dhw["supply_temp"].quantile(0.999))
-            logger.info(f"[SysID] Geleerde Max DHW Temp: {self.T_max_dhw:.1f}C")
+            logger.info(f"[Thermal] Geleerde Max DHW Temp: {self.T_max_dhw:.1f}C")
 
         df_dhw_all = df_proc.copy()
         # Markeer elke keer dat de modus verandert
@@ -530,7 +530,7 @@ class SystemIdentificator:
                 if 0.100 < c_calc < 0.350:
                     calculated_cs.append(c_calc)
                     logger.info(
-                        f"[SysID] DHW Run: C={c_calc:.3f} kWh/K, T_start={t_start:.1f}C, T_end={t_end:.1f}C, T_diff={delta_T_total:.1f}C, total_energy_in={total_energy_in:.1f}kWh"
+                        f"[Thermal] DHW Run: C={c_calc:.3f} kWh/K, T_start={t_start:.1f}C, T_end={t_end:.1f}C, T_diff={delta_T_total:.1f}C, total_energy_in={total_energy_in:.1f}kWh"
                     )
 
         if len(calculated_cs) > 0:
@@ -540,11 +540,11 @@ class SystemIdentificator:
             # Fysieke clip: we staan maximaal 300L toe (0.350 kWh/K)
             self.C_tank = float(np.clip(c_median, 0.150, 0.350))
             logger.info(
-                f"[SysID] Geleerde Boiler Massa (Integraal): {self.C_tank:.3f} kWh/K (o.b.v. {len(calculated_cs)} runs)"
+                f"[Thermal] Geleerde Boiler Massa (Integraal): {self.C_tank:.3f} kWh/K (o.b.v. {len(calculated_cs)} runs)"
             )
 
         logger.info(
-            f"[Optimizer] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
+            f"[Thermal] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
             f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f} C_tank={self.C_tank:.3f} T_max_dhw={self.T_max_dhw:.1f}"
         )
         joblib.dump(
@@ -607,10 +607,10 @@ class HydraulicPredictor:
 
                 self.is_fitted = True
                 logger.info(
-                    f"[Hydraulic] Model geladen. Geleerde parameters: UFH Factor={self.learned_factor_ufh:.2f}, DHW Factor={self.learned_factor_dhw:.2f}, UFH Lift={self.learned_lift_ufh:.2f}C, UFH Slope={self.learned_ufh_slope:.2f}, DHW Lift={self.learned_lift_dhw:.2f}C, DHW Slope={self.dhw_delta_slope:.3f} Base={self.dhw_delta_base:.1f}"
+                    f"[Thermal] Model geladen. Geleerde parameters: UFH Factor={self.learned_factor_ufh:.2f}, DHW Factor={self.learned_factor_dhw:.2f}, UFH Lift={self.learned_lift_ufh:.2f}C, UFH Slope={self.learned_ufh_slope:.2f}, DHW Lift={self.learned_lift_dhw:.2f}C, DHW Slope={self.dhw_delta_slope:.3f} Base={self.dhw_delta_base:.1f}"
                 )
             except Exception as e:
-                logger.warning(f"[Hydraulic] Model laden mislukt: {e}")
+                logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
         df = df.copy()
@@ -670,7 +670,7 @@ class HydraulicPredictor:
                 n_estimators=50, max_depth=6
             ).fit(df_ufh[self.features], df_ufh["supply_temp"])
             logger.info(
-                f"[Hydraulic] UFH Geleerd: Factor={self.learned_factor_ufh:.2f}, Slope={self.learned_ufh_slope:.2f}"
+                f"[Thermal] UFH Geleerd: Factor={self.learned_factor_ufh:.2f}, Slope={self.learned_ufh_slope:.2f}"
             )
 
             # =========================================================================
@@ -721,7 +721,7 @@ class HydraulicPredictor:
                     power_slope = float(reg.coef_[0])
                     power_base = float(reg.intercept_)
                     logger.info(
-                        f"[Hydraulic] DHW curve Linear: Slope={power_slope:.2f}, Base={power_base:.1f}"
+                        f"[Thermal] DHW curve Linear: Slope={power_slope:.2f}, Base={power_base:.1f}"
                     )
 
                     # ==========================================================
@@ -745,12 +745,12 @@ class HydraulicPredictor:
                 min_delta_at_35C = self.dhw_delta_base + (self.dhw_delta_slope * 35.0)
                 if min_delta_at_35C < 1.5:
                     logger.warning(
-                        "[Hydraulic] Geëxtrapoleerde curve duikt te laag bij 35C. Base heuristisch verschoven."
+                        "[Thermal] Geëxtrapoleerde curve duikt te laag bij 35C. Base heuristisch verschoven."
                     )
                     self.dhw_delta_base += 1.5 - min_delta_at_35C
 
                 logger.info(
-                    f"[Hydraulic] Empirisch DHW capaciteitsmodel geaccepteerd: PowerSlope={power_slope:.2f} -> DeltaSlope={self.dhw_delta_slope:.3f}"
+                    f"[Thermal] Empirisch DHW capaciteitsmodel geaccepteerd: PowerSlope={power_slope:.2f} -> DeltaSlope={self.dhw_delta_slope:.3f}"
                 )
 
                 # Train ML Model voor Supply Temp (dit model leert ook evt niet-lineair gedrag)
@@ -759,7 +759,7 @@ class HydraulicPredictor:
                 ).fit(df_dhw[self.features], df_dhw["supply_temp"])
 
                 logger.info(
-                    f"[Hydraulic] DHW Final: Lift={self.learned_lift_dhw:.1f}C, Base DeltaT={self.dhw_delta_base:.1f}C"
+                    f"[Thermal] DHW Final: Lift={self.learned_lift_dhw:.1f}C, Base DeltaT={self.dhw_delta_base:.1f}C"
                 )
 
         self.is_fitted = True
@@ -823,7 +823,7 @@ class HydraulicPredictor:
                 pass  # Fallback naar physical_guess bij error
 
         logger.debug(
-            f"[Hydraulic] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}"
+            f"[Thermal] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}"
         )
         # STAP 5: Final Check & Clip
         # De voorspelling mag nooit lager zijn dan de fysieke ondergrens (min_supply_hard)
@@ -871,9 +871,9 @@ class UfhResidualPredictor:
             try:
                 self.model = joblib.load(self.path)
                 self.is_fitted = True
-                logger.info("[UFH] Model geladen.")
+                logger.info("[Thermal] Model geladen.")
             except Exception as e:
-                logger.warning(f"[UFH] Model laden mislukt: {e}")
+                logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
     def train(self, df):
         df_proc = df.copy().sort_values("timestamp")
@@ -933,18 +933,18 @@ class UfhResidualPredictor:
             ).fit(train_set[self.features], train_set["target"])
             self.is_fitted = True
             joblib.dump(self.model, self.path)
-            logger.info("[UFH] Model getraind.")
+            logger.info("[Thermal] Model getraind.")
 
-    def predict(self, forecast_df, predicted_shutters):
+    def predict(self, forecast_df, shutters):
         if self.model is None or not self.is_fitted:
-            logger.info("[UFH] Geen model beschikbaar, voorspel 0 residu.")
+            logger.info("[Thermal] Geen model beschikbaar, voorspel 0 residu.")
             return np.zeros(len(forecast_df))
 
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
         df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
 
         # We gebruiken de AI-voorspelling van jouw eigen gedrag!
-        df["shutter_room"] = predicted_shutters
+        df["shutter_room"] = shutters
 
         # Bereken effectieve zon
         df["effective_solar"] = df["solar"] * (df["shutter_room"] / 100.0)
@@ -969,9 +969,9 @@ class DhwResidualPredictor:
             try:
                 self.model = joblib.load(self.path)
                 self.is_fitted = True
-                logger.info("[DHW] Model geladen.")
+                logger.info("[Thermal] Model geladen.")
             except Exception as e:
-                logger.warning(f"[DHW] Model laden mislukt: {e}")
+                logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
         df = df.copy().sort_values("timestamp")
@@ -1003,14 +1003,14 @@ class DhwResidualPredictor:
 
             self.is_fitted = True
             joblib.dump(self.model, self.path)
-            logger.info("[DHW] Douchemodel getraind.")
+            logger.info("[Thermal] Douchemodel getraind.")
         else:
             logger.warning("[Shower] Te weinig data om te trainen.")
 
     def predict(self, forecast_df):
         """Geeft een array terug met de verwachte daling (graden) per tijdstap."""
         if self.model is None or not self.is_fitted:
-            logger.info("[DHW] Geen model beschikbaar, voorspel 0 daling.")
+            logger.info("[Thermal] Geen model beschikbaar, voorspel 0 daling.")
             return np.zeros(len(forecast_df))
 
         # Maak features voor de forecast

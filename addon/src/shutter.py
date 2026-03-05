@@ -40,7 +40,7 @@ class ShutterPredictor:
     def train(self, df: pd.DataFrame):
         df_train = df.copy().dropna(subset=["shutter_room"])
 
-        if len(df_train) < 100:
+        if len(df_train) < 10:
             logger.info("[Shutter] Te weinig data om te trainen.")
             return
 
