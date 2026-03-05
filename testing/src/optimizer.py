@@ -1261,8 +1261,8 @@ class ThermalMPC:
         # Boiler krijgt prioriteit bij vraag
         self.P_cost_dhw_under.value = 15.0 * self.ident.C_tank * avg_price
         self.P_cost_dhw_over.value = 5.0 * self.ident.C_tank * avg_price
-        # De boiler is goed geïsoleerd en echt een batterij: die geven we 85% waarde.
-        self.P_val_terminal_dhw.value = 0.85 * self.ident.C_tank * avg_price
+        # De boiler is goed geïsoleerd en echt een batterij: die geven we 40% waarde.
+        self.P_val_terminal_dhw.value = 0.4 * self.ident.C_tank * avg_price
 
         temps = forecast_df.temp.values[:T]
 
