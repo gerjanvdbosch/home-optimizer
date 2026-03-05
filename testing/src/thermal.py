@@ -937,7 +937,7 @@ class UfhResidualPredictor:
 
     def predict(self, forecast_df, shutters):
         if self.model is None or not self.is_fitted:
-            logger.info("[Thermal] Geen model beschikbaar, voorspel 0 residu.")
+            logger.info("[Thermal] Geen UFH model beschikbaar, voorspel 0 residu.")
             return np.zeros(len(forecast_df))
 
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
@@ -1010,7 +1010,7 @@ class DhwResidualPredictor:
     def predict(self, forecast_df):
         """Geeft een array terug met de verwachte daling (graden) per tijdstap."""
         if self.model is None or not self.is_fitted:
-            logger.info("[Thermal] Geen model beschikbaar, voorspel 0 daling.")
+            logger.info("[Thermal] Geen DHW model beschikbaar, voorspel 0 daling.")
             return np.zeros(len(forecast_df))
 
         # Maak features voor de forecast

@@ -475,11 +475,15 @@ class Optimizer:
             }
 
         # We berekenen hoeveel stappen er nog resteren in de huidige kalenderdag
-        current_day = context.now.date()
+        tz = datetime.now().astimezone().tzinfo
+        now_local = context.now.astimezone(tz)
+        current_day = now_local.date()
 
+        steps_today = 0
         for t in range(self.mpc.horizon):
-            ts = context.now + timedelta(minutes=t * 15)
-            if ts.date() == current_day:
+            ts_local = now_local + timedelta(minutes=t * 15)
+
+            if ts_local.date() == current_day:
                 steps_today += 1
             else:
                 break
