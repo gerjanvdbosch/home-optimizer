@@ -55,6 +55,19 @@ class Coordinator:
             logger.info("--- Resultaat ---")
             logger.info(f"Status: {result.get('status', 'FAIL')}")
             logger.info(f"Gekozen Modus: {result.get('mode', 'OFF')}")
+            logger.info(
+                f"Totalen rest vandaag ({result.get('steps_today', 0) * 15} min):"
+            )
+            logger.info(f"Zonproductie PV: {result.get('pv_today', 0):.3f} kWh")
+            logger.info(
+                f"Eigen verbruik PV: {result.get('solar_self_today', 0):.3f} kWh"
+            )
+            logger.info(
+                f"Export naar net: {result.get('export_today', 0):.3f} kWh"
+            )
+            logger.info(
+                f"Import van net:{result.get('grid_today', 0):.3f} kWh"
+            )
 
             if result.get("mode") != "OFF":
                 logger.info(

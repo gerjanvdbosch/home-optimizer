@@ -437,11 +437,11 @@ class Optimizer:
             )
 
         shutter_room = getattr(context, "shutter_room", 100.0)
-
         predicted_shutters = self.shutter.predict(context.forecast_df, shutter_room)
-
         # FIX: Voorspel de zon-opwarming vooraf via het getrainde ML model
         solar_gains = self.res_ufh.predict(context.forecast_df, predicted_shutters)
+
+        logger.info(f"[Optimizer] Predicted shutter position: {predicted_shutters}")
 
         logger.info(
             f"[Optimizer] Max solar gain in forecast: {np.max(solar_gains):.3f} K/kwartier"
@@ -453,34 +453,54 @@ class Optimizer:
         # Geef de solar_gains ook mee aan de solver
         self.mpc.solve(state, context.forecast_df, recent_history_df, solar_gains)
 
-        logger.info(f"[Optimizer] Totaal zonopbrengst: {np.sum(solar_gains):.3f} KWh")
-        logger.info(
-            f"[Optimizer] Eigen zonverbruik: {np.sum(self.mpc.p_solar_self.value * self.mpc.dt):.3f} KWh"
-        )
-        logger.info(
-            f"[Optimizer] Export: {np.sum(self.mpc.p_export.value * self.mpc.dt):.3f} KWh"
-        )
-        logger.info(
-            f"[Optimizer] Net verbruik: {np.sum(self.mpc.p_grid.value * self.mpc.dt):.3f} KWh"
-        )
-        # logger.info(f"[Optimizer] Comfort overtreding (K): {(np.sum(self.mpc.s_room_low.value) + np.sum(self.mpc.s_room_high.value) * self.mpc.dt):.2f} K-uur")
-        # logger.info(f"[Optimizer] Comfort overtreding DHW (K): {(np.sum(self.mpc.s_dhw_low.value) + np.sum(self.mpc.s_dhw_high.value) * self.mpc.dt):.2f} K-uur")
+        mode = "OFF"
+        target_pel = 0.0
+        target_supply_temp = 0.0
+        steps_today = 0
+        pv_today = 0.0
+        solar_self_today = 0.0
+        export_today = 0.0
+        grid_today = 0.0
 
         if self.mpc.p_el_ufh.value is None:
             return {
-                "mode": "OFF",
-                "target_pel_kw": 0.0,
-                "target_supply_temp": 0.0,
+                "mode": mode,
+                "status": self.mpc.problem.status,
+                "target_pel_kw": target_pel,
+                "target_supply_temp": target_supply_temp,
+                "steps_today": steps_today,
+                "pv_today": pv_today,
+                "solar_self_today": solar_self_today,
+                "export_today": export_today,
+                "grid_today": grid_today,
                 "plan": [],
             }
+
+        # We berekenen hoeveel stappen er nog resteren in de huidige kalenderdag
+        current_day = context.now.date()
+
+        for t in range(self.mpc.horizon):
+            ts = context.now + timedelta(minutes=t * 15)
+            if ts.date() == current_day:
+                steps_today += 1
+            else:
+                break
+
+        # Als we bijna op het einde van de dag zitten (bv 23:55), is steps_today laag.
+        # We pakken de slices van de arrays tot aan steps_today.
+        if steps_today > 0:
+            # Elektrische PV opwekking
+            pv_today = np.sum(self.mpc.P_solar.value[:steps_today]) * self.mpc.dt
+            # Energiebalans
+            solar_self_today = (
+                np.sum(self.mpc.p_solar_self.value[:steps_today]) * self.mpc.dt
+            )
+            export_today = np.sum(self.mpc.p_export.value[:steps_today]) * self.mpc.dt
+            grid_today = np.sum(self.mpc.p_grid.value[:steps_today]) * self.mpc.dt
 
         # Wat doen we NU (index 0)
         p_el_ufh_now = self.mpc.p_el_ufh.value[0]
         p_el_dhw_now = self.mpc.p_el_dhw.value[0]
-
-        mode = "OFF"
-        target_pel = 0.0
-        target_supply_temp = 0.0
 
         # --- BEPALEN TARGETS MET ML (GEEN VASTE FORMULES MEER) ---
         if p_el_dhw_now > 0.1:
@@ -494,10 +514,15 @@ class Optimizer:
             target_supply_temp = self.mpc.plan_t_sup_ufh[0]
 
         return {
+            "status": self.mpc.problem.status,
             "mode": mode,
             "target_pel_kw": round(target_pel, 2),
             "target_supply_temp": round(target_supply_temp, 1),
-            "status": self.mpc.problem.status,
+            "steps_today": steps_today,
+            "pv_today": pv_today,
+            "solar_self_today": solar_self_today,
+            "export_today": export_today,
+            "grid_today": grid_today,
             "plan": self.get_plan(context),
         }
 

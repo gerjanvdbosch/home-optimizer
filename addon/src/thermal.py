@@ -347,7 +347,8 @@ class SystemIdentificator:
                 )
 
         df_15m = (
-            df_proc.set_index("timestamp")
+            df_proc[["timestamp", "room_temp", "wp_output"]]
+            .set_index("timestamp")
             .resample("15min")
             .mean()
             .dropna()

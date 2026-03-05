@@ -138,6 +138,7 @@ class Collector:
         self.context.dhw_top = raw_dhw_top
         self.context.dhw_bottom = raw_dhw_bottom
         self.context.hvac_mode = self.client.get_hvac_mode()
+        self.context.shutter_room = self.client.get_shutter_room()
 
         self._update_slot(self.room_slots, raw_room)
         self._update_slot(self.dhw_top_slots, raw_dhw_top)
