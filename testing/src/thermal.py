@@ -935,7 +935,7 @@ class UfhResidualPredictor:
             joblib.dump(self.model, self.path)
             logger.info("[UFH] Model getraind.")
 
-    def predict(self, forecast_df, predicted_shutters):
+    def predict(self, forecast_df, shutters):
         if self.model is None or not self.is_fitted:
             logger.info("[UFH] Geen model beschikbaar, voorspel 0 residu.")
             return np.zeros(len(forecast_df))
@@ -944,7 +944,7 @@ class UfhResidualPredictor:
         df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
 
         # We gebruiken de AI-voorspelling van jouw eigen gedrag!
-        df["shutter_room"] = predicted_shutters
+        df["shutter_room"] = shutters
 
         # Bereken effectieve zon
         df["effective_solar"] = df["solar"] * (df["shutter_room"] / 100.0)

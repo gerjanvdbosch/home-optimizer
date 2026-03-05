@@ -437,11 +437,9 @@ class Optimizer:
             )
 
         shutter_room = getattr(context, "shutter_room", 100.0)
-        predicted_shutters = self.shutter.predict(context.forecast_df, shutter_room)
+        shutters = self.shutter.predict(context.forecast_df, shutter_room)
         # FIX: Voorspel de zon-opwarming vooraf via het getrainde ML model
-        solar_gains = self.res_ufh.predict(context.forecast_df, predicted_shutters)
-
-        logger.info(f"[Optimizer] Predicted shutter position: {predicted_shutters}")
+        solar_gains = self.res_ufh.predict(context.forecast_df, shutters)
 
         logger.info(
             f"[Optimizer] Max solar gain in forecast: {np.max(solar_gains):.3f} K/kwartier"
@@ -523,10 +521,10 @@ class Optimizer:
             "solar_self_today": solar_self_today,
             "export_today": export_today,
             "grid_today": grid_today,
-            "plan": self.get_plan(context),
+            "plan": self.get_plan(context, shutters),
         }
 
-    def get_plan(self, context):
+    def get_plan(self, context, shutters):
         if self.mpc.p_el_ufh.value is None:
             return []
 
@@ -559,6 +557,8 @@ class Optimizer:
             elif u_on[t] > 0.5:
                 mode_str = "UFH"
 
+            shutter_val = shutters[t] if t < len(shutters) else np.nan
+
             plan.append(
                 {
                     "time": ts,
@@ -575,6 +575,7 @@ class Optimizer:
                     "supply_ufh": f"{u_sup[t]:.2f}",
                     "supply_dhw": f"{d_sup[t]:.2f}",
                     "strictness": f"{strictness[t]:.0f}",
+                    "shutter": f"{shutter_val:.0f}",
                 }
             )
 

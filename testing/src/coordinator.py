@@ -57,6 +57,13 @@ class Coordinator:
             logger.info("--- Resultaat ---")
             logger.info(f"Status: {result.get('status', 'FAIL')}")
             logger.info(f"Gekozen Modus: {result.get('mode', 'OFF')}")
+
+            if result.get("mode") != "OFF":
+                logger.info(
+                    f"Doel Elektrisch Vermogen: {result.get('target_pel_kw')} kW"
+                )
+                logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
+
             logger.info(
                 f"Totalen rest vandaag ({result.get('steps_today', 0) * 15} min):"
             )
@@ -64,18 +71,8 @@ class Coordinator:
             logger.info(
                 f"Eigen verbruik PV: {result.get('solar_self_today', 0):.3f} kWh"
             )
-            logger.info(
-                f"Export naar net: {result.get('export_today', 0):.3f} kWh"
-            )
-            logger.info(
-                f"Import van net:{result.get('grid_today', 0):.3f} kWh"
-            )
-
-            if result.get("mode") != "OFF":
-                logger.info(
-                    f"Doel Elektrisch Vermogen: {result.get('target_pel_kw')} kW"
-                )
-                logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
+            logger.info(f"Export naar net: {result.get('export_today', 0):.3f} kWh")
+            logger.info(f"Import van net: {result.get('grid_today', 0):.3f} kWh")
 
             # Print tabel in de console
             df_plan = pd.DataFrame(result.get("plan"))
