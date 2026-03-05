@@ -33,7 +33,7 @@ class ShutterPredictor:
             try:
                 self.model = joblib.load(self.path)
                 self.is_fitted = True
-                logger.info("[Shutter] Rolluik-gedrag model geladen.")
+                logger.info("[Shutter] Model geladen.")
             except Exception as e:
                 logger.warning(f"[Shutter] Model laden mislukt: {e}")
 

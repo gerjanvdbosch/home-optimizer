@@ -871,7 +871,7 @@ class UfhResidualPredictor:
             try:
                 self.model = joblib.load(self.path)
                 self.is_fitted = True
-                logger.info("[Thermal] Model geladen.")
+                logger.info("[Thermal] UFH Model geladen.")
             except Exception as e:
                 logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
