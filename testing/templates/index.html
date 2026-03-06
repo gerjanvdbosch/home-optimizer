@@ -513,6 +513,13 @@
             <span class="stat-label">{{ item.label }}</span>
             <span class="stat-value" {% if item.color %}style="color: {{ item.color }};" {% endif %}>
                 {{ item.value }}
+
+                {% if item.total %}
+                    <span style="font-size: 0.8em; color: var(--text-muted); font-weight: normal; margin: 0 2px;">
+                        / {{ item.total }}
+                    </span>
+                {% endif %}
+
                 {% if item.unit %}
                     <span class="unit">{{ item.unit }}</span>
                 {% endif %}

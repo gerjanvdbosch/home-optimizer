@@ -176,7 +176,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 30.0) + (valve_switches * 5.0)
+        switching = (cp.sum(self.comp_start) * 20.0) + (valve_switches * 2.0)
 
         stored_heat_value = (self.t_dhw[T] * self.P_val_terminal_dhw) + (
             self.t_room[T] * self.P_val_terminal_room
@@ -454,11 +454,11 @@ class Optimizer:
         mode = "OFF"
         target_pel = 0.0
         target_supply_temp = 0.0
-        steps_today = 0
-        pv_today = 0.0
-        solar_self_today = 0.0
-        export_today = 0.0
-        grid_today = 0.0
+        steps_remaining = 0
+        pv_remaining = 0.0
+        solar_self_remaining = 0.0
+        export_remaining = 0.0
+        grid_remaining = 0.0
 
         if self.mpc.p_el_ufh.value is None:
             return {
@@ -466,11 +466,11 @@ class Optimizer:
                 "status": self.mpc.problem.status,
                 "target_pel_kw": target_pel,
                 "target_supply_temp": target_supply_temp,
-                "steps_today": steps_today,
-                "pv_today": pv_today,
-                "solar_self_today": solar_self_today,
-                "export_today": export_today,
-                "grid_today": grid_today,
+                "steps_remaining": steps_remaining,
+                "pv_remaining": pv_remaining,
+                "solar_self_remaining": solar_self_remaining,
+                "export_remaining": export_remaining,
+                "grid_remaining": grid_remaining,
                 "plan": [],
             }
 
@@ -479,26 +479,32 @@ class Optimizer:
         now_local = context.now.astimezone(tz)
         current_day = now_local.date()
 
-        steps_today = 0
+        steps_remaining = 0
         for t in range(self.mpc.horizon):
             ts_local = now_local + timedelta(minutes=t * 15)
 
             if ts_local.date() == current_day:
-                steps_today += 1
+                steps_remaining += 1
             else:
                 break
 
-        # Als we bijna op het einde van de dag zitten (bv 23:55), is steps_today laag.
-        # We pakken de slices van de arrays tot aan steps_today.
-        if steps_today > 0:
+        # Als we bijna op het einde van de dag zitten (bv 23:55), is steps_remaining laag.
+        # We pakken de slices van de arrays tot aan steps_remaining.
+        if steps_remaining > 0:
             # Elektrische PV opwekking
-            pv_today = np.sum(self.mpc.P_solar.value[:steps_today]) * self.mpc.dt
-            # Energiebalans
-            solar_self_today = (
-                np.sum(self.mpc.p_solar_self.value[:steps_today]) * self.mpc.dt
+            pv_remaining = (
+                np.sum(self.mpc.P_solar.value[:steps_remaining]) * self.mpc.dt
             )
-            export_today = np.sum(self.mpc.p_export.value[:steps_today]) * self.mpc.dt
-            grid_today = np.sum(self.mpc.p_grid.value[:steps_today]) * self.mpc.dt
+            # Energiebalans
+            solar_self_remaining = (
+                np.sum(self.mpc.p_solar_self.value[:steps_remaining]) * self.mpc.dt
+            )
+            export_remaining = (
+                np.sum(self.mpc.p_export.value[:steps_remaining]) * self.mpc.dt
+            )
+            grid_remaining = (
+                np.sum(self.mpc.p_grid.value[:steps_remaining]) * self.mpc.dt
+            )
 
         # Wat doen we NU (index 0)
         p_el_ufh_now = self.mpc.p_el_ufh.value[0]
@@ -520,11 +526,11 @@ class Optimizer:
             "mode": mode,
             "target_pel_kw": round(target_pel, 2),
             "target_supply_temp": round(target_supply_temp, 1),
-            "steps_today": steps_today,
-            "pv_today": pv_today,
-            "solar_self_today": solar_self_today,
-            "export_today": export_today,
-            "grid_today": grid_today,
+            "steps_remaining": steps_remaining,
+            "pv_remaining": pv_remaining,
+            "solar_self_remaining": solar_self_remaining,
+            "export_remaining": export_remaining,
+            "grid_remaining": grid_remaining,
             "plan": self.get_plan(context, shutters),
         }
 

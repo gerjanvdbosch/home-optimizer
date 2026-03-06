@@ -65,14 +65,14 @@ class Coordinator:
                 logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
 
             logger.info(
-                f"Vandaag resterend: {result.get('steps_today', 0) * 15 / 60} uur"
+                f"Vandaag resterend: {result.get('steps_remaining', 0) * 15 / 60} uur"
             )
-            logger.info(f"Zonproductie PV: {result.get('pv_today', 0):.3f} kWh")
+            logger.info(f"Zonproductie PV: {result.get('pv_remaining', 0):.3f} kWh")
             logger.info(
-                f"Eigen verbruik PV: {result.get('solar_self_today', 0):.3f} kWh"
+                f"Eigen verbruik PV: {result.get('solar_self_remaining', 0):.3f} kWh"
             )
-            logger.info(f"Export naar net: {result.get('export_today', 0):.3f} kWh")
-            logger.info(f"Import van net: {result.get('grid_today', 0):.3f} kWh")
+            logger.info(f"Export naar net: {result.get('export_remaining', 0):.3f} kWh")
+            logger.info(f"Import van net: {result.get('grid_remaining', 0):.3f} kWh")
 
             # Print tabel in de console
             df_plan = pd.DataFrame(result.get("plan"))

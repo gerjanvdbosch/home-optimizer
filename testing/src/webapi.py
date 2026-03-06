@@ -87,11 +87,104 @@ def index(
     # Gestructureerde lijst maken
     details = []
     if result:
+        realized_pv = 0.0
+        realized_self = 0.0
+        realized_export = 0.0
+        realized_import = 0.0
+
+        # Haal historische data op vanaf het begin van de geselecteerde dag (UTC)
+        start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+            tzinfo=local_tz
+        )
+        database = coordinator.collector.database
+        df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+
+        if not df_hist.empty:
+            df_hist["timestamp_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
+
+            # Filter de historie: vanaf middernacht tot 'nu' (voorkomt dubbel tellen met de toekomst)
+            local_now = context.now.astimezone(local_tz)
+            cutoff = local_now if is_today else start_of_day + timedelta(days=1)
+
+            mask = (df_hist["timestamp_local"] >= start_of_day) & (
+                df_hist["timestamp_local"] < cutoff
+            )
+            df_past = df_hist[mask].copy()
+
+            if not df_past.empty:
+                # Veilige omzetting naar numeriek (voorkom lege of corrupte strings)
+                for col in ["pv_actual", "grid_import", "grid_export"]:
+                    if col in df_past.columns:
+                        df_past[col] = (
+                            pd.to_numeric(df_past[col], errors="coerce")
+                            .fillna(0.0)
+                            .clip(lower=0.0)
+                        )
+
+                # Bereken gerealiseerde kWh (kwartierwaarden = kW * 0.25)
+                if "pv_actual" in df_past.columns:
+                    realized_pv = df_past["pv_actual"].sum() * 0.25
+                if "grid_import" in df_past.columns:
+                    realized_import = df_past["grid_import"].sum() * 0.25
+                if "grid_export" in df_past.columns:
+                    realized_export = df_past["grid_export"].sum() * 0.25
+
+                # Gerealiseerd eigen verbruik = Zonne-energie - Teruglevering (per 15 min kwartier bekeken)
+                if "pv_actual" in df_past.columns and "grid_export" in df_past.columns:
+                    self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(
+                        lower=0.0
+                    )
+                    realized_self = self_kw.sum() * 0.25
+
+        # Haal de verwachte rest-van-de-dag (toekomst) op uit je optimizer resultaat
+        future_pv = result.get("pv_remaining", 0.0) if is_today else 0.0
+        future_self = result.get("solar_self_remaining", 0.0) if is_today else 0.0
+        future_export = result.get("export_remaining", 0.0) if is_today else 0.0
+        future_import = result.get("grid_remaining", 0.0) if is_today else 0.0
+
+        # Totale dagwaarde = Gerealiseerd (verleden) + Verwacht (toekomst)
+        total_pv = realized_pv + future_pv
+        total_self = realized_self + future_self
+        total_export = realized_export + future_export
+        total_import = realized_import + future_import
+
+        # Voeg de berekende resultaten toe aan de weergave
         details.extend(
             [
                 {"label": "Modus", "value": result.get("mode", "-")},
                 {
-                    "label": "Zon Actueel",
+                    "label": "Zon opbrengst",
+                    "value": f"{future_pv:.2f}",
+                    "total": f"{total_pv:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Eigen verbruik",
+                    "value": f"{future_self:.2f}",
+                    "total": f"{total_self:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Import net",
+                    "value": f"{future_import:.2f}",
+                    "total": f"{total_import:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Export net",
+                    "value": f"{future_export:.2f}",
+                    "total": f"{total_export:.2f}",
+                    "unit": "kWh",
+                },
+            ]
+        )
+
+        details.extend(
+            [
+                {"label": "Kamer Temp", "value": f"{room_t:.1f}", "unit": "°C"},
+                {"label": "Boiler Temp", "value": f"{dhw_t:.1f}", "unit": "°C"},
+                {
+                    "label": "Zon nu",
                     "value": (
                         f"{context.stable_pv:.2f}"
                         if getattr(context, "stable_pv", None) is not None
@@ -101,7 +194,12 @@ def index(
                     # "color": "#FF9100"
                 },
                 {
-                    "label": "Huis Actueel",
+                    "label": "Zon Bias",
+                    "value": f"{context.solar_bias * 100:.1f}",
+                    "unit": "%",
+                },
+                {
+                    "label": "Load nu",
                     "value": (
                         f"{context.stable_load:.2f}"
                         if getattr(context, "stable_load", None) is not None
@@ -110,8 +208,11 @@ def index(
                     "unit": "kW",
                     # "color": "#F50057"
                 },
-                {"label": "Kamer Temp", "value": f"{room_t:.1f}", "unit": "°C"},
-                {"label": "Boiler Temp", "value": f"{dhw_t:.1f}", "unit": "°C"},
+                {
+                    "label": "Load Bias",
+                    "value": f"{context.load_bias:.2f}",
+                    "unit": "kW",
+                },
                 {
                     "label": "Doel Aanvoer",
                     "value": f"{result.get('target_supply_temp', 0):.1f}",
@@ -122,58 +223,8 @@ def index(
                     "value": f"{result.get('target_pel_kw', 0):.2f}",
                     "unit": "kW",
                 },
+                {"label": "Verwachte COP", "value": current_cop, "unit": ""},
             ]
-        )
-
-        if "pv_today" in result:
-            details.append(
-                {
-                    "label": "Zon opbrenst",
-                    "value": f"{result['pv_today']:.2f}",
-                    "unit": "kWh",
-                }
-            )
-        if "solar_self_today" in result:
-            details.append(
-                {
-                    "label": "Eigen verbruik",
-                    "value": f"{result['solar_self_today']:.2f}",
-                    "unit": "kWh",
-                }
-            )
-        if "export_today" in result:
-            details.append(
-                {
-                    "label": "Export net",
-                    "value": f"{result['export_today']:.2f}",
-                    "unit": "kWh",
-                }
-            )
-        if "grid_today" in result:
-            details.append(
-                {
-                    "label": "Import net",
-                    "value": f"{result['grid_today']:.2f}",
-                    "unit": "kWh",
-                }
-            )
-
-        # Alleen de COP tonen als hij daadwerkelijk draait
-        if current_cop != "-":
-            details.append({"label": "Verwachte COP", "value": current_cop, "unit": ""})
-
-    # Optionele debug/ML informatie toevoegen
-    if hasattr(context, "solar_bias"):
-        details.append(
-            {
-                "label": "Zon Bias",
-                "value": f"{context.solar_bias * 100:.1f}",
-                "unit": "%",
-            }
-        )
-    if hasattr(context, "load_bias"):
-        details.append(
-            {"label": "Load Bias", "value": f"{context.load_bias:.2f}", "unit": "kW"}
         )
 
     # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
