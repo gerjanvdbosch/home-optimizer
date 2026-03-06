@@ -919,7 +919,7 @@ class UfhResidualPredictor:
         df_feat["solar"] = df_feat["pv_actual"]
         df_feat["target"] = target
         df_feat["effective_solar"] = df_feat["solar"] * (
-            df_feat.get("shutter_room", np.nan) / 100.0
+            df_feat.get("shutter_room", 100) / 100.0
         )
 
         train_set = df_feat[self.features + ["target"]].dropna()
