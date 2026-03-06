@@ -38,7 +38,7 @@ class Coordinator:
 
     def tick(self):
         self.context.now = datetime.now(timezone.utc).replace(
-            day=14, month=1, year=2027, hour=8
+            day=14, month=1, year=2027, hour=8, minute=0, second=0
         )
 
         self.collector.update_sensors()
@@ -127,7 +127,7 @@ if __name__ == "__main__":
         scheduler.add_job(
             coordinator.optimize,
             "interval",
-            minutes=1,
+            seconds=30,
             next_run_time=next_run,
             id="optimize",
         )
