@@ -65,7 +65,7 @@ class Coordinator:
                 logger.info(f"Doel Aanvoertemp: {result.get('target_supply_temp')} °C")
 
             logger.info(
-                f"Totalen rest vandaag ({result.get('steps_today', 0) * 15} min):"
+                f"Vandaag resterend: {result.get('steps_today', 0) * 15 / 60} uur"
             )
             logger.info(f"Zonproductie PV: {result.get('pv_today', 0):.3f} kWh")
             logger.info(
