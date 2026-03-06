@@ -248,6 +248,10 @@ class SolarForecaster:
         )
         df["power_corrected"] = df["power_corrected"].clip(0, self.config.pv_max_kw)
 
+        df.loc[df["power_ml"] < 0.05, "power_ml"] = 0.0
+        df.loc[df["power_ml_raw"] < 0.05, "power_ml_raw"] = 0.0
+        df.loc[df["power_corrected"] < 0.05, "power_corrected"] = 0.0
+
         self.context.solar_bias = round(self.nowcaster.current_ratio, 3)
 
         return df
