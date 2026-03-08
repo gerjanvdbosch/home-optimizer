@@ -270,7 +270,7 @@ class SystemIdentificator:
         self.C = 30.0  # kWh/K
         self.K_emit = 0.15  # kW/K (Afgifte vloer)
         self.K_tank = 0.25  # kW/K (Afgifte spiraal)
-        self.K_loss_dhw = 0.01  # °C/uur verlies
+        self.K_loss_dhw = 0.01  # verliesfactor [1/h] — proportioneel: (T_tank - T_room) * K_loss_dhw * dt
         self.T_max_dhw = 58.0  # Max aanvoertemperatuur van de machine (voor veiligheid in optimalisatie)
         self.ufh_lag_steps = 4  # Aantal 15-minuten stappen traagheid (default 1 uur)
         self._load()
