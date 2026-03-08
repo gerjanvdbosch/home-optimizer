@@ -244,14 +244,20 @@ class HPPerformanceMap:
 # 2. SYSTEM IDENTIFICATOR (MET TRAAGHEID)
 # =========================================================
 class SystemIdentificator:
-    def __init__(self, path):
+    def __init__(self, path, tank_liters):
         self.path = Path(path)
+        # C_tank: gebruik de fysische waarde op basis van tankinhoud.
+        # De integraal-methode is onbetrouwbaar omdat:
+        # 1. dhw_bottom meet de koudste plek van een gelaagde tank, niet het gemiddelde
+        # 2. Eerste en laatste kwartier van een run zijn deelkwartieren met verstoorde
+        #    energie/temperatuur-verhouding
+        # Bij een bekende tankinhoud is de fysische berekening nauwkeuriger.
+        self.C_tank = tank_liters * 0.001163  # kWh/K (soortelijke warmte water)
         self.R = 15.0  # K/kW
         self.C = 30.0  # kWh/K
         self.K_emit = 0.15  # kW/K (Afgifte vloer)
         self.K_tank = 0.25  # kW/K (Afgifte spiraal)
         self.K_loss_dhw = 0.01  # °C/uur verlies
-        self.C_tank = 0.232  # kWh/K (200L water)
         self.T_max_dhw = 58.0  # Max aanvoertemperatuur van de machine (voor veiligheid in optimalisatie)
         self.ufh_lag_steps = 4  # Aantal 15-minuten stappen traagheid (default 1 uur)
         self._load()
@@ -265,7 +271,6 @@ class SystemIdentificator:
                 self.K_emit = data.get("K_emit", 0.15)
                 self.K_tank = data.get("K_tank", 0.25)
                 self.K_loss_dhw = data.get("K_loss_dhw", 0.01)
-                self.C_tank = data.get("C_tank", 0.232)
                 self.T_max_dhw = data.get("T_max_dhw", 58.0)
                 self.ufh_lag_steps = data.get("ufh_lag_steps", 4)
                 logger.info(
@@ -589,19 +594,6 @@ class SystemIdentificator:
             self.T_max_dhw = float(df_dhw["supply_temp"].max())
             logger.info(f"[Thermal] Geleerde Max DHW Temp: {self.T_max_dhw:.1f}C")
 
-        # C_tank: gebruik de fysische waarde op basis van tankinhoud.
-        # De integraal-methode is onbetrouwbaar omdat:
-        # 1. dhw_bottom meet de koudste plek van een gelaagde tank, niet het gemiddelde
-        # 2. Eerste en laatste kwartier van een run zijn deelkwartieren met verstoorde
-        #    energie/temperatuur-verhouding
-        # Bij een bekende tankinhoud is de fysische berekening nauwkeuriger.
-        TANK_LITERS = 200.0  # Configureer hier de werkelijke tankinhoud in liters
-        C_physical = TANK_LITERS * 0.001163  # kWh/K (soortelijke warmte water)
-        self.C_tank = C_physical
-        logger.info(
-            f"[Thermal] C_tank fysisch: {self.C_tank:.3f} kWh/K ({TANK_LITERS:.0f}L water)"
-        )
-
         logger.info(
             f"[Thermal] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
             f"K_emit={self.K_emit:.3f}, K_tank={self.K_tank:.3f}, K_loss={self.K_loss_dhw:.3f} C_tank={self.C_tank:.3f} T_max_dhw={self.T_max_dhw:.1f}"
@@ -613,7 +605,6 @@ class SystemIdentificator:
                 "K_emit": self.K_emit,
                 "K_tank": self.K_tank,
                 "K_loss_dhw": self.K_loss_dhw,
-                "C_tank": self.C_tank,
                 "T_max_dhw": self.T_max_dhw,
                 "ufh_lag_steps": self.ufh_lag_steps,
             },

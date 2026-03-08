@@ -384,7 +384,7 @@ class Optimizer:
     def __init__(self, config, database):
         self.db = database
         self.perf_map = HPPerformanceMap(config.hp_model_path)
-        self.ident = SystemIdentificator(config.rc_model_path)
+        self.ident = SystemIdentificator(config.rc_model_path, config.tank_liters)
         self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
         self.res_ufh = UfhResidualPredictor(
             config.ufh_model_path, self.ident.R, self.ident.C
