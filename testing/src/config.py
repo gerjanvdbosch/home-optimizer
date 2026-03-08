@@ -10,6 +10,8 @@ class Config:
     pv_tilt: float = 50.0
     pv_max_kw: float = 2.0
 
+    tank_liters: int = 200
+
     sensor_pv_power: str = "sensor.pv_output"
     sensor_grid_power: str = "sensor.p1_meter_power"
     sensor_wp_power: str = "sensor.warmtepomp_geschat_vermogen"
