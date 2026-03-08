@@ -24,6 +24,110 @@ FACTOR_UFH = (FLOW_UFH / 60.0) * CP_WATER  # ~1.2558 kW/K
 FACTOR_DHW = (FLOW_DHW / 60.0) * CP_WATER  # ~1.3256 kW/K
 
 
+def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Verwijdert fysisch corrupte rijen uit de meetdata.
+    Gooit alleen weg wat aantoonbaar fout is — geen schattingen, geen imputatie.
+
+    Regels:
+    1. Onbekende HVAC modes (niet 0/1/2) worden gefilterd.
+    2. wp_actual < 0 is fysisch onmogelijk (meetruis meter).
+    3. Rijen zonder return_temp worden gefilterd: delta_t is dan niet te berekenen.
+    4. Negatieve delta_t (supply < return) is fysisch onmogelijk bij normale werking.
+    5. DHW-opstarttransienten: supply kouder dan de tank betekent geen warmteoverdracht.
+    6. UFH-transienten na DHW: supply > 45°C in UFH-mode is resterende DHW-vloeistof.
+    7. dhw_top < dhw_bottom: warmwater stijgt op, inversie wijst op sensor- of logfout.
+    8. wp_actual aanwezig maar < 0.15 kW terwijl HVAC actief: compressor draait niet echt.
+    """
+    df = df.copy()
+
+    # Zorg dat alle thermische kolommen numeriek zijn
+    numeric_cols = [
+        "supply_temp",
+        "return_temp",
+        "room_temp",
+        "dhw_top",
+        "dhw_bottom",
+        "wp_actual",
+        "hvac_mode",
+        "pv_actual",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # 1. Filter onbekende HVAC modes (bijv. mode 4 = koelen/defrost)
+    df = df[
+        df["hvac_mode"].isin(
+            [
+                HvacMode.OFF.value,
+                HvacMode.HEATING.value,
+                HvacMode.DHW.value,
+            ]
+        )
+    ]
+
+    # 2. Negatief elektrisch vermogen is fysisch onmogelijk
+    df = df[df["wp_actual"].isna() | (df["wp_actual"] >= 0.0)]
+
+    # 3. Bereken delta_t; rijen zonder return_temp vallen af
+    df["delta_t"] = df["supply_temp"] - df["return_temp"]
+    # Rijen zonder return_temp hebben delta_t=NaN -> laat ze staan voor standby-analyse,
+    # maar markeer ze zodat klassen die delta_t nodig hebben ze kunnen droppen.
+    # (Standby mode=0 heeft legitiem geen supply/return; die rijen zijn nuttig voor R/C training.)
+
+    # 4. Negatieve delta_t bij actieve modus is fysisch onmogelijk
+    active = df["hvac_mode"].isin([HvacMode.HEATING.value, HvacMode.DHW.value])
+    corrupt_delta = active & df["delta_t"].notna() & (df["delta_t"] < 0.0)
+    df = df[~corrupt_delta]
+
+    # 5. DHW-opstarttransienten: supply kouder dan tank = compressor heeft nog niet geleverd
+    mask_dhw = df["hvac_mode"] == HvacMode.DHW.value
+    dhw_cold_start = mask_dhw & (df["supply_temp"] < df["dhw_bottom"] + 1.0)
+    df = df[~dhw_cold_start]
+
+    # 6. UFH-transienten na DHW-run: supply > 30°C in UFH-mode = resterende DHW-vloeistof in leiding
+    mask_ufh = df["hvac_mode"] == HvacMode.HEATING.value
+    ufh_hot_transient = mask_ufh & (df["supply_temp"] > 30.0)
+    df = df[~ufh_hot_transient]
+
+    # 7. dhw_top < dhw_bottom: fysisch onmogelijk (warmwater stijgt op)
+    if "dhw_top" in df.columns and "dhw_bottom" in df.columns:
+        corrupt_dhw = (
+            df["dhw_top"].notna()
+            & df["dhw_bottom"].notna()
+            & (df["dhw_top"] < df["dhw_bottom"])
+        )
+        df = df[~corrupt_dhw]
+
+    # 8. Actieve modus maar wp_actual is sluipverbruik (< 0.15 kW): compressor draait niet
+    # Herbereken active op de huidig gefilterde df zodat de index overeenkomt
+    active = df["hvac_mode"].isin([HvacMode.HEATING.value, HvacMode.DHW.value])
+    standby_noise = active & df["wp_actual"].notna() & (df["wp_actual"] < 0.15)
+    df = df[~standby_noise]
+
+    # Filter deelkwartieren: wp_actual moet dicht bij steady-state liggen
+    # Gebruik een ondergrens van 80% van de mediaan per modus
+    # zodat opstarts en stops niet mee-trainen
+    for mode_val in [HvacMode.HEATING.value, HvacMode.DHW.value]:
+        mask = df["hvac_mode"] == mode_val
+        if mask.sum() > 10:
+            median_wp = df.loc[mask, "wp_actual"].median()
+            # Rijen onder 70% van mediaan zijn deelkwartieren
+            partial = mask & (df["wp_actual"] < 0.70 * median_wp)
+            df = df[~partial]
+
+    # 9. Markeer volledige kwartieren: de vorige én volgende rij hebben dezelfde HVAC-modus.
+    # Een deelkwartier (WP start of stopt halverwege) heeft een verkeerde verhouding
+    # tussen wp_actual en temperatuurverandering. Gebruik full_quarter als filter-kolom
+    # in trainingsmethodes die gevoelig zijn voor deze verhouding (K_emit, K_tank, DHW stooklijn).
+    df["full_quarter"] = (df["hvac_mode"] == df["hvac_mode"].shift(1)) & (
+        df["hvac_mode"] == df["hvac_mode"].shift(-1)
+    )
+
+    return df
+
+
 # =========================================================
 # 1. HEAT PUMP PERFORMANCE MAP
 # =========================================================
@@ -55,12 +159,15 @@ class HPPerformanceMap:
                 logger.warning(f"[Thermal] Performance map laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
-        df = df.copy()
+        df = clean_thermal_data(df)
 
         # ============================
         # 1. Fysisch thermisch vermogen berekenen
         # ============================
-        df["delta_t"] = (df["supply_temp"] - df["return_temp"]).astype(float)
+
+        # Na clean_thermal_data zijn rijen zonder return_temp al gefilterd voor actieve modes,
+        # maar droppen we hier expliciet voor de COP-berekening die delta_t vereist.
+        df = df.dropna(subset=["delta_t", "wp_actual", "supply_temp", "return_temp"])
         df = df[df["delta_t"] > 0.5]
 
         conditions = [
@@ -81,7 +188,7 @@ class HPPerformanceMap:
         df = df[(df["wp_output"] > 0.1) & (df["wp_actual"] > 0.1)].copy()
         df["cop"] = df["wp_output"] / df["wp_actual"]
 
-        mask = (df["cop"].between(0.8, 8.0)) & (df["delta_t"].between(1.0, 15.0))
+        mask = (df["cop"].between(1.0, 8.0)) & (df["delta_t"].between(1.0, 15.0))
         df_clean = df[mask].copy()
 
         if len(df_clean) < 50:
@@ -150,14 +257,20 @@ class HPPerformanceMap:
 # 2. SYSTEM IDENTIFICATOR (MET TRAAGHEID)
 # =========================================================
 class SystemIdentificator:
-    def __init__(self, path):
+    def __init__(self, path, tank_liters):
         self.path = Path(path)
+        # C_tank: gebruik de fysische waarde op basis van tankinhoud.
+        # De integraal-methode is onbetrouwbaar omdat:
+        # 1. dhw_bottom meet de koudste plek van een gelaagde tank, niet het gemiddelde
+        # 2. Eerste en laatste kwartier van een run zijn deelkwartieren met verstoorde
+        #    energie/temperatuur-verhouding
+        # Bij een bekende tankinhoud is de fysische berekening nauwkeuriger.
+        self.C_tank = tank_liters * 0.001163  # kWh/K (soortelijke warmte water)
         self.R = 15.0  # K/kW
         self.C = 30.0  # kWh/K
         self.K_emit = 0.15  # kW/K (Afgifte vloer)
         self.K_tank = 0.25  # kW/K (Afgifte spiraal)
         self.K_loss_dhw = 0.01  # °C/uur verlies
-        self.C_tank = 0.232  # kWh/K (200L water)
         self.T_max_dhw = 58.0  # Max aanvoertemperatuur van de machine (voor veiligheid in optimalisatie)
         self.ufh_lag_steps = 4  # Aantal 15-minuten stappen traagheid (default 1 uur)
         self._load()
@@ -171,7 +284,6 @@ class SystemIdentificator:
                 self.K_emit = data.get("K_emit", 0.15)
                 self.K_tank = data.get("K_tank", 0.25)
                 self.K_loss_dhw = data.get("K_loss_dhw", 0.01)
-                self.C_tank = data.get("C_tank", 0.232)
                 self.T_max_dhw = data.get("T_max_dhw", 58.0)
                 self.ufh_lag_steps = data.get("ufh_lag_steps", 4)
                 logger.info(
@@ -181,7 +293,7 @@ class SystemIdentificator:
                 logger.error(f"Failed to load SystemID: {e}")
 
     def train(self, df: pd.DataFrame):
-        df_proc = df.copy().sort_values("timestamp")
+        df_proc = clean_thermal_data(df).sort_values("timestamp")
 
         # Zorg dat alle relevante kolommen numeriek zijn
         for col in [
@@ -195,7 +307,7 @@ class SystemIdentificator:
             if col in df_proc.columns:
                 df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
 
-        # Bereken thermisch vermogen
+        # Bereken thermisch vermogen (alleen voor rijen met echte delta_t)
         df_proc["delta_t"] = (df_proc["supply_temp"] - df_proc["return_temp"]).clip(
             lower=0.0
         )
@@ -346,12 +458,24 @@ class SystemIdentificator:
                     "[Thermal] Beide trainingsmethodes mislukt door te weinig data. Defaults worden behouden."
                 )
 
+        # Gebruik alleen volledige UFH kwartieren voor de lag-berekening.
+        # Deelkwartieren hebben een te laag wp_output wat het gecorreleerde signaal
+        # verzwakt en de gevonden lag systematisch te lang maakt.
+        df_15m_lag = df_proc[
+            ["timestamp", "room_temp", "wp_output", "full_quarter", "hvac_mode"]
+        ].copy()
+        df_15m_lag.loc[
+            (df_15m_lag["hvac_mode"] == HvacMode.HEATING.value)
+            & (~df_15m_lag["full_quarter"]),
+            "wp_output",
+        ] = np.nan  # Deelkwartieren op NaN zodat ze niet meetellen in de correlatie
+
         df_15m = (
-            df_proc[["timestamp", "room_temp", "wp_output"]]
+            df_15m_lag[["timestamp", "room_temp", "wp_output"]]
             .set_index("timestamp")
             .resample("15min")
             .mean()
-            .dropna()
+            .dropna(subset=["room_temp"])
             .reset_index()
         )
 
@@ -399,8 +523,11 @@ class SystemIdentificator:
             )
 
         # --- LEER K_emit & K_tank (Als fallback of validatie) ---
+        # Gebruik alleen volledige kwartieren: deelkwartieren hebben een te lage gemiddelde
+        # delta_T (compressor warmt nog op of is al gestopt) waardoor K_emit onderschat wordt.
         mask_ufh = (
             (df_proc["hvac_mode"] == HvacMode.HEATING.value)
+            & (df_proc["full_quarter"])
             & (df_proc["wp_output"] > 0.5)
             & (df_proc["supply_temp"] < 30)  # Niet te heet (voorkom overshoot data)
             & (df_proc["supply_temp"] > df_proc["room_temp"] + 1)  # Zinvolle delta T
@@ -419,10 +546,15 @@ class SystemIdentificator:
         # ============================
         # 4. Identificatie K_tank (Spiraalafgifte)
         # ============================
+        # Gebruik alleen volledige kwartieren met return_temp beschikbaar.
+        # dhw_bottom is de WP-kant van de gelaagde tank en daarmee de juiste
+        # referentietemperatuur voor de warmteoverdracht van de spiraal.
         mask_dhw = (
             (df_proc["hvac_mode"] == HvacMode.DHW.value)
+            & (df_proc["full_quarter"])
             & (df_proc["wp_output"] > 0.8)
             & (df_proc["supply_temp"] > df_proc["dhw_bottom"] + 1)
+            & (df_proc["return_temp"].notna())
         )
         df_dhw = df_proc[mask_dhw].copy()
 
@@ -470,78 +602,12 @@ class SystemIdentificator:
             )
             # Betekenis: bij 0.01 verliest hij 1% van het temperatuurverschil met de kamer per uur.
 
-        # We kijken naar DHW runs en berekenen: C = Energie_in / Temperatuurstijging
+        # We kijken naar DHW runs en berekenen: T_max_dhw
         df_dhw = df_proc[df_proc["hvac_mode"] == HvacMode.DHW.value].copy()
         if len(df_dhw) > 10:
             # Wat is de hoogste supply_temp die we ooit in DHW mode hebben gezien?
-            self.T_max_dhw = float(df_dhw["supply_temp"].quantile(0.999))
+            self.T_max_dhw = float(df_dhw["supply_temp"].max())
             logger.info(f"[Thermal] Geleerde Max DHW Temp: {self.T_max_dhw:.1f}C")
-
-        df_dhw_all = df_proc.copy()
-        # Markeer elke keer dat de modus verandert
-        df_dhw_all["run_id"] = (
-            df_dhw_all["hvac_mode"] != df_dhw_all["hvac_mode"].shift()
-        ).cumsum()
-
-        # Filter alleen op de DHW regels
-        df_dhw_runs = df_dhw_all[df_dhw_all["hvac_mode"] == HvacMode.DHW.value].copy()
-
-        calculated_cs = []
-
-        # Loop per run (bijv. elke dag 1 run)
-        for run_id, run_data in df_dhw_runs.groupby("run_id"):
-            if len(run_data) < 4:
-                continue  # Te korte run (minder dan een uur)
-
-            # FILTER 1: Tappen tijdens opwarmen
-            # Als de bovenste sensor meer dan 1 graad daalt tijdens de run,
-            # wordt er warm water verbruikt. Dit verpest de energiebalans.
-            t_top_start = run_data["dhw_top"].iloc[0]
-            if run_data["dhw_top"].min() < t_top_start - 1.0:
-                continue  # Sla deze run over, data is vervuild door tapwatergebruik
-
-            # Energie die erin ging (Vermogen * tijd in uren)
-            dt_hours = (
-                run_data["timestamp"].diff().dt.total_seconds().fillna(900) / 3600.0
-            )
-
-            total_energy_in = (run_data["wp_output"] * dt_hours).sum()
-
-            # Temperatuurstijging (Einde - Begin)
-            t_start = (
-                run_data["dhw_top"].iloc[:2].mean()
-                + run_data["dhw_bottom"].iloc[:2].mean()
-            ) / 2.0
-
-            # Sensoren lopen altijd wat achter op het water (traagheid van de huls).
-            # We pakken het MAXIMUM van de laatste paar metingen in de run.
-            t_end_top = run_data["dhw_top"].iloc[-3:].max()
-            t_end_bot = run_data["dhw_bottom"].iloc[-3:].max()
-            t_end = (t_end_top + t_end_bot) / 2.0
-
-            delta_T_total = t_end - t_start
-
-            # Alleen valideren als er serieus gestookt is (> 5 graden erbij en > 1 kWh erin)
-            if delta_T_total > 5.0 and total_energy_in > 1.0:
-                c_calc = total_energy_in / delta_T_total
-
-                # Uitschieters filteren: Een huishoudelijke boiler is tussen de 100L en 300L.
-                # 100L = ~0.116 kWh/K  |  300L = ~0.348 kWh/K
-                if 0.100 < c_calc < 0.350:
-                    calculated_cs.append(c_calc)
-                    logger.info(
-                        f"[Thermal] DHW Run: C={c_calc:.3f} kWh/K, T_start={t_start:.1f}C, T_end={t_end:.1f}C, T_diff={delta_T_total:.1f}C, total_energy_in={total_energy_in:.1f}kWh"
-                    )
-
-        if len(calculated_cs) > 0:
-            # Pak de mediaan om uitschieters te negeren
-            c_median = float(np.median(calculated_cs))
-
-            # Fysieke clip: we staan maximaal 300L toe (0.350 kWh/K)
-            self.C_tank = float(np.clip(c_median, 0.150, 0.350))
-            logger.info(
-                f"[Thermal] Geleerde Boiler Massa (Integraal): {self.C_tank:.3f} kWh/K (o.b.v. {len(calculated_cs)} runs)"
-            )
 
         logger.info(
             f"[Thermal] Final Trained SysID: R={self.R:.1f}, C={self.C:.1f}, "
@@ -554,7 +620,6 @@ class SystemIdentificator:
                 "K_emit": self.K_emit,
                 "K_tank": self.K_tank,
                 "K_loss_dhw": self.K_loss_dhw,
-                "C_tank": self.C_tank,
                 "T_max_dhw": self.T_max_dhw,
                 "ufh_lag_steps": self.ufh_lag_steps,
             },
@@ -613,10 +678,12 @@ class HydraulicPredictor:
                 logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
-        df = df.copy()
+        df = clean_thermal_data(df)
 
         # 1. Bereken fysieke Delta T en check sensoren
-        df["delta_t"] = df["supply_temp"] - df["return_temp"]
+        # Na clean_thermal_data zijn corrupte delta_t rijen al verwijderd;
+        # drop hier rijen die delta_t nog missen (standby zonder meting).
+        df = df.dropna(subset=["delta_t", "supply_temp", "return_temp"])
         df = df[(df["delta_t"] > 0.1) & (df["delta_t"] < 15.0)].copy()
 
         # 2. Bepaal sink temp & HVAC mode logica
@@ -676,8 +743,11 @@ class HydraulicPredictor:
             # =========================================================================
             # DHW TRAINING (ROBUUST & SIMPEL)
             # =========================================================================
+            # Gebruik alleen volledige kwartieren: bij deelkwartieren is supply_temp
+            # nog aan het oplopen (opstartmoment) wat de lift en delta overschat.
             mask_dhw = (
                 (df["hvac_mode"] == HvacMode.DHW.value)
+                & (df["full_quarter"])
                 & (df["p_th_raw"] > 1.5)  # Alleen actief draaiend
                 & (df["delta_t"] > 2.0)
                 & (df["supply_temp"] > df["dhw_bottom"] + 3.0)
@@ -780,6 +850,7 @@ class HydraulicPredictor:
 
     def predict_supply(self, mode, p_th, t_out, t_sink):
         """Voorspelt aanvoer op basis van GELEERDE hydraulische eigenschappen."""
+        val = None  # Initialiseer zodat logger.debug niet crasht als ML model ontbreekt
 
         if mode == "UFH":
             # Gebruik geleerde parameters (met fallback naar constants als training faalde)
@@ -823,7 +894,7 @@ class HydraulicPredictor:
                 pass  # Fallback naar physical_guess bij error
 
         logger.debug(
-            f"[Thermal] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val:.1f}"
+            f"[Thermal] Predict Supply: Mode={mode} P_th={p_th:.2f} T_out={t_out:.1f} T_sink={t_sink:.1f} => Pred={prediction:.1f} (Phys={physical_guess:.1f}, MinHard={min_supply_hard:.1f}) Val={val}"
         )
         # STAP 5: Final Check & Clip
         # De voorspelling mag nooit lager zijn dan de fysieke ondergrens (min_supply_hard)
@@ -876,9 +947,9 @@ class UfhResidualPredictor:
                 logger.warning(f"[Thermal] Model laden mislukt: {e}")
 
     def train(self, df):
-        df_proc = df.copy().sort_values("timestamp")
+        df_proc = clean_thermal_data(df).sort_values("timestamp")
 
-        # Bereken wp_output voor de hele set
+        # Bereken wp_output: gebruik delta_t waar beschikbaar, anders 0 (geen schatting)
         df_proc["delta_t_water"] = (
             df_proc["supply_temp"] - df_proc["return_temp"]
         ).clip(lower=0)

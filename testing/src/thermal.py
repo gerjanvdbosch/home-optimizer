@@ -43,25 +43,35 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # Zorg dat alle thermische kolommen numeriek zijn
     numeric_cols = [
-        "supply_temp", "return_temp", "room_temp", "dhw_top",
-        "dhw_bottom", "wp_actual", "hvac_mode", "pv_actual",
+        "supply_temp",
+        "return_temp",
+        "room_temp",
+        "dhw_top",
+        "dhw_bottom",
+        "wp_actual",
+        "hvac_mode",
+        "pv_actual",
     ]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # 1. Filter onbekende HVAC modes (bijv. mode 4 = koelen/defrost)
-    df = df[df["hvac_mode"].isin([
-        HvacMode.OFF.value,
-        HvacMode.HEATING.value,
-        HvacMode.DHW.value,
-    ])]
+    df = df[
+        df["hvac_mode"].isin(
+            [
+                HvacMode.OFF.value,
+                HvacMode.HEATING.value,
+                HvacMode.DHW.value,
+            ]
+        )
+    ]
 
     # 2. Negatief elektrisch vermogen is fysisch onmogelijk
     df = df[df["wp_actual"].isna() | (df["wp_actual"] >= 0.0)]
 
     # 3. Bereken delta_t; rijen zonder return_temp vallen af
-    df["delta_t"] = (df["supply_temp"] - df["return_temp"])
+    df["delta_t"] = df["supply_temp"] - df["return_temp"]
     # Rijen zonder return_temp hebben delta_t=NaN -> laat ze staan voor standby-analyse,
     # maar markeer ze zodat klassen die delta_t nodig hebben ze kunnen droppen.
     # (Standby mode=0 heeft legitiem geen supply/return; die rijen zijn nuttig voor R/C training.)
@@ -83,7 +93,11 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
 
     # 7. dhw_top < dhw_bottom: fysisch onmogelijk (warmwater stijgt op)
     if "dhw_top" in df.columns and "dhw_bottom" in df.columns:
-        corrupt_dhw = df["dhw_top"].notna() & df["dhw_bottom"].notna() & (df["dhw_top"] < df["dhw_bottom"])
+        corrupt_dhw = (
+            df["dhw_top"].notna()
+            & df["dhw_bottom"].notna()
+            & (df["dhw_top"] < df["dhw_bottom"])
+        )
         df = df[~corrupt_dhw]
 
     # 8. Actieve modus maar wp_actual is sluipverbruik (< 0.15 kW): compressor draait niet
@@ -107,9 +121,8 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     # Een deelkwartier (WP start of stopt halverwege) heeft een verkeerde verhouding
     # tussen wp_actual en temperatuurverandering. Gebruik full_quarter als filter-kolom
     # in trainingsmethodes die gevoelig zijn voor deze verhouding (K_emit, K_tank, DHW stooklijn).
-    df["full_quarter"] = (
-        (df["hvac_mode"] == df["hvac_mode"].shift(1)) &
-        (df["hvac_mode"] == df["hvac_mode"].shift(-1))
+    df["full_quarter"] = (df["hvac_mode"] == df["hvac_mode"].shift(1)) & (
+        df["hvac_mode"] == df["hvac_mode"].shift(-1)
     )
 
     return df
@@ -448,11 +461,13 @@ class SystemIdentificator:
         # Gebruik alleen volledige UFH kwartieren voor de lag-berekening.
         # Deelkwartieren hebben een te laag wp_output wat het gecorreleerde signaal
         # verzwakt en de gevonden lag systematisch te lang maakt.
-        df_15m_lag = df_proc[["timestamp", "room_temp", "wp_output", "full_quarter", "hvac_mode"]].copy()
+        df_15m_lag = df_proc[
+            ["timestamp", "room_temp", "wp_output", "full_quarter", "hvac_mode"]
+        ].copy()
         df_15m_lag.loc[
-            (df_15m_lag["hvac_mode"] == HvacMode.HEATING.value) &
-            (df_15m_lag["full_quarter"] == False),
-            "wp_output"
+            (df_15m_lag["hvac_mode"] == HvacMode.HEATING.value)
+            & (~df_15m_lag["full_quarter"]),
+            "wp_output",
         ] = np.nan  # Deelkwartieren op NaN zodat ze niet meetellen in de correlatie
 
         df_15m = (
@@ -512,7 +527,7 @@ class SystemIdentificator:
         # delta_T (compressor warmt nog op of is al gestopt) waardoor K_emit onderschat wordt.
         mask_ufh = (
             (df_proc["hvac_mode"] == HvacMode.HEATING.value)
-            & (df_proc["full_quarter"] == True)
+            & (df_proc["full_quarter"])
             & (df_proc["wp_output"] > 0.5)
             & (df_proc["supply_temp"] < 30)  # Niet te heet (voorkom overshoot data)
             & (df_proc["supply_temp"] > df_proc["room_temp"] + 1)  # Zinvolle delta T
@@ -536,7 +551,7 @@ class SystemIdentificator:
         # referentietemperatuur voor de warmteoverdracht van de spiraal.
         mask_dhw = (
             (df_proc["hvac_mode"] == HvacMode.DHW.value)
-            & (df_proc["full_quarter"] == True)
+            & (df_proc["full_quarter"])
             & (df_proc["wp_output"] > 0.8)
             & (df_proc["supply_temp"] > df_proc["dhw_bottom"] + 1)
             & (df_proc["return_temp"].notna())
@@ -732,7 +747,7 @@ class HydraulicPredictor:
             # nog aan het oplopen (opstartmoment) wat de lift en delta overschat.
             mask_dhw = (
                 (df["hvac_mode"] == HvacMode.DHW.value)
-                & (df["full_quarter"] == True)
+                & (df["full_quarter"])
                 & (df["p_th_raw"] > 1.5)  # Alleen actief draaiend
                 & (df["delta_t"] > 2.0)
                 & (df["supply_temp"] > df["dhw_bottom"] + 3.0)

@@ -280,7 +280,7 @@ class ThermalMPC:
         guessed_t_room = np.full(T, state["room_temp"])
         guessed_t_dhw = np.full(T, state["dhw_bottom"])
 
-        for iteration in range(2):
+        for iteration in range(4):
             cop_u, cop_d = np.zeros(T), np.zeros(T)
             fixed_p_ufh, fixed_p_dhw = np.zeros(T), np.zeros(T)
 
@@ -318,12 +318,17 @@ class ThermalMPC:
                 predicted_delta_dhw = self.hydraulic.dhw_delta_base + (
                     self.hydraulic.dhw_delta_slope * t_out
                 )
-                t_sup_d = min(
+                t_sup_d = (
                     t_dhw_current
                     + self.hydraulic.learned_lift_dhw
-                    + predicted_delta_dhw,
-                    self.ident.T_max_dhw,
+                    + predicted_delta_dhw
                 )
+
+                if t_sup_d >= self.ident.T_max_dhw:
+                    # Resterende drijfkracht is kleiner dan de nominale delta
+                    # fixed_p_dhw is al correct via de formule — maar zorg dat de SLP
+                    # minimaal 3 iteraties draait zodat guessed_t_dhw convergeert
+                    pass
 
                 numerator_d = k_tank * (t_sup_d - t_dhw_current)
                 denominator_d = 1 + (k_tank / (2 * f_dhw))
@@ -337,13 +342,6 @@ class ThermalMPC:
                 )
                 fixed_p_dhw[t] = p_th_dhw / cop_d[t] if cop_d[t] > 0 else 0.0
                 self.plan_t_sup_dhw[t] = t_sup_d
-
-                # --- LIMITS (Zorgt dat voorspelling binnen machine hardware specs blijft) ---
-                min_kw, max_kw = self.perf_map.get_pel_limits(t_out)
-                if fixed_p_ufh[t] > 0.05:
-                    fixed_p_ufh[t] = np.clip(fixed_p_ufh[t], min_kw * 0.9, max_kw * 1.2)
-                if fixed_p_dhw[t] > 0.05:
-                    fixed_p_dhw[t] = np.clip(fixed_p_dhw[t], min_kw * 0.9, max_kw * 1.2)
 
             # Vul de CVXPY parameters netjes in
             self.P_cop_ufh.value = np.clip(cop_u, 1.5, 9.0)
@@ -386,7 +384,7 @@ class Optimizer:
     def __init__(self, config, database):
         self.db = database
         self.perf_map = HPPerformanceMap(config.hp_model_path)
-        self.ident = SystemIdentificator(config.rc_model_path)
+        self.ident = SystemIdentificator(config.rc_model_path, config.tank_liters)
         self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
         self.res_ufh = UfhResidualPredictor(
             config.ufh_model_path, self.ident.R, self.ident.C
