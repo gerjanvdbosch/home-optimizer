@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from context import Context
 from client import HAClient
 from config import Config
-from collections import deque
+from collections import deque, Counter
 from weather import WeatherClient
 from database import Database
 from context import HvacMode
@@ -39,6 +39,7 @@ class Collector:
         self.room_slots = []
         self.dhw_top_slots = []
         self.dhw_bottom_slots = []
+        self.mode_slots = []
 
     def update_forecast(self):
         self.client.reload()
@@ -133,16 +134,18 @@ class Collector:
         raw_room = self.client.get_room_temp()
         raw_dhw_top = self.client.get_dhw_top()
         raw_dhw_bottom = self.client.get_dhw_bottom()
+        raw_mode = self.client.get_hvac_mode()
 
         self.context.room_temp = raw_room
         self.context.dhw_top = raw_dhw_top
         self.context.dhw_bottom = raw_dhw_bottom
-        self.context.hvac_mode = self.client.get_hvac_mode()
+        self.context.hvac_mode = raw_mode
         self.context.shutter_room = self.client.get_shutter_room()
 
         self._update_slot(self.room_slots, raw_room)
         self._update_slot(self.dhw_top_slots, raw_dhw_top)
         self._update_slot(self.dhw_bottom_slots, raw_dhw_bottom)
+        self._update_slot(self.mode_slots, raw_mode.value)
 
         if self.context.hvac_mode != HvacMode.OFF:
             self._update_slot(self.supply_slots, self.client.get_supply_temp())
@@ -168,9 +171,9 @@ class Collector:
         # Detecteer kwartierwissel
         if slot_start > self.current_slot_start:
             avg_pv = self._mean(self.pv_slots)
-            avg_wp = self._mean(self.wp_slots)
-            avg_supply = self._mean(self.supply_slots)
-            avg_return = self._mean(self.return_slots)
+            avg_wp = self._mean(self.wp_slots, skip_zeros=True)
+            avg_supply = self._mean(self.supply_slots, skip_zeros=True)
+            avg_return = self._mean(self.return_slots, skip_zeros=True)
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
@@ -183,6 +186,8 @@ class Collector:
                 avg_import = 0.0
                 avg_export = 0.0
 
+            hvac_mode = self._hvac_mode(self.mode_slots)
+
             self.pv_slots = []
             self.wp_slots = []
             self.grid_slots = []
@@ -191,6 +196,7 @@ class Collector:
             self.room_slots = []
             self.dhw_top_slots = []
             self.dhw_bottom_slots = []
+            self.mode_slots = []
 
             shutter_room = self.client.get_shutter_room()
 
@@ -206,14 +212,14 @@ class Collector:
                 dhw_bottom=avg_dhw_bottom,
                 supply_temp=avg_supply,
                 return_temp=avg_return,
-                hvac_mode=int(self.context.hvac_mode.value),
+                hvac_mode=hvac_mode,
                 shutter_room=shutter_room,
             )
 
             self.current_slot_start = slot_start
 
             logger.info(
-                f"[Collector] Mode={self.context.hvac_mode.value} PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW "
+                f"[Collector] Mode={hvac_mode} PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW "
                 f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C Shutter={shutter_room:.0f}%"
             )
 
@@ -229,7 +235,13 @@ class Collector:
         if value is not None:
             slot.append(value)
 
-    def _mean(self, value, default: float = np.nan):
+    def _mean(self, value, default: float = np.nan, skip_zeros: bool = False):
+        if not value:
+            return default
+
+        if skip_zeros:
+            value = [v for v in value if v != 0]
+
         if not value:
             return default
 
@@ -240,13 +252,12 @@ class Collector:
 
         return float(result)
 
-    def _median(self, value, default: float = np.nan):
-        if not value:
-            return default
-
-        result = np.nanmedian(value)
-
-        if np.isnan(result):
-            return default
-
-        return float(result)
+    def _hvac_mode(self, values):
+        if all(v == 0 for v in values):
+            return 0
+        elif all(v in (0, 1) for v in values):
+            return 1
+        elif all(v in (0, 2) for v in values):
+            return 2
+        else:
+            return Counter(v for v in values if v in (1, 2)).most_common(1)[0][0]

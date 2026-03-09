@@ -49,7 +49,7 @@ class HAClient:
         return self.data.get("shutter_room", 100.0)
 
     def get_hvac_mode(self):
-        return HvacMode(HvacMode.DHW)
+        return HvacMode(self.data.get("hvac_mode", 0))
 
     def get_forecast(self):
         return self.data.get("solcast", {})
