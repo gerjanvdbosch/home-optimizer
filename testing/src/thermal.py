@@ -729,12 +729,6 @@ class HydraulicPredictor:
 
         return float(np.clip(prediction, min_hard, max_safe))
 
-    def predict_delta(self, mode, p_th):
-        factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
-        return p_th / factor if p_th > 0 else 0.0
-
-    def get_ufh_slope(self, t_out):
-        return max(0.0, 20.0 - t_out) * self.learned_ufh_slope
 
 
 # =========================================================
@@ -789,7 +783,6 @@ class UfhResidualPredictor:
         t_out        = df_feat["temp"]
         t_model_next = t_curr + ((p_heat - (t_curr - t_out) / self.R) * dt / self.C)
         target       = (t_next - t_model_next) / dt
-        target       = np.where(np.abs(target) < 0.15, 0, target)
 
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
         df_feat["solar"]           = df_feat["pv_actual"]
@@ -870,7 +863,6 @@ class DhwResidualPredictor:
         df_feat     = add_cyclic_time_features(forecast_df.copy(), "timestamp")
         predictions = self.model.predict(df_feat[self.features])
         predictions = np.where(predictions < 0.8, 0.0, predictions)
-        predictions = np.clip(predictions, 0.0, 5.0)
         return predictions * 1.5
 
 

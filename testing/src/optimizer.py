@@ -142,7 +142,7 @@ class ThermalMPC:
                 self.t_room[t + 1] == self.t_room[t] + (
                     (active_heat - (self.t_room[t] - self.P_temp_out[t]) / R)
                     * self.dt / C
-                ) + self.P_solar_gain[t],
+                ) + (self.P_solar_gain[t] * self.dt),
 
                 # Thermische balans boiler
                 self.t_dhw[t + 1] == self.t_dhw[t] + (
@@ -188,7 +188,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 10.0) + (valve_switches * 1.0)
+        switching = (cp.sum(self.comp_start) * 0.05) + (valve_switches * 0.02)
 
         stored_heat = (
             self.t_dhw[T]  * self.P_val_terminal_dhw
@@ -332,17 +332,12 @@ class ThermalMPC:
 
             # 2. Supply-temp plan voor rapportage
             self.plan_t_sup_ufh = np.array([
-                guessed_t_room[t]
-                + self.hydraulic.learned_lift_ufh
-                + self.hydraulic.get_ufh_slope(t_out_arr[t])
+                self.hydraulic.predict_supply("UFH", p_el_ufh[t] * cop_ufh[t], t_out_arr[t], guessed_t_room[t])
                 for t in range(T)
             ], dtype=float)
 
             self.plan_t_sup_dhw = np.array([
-                guessed_t_dhw[t]
-                + self.hydraulic.learned_lift_dhw
-                + self.hydraulic.dhw_delta_base
-                + self.hydraulic.dhw_delta_slope * t_out_arr[t]
+                self.hydraulic.predict_supply("DHW", p_el_dhw[t] * cop_dhw[t], t_out_arr[t], guessed_t_dhw[t])
                 for t in range(T)
             ], dtype=float)
 
@@ -458,7 +453,7 @@ class Optimizer:
 
         logger.info(
             f"[Optimizer] Solar gain: max={np.max(solar_gains):.3f}  "
-            f"gem={np.mean(solar_gains):.3f} K/kwartier"
+            f"gem={np.mean(solar_gains):.3f} K/uur"
         )
 
         # Oplossen
