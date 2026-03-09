@@ -34,6 +34,7 @@ class ThermalMPC:
     def _build_problem(self):
         T = self.horizon
         R, C = self.ident.R, self.ident.C
+        lag = self.ident.ufh_lag_steps
 
         # --- PARAMETERS ---
         self.P_t_room_init = cp.Parameter()
@@ -71,7 +72,7 @@ class ThermalMPC:
         self.P_fixed_pel_ufh = cp.Parameter(T, nonneg=True)
         self.P_fixed_pel_dhw = cp.Parameter(T, nonneg=True)
 
-        self.P_hist_heat = cp.Parameter(self.ident.ufh_lag_steps, nonneg=True)
+        self.P_hist_heat = cp.Parameter(lag, nonneg=True)
 
         self.P_dhw_demand = cp.Parameter(T, nonneg=True)
 
@@ -109,13 +110,18 @@ class ThermalMPC:
         for t in range(1, T):
             constraints += [self.comp_start[t] >= comp_on[t] - comp_on[t - 1]]
 
+        tau = max(1.0, lag / 2.0)
+        kernel_np = np.array([np.exp(-i / tau) for i in range(lag)])
+        kernel_np /= kernel_np.sum()
+        kernel = cp.Constant(kernel_np[::-1])
+
         p_th_ufh_future = cp.multiply(self.p_el_ufh, self.P_cop_ufh)
         p_th_ufh_lagged = cp.hstack([self.P_hist_heat, p_th_ufh_future])
 
         for t in range(T):
             p_el_wp = self.p_el_ufh[t] + self.p_el_dhw[t]
             p_th_dhw_now = self.p_el_dhw[t] * self.P_cop_dhw[t]
-            active_room_heat = p_th_ufh_lagged[t]
+            active_room_heat = kernel @ p_th_ufh_lagged[t : t + lag]
 
             constraints += [
                 # Stroombalans
@@ -129,7 +135,7 @@ class ThermalMPC:
                     * self.dt
                     / C
                 )
-                + (self.P_solar_gain[t] * self.dt),
+                + self.P_solar_gain[t],
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
                 + (
@@ -176,7 +182,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 20.0) + (valve_switches * 2.0)
+        switching = (cp.sum(self.comp_start) * 10.0) + (valve_switches * 1.0)
 
         stored_heat_value = (self.t_dhw[T] * self.P_val_terminal_dhw) + (
             self.t_room[T] * self.P_val_terminal_room
