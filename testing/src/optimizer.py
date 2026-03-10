@@ -332,12 +332,17 @@ class ThermalMPC:
 
             # 2. Supply-temp plan voor rapportage
             self.plan_t_sup_ufh = np.array([
-                self.hydraulic.predict_supply("UFH", p_el_ufh[t] * cop_ufh[t], t_out_arr[t], guessed_t_room[t])
+                guessed_t_room[t]
+                + self.hydraulic.learned_lift_ufh
+                + self.hydraulic.get_ufh_slope(t_out_arr[t])
                 for t in range(T)
             ], dtype=float)
 
             self.plan_t_sup_dhw = np.array([
-                self.hydraulic.predict_supply("DHW", p_el_dhw[t] * cop_dhw[t], t_out_arr[t], guessed_t_dhw[t])
+                guessed_t_dhw[t]
+                + self.hydraulic.learned_lift_dhw
+                + self.hydraulic.dhw_delta_base
+                + self.hydraulic.dhw_delta_slope * t_out_arr[t]
                 for t in range(T)
             ], dtype=float)
 

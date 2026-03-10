@@ -729,6 +729,12 @@ class HydraulicPredictor:
 
         return float(np.clip(prediction, min_hard, max_safe))
 
+    def predict_delta(self, mode, p_th):
+        factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
+        return p_th / factor if p_th > 0 else 0.0
+
+    def get_ufh_slope(self, t_out):
+        return max(0.0, 20.0 - t_out) * self.learned_ufh_slope
 
 
 # =========================================================
@@ -943,7 +949,7 @@ class ComfortCostCalculator:
         avg_cop_ufh:         float = 3.5,
         avg_cop_dhw:         float = 2.5,
         recovery_hours_room: float = 2.0,
-        recovery_hours_dhw:  float = 0.5,
+        recovery_hours_dhw:  float = 1.0,
     ):
         self.C_room              = C_room
         self.C_tank              = C_tank
