@@ -48,8 +48,8 @@ class HAClient:
     def get_dhw_bottom(self):
         return safe_float(self._get_state(self.config.sensor_dhw_bottom))
 
-    def get_dhw_setpoint(self):
-        return safe_float(self._get_state(self.config.sensor_dhw_setpoint))
+    def get_target_setpoint(self):
+        return safe_float(self._get_state(self.config.sensor_target_setpoint))
 
     def get_supply_temp(self):
         return safe_float(self._get_state(self.config.sensor_supply_temp))

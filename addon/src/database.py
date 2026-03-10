@@ -43,6 +43,7 @@ class Measurement(Base):
     room_temp = Column(Float)
     dhw_top = Column(Float)
     dhw_bottom = Column(Float)
+    target_setpoint = Column(Float)
     supply_temp = Column(Float)
     return_temp = Column(Float)
     hvac_mode = Column(Integer)

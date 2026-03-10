@@ -30,17 +30,18 @@ logger = logging.getLogger(__name__)
 # =========================================================
 # CONSTANTEN — alleen als fysische fallback, nooit als aanname
 # =========================================================
-_FLOW_UFH  = 18.0   # L/min
-_FLOW_DHW  = 19.0
-_CP_WATER  = 4.186  # kJ/kg·K
+_FLOW_UFH = 18.0  # L/min
+_FLOW_DHW = 19.0
+_CP_WATER = 4.186  # kJ/kg·K
 
-FACTOR_UFH = (_FLOW_UFH / 60.0) * _CP_WATER   # ~1.256 kW/K
-FACTOR_DHW = (_FLOW_DHW / 60.0) * _CP_WATER   # ~1.326 kW/K
+FACTOR_UFH = (_FLOW_UFH / 60.0) * _CP_WATER  # ~1.256 kW/K
+FACTOR_DHW = (_FLOW_DHW / 60.0) * _CP_WATER  # ~1.326 kW/K
 
 
 # =========================================================
 # DATA CLEANING
 # =========================================================
+
 
 def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -61,19 +62,29 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     numeric_cols = [
-        "supply_temp", "return_temp", "room_temp",
-        "dhw_top", "dhw_bottom", "wp_actual", "hvac_mode", "pv_actual",
+        "supply_temp",
+        "return_temp",
+        "room_temp",
+        "dhw_top",
+        "dhw_bottom",
+        "wp_actual",
+        "hvac_mode",
+        "pv_actual",
     ]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # 1. Onbekende modes
-    df = df[df["hvac_mode"].isin([
-        HvacMode.OFF.value,
-        HvacMode.HEATING.value,
-        HvacMode.DHW.value,
-    ])]
+    df = df[
+        df["hvac_mode"].isin(
+            [
+                HvacMode.OFF.value,
+                HvacMode.HEATING.value,
+                HvacMode.DHW.value,
+            ]
+        )
+    ]
 
     # 2. Negatief elektrisch vermogen
     df = df[df["wp_actual"].isna() | (df["wp_actual"] >= 0.0)]
@@ -109,13 +120,12 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
         mask = df["hvac_mode"] == mode_val
         if mask.sum() > 10:
             median_wp = df.loc[mask, "wp_actual"].median()
-            partial   = mask & (df["wp_actual"] < 0.70 * median_wp)
+            partial = mask & (df["wp_actual"] < 0.70 * median_wp)
             df = df[~partial]
 
     # 9. Annotatie: volledig kwartier (vorige en volgende rij zelfde mode)
-    df["full_quarter"] = (
-        (df["hvac_mode"] == df["hvac_mode"].shift(1))
-        & (df["hvac_mode"] == df["hvac_mode"].shift(-1))
+    df["full_quarter"] = (df["hvac_mode"] == df["hvac_mode"].shift(1)) & (
+        df["hvac_mode"] == df["hvac_mode"].shift(-1)
     )
 
     return df
@@ -124,6 +134,7 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
 # =========================================================
 # HP PERFORMANCE MAP
 # =========================================================
+
 
 class HPPerformanceMap:
     """
@@ -166,10 +177,10 @@ class HPPerformanceMap:
             self._cop_model_dhw = d.get("cop_dhw")
             self._setpoint_ufh = d.get("setpoint_ufh", 2.0)
             self._setpoint_dhw = d.get("setpoint_dhw", 3.0)
-            self._pel_min_ufh   = d.get("pel_min_ufh", 0.4)
-            self._pel_max_ufh   = d.get("pel_max_ufh", 2.5)
-            self._pel_min_dhw   = d.get("pel_min_dhw", 0.6)
-            self._pel_max_dhw   = d.get("pel_max_dhw", 3.0)
+            self._pel_min_ufh = d.get("pel_min_ufh", 0.4)
+            self._pel_max_ufh = d.get("pel_max_ufh", 2.5)
+            self._pel_min_dhw = d.get("pel_min_dhw", 0.6)
+            self._pel_max_dhw = d.get("pel_max_dhw", 3.0)
             self.is_fitted = True
             logger.info(
                 f"[PerfMap] Geladen. "
@@ -180,29 +191,39 @@ class HPPerformanceMap:
             logger.warning(f"[PerfMap] Laden mislukt: {e}")
 
     def _save(self):
-        joblib.dump({
-            "pel_ufh":     self._pel_model_ufh,
-            "pel_dhw":     self._pel_model_dhw,
-            "cop_ufh":     self._cop_model_ufh,
-            "cop_dhw":     self._cop_model_dhw,
-            "setpoint_ufh": self._setpoint_ufh,
-            "setpoint_dhw": self._setpoint_dhw,
-            "pel_min_ufh": self._pel_min_ufh,
-            "pel_max_ufh": self._pel_max_ufh,
-            "pel_min_dhw": self._pel_min_dhw,
-            "pel_max_dhw": self._pel_max_dhw,
-        }, self.path)
+        joblib.dump(
+            {
+                "pel_ufh": self._pel_model_ufh,
+                "pel_dhw": self._pel_model_dhw,
+                "cop_ufh": self._cop_model_ufh,
+                "cop_dhw": self._cop_model_dhw,
+                "setpoint_ufh": self._setpoint_ufh,
+                "setpoint_dhw": self._setpoint_dhw,
+                "pel_min_ufh": self._pel_min_ufh,
+                "pel_max_ufh": self._pel_max_ufh,
+                "pel_min_dhw": self._pel_min_dhw,
+                "pel_max_dhw": self._pel_max_dhw,
+            },
+            self.path,
+        )
 
     def train(self, df: pd.DataFrame):
         df = clean_thermal_data(df)
 
-        for col in ["wp_actual", "supply_temp", "return_temp",
-                    "room_temp", "dhw_bottom", "temp", "delta_t"]:
+        for col in [
+            "wp_actual",
+            "supply_temp",
+            "return_temp",
+            "room_temp",
+            "dhw_bottom",
+            "temp",
+            "delta_t",
+        ]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        self._train_mode(df, HvacMode.HEATING.value, "room_temp",  "UFH")
-        self._train_mode(df, HvacMode.DHW.value,     "dhw_bottom", "DHW")
+        self._train_mode(df, HvacMode.HEATING.value, "room_temp", "UFH")
+        self._train_mode(df, HvacMode.DHW.value, "dhw_bottom", "DHW")
 
         self.is_fitted = True
         self._save()
@@ -211,16 +232,22 @@ class HPPerformanceMap:
     def _train_mode(self, df, mode_val, sink_col, label):
         base = df[df["hvac_mode"] == mode_val]
         logger.info(f"[PerfMap] {label}: {len(base)} rijen totaal in modus")
-        logger.info(f"[PerfMap] {label}: {base['full_quarter'].sum()} full_quarter rijen")
-        logger.info(f"[PerfMap] {label}: {base['wp_actual'].notna().sum()} met wp_actual")
+        logger.info(
+            f"[PerfMap] {label}: {base['full_quarter'].sum()} full_quarter rijen"
+        )
+        logger.info(
+            f"[PerfMap] {label}: {base['wp_actual'].notna().sum()} met wp_actual"
+        )
         logger.info(f"[PerfMap] {label}: {base[sink_col].notna().sum()} met {sink_col}")
         logger.info(f"[PerfMap] {label}: {base['delta_t'].notna().sum()} met delta_t")
 
         if label == "DHW":
             mask = (
                 (df["hvac_mode"] == mode_val)
-                & df["wp_actual"].notna() & (df["wp_actual"] > 0.5)  # actief vermogen
-                & df["delta_t"].notna() & (df["delta_t"] > 2.0)  # duidelijke delta_t
+                & df["wp_actual"].notna()
+                & (df["wp_actual"] > 0.5)  # actief vermogen
+                & df["delta_t"].notna()
+                & (df["delta_t"] > 2.0)  # duidelijke delta_t
                 & df[sink_col].notna()
                 & df["temp"].notna()
                 # geen full_quarter eis
@@ -229,17 +256,19 @@ class HPPerformanceMap:
             mask = (
                 (df["hvac_mode"] == mode_val)
                 & df["full_quarter"]
-                & df["wp_actual"].notna() & (df["wp_actual"] > 0.15)
-                & df["delta_t"].notna() & (df["delta_t"] > 0.5)
+                & df["wp_actual"].notna()
+                & (df["wp_actual"] > 0.15)
+                & df["delta_t"].notna()
+                & (df["delta_t"] > 0.5)
                 & df[sink_col].notna()
                 & df["temp"].notna()
             )
 
         d = df[mask].copy()
-        d["t_out"]  = d["temp"]
+        d["t_out"] = d["temp"]
         d["t_sink"] = d[sink_col]
         d["supply_temp"] = d["supply_temp"]
-        d["delta_setpoint"] = (d["supply_setpoint"] - d["supply_temp"]).clip(-2, 20)
+        d["delta_setpoint"] = (d["target_setpoint"] - d["supply_temp"]).clip(-2, 20)
 
         n = len(d)
         if n < 10:
@@ -249,17 +278,25 @@ class HPPerformanceMap:
             logger.info(f"[PerfMap] {label}: {n} steady-state rijen.")
 
         # Leer ook de typische setpoint per modus
-        wp_setpoint_median = float(d["supply_setpoint"].median())
+        wp_setpoint_median = float(d["target_setpoint"].median())
         if label == "UFH":
             self._setpoint_ufh = float(np.clip(wp_setpoint_median, 20.0, 35.0))
         else:
             self._setpoint_dhw = float(np.clip(wp_setpoint_median, 45.0, 65.0))
 
-        logger.info(f"[PerfMap] {label}: supply_setpoint mediaan={wp_setpoint_median:.1f}°C")
-        logger.info(f"[PerfMap] {label}: wp_actual mediaan={d['wp_actual'].median():.3f} kW")
+        logger.info(
+            f"[PerfMap] {label}: target_setpoint mediaan={wp_setpoint_median:.1f}°C"
+        )
+        logger.info(
+            f"[PerfMap] {label}: wp_actual mediaan={d['wp_actual'].median():.3f} kW"
+        )
         logger.info(f"[PerfMap] {label}: delta_t mediaan={d['delta_t'].median():.3f} K")
-        logger.info(f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C")
-        logger.info(f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C")
+        logger.info(
+            f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C"
+        )
+        logger.info(
+            f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C"
+        )
 
         # Gebruik ALTIJD de fysische flow-factor voor P_th berekening
         # De flow-factor is een materiaaleigenschap van water, geen leerbare parameter
@@ -269,9 +306,12 @@ class HPPerformanceMap:
         d["cop"] = (d["p_th"] / d["wp_actual"]).replace([np.inf, -np.inf], np.nan)
 
         logger.info(f"[PerfMap] {label}: p_th mediaan={d['p_th'].median():.3f} kW")
-        logger.info(f"[PerfMap] {label}: cop bereik={d['cop'].quantile(0.1):.2f} - {d['cop'].quantile(0.9):.2f}")
         logger.info(
-            f"[PerfMap] {label}: supply mediaan={d['supply_temp'].median():.1f}  return={d['return_temp'].median():.1f}  sink={d[sink_col].median():.1f}")
+            f"[PerfMap] {label}: cop bereik={d['cop'].quantile(0.1):.2f} - {d['cop'].quantile(0.9):.2f}"
+        )
+        logger.info(
+            f"[PerfMap] {label}: supply mediaan={d['supply_temp'].median():.1f}  return={d['return_temp'].median():.1f}  sink={d[sink_col].median():.1f}"
+        )
 
         if len(d) < 10:
             logger.warning(f"[PerfMap] {label}: te weinig data na sanity-filter.")
@@ -288,7 +328,7 @@ class HPPerformanceMap:
             self._pel_min_dhw = float(np.clip(pel_min, 0.4, 1.5))
             self._pel_max_dhw = float(np.clip(pel_max, 1.5, 5.0))
 
-        X     = d[self.FEATURES]
+        X = d[self.FEATURES]
         y_pel = d["wp_actual"]
         y_cop = d["cop"]
 
@@ -313,8 +353,14 @@ class HPPerformanceMap:
             self._pel_model_dhw = pel_model
             self._cop_model_dhw = cop_model
 
-    def predict_pel(self, mode: int, t_out: float, t_sink: float,
-                    supply_temp: float = None, delta_setpoint: float = None) -> float:
+    def predict_pel(
+        self,
+        mode: int,
+        t_out: float,
+        t_sink: float,
+        supply_temp: float = None,
+        delta_setpoint: float = None,
+    ) -> float:
 
         if supply_temp is None:
             supply_temp = t_sink + 5.0
@@ -332,13 +378,26 @@ class HPPerformanceMap:
             return default
 
         X = pd.DataFrame(
-            [[t_out, t_sink, float(supply_temp), float(np.clip(delta_setpoint, -5, 20))]],
-            columns=self.FEATURES
+            [
+                [
+                    t_out,
+                    t_sink,
+                    float(supply_temp),
+                    float(np.clip(delta_setpoint, -5, 20)),
+                ]
+            ],
+            columns=self.FEATURES,
         )
         return float(np.clip(model.predict(X)[0], lo, hi))
 
-    def predict_cop(self, mode: int, t_out: float, t_sink: float,
-                    supply_temp: float = None, delta_setpoint: float = None) -> float:
+    def predict_cop(
+        self,
+        mode: int,
+        t_out: float,
+        t_sink: float,
+        supply_temp: float = None,
+        delta_setpoint: float = None,
+    ) -> float:
 
         if supply_temp is None:
             supply_temp = t_sink + 5.0
@@ -354,13 +413,22 @@ class HPPerformanceMap:
             return default
 
         X = pd.DataFrame(
-            [[t_out, t_sink, float(supply_temp), float(np.clip(delta_setpoint, -5, 20))]],
-            columns=self.FEATURES
+            [
+                [
+                    t_out,
+                    t_sink,
+                    float(supply_temp),
+                    float(np.clip(delta_setpoint, -5, 20)),
+                ]
+            ],
+            columns=self.FEATURES,
         )
         return float(np.clip(model.predict(X)[0], 1.2, 8.0))
 
     def predict_p_th(self, mode: int, t_out: float, t_sink: float) -> float:
-        return self.predict_pel(mode, t_out, t_sink) * self.predict_cop(mode, t_out, t_sink)
+        return self.predict_pel(mode, t_out, t_sink) * self.predict_cop(
+            mode, t_out, t_sink
+        )
 
     # Backwards-compat
     def get_pel_limits(self, t_out: float):
@@ -371,16 +439,17 @@ class HPPerformanceMap:
 # SYSTEM IDENTIFICATOR
 # =========================================================
 
+
 class SystemIdentificator:
     def __init__(self, path, tank_liters):
-        self.path          = Path(path)
-        self.C_tank        = tank_liters * 0.001163
-        self.R             = 15.0
-        self.C             = 30.0
-        self.K_emit        = 0.15
-        self.K_tank        = 0.25
-        self.K_loss_dhw    = 0.01
-        self.T_max_dhw     = 58.0
+        self.path = Path(path)
+        self.C_tank = tank_liters * 0.001163
+        self.R = 15.0
+        self.C = 30.0
+        self.K_emit = 0.15
+        self.K_tank = 0.25
+        self.K_loss_dhw = 0.01
+        self.T_max_dhw = 58.0
         self.ufh_lag_steps = 4
         self._load()
 
@@ -389,12 +458,12 @@ class SystemIdentificator:
             return
         try:
             d = joblib.load(self.path)
-            self.R             = d.get("R",             15.0)
-            self.C             = d.get("C",             30.0)
-            self.K_emit        = d.get("K_emit",        0.15)
-            self.K_tank        = d.get("K_tank",        0.25)
-            self.K_loss_dhw    = d.get("K_loss_dhw",    0.01)
-            self.T_max_dhw     = d.get("T_max_dhw",     58.0)
+            self.R = d.get("R", 15.0)
+            self.C = d.get("C", 30.0)
+            self.K_emit = d.get("K_emit", 0.15)
+            self.K_tank = d.get("K_tank", 0.25)
+            self.K_loss_dhw = d.get("K_loss_dhw", 0.01)
+            self.T_max_dhw = d.get("T_max_dhw", 58.0)
             self.ufh_lag_steps = d.get("ufh_lag_steps", 4)
             logger.info(
                 f"[SysID] Geladen: R={self.R:.1f} C={self.C:.1f} "
@@ -407,26 +476,37 @@ class SystemIdentificator:
     def train(self, df: pd.DataFrame):
         df_proc = clean_thermal_data(df).sort_values("timestamp")
 
-        for col in ["supply_temp", "return_temp", "room_temp", "temp", "hvac_mode", "pv_actual"]:
+        for col in [
+            "supply_temp",
+            "return_temp",
+            "room_temp",
+            "temp",
+            "hvac_mode",
+            "pv_actual",
+        ]:
             if col in df_proc.columns:
                 df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
 
-        df_proc["delta_t"]   = (df_proc["supply_temp"] - df_proc["return_temp"]).clip(lower=0.0)
+        df_proc["delta_t"] = (df_proc["supply_temp"] - df_proc["return_temp"]).clip(
+            lower=0.0
+        )
         df_proc["wp_output"] = np.select(
-            [df_proc["hvac_mode"] == HvacMode.HEATING.value,
-             df_proc["hvac_mode"] == HvacMode.DHW.value],
-            [df_proc["delta_t"] * FACTOR_UFH,
-             df_proc["delta_t"] * FACTOR_DHW],
+            [
+                df_proc["hvac_mode"] == HvacMode.HEATING.value,
+                df_proc["hvac_mode"] == HvacMode.DHW.value,
+            ],
+            [df_proc["delta_t"] * FACTOR_UFH, df_proc["delta_t"] * FACTOR_DHW],
             default=0.0,
         )
 
         df_1h = (
             df_proc.set_index("timestamp")
-            .resample("1h").mean()
+            .resample("1h")
+            .mean()
             .dropna(subset=["room_temp", "temp", "pv_actual", "wp_output"])
             .reset_index()
         )
-        df_1h["dT_next"]     = df_1h["room_temp"].shift(-1) - df_1h["room_temp"]
+        df_1h["dT_next"] = df_1h["room_temp"].shift(-1) - df_1h["room_temp"]
         df_1h["delta_T_env"] = df_1h["room_temp"] - df_1h["temp"]
 
         self._fit_rc(df_1h)
@@ -444,11 +524,18 @@ class SystemIdentificator:
             f"K_emit={self.K_emit:.3f} K_tank={self.K_tank:.3f} "
             f"K_loss={self.K_loss_dhw:.4f} T_max_dhw={self.T_max_dhw:.1f}"
         )
-        joblib.dump({
-            "R": self.R, "C": self.C, "K_emit": self.K_emit,
-            "K_tank": self.K_tank, "K_loss_dhw": self.K_loss_dhw,
-            "T_max_dhw": self.T_max_dhw, "ufh_lag_steps": self.ufh_lag_steps,
-        }, self.path)
+        joblib.dump(
+            {
+                "R": self.R,
+                "C": self.C,
+                "K_emit": self.K_emit,
+                "K_tank": self.K_tank,
+                "K_loss_dhw": self.K_loss_dhw,
+                "T_max_dhw": self.T_max_dhw,
+                "ufh_lag_steps": self.ufh_lag_steps,
+            },
+            self.path,
+        )
 
     def _fit_rc(self, df_1h: pd.DataFrame):
         tau_inv = None
@@ -469,14 +556,16 @@ class SystemIdentificator:
                 tau = 1.0 / lr.coef_[0]
                 if 20 < tau < 1000:
                     tau_inv = lr.coef_[0]
-                    logger.info(f"[SysID] Tau(RC)={tau:.1f} uur ({len(df_cool)} punten)")
+                    logger.info(
+                        f"[SysID] Tau(RC)={tau:.1f} uur ({len(df_cool)} punten)"
+                    )
 
         if tau_inv is not None:
             mask_heat = (df_1h["wp_output"] > 0.5) & (df_1h["dT_next"] > 0.01)
-            df_heat   = df_1h[mask_heat]
+            df_heat = df_1h[mask_heat]
             if len(df_heat) > 10:
                 y_adj = df_heat["dT_next"] + tau_inv * df_heat["delta_T_env"]
-                lr2   = LinearRegression(fit_intercept=False).fit(
+                lr2 = LinearRegression(fit_intercept=False).fit(
                     df_heat[["wp_output"]], y_adj
                 )
                 if lr2.coef_[0] > 0:
@@ -485,7 +574,9 @@ class SystemIdentificator:
                     if 10.0 < new_C < 200.0 and 2.0 < new_R < 60.0:
                         self.C = float(new_C)
                         self.R = float(new_R)
-                        logger.info(f"[SysID] R={self.R:.2f} C={self.C:.2f} (gesplitst)")
+                        logger.info(
+                            f"[SysID] R={self.R:.2f} C={self.C:.2f} (gesplitst)"
+                        )
                         return
             tau_inv = None
 
@@ -507,7 +598,9 @@ class SystemIdentificator:
             logger.error("[SysID] Te weinig data voor R/C; defaults behouden.")
 
     def _fit_floor_lag(self, df_proc: pd.DataFrame):
-        df_lag = df_proc[["timestamp", "room_temp", "wp_output", "full_quarter", "hvac_mode"]].copy()
+        df_lag = df_proc[
+            ["timestamp", "room_temp", "wp_output", "full_quarter", "hvac_mode"]
+        ].copy()
         df_lag.loc[
             (df_lag["hvac_mode"] == HvacMode.HEATING.value) & (~df_lag["full_quarter"]),
             "wp_output",
@@ -515,26 +608,33 @@ class SystemIdentificator:
 
         df_15 = (
             df_lag[["timestamp", "room_temp", "wp_output"]]
-            .set_index("timestamp").resample("15min").mean()
-            .dropna(subset=["room_temp"]).reset_index()
+            .set_index("timestamp")
+            .resample("15min")
+            .mean()
+            .dropna(subset=["room_temp"])
+            .reset_index()
         )
         df_15["room_smooth"] = df_15["room_temp"].rolling(4, center=True).mean()
-        df_15["dT_trend"]    = df_15["room_smooth"].diff(4)
+        df_15["dT_trend"] = df_15["room_smooth"].diff(4)
 
         best_lag, best_corr = 0, -1.0
         for lag in range(0, 17):
-            col         = f"wp_lag_{lag}"
-            df_15[col]  = df_15["wp_output"].shift(lag)
-            corr        = df_15["dT_trend"].corr(df_15[col])
+            col = f"wp_lag_{lag}"
+            df_15[col] = df_15["wp_output"].shift(lag)
+            corr = df_15["dT_trend"].corr(df_15[col])
             if pd.notna(corr) and corr > best_corr:
                 best_corr, best_lag = corr, lag
 
         if best_corr < 0.1:
-            logger.warning(f"[SysID] Geen duidelijke vloerlag (corr={best_corr:.2f}); fallback 1 uur.")
+            logger.warning(
+                f"[SysID] Geen duidelijke vloerlag (corr={best_corr:.2f}); fallback 1 uur."
+            )
             self.ufh_lag_steps = 4
         else:
             self.ufh_lag_steps = int(np.clip(best_lag, 2, 16))
-            logger.info(f"[SysID] Vloerlag={self.ufh_lag_steps * 15} min (corr={best_corr:.2f})")
+            logger.info(
+                f"[SysID] Vloerlag={self.ufh_lag_steps * 15} min (corr={best_corr:.2f})"
+            )
 
     def _fit_k_emit(self, df_proc: pd.DataFrame):
         mask = (
@@ -573,10 +673,10 @@ class SystemIdentificator:
                 logger.info(f"[SysID] K_tank={self.K_tank:.3f}")
 
     def _fit_dhw_loss(self, df_proc: pd.DataFrame):
-        df_loss              = df_proc.sort_values("timestamp").copy()
-        df_loss["t_tank"]    = (df_loss["dhw_top"] + df_loss["dhw_bottom"]) / 2.0
-        df_loss["dt_hours"]  = df_loss["timestamp"].diff().dt.total_seconds() / 3600.0
-        df_loss["dT_tank"]   = df_loss["t_tank"].diff()
+        df_loss = df_proc.sort_values("timestamp").copy()
+        df_loss["t_tank"] = (df_loss["dhw_top"] + df_loss["dhw_bottom"]) / 2.0
+        df_loss["dt_hours"] = df_loss["timestamp"].diff().dt.total_seconds() / 3600.0
+        df_loss["dT_tank"] = df_loss["t_tank"].diff()
 
         mask = (
             (df_loss["hvac_mode"] != HvacMode.DHW.value)
@@ -588,8 +688,8 @@ class SystemIdentificator:
         )
         d = df_loss[mask].copy()
         if len(d) > 20:
-            t_diff          = (d["t_tank"] - d["room_temp"]).clip(lower=1.0)
-            loss            = -(d["dT_tank"] / d["dt_hours"]) / t_diff
+            t_diff = (d["t_tank"] - d["room_temp"]).clip(lower=1.0)
+            loss = -(d["dT_tank"] / d["dt_hours"]) / t_diff
             self.K_loss_dhw = float(np.clip(loss.quantile(0.25), 0.001, 0.05))
             logger.info(f"[SysID] K_loss_dhw={self.K_loss_dhw:.4f}")
 
@@ -598,18 +698,19 @@ class SystemIdentificator:
 # HYDRAULIC PREDICTOR
 # =========================================================
 
+
 class HydraulicPredictor:
     def __init__(self, path):
         self.path = Path(path)
         self.is_fitted = False
 
-        self.model_supply_ufh   = None
-        self.model_supply_dhw   = None
-        self.learned_lift_ufh   = 0.5
-        self.learned_lift_dhw   = 3.0
-        self.learned_ufh_slope  = 0.4
-        self.dhw_delta_slope    = 0.0
-        self.dhw_delta_base     = 5.0
+        self.model_supply_ufh = None
+        self.model_supply_dhw = None
+        self.learned_lift_ufh = 0.5
+        self.learned_lift_dhw = 3.0
+        self.learned_ufh_slope = 0.4
+        self.dhw_delta_slope = 0.0
+        self.dhw_delta_base = 5.0
 
         self.features = ["wp_output", "temp", "sink_temp"]
         self._load()
@@ -619,13 +720,13 @@ class HydraulicPredictor:
             return
         try:
             d = joblib.load(self.path)
-            self.model_supply_ufh   = d.get("supply_ufh")
-            self.model_supply_dhw   = d.get("supply_dhw")
-            self.learned_lift_ufh   = d.get("lift_ufh",  0.5)
-            self.learned_lift_dhw   = d.get("lift_dhw",  3.0)
-            self.learned_ufh_slope  = d.get("ufh_slope", 0.4)
-            self.dhw_delta_slope    = d.get("dhw_slope", 0.0)
-            self.dhw_delta_base     = d.get("dhw_base",  5.0)
+            self.model_supply_ufh = d.get("supply_ufh")
+            self.model_supply_dhw = d.get("supply_dhw")
+            self.learned_lift_ufh = d.get("lift_ufh", 0.5)
+            self.learned_lift_dhw = d.get("lift_dhw", 3.0)
+            self.learned_ufh_slope = d.get("ufh_slope", 0.4)
+            self.dhw_delta_slope = d.get("dhw_slope", 0.0)
+            self.dhw_delta_base = d.get("dhw_base", 5.0)
             self.is_fitted = True
         except Exception as e:
             logger.warning(f"[Hydraulic] Laden mislukt: {e}")
@@ -635,32 +736,48 @@ class HydraulicPredictor:
         df = df.dropna(subset=["delta_t", "supply_temp", "return_temp"])
         df = df[(df["delta_t"] > 0.1) & (df["delta_t"] < 15.0)].copy()
 
-        conditions = [df["hvac_mode"] == HvacMode.HEATING.value,
-                      df["hvac_mode"] == HvacMode.DHW.value]
-        df["sink_temp"] = np.select(conditions, [df["room_temp"], df["dhw_bottom"]], default=20.0)
-        df["p_th_raw"] = np.select(conditions, [df["delta_t"] * FACTOR_UFH,
-                                                df["delta_t"] * FACTOR_DHW], default=0.0)
+        conditions = [
+            df["hvac_mode"] == HvacMode.HEATING.value,
+            df["hvac_mode"] == HvacMode.DHW.value,
+        ]
+        df["sink_temp"] = np.select(
+            conditions, [df["room_temp"], df["dhw_bottom"]], default=20.0
+        )
+        df["p_th_raw"] = np.select(
+            conditions,
+            [df["delta_t"] * FACTOR_UFH, df["delta_t"] * FACTOR_DHW],
+            default=0.0,
+        )
         df["wp_output"] = df["p_th_raw"]
 
         # UFH
         mask_ufh = (
-                (df["hvac_mode"] == HvacMode.HEATING.value)
-                & (df["p_th_raw"] > 0.5)
-                & (df["supply_temp"] > df["room_temp"] + 1.0)
+            (df["hvac_mode"] == HvacMode.HEATING.value)
+            & (df["p_th_raw"] > 0.5)
+            & (df["supply_temp"] > df["room_temp"] + 1.0)
         )
-        df_ufh = df[mask_ufh].dropna(subset=self.features + ["supply_temp", "return_temp"])
+        df_ufh = df[mask_ufh].dropna(
+            subset=self.features + ["supply_temp", "return_temp"]
+        )
 
         if len(df_ufh) > 15:
             # ← factor_ufh NIET meer leren, altijd fysische constante
-            self.learned_lift_ufh = max(0.2, (df_ufh["return_temp"] - df_ufh["room_temp"]).quantile(0.05))
+            self.learned_lift_ufh = max(
+                0.2, (df_ufh["return_temp"] - df_ufh["room_temp"]).quantile(0.05)
+            )
 
-            mask_curve = mask_ufh & (df["temp"] < 15.0) & (df["supply_temp"] > df["room_temp"] + 2.0)
+            mask_curve = (
+                mask_ufh
+                & (df["temp"] < 15.0)
+                & (df["supply_temp"] > df["room_temp"] + 2.0)
+            )
             df_curve = df[mask_curve].copy()
             if len(df_curve) > 50:
                 slopes = (
-                        (df_curve["supply_temp"] - df_curve["room_temp"] - self.learned_lift_ufh)
-                        / (20.0 - df_curve["temp"]).clip(lower=0.1)
-                )
+                    df_curve["supply_temp"]
+                    - df_curve["room_temp"]
+                    - self.learned_lift_ufh
+                ) / (20.0 - df_curve["temp"]).clip(lower=0.1)
                 self.learned_ufh_slope = float(np.clip(slopes.median(), 0.1, 1.5))
 
             self.model_supply_ufh = RandomForestRegressor(
@@ -669,22 +786,29 @@ class HydraulicPredictor:
 
         # DHW
         mask_dhw = (
-                (df["hvac_mode"] == HvacMode.DHW.value)
-                & df["full_quarter"]
-                & (df["p_th_raw"] > 1.5)
-                & (df["delta_t"] > 2.0)
-                & (df["supply_temp"] > df["dhw_bottom"] + 3.0)
+            (df["hvac_mode"] == HvacMode.DHW.value)
+            & df["full_quarter"]
+            & (df["p_th_raw"] > 1.5)
+            & (df["delta_t"] > 2.0)
+            & (df["supply_temp"] > df["dhw_bottom"] + 3.0)
         )
-        df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"]).copy()
+        df_dhw = (
+            df[mask_dhw]
+            .dropna(subset=self.features + ["supply_temp", "return_temp"])
+            .copy()
+        )
 
         if len(df_dhw) > 10:
             # ← factor_dhw NIET meer leren, altijd fysische constante
-            self.learned_lift_dhw = max(1.0, (df_dhw["return_temp"] - df_dhw["dhw_bottom"]).quantile(0.10))
+            self.learned_lift_dhw = max(
+                1.0, (df_dhw["return_temp"] - df_dhw["dhw_bottom"]).quantile(0.10)
+            )
 
             df_dhw["t_bin"] = df_dhw["temp"].round()
             tops = [
                 (g["p_th_raw"].quantile(0.90), t)
-                for t, g in df_dhw.groupby("t_bin") if len(g) >= 3
+                for t, g in df_dhw.groupby("t_bin")
+                if len(g) >= 3
             ]
 
             if len(tops) >= 3:
@@ -694,7 +818,9 @@ class HydraulicPredictor:
                 p_base = float(reg.intercept_)
             else:
                 p_slope = 0.0
-                p_base = df_dhw["delta_t"].median() * FACTOR_DHW  # ← ook hier vaste constante
+                p_base = (
+                    df_dhw["delta_t"].median() * FACTOR_DHW
+                )  # ← ook hier vaste constante
 
             self.dhw_delta_slope = p_slope / FACTOR_DHW  # ← vaste constante
             self.dhw_delta_base = p_base / FACTOR_DHW  # ← vaste constante
@@ -708,15 +834,18 @@ class HydraulicPredictor:
             ).fit(df_dhw[self.features], df_dhw["supply_temp"])
 
         self.is_fitted = True
-        joblib.dump({
-            "supply_ufh": self.model_supply_ufh,
-            "supply_dhw": self.model_supply_dhw,
-            "lift_ufh": self.learned_lift_ufh,
-            "lift_dhw": self.learned_lift_dhw,
-            "ufh_slope": self.learned_ufh_slope,
-            "dhw_slope": self.dhw_delta_slope,
-            "dhw_base": self.dhw_delta_base,
-        }, self.path)
+        joblib.dump(
+            {
+                "supply_ufh": self.model_supply_ufh,
+                "supply_dhw": self.model_supply_dhw,
+                "lift_ufh": self.learned_lift_ufh,
+                "lift_dhw": self.learned_lift_dhw,
+                "ufh_slope": self.learned_ufh_slope,
+                "dhw_slope": self.dhw_delta_slope,
+                "dhw_base": self.dhw_delta_base,
+            },
+            self.path,
+        )
         logger.info("[Hydraulic] Training compleet.")
 
     def predict_supply(self, mode, p_th, t_out, t_sink):
@@ -728,16 +857,18 @@ class HydraulicPredictor:
             offset = 2.0
 
         delta_t_calc = p_th / factor if p_th > 0 else 0.0
-        physical     = t_sink + min_lift + delta_t_calc + offset
-        min_hard     = t_sink + min_lift + delta_t_calc
-        prediction   = physical
+        physical = t_sink + min_lift + delta_t_calc + offset
+        min_hard = t_sink + min_lift + delta_t_calc
+        prediction = physical
 
         if self.is_fitted:
             data = pd.DataFrame([[p_th, t_out, t_sink]], columns=self.features)
             try:
-                ml_model = self.model_supply_ufh if mode == "UFH" else self.model_supply_dhw
+                ml_model = (
+                    self.model_supply_ufh if mode == "UFH" else self.model_supply_dhw
+                )
                 if ml_model is not None:
-                    val        = float(ml_model.predict(data)[0])
+                    val = float(ml_model.predict(data)[0])
                     prediction = 0.7 * val + 0.3 * physical
             except Exception:
                 pass
@@ -756,16 +887,26 @@ class HydraulicPredictor:
 # UFH RESIDUAL PREDICTOR
 # =========================================================
 
+
 class UfhResidualPredictor:
     def __init__(self, path, R, C):
-        self.path      = Path(path)
-        self.R         = R
-        self.C         = C
-        self.model     = None
+        self.path = Path(path)
+        self.R = R
+        self.C = C
+        self.model = None
         self.is_fitted = False
-        self.features  = [
-            "temp", "solar", "effective_solar", "shutter_room", "wind",
-            "hour_sin", "hour_cos", "day_sin", "day_cos", "doy_sin", "doy_cos",
+        self.features = [
+            "temp",
+            "solar",
+            "effective_solar",
+            "shutter_room",
+            "wind",
+            "hour_sin",
+            "hour_cos",
+            "day_sin",
+            "day_cos",
+            "doy_sin",
+            "doy_cos",
         ]
         self._load()
 
@@ -773,7 +914,7 @@ class UfhResidualPredictor:
         if not self.path.exists():
             return
         try:
-            self.model     = joblib.load(self.path)
+            self.model = joblib.load(self.path)
             self.is_fitted = True
             logger.info("[UFH Residual] Geladen.")
         except Exception as e:
@@ -782,8 +923,10 @@ class UfhResidualPredictor:
     def train(self, df):
         df_proc = clean_thermal_data(df).sort_values("timestamp")
 
-        df_proc["delta_t_water"] = (df_proc["supply_temp"] - df_proc["return_temp"]).clip(lower=0)
-        df_proc["wp_output"]     = np.where(
+        df_proc["delta_t_water"] = (
+            df_proc["supply_temp"] - df_proc["return_temp"]
+        ).clip(lower=0)
+        df_proc["wp_output"] = np.where(
             df_proc["hvac_mode"] == HvacMode.DHW.value,
             df_proc["delta_t_water"] * FACTOR_DHW,
             np.where(
@@ -794,21 +937,25 @@ class UfhResidualPredictor:
         )
 
         dt_hours = df_proc["timestamp"].diff().dt.total_seconds().shift(-1) / 3600
-        mask     = (df_proc["hvac_mode"] == HvacMode.HEATING.value) | (df_proc["wp_output"] < 0.1)
-        df_feat  = df_proc[mask].copy()
-        dt       = dt_hours[mask]
+        mask = (df_proc["hvac_mode"] == HvacMode.HEATING.value) | (
+            df_proc["wp_output"] < 0.1
+        )
+        df_feat = df_proc[mask].copy()
+        dt = dt_hours[mask]
 
-        t_curr       = df_feat["room_temp"]
-        t_next       = df_feat["room_temp"].shift(-1)
-        p_heat       = df_feat["wp_output"]
-        t_out        = df_feat["temp"]
+        t_curr = df_feat["room_temp"]
+        t_next = df_feat["room_temp"].shift(-1)
+        p_heat = df_feat["wp_output"]
+        t_out = df_feat["temp"]
         t_model_next = t_curr + ((p_heat - (t_curr - t_out) / self.R) * dt / self.C)
-        target       = (t_next - t_model_next) / dt
+        target = (t_next - t_model_next) / dt
 
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
-        df_feat["solar"]           = df_feat["pv_actual"]
-        df_feat["target"]          = target
-        df_feat["effective_solar"] = df_feat["solar"] * (df_feat.get("shutter_room", 100) / 100.0)
+        df_feat["solar"] = df_feat["pv_actual"]
+        df_feat["target"] = target
+        df_feat["effective_solar"] = df_feat["solar"] * (
+            df_feat.get("shutter_room", 100) / 100.0
+        )
 
         train_set = df_feat[self.features + ["target"]].dropna()
         train_set = train_set[train_set["target"].between(-1.2, 1.2)]
@@ -826,8 +973,8 @@ class UfhResidualPredictor:
             return np.zeros(len(forecast_df))
 
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
-        df["solar"]           = df.get("power_corrected", df.get("pv_estimate", 0.0))
-        df["shutter_room"]    = shutters
+        df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
+        df["shutter_room"] = shutters
         df["effective_solar"] = df["solar"] * (df["shutter_room"] / 100.0)
 
         for col in self.features:
@@ -841,31 +988,32 @@ class UfhResidualPredictor:
 # DHW RESIDUAL PREDICTOR
 # =========================================================
 
+
 class DhwResidualPredictor:
     def __init__(self, path):
-        self.path      = Path(path)
-        self.model     = None
+        self.path = Path(path)
+        self.model = None
         self.is_fitted = False
-        self.features  = ["hour_sin", "hour_cos", "day_sin", "day_cos"]
+        self.features = ["hour_sin", "hour_cos", "day_sin", "day_cos"]
         self._load()
 
     def _load(self):
         if not self.path.exists():
             return
         try:
-            self.model     = joblib.load(self.path)
+            self.model = joblib.load(self.path)
             self.is_fitted = True
             logger.info("[DHW Residual] Geladen.")
         except Exception as e:
             logger.warning(f"[DHW Residual] Laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
-        df              = df.copy().sort_values("timestamp")
-        df["dhw_diff"]  = df["dhw_top"].diff()
-        mask_shower     = (df["hvac_mode"] != HvacMode.DHW.value) & (df["dhw_diff"] < -0.5)
-        df["demand"]    = 0.0
+        df = df.copy().sort_values("timestamp")
+        df["dhw_diff"] = df["dhw_top"].diff()
+        mask_shower = (df["hvac_mode"] != HvacMode.DHW.value) & (df["dhw_diff"] < -0.5)
+        df["demand"] = 0.0
         df.loc[mask_shower, "demand"] = df["dhw_diff"].abs()
-        df              = add_cyclic_time_features(df, "timestamp")
+        df = add_cyclic_time_features(df, "timestamp")
 
         if len(df) > 100:
             self.model = RandomForestRegressor(
@@ -881,7 +1029,7 @@ class DhwResidualPredictor:
         if self.model is None or not self.is_fitted:
             return np.zeros(len(forecast_df))
 
-        df_feat     = add_cyclic_time_features(forecast_df.copy(), "timestamp")
+        df_feat = add_cyclic_time_features(forecast_df.copy(), "timestamp")
         predictions = self.model.predict(df_feat[self.features])
         predictions = np.where(predictions < 0.8, 0.0, predictions)
         return predictions * 1.5
@@ -890,6 +1038,7 @@ class DhwResidualPredictor:
 # =========================================================
 # PHYSICS LINEARIZER  (SLP-hulpklasse voor ThermalMPC)
 # =========================================================
+
 
 class PhysicsLinearizer:
     """
@@ -901,27 +1050,27 @@ class PhysicsLinearizer:
         self,
         perf_map: HPPerformanceMap,
         hydraulic: HydraulicPredictor,
-        horizon:  int   = 96,
-        max_iter: int   = 6,
-        tol:      float = 0.05,
+        horizon: int = 96,
+        max_iter: int = 6,
+        tol: float = 0.05,
     ):
         self.perf_map = perf_map
         self.hydraulic = hydraulic
-        self.horizon  = horizon
+        self.horizon = horizon
         self.max_iter = max_iter
-        self.tol      = tol
+        self.tol = tol
 
     def compute(
         self,
-        t_out_arr:  np.ndarray,
+        t_out_arr: np.ndarray,
         t_room_arr: np.ndarray,
-        t_dhw_arr:  np.ndarray,
+        t_dhw_arr: np.ndarray,
     ) -> tuple:
-        T        = self.horizon
+        T = self.horizon
         p_el_ufh = np.zeros(T)
-        cop_ufh  = np.zeros(T)
+        cop_ufh = np.zeros(T)
         p_el_dhw = np.zeros(T)
-        cop_dhw  = np.zeros(T)
+        cop_dhw = np.zeros(T)
 
         for t in range(T):
             t_out = float(t_out_arr[t])
@@ -929,7 +1078,9 @@ class PhysicsLinearizer:
             t_dhw = float(t_dhw_arr[t])
 
             # Supply projecteren via hydraulic curve
-            p_th_ufh_est = self.perf_map.predict_p_th(HvacMode.HEATING.value, t_out, t_room)
+            p_th_ufh_est = self.perf_map.predict_p_th(
+                HvacMode.HEATING.value, t_out, t_room
+            )
             p_th_dhw_est = self.perf_map.predict_p_th(HvacMode.DHW.value, t_out, t_dhw)
 
             sup_ufh = self.hydraulic.predict_supply("UFH", p_th_ufh_est, t_out, t_room)
@@ -938,39 +1089,53 @@ class PhysicsLinearizer:
             # wp_setpoint is vast (bijv. 55°C), supply loopt op met t_dhw
             # delta_setpoint = wp_setpoint - supply_temp
             # supply_temp ≈ t_dhw + hydraulische lift (loopt op met t_dhw)
-            # → delta neemt automatisch af naarmate t_dhw stijgt
+            # delta neemt automatisch af naarmate t_dhw stijgt
             delta_dhw = float(np.clip(self.perf_map._setpoint_dhw - sup_dhw, 0.5, 15.0))
 
             # Zelfde voor UFH (minder dramatisch want t_room varieert weinig):
             delta_ufh = float(np.clip(self.perf_map._setpoint_ufh - sup_ufh, 0.5, 8.0))
 
             p_el_ufh[t] = self.perf_map.predict_pel(
-                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh)
+                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh
+            )
             cop_ufh[t] = self.perf_map.predict_cop(
-                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh)
+                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh
+            )
             p_el_dhw[t] = self.perf_map.predict_pel(
-                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw)
+                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw
+            )
             cop_dhw[t] = self.perf_map.predict_cop(
-                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw)
+                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw
+            )
 
         return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw
 
-    def has_converged(self, p_el_ufh_prev, p_el_dhw_prev,
-                      p_el_ufh_new, p_el_dhw_new,
-                      ufh_on=None, dhw_on=None) -> bool:
+    def has_converged(
+        self,
+        p_el_ufh_prev,
+        p_el_dhw_prev,
+        p_el_ufh_new,
+        p_el_dhw_new,
+        ufh_on=None,
+        dhw_on=None,
+    ) -> bool:
 
         if ufh_on is not None and np.any(ufh_on > 0.5):
-            delta_ufh = float(np.max(np.abs((p_el_ufh_new - p_el_ufh_prev)[ufh_on > 0.5])))
+            delta_ufh = float(
+                np.max(np.abs((p_el_ufh_new - p_el_ufh_prev)[ufh_on > 0.5]))
+            )
         else:
             delta_ufh = float(np.max(np.abs(p_el_ufh_new - p_el_ufh_prev)))
 
         if dhw_on is not None and np.any(dhw_on > 0.5):
-            delta_dhw = float(np.max(np.abs((p_el_dhw_new - p_el_dhw_prev)[dhw_on > 0.5])))
+            delta_dhw = float(
+                np.max(np.abs((p_el_dhw_new - p_el_dhw_prev)[dhw_on > 0.5]))
+            )
         else:
             delta_dhw = float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev)))
 
         tol_ufh = self.tol  # 0.05 kW
-        tol_dhw = self.tol  #* 3.0  # 0.15 kW — DHW mag ruimer
+        tol_dhw = self.tol  # * 3.0  # 0.15 kW — DHW mag ruimer
 
         converged = (delta_ufh < tol_ufh) and (delta_dhw < tol_dhw)
         logger.debug(
@@ -984,6 +1149,7 @@ class PhysicsLinearizer:
 # COMFORT COST CALCULATOR
 # =========================================================
 
+
 class ComfortCostCalculator:
     """
     Comfortboetes in euro per graad afwijking — dimensioneel correct.
@@ -993,28 +1159,28 @@ class ComfortCostCalculator:
 
     def __init__(
         self,
-        C_room:              float,
-        C_tank:              float,
-        avg_cop_ufh:         float = 3.5,
-        avg_cop_dhw:         float = 2.5,
+        C_room: float,
+        C_tank: float,
+        avg_cop_ufh: float = 3.5,
+        avg_cop_dhw: float = 2.5,
         recovery_hours_room: float = 2.0,
-        recovery_hours_dhw:  float = 1.0,
+        recovery_hours_dhw: float = 1.0,
     ):
-        self.C_room              = C_room
-        self.C_tank              = C_tank
-        self.avg_cop_ufh         = avg_cop_ufh
-        self.avg_cop_dhw         = avg_cop_dhw
+        self.C_room = C_room
+        self.C_tank = C_tank
+        self.avg_cop_ufh = avg_cop_ufh
+        self.avg_cop_dhw = avg_cop_dhw
         self.recovery_hours_room = recovery_hours_room
-        self.recovery_hours_dhw  = recovery_hours_dhw
+        self.recovery_hours_dhw = recovery_hours_dhw
 
     def compute(self, avg_price: float) -> dict:
         kwh_per_K_room = self.C_room / self.avg_cop_ufh / self.recovery_hours_room
         kwh_per_K_tank = self.C_tank / self.avg_cop_dhw / self.recovery_hours_dhw
 
-        room_under    = kwh_per_K_room * avg_price
-        tank_under    = kwh_per_K_tank * avg_price
-        room_over     = room_under * 0.5
-        tank_over     = tank_under * 0.3
+        room_under = kwh_per_K_room * avg_price
+        tank_under = kwh_per_K_tank * avg_price
+        room_over = room_under * 0.5
+        tank_over = tank_under * 0.3
         terminal_room = room_under * 0.15
         terminal_tank = tank_under * 0.40
 
@@ -1024,10 +1190,10 @@ class ComfortCostCalculator:
             f"term_kamer={terminal_room:.4f}  term_tank={terminal_tank:.4f}"
         )
         return {
-            "room_under":    room_under,
-            "room_over":     room_over,
-            "tank_under":    tank_under,
-            "tank_over":     tank_over,
+            "room_under": room_under,
+            "room_over": room_over,
+            "tank_under": tank_under,
+            "tank_over": tank_over,
             "terminal_room": terminal_room,
             "terminal_tank": terminal_tank,
         }

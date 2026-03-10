@@ -234,7 +234,6 @@ class HPPerformanceMap:
         )
         logger.info("[Thermal] Performance Map getraind.")
 
-
     def predict_cop(self, t_out, t_sink, mode_idx):
         if not self.is_fitted:
             return 3.5 if mode_idx == HvacMode.HEATING.value else 2.5

@@ -149,7 +149,7 @@ class Collector:
         self._update_slot(self.mode_slots, raw_mode.value)
 
         if self.context.hvac_mode != HvacMode.OFF:
-            self._update_slot(self.setpoint_slots, self.client.get_supply_setpoint())
+            self._update_slot(self.setpoint_slots, self.client.get_target_setpoint())
             self._update_slot(self.supply_slots, self.client.get_supply_temp())
             self._update_slot(self.return_slots, self.client.get_return_temp())
 
@@ -214,7 +214,7 @@ class Collector:
                 room_temp=avg_room,
                 dhw_top=avg_dhw_top,
                 dhw_bottom=avg_dhw_bottom,
-                supply_setpoint=avg_setpoint,
+                target_setpoint=avg_setpoint,
                 supply_temp=avg_supply,
                 return_temp=avg_return,
                 hvac_mode=hvac_mode,

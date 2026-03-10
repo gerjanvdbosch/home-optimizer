@@ -3,7 +3,7 @@
   "room_temp": 20.0,
   "dhw_top": 25.0,
   "dhw_bottom": 15.0,
-  "supply_setpoint": 25.0,
+  "target_setpoint": 25.0,
   "supply_temp": 25.0,
   "return_temp": 20.0,
   "pv_power": 0.0,

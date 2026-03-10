@@ -36,8 +36,8 @@ class HAClient:
     def get_dhw_bottom(self):
         return float(self.data.get("dhw_bottom", 25.0))
 
-    def get_supply_setpoint(self):
-        return self.data.get("supply_setpoint", 0.0)
+    def get_target_setpoint(self):
+        return self.data.get("target_setpoint", 0.0)
 
     def get_supply_temp(self):
         return self.data.get("supply_temp", 0.0)
