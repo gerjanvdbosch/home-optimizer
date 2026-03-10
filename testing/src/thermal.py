@@ -239,34 +239,27 @@ class HPPerformanceMap:
         d["t_out"]  = d["temp"]
         d["t_sink"] = d[sink_col]
         d["supply_temp"] = d["supply_temp"]
-
-        if "wp_setpoint" in d.columns and "supply_temp" in d.columns:
-            d["delta_setpoint"] = (d["wp_setpoint"] - d["supply_temp"]).clip(-5, 20)
-        else:
-            d["delta_setpoint"] = 2.0  # fallback: WP net aan het opwarmen
+        d["delta_setpoint"] = (d["supply_setpoint"] - d["supply_temp"]).clip(-2, 20)
 
         n = len(d)
-        logger.info(f"[PerfMap] {label}: {n} steady-state rijen.")
-
         if n < 10:
             logger.warning(f"[PerfMap] {label}: te weinig data, sla over.")
             return
-
-        logger.info(f"[PerfMap] {label}: wp_actual mediaan={d['wp_actual'].median():.3f} kW")
-        logger.info(f"[PerfMap] {label}: delta_t mediaan={d['delta_t'].median():.3f} K")
-        logger.info(f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C")
-        logger.info(f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C")
-
-        d["delta_setpoint"] = (d["wp_setpoint"] - d["supply_temp"]).clip(-2, 20)
+        else:
+            logger.info(f"[PerfMap] {label}: {n} steady-state rijen.")
 
         # Leer ook de typische setpoint per modus
-        wp_setpoint_median = float(d["wp_setpoint"].median())
+        wp_setpoint_median = float(d["supply_setpoint"].median())
         if label == "UFH":
             self._setpoint_ufh = float(np.clip(wp_setpoint_median, 20.0, 35.0))
         else:
             self._setpoint_dhw = float(np.clip(wp_setpoint_median, 45.0, 65.0))
 
-        logger.info(f"[PerfMap] {label}: wp_setpoint mediaan={wp_setpoint_median:.1f}°C")
+        logger.info(f"[PerfMap] {label}: supply_setpoint mediaan={wp_setpoint_median:.1f}°C")
+        logger.info(f"[PerfMap] {label}: wp_actual mediaan={d['wp_actual'].median():.3f} kW")
+        logger.info(f"[PerfMap] {label}: delta_t mediaan={d['delta_t'].median():.3f} K")
+        logger.info(f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C")
+        logger.info(f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C")
 
         # Gebruik ALTIJD de fysische flow-factor voor P_th berekening
         # De flow-factor is een materiaaleigenschap van water, geen leerbare parameter
