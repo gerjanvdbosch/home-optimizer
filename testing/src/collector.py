@@ -225,7 +225,9 @@ class Collector:
 
             logger.info(
                 f"[Collector] Mode={hvac_mode} PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW "
-                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C Shutter={shutter_room:.0f}%"
+                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C "
+                f"Target={avg_setpoint:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C "
+                f"Shutter={shutter_room:.0f}%"
             )
 
     def _update_buffer(self, buffer: deque, value: float):
