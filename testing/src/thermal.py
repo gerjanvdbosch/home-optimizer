@@ -919,15 +919,24 @@ class PhysicsLinearizer:
         return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw
 
     def has_converged(
-        self,
-        p_el_ufh_prev: np.ndarray, p_el_dhw_prev: np.ndarray,
-        p_el_ufh_new:  np.ndarray, p_el_dhw_new:  np.ndarray,
+            self,
+            p_el_ufh_prev: np.ndarray, p_el_dhw_prev: np.ndarray,
+            p_el_ufh_new: np.ndarray, p_el_dhw_new: np.ndarray,
+            ufh_on: np.ndarray = None,
+            dhw_on: np.ndarray = None,
     ) -> bool:
-        delta = max(
-            float(np.max(np.abs(p_el_ufh_new - p_el_ufh_prev))),
-            float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev))),
-        )
-        logger.debug(f"[SLP] delta P_el={delta:.4f} kW  tol={self.tol}")
+        if ufh_on is not None and np.any(ufh_on > 0.5):
+            delta_ufh = float(np.max(np.abs((p_el_ufh_new - p_el_ufh_prev)[ufh_on > 0.5])))
+        else:
+            delta_ufh = float(np.max(np.abs(p_el_ufh_new - p_el_ufh_prev)))
+
+        if dhw_on is not None and np.any(dhw_on > 0.5):
+            delta_dhw = float(np.max(np.abs((p_el_dhw_new - p_el_dhw_prev)[dhw_on > 0.5])))
+        else:
+            delta_dhw = float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev)))
+
+        delta = max(delta_ufh, delta_dhw)
+        logger.debug(f"[SLP] delta UFH={delta_ufh:.4f}  DHW={delta_dhw:.4f}  tol={self.tol}")
         return delta < self.tol
 
 

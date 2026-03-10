@@ -311,7 +311,7 @@ class ThermalMPC:
         linearizer = PhysicsLinearizer(
             perf_map=self.perf_map,
             horizon=T,
-            max_iter=6,
+            max_iter=10,
             tol=0.05,
         )
 
@@ -354,7 +354,9 @@ class ThermalMPC:
 
             # 4. Convergentiecheck vóór oplossen
             if iteration > 0 and linearizer.has_converged(
-                p_el_ufh_prev, p_el_dhw_prev, p_el_ufh, p_el_dhw
+                    p_el_ufh_prev, p_el_dhw_prev, p_el_ufh, p_el_dhw,
+                    ufh_on=self.ufh_on.value,
+                    dhw_on=self.dhw_on.value,
             ):
                 logger.info(f"[SLP] Geconvergeerd na {iteration} iteraties.")
                 break
