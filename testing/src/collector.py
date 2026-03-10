@@ -34,6 +34,7 @@ class Collector:
         self.pv_slots = []
         self.wp_slots = []
         self.grid_slots = []
+        self.setpoint_slots = []
         self.supply_slots = []
         self.return_slots = []
         self.room_slots = []
@@ -148,6 +149,7 @@ class Collector:
         self._update_slot(self.mode_slots, raw_mode.value)
 
         if self.context.hvac_mode != HvacMode.OFF:
+            self._update_slot(self.setpoint_slots, self.client.get_supply_setpoint())
             self._update_slot(self.supply_slots, self.client.get_supply_temp())
             self._update_slot(self.return_slots, self.client.get_return_temp())
 
@@ -172,6 +174,7 @@ class Collector:
         if slot_start > self.current_slot_start:
             avg_pv = self._mean(self.pv_slots)
             avg_wp = self._mean(self.wp_slots, skip_zeros=True)
+            avg_setpoint = self._mean(self.setpoint_slots, skip_zeros=True)
             avg_supply = self._mean(self.supply_slots, skip_zeros=True)
             avg_return = self._mean(self.return_slots, skip_zeros=True)
             avg_room = self._mean(self.room_slots)
@@ -191,6 +194,7 @@ class Collector:
             self.pv_slots = []
             self.wp_slots = []
             self.grid_slots = []
+            self.setpoint_slots = []
             self.supply_slots = []
             self.return_slots = []
             self.room_slots = []
@@ -210,6 +214,7 @@ class Collector:
                 room_temp=avg_room,
                 dhw_top=avg_dhw_top,
                 dhw_bottom=avg_dhw_bottom,
+                supply_setpoint=avg_setpoint,
                 supply_temp=avg_supply,
                 return_temp=avg_return,
                 hvac_mode=hvac_mode,

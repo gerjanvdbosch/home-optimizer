@@ -164,8 +164,8 @@ class HPPerformanceMap:
             self._pel_model_dhw = d.get("pel_dhw")
             self._cop_model_ufh = d.get("cop_ufh")
             self._cop_model_dhw = d.get("cop_dhw")
-            self._delta_setpoint_ufh = d.get("delta_setpoint_ufh", 2.0)
-            self._delta_setpoint_dhw = d.get("delta_setpoint_dhw", 3.0)
+            self._setpoint_ufh = d.get("setpoint_ufh", 2.0)
+            self._setpoint_dhw = d.get("setpoint_dhw", 3.0)
             self._pel_min_ufh   = d.get("pel_min_ufh", 0.4)
             self._pel_max_ufh   = d.get("pel_max_ufh", 2.5)
             self._pel_min_dhw   = d.get("pel_min_dhw", 0.6)
@@ -185,8 +185,8 @@ class HPPerformanceMap:
             "pel_dhw":     self._pel_model_dhw,
             "cop_ufh":     self._cop_model_ufh,
             "cop_dhw":     self._cop_model_dhw,
-            "delta_setpoint_ufh": self._delta_setpoint_ufh,
-            "delta_setpoint_dhw": self._delta_setpoint_dhw,
+            "setpoint_ufh": self._setpoint_ufh,
+            "setpoint_dhw": self._setpoint_dhw,
             "pel_min_ufh": self._pel_min_ufh,
             "pel_max_ufh": self._pel_max_ufh,
             "pel_min_dhw": self._pel_min_dhw,
@@ -257,14 +257,16 @@ class HPPerformanceMap:
         logger.info(f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C")
         logger.info(f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C")
 
-        # Leer de steady-state delta als mediaan uit de data
-        delta_setpoint_median = float(d["delta_setpoint"].median())
-        logger.info(f"[PerfMap] {label}: delta_setpoint mediaan={delta_setpoint_median:.2f} K")
+        d["delta_setpoint"] = (d["wp_setpoint"] - d["supply_temp"]).clip(-2, 20)
 
+        # Leer ook de typische setpoint per modus
+        wp_setpoint_median = float(d["wp_setpoint"].median())
         if label == "UFH":
-            self._delta_setpoint_ufh = float(np.clip(delta_setpoint_median, 0.5, 8.0))
+            self._setpoint_ufh = float(np.clip(wp_setpoint_median, 20.0, 35.0))
         else:
-            self._delta_setpoint_dhw = float(np.clip(delta_setpoint_median, 0.5, 15.0))
+            self._setpoint_dhw = float(np.clip(wp_setpoint_median, 45.0, 65.0))
+
+        logger.info(f"[PerfMap] {label}: wp_setpoint mediaan={wp_setpoint_median:.1f}°C")
 
         # Gebruik ALTIJD de fysische flow-factor voor P_th berekening
         # De flow-factor is een materiaaleigenschap van water, geen leerbare parameter
@@ -940,9 +942,14 @@ class PhysicsLinearizer:
             sup_ufh = self.hydraulic.predict_supply("UFH", p_th_ufh_est, t_out, t_room)
             sup_dhw = self.hydraulic.predict_supply("DHW", p_th_dhw_est, t_out, t_dhw)
 
-            # delta_setpoint
-            delta_ufh = self.perf_map._delta_setpoint_ufh
-            delta_dhw = self.perf_map._delta_setpoint_dhw
+            # wp_setpoint is vast (bijv. 55°C), supply loopt op met t_dhw
+            # delta_setpoint = wp_setpoint - supply_temp
+            # supply_temp ≈ t_dhw + hydraulische lift (loopt op met t_dhw)
+            # → delta neemt automatisch af naarmate t_dhw stijgt
+            delta_dhw = float(np.clip(self.perf_map._setpoint_dhw - sup_dhw, 0.5, 15.0))
+
+            # Zelfde voor UFH (minder dramatisch want t_room varieert weinig):
+            delta_ufh = float(np.clip(self.perf_map._setpoint_ufh - sup_ufh, 0.5, 8.0))
 
             p_el_ufh[t] = self.perf_map.predict_pel(
                 HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh)

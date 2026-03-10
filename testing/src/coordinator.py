@@ -115,13 +115,13 @@ if __name__ == "__main__":
         next_run = datetime.now(timezone.utc) + timedelta(seconds=5)
 
         scheduler.add_job(
-            collector.update_forecast, "interval", seconds=15, id="forecast"
+            collector.update_forecast, "interval", seconds=30, id="forecast"
         )
         scheduler.add_job(collector.update_load, "interval", seconds=15, id="load")
         scheduler.add_job(
-            collector.update_history, "interval", seconds=15, id="history"
+            collector.update_history, "interval", seconds=30, id="history"
         )
-        scheduler.add_job(coordinator.tick, "interval", seconds=5, id="tick")
+        scheduler.add_job(coordinator.tick, "interval", seconds=15, id="tick")
 
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
         scheduler.add_job(
