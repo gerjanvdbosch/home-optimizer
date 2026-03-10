@@ -246,6 +246,11 @@ class HPPerformanceMap:
             logger.warning(f"[PerfMap] {label}: te weinig data, sla over.")
             return
 
+        logger.info(f"[PerfMap] {label}: wp_actual mediaan={d['wp_actual'].median():.3f} kW")
+        logger.info(f"[PerfMap] {label}: delta_t mediaan={d['delta_t'].median():.3f} K")
+        logger.info(f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C")
+        logger.info(f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C")
+
         # Gebruik ALTIJD de fysische flow-factor voor P_th berekening
         # De flow-factor is een materiaaleigenschap van water, geen leerbare parameter
         factor_physical = FACTOR_UFH if label == "UFH" else FACTOR_DHW
@@ -255,18 +260,24 @@ class HPPerformanceMap:
         factor_raw = (d["wp_actual"] / d["delta_t"]).replace([np.inf, -np.inf], np.nan).dropna()
         factor_median = float(factor_raw.median())
 
-        logger.info(f"[PerfMap] {label}: gemeten P_el/delta_t mediaan={factor_median:.3f} "
-                    f"(fysisch flow-factor={factor_physical:.3f})")
-
         # P_th berekenen via fysische flow-factor
-        d["p_th"] = d["delta_t"] * factor_physical
-        d["cop"] = (d["p_th"] / d["wp_actual"]).replace([np.inf, -np.inf], np.nan)
-
-        # Sla de flow-factor op als de geleerde factor (voor hydraulics)
-        if label == "UFH":
-            self._factor_ufh = factor_physical
+        # (0.1 = ~1.4 L/min, 3.0 = ~43 L/min — buiten dit bereik is het een sensorprobleem)
+        if 0.1 < factor_median < 3.0:
+            d["p_th"] = d["delta_t"] * factor_median
+            if label == "UFH":
+                self._factor_ufh = factor_median
+            else:
+                self._factor_dhw = factor_median
+            logger.info(f"[PerfMap] {label}: geleerde flow-factor={factor_median:.3f} kW/K")
         else:
-            self._factor_dhw = factor_physical
+            # Fallback naar fysische constante als de meting onbetrouwbaar is
+            logger.warning(
+                f"[PerfMap] {label}: gemeten factor {factor_median:.3f} buiten bereik, "
+                f"fysische fallback {factor_physical:.3f} gebruikt"
+            )
+            d["p_th"] = d["delta_t"] * factor_physical
+
+        d["cop"] = (d["p_th"] / d["wp_actual"]).replace([np.inf, -np.inf], np.nan)
 
         if len(d) < 10:
             logger.warning(f"[PerfMap] {label}: te weinig data na sanity-filter.")

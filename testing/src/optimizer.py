@@ -188,7 +188,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.05) + (valve_switches * 0.02)
+        switching = (cp.sum(self.comp_start) * 0.05) + (valve_switches * 0.05)
 
         stored_heat = (
             self.t_dhw[T]  * self.P_val_terminal_dhw
@@ -383,8 +383,19 @@ class ThermalMPC:
 
             # 6. Toestandstrajectorie bijwerken voor volgende iteratie
             if self.t_room.value is not None:
-                guessed_t_room = self.t_room.value[:-1].copy()
-                guessed_t_dhw  = self.t_dhw.value[:-1].copy()
+                new_t_room = self.t_room.value[:-1].copy()
+                new_t_dhw = self.t_dhw.value[:-1].copy()
+
+                if iteration == 0:
+                    # Eerste iteratie: volledige update
+                    guessed_t_room = new_t_room
+                    guessed_t_dhw = new_t_dhw
+                else:
+                    alpha = 0.35  # dampingsfactor (0 = geen update, 1 = volledige update)
+
+                    # Volgende iteraties: gedempte update
+                    guessed_t_room = alpha * new_t_room + (1 - alpha) * guessed_t_room
+                    guessed_t_dhw = alpha * new_t_dhw + (1 - alpha) * guessed_t_dhw
 
 
 # =========================================================
@@ -413,8 +424,8 @@ class Optimizer:
         self.perf_map.train(df)
         self.ident.train(df)
         self.hydraulic.train(df)
-        self.res_ufh.train(df)
-        self.res_dhw.train(df)
+        # self.res_ufh.train(df)
+        # self.res_dhw.train(df)
         self.shutter.train(df)
 
         # Herbouw MPC zodat R, C en lag correct zijn na training
