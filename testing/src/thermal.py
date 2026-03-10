@@ -134,7 +134,7 @@ class HPPerformanceMap:
     Beide direct uit steady-state meetdata — geen flowfactoren.
     """
 
-    FEATURES = ["t_out", "t_sink"]
+    FEATURES = ["t_out", "t_sink", "supply_temp", "delta_setpoint"]
 
     def __init__(self, path: str):
         self.path = Path(path)
@@ -145,8 +145,8 @@ class HPPerformanceMap:
         self._cop_model_ufh = None
         self._cop_model_dhw = None
 
-        self._factor_ufh = FACTOR_UFH
-        self._factor_dhw = FACTOR_DHW
+        self._delta_setpoint_ufh = 2.0  # fallback
+        self._delta_setpoint_dhw = 3.0
 
         self._pel_min_ufh = 0.4
         self._pel_max_ufh = 2.5
@@ -164,8 +164,8 @@ class HPPerformanceMap:
             self._pel_model_dhw = d.get("pel_dhw")
             self._cop_model_ufh = d.get("cop_ufh")
             self._cop_model_dhw = d.get("cop_dhw")
-            self._factor_ufh    = d.get("factor_ufh", FACTOR_UFH)
-            self._factor_dhw    = d.get("factor_dhw", FACTOR_DHW)
+            self._delta_setpoint_ufh = d.get("delta_setpoint_ufh", 2.0)
+            self._delta_setpoint_dhw = d.get("delta_setpoint_dhw", 3.0)
             self._pel_min_ufh   = d.get("pel_min_ufh", 0.4)
             self._pel_max_ufh   = d.get("pel_max_ufh", 2.5)
             self._pel_min_dhw   = d.get("pel_min_dhw", 0.6)
@@ -185,8 +185,8 @@ class HPPerformanceMap:
             "pel_dhw":     self._pel_model_dhw,
             "cop_ufh":     self._cop_model_ufh,
             "cop_dhw":     self._cop_model_dhw,
-            "factor_ufh":  self._factor_ufh,
-            "factor_dhw":  self._factor_dhw,
+            "delta_setpoint_ufh": self._delta_setpoint_ufh,
+            "delta_setpoint_dhw": self._delta_setpoint_dhw,
             "pel_min_ufh": self._pel_min_ufh,
             "pel_max_ufh": self._pel_max_ufh,
             "pel_min_dhw": self._pel_min_dhw,
@@ -238,6 +238,12 @@ class HPPerformanceMap:
         d = df[mask].copy()
         d["t_out"]  = d["temp"]
         d["t_sink"] = d[sink_col]
+        d["supply_temp"] = d["supply_temp"]
+
+        if "wp_setpoint" in d.columns and "supply_temp" in d.columns:
+            d["delta_setpoint"] = (d["wp_setpoint"] - d["supply_temp"]).clip(-5, 20)
+        else:
+            d["delta_setpoint"] = 2.0  # fallback: WP net aan het opwarmen
 
         n = len(d)
         logger.info(f"[PerfMap] {label}: {n} steady-state rijen.")
@@ -251,33 +257,26 @@ class HPPerformanceMap:
         logger.info(f"[PerfMap] {label}: supply_temp mediaan={d['supply_temp'].median():.1f} °C")
         logger.info(f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C")
 
+        # Leer de steady-state delta als mediaan uit de data
+        delta_setpoint_median = float(d["delta_setpoint"].median())
+        logger.info(f"[PerfMap] {label}: delta_setpoint mediaan={delta_setpoint_median:.2f} K")
+
+        if label == "UFH":
+            self._delta_setpoint_ufh = float(np.clip(delta_setpoint_median, 0.5, 8.0))
+        else:
+            self._delta_setpoint_dhw = float(np.clip(delta_setpoint_median, 0.5, 15.0))
+
         # Gebruik ALTIJD de fysische flow-factor voor P_th berekening
         # De flow-factor is een materiaaleigenschap van water, geen leerbare parameter
         factor_physical = FACTOR_UFH if label == "UFH" else FACTOR_DHW
 
-        # Valideer of de data consistent is met de fysische factor
-        # (als de ratio ver afwijkt, is er waarschijnlijk een meetsensorprobleem)
-        factor_raw = (d["wp_actual"] / d["delta_t"]).replace([np.inf, -np.inf], np.nan).dropna()
-        factor_median = float(factor_raw.median())
-
-        # P_th berekenen via fysische flow-factor
-        # (0.1 = ~1.4 L/min, 3.0 = ~43 L/min — buiten dit bereik is het een sensorprobleem)
-        if 0.1 < factor_median < 3.0:
-            d["p_th"] = d["delta_t"] * factor_median
-            if label == "UFH":
-                self._factor_ufh = factor_median
-            else:
-                self._factor_dhw = factor_median
-            logger.info(f"[PerfMap] {label}: geleerde flow-factor={factor_median:.3f} kW/K")
-        else:
-            # Fallback naar fysische constante als de meting onbetrouwbaar is
-            logger.warning(
-                f"[PerfMap] {label}: gemeten factor {factor_median:.3f} buiten bereik, "
-                f"fysische fallback {factor_physical:.3f} gebruikt"
-            )
-            d["p_th"] = d["delta_t"] * factor_physical
-
+        d["p_th"] = d["delta_t"] * factor_physical
         d["cop"] = (d["p_th"] / d["wp_actual"]).replace([np.inf, -np.inf], np.nan)
+
+        logger.info(f"[PerfMap] {label}: p_th mediaan={d['p_th'].median():.3f} kW")
+        logger.info(f"[PerfMap] {label}: cop bereik={d['cop'].quantile(0.1):.2f} - {d['cop'].quantile(0.9):.2f}")
+        logger.info(
+            f"[PerfMap] {label}: supply mediaan={d['supply_temp'].median():.1f}  return={d['return_temp'].median():.1f}  sink={d[sink_col].median():.1f}")
 
         if len(d) < 10:
             logger.warning(f"[PerfMap] {label}: te weinig data na sanity-filter.")
@@ -319,7 +318,14 @@ class HPPerformanceMap:
             self._pel_model_dhw = pel_model
             self._cop_model_dhw = cop_model
 
-    def predict_pel(self, mode: int, t_out: float, t_sink: float) -> float:
+    def predict_pel(self, mode: int, t_out: float, t_sink: float,
+                    supply_temp: float = None, delta_setpoint: float = None) -> float:
+
+        if supply_temp is None:
+            supply_temp = t_sink + 5.0
+        if delta_setpoint is None:
+            delta_setpoint = 2.0
+
         if mode == HvacMode.HEATING.value:
             model, lo, hi = self._pel_model_ufh, self._pel_min_ufh, self._pel_max_ufh
             default = float(np.clip(1.2 - 0.02 * t_out, lo, hi))
@@ -330,10 +336,20 @@ class HPPerformanceMap:
         if model is None:
             return default
 
-        X = pd.DataFrame([[t_out, t_sink]], columns=self.FEATURES)
+        X = pd.DataFrame(
+            [[t_out, t_sink, float(supply_temp), float(np.clip(delta_setpoint, -5, 20))]],
+            columns=self.FEATURES
+        )
         return float(np.clip(model.predict(X)[0], lo, hi))
 
-    def predict_cop(self, mode: int, t_out: float, t_sink: float) -> float:
+    def predict_cop(self, mode: int, t_out: float, t_sink: float,
+                    supply_temp: float = None, delta_setpoint: float = None) -> float:
+
+        if supply_temp is None:
+            supply_temp = t_sink + 5.0
+        if delta_setpoint is None:
+            delta_setpoint = 2.0
+
         if mode == HvacMode.HEATING.value:
             model, default = self._cop_model_ufh, 3.5
         else:
@@ -342,7 +358,10 @@ class HPPerformanceMap:
         if model is None:
             return default
 
-        X = pd.DataFrame([[t_out, t_sink]], columns=self.FEATURES)
+        X = pd.DataFrame(
+            [[t_out, t_sink, float(supply_temp), float(np.clip(delta_setpoint, -5, 20))]],
+            columns=self.FEATURES
+        )
         return float(np.clip(model.predict(X)[0], 1.2, 8.0))
 
     def predict_p_th(self, mode: int, t_out: float, t_sink: float) -> float:
@@ -591,8 +610,6 @@ class HydraulicPredictor:
 
         self.model_supply_ufh   = None
         self.model_supply_dhw   = None
-        self.learned_factor_ufh = FACTOR_UFH
-        self.learned_factor_dhw = FACTOR_DHW
         self.learned_lift_ufh   = 0.5
         self.learned_lift_dhw   = 3.0
         self.learned_ufh_slope  = 0.4
@@ -609,18 +626,12 @@ class HydraulicPredictor:
             d = joblib.load(self.path)
             self.model_supply_ufh   = d.get("supply_ufh")
             self.model_supply_dhw   = d.get("supply_dhw")
-            self.learned_factor_ufh = d.get("factor_ufh", FACTOR_UFH)
-            self.learned_factor_dhw = d.get("factor_dhw", FACTOR_DHW)
             self.learned_lift_ufh   = d.get("lift_ufh",  0.5)
             self.learned_lift_dhw   = d.get("lift_dhw",  3.0)
             self.learned_ufh_slope  = d.get("ufh_slope", 0.4)
             self.dhw_delta_slope    = d.get("dhw_slope", 0.0)
             self.dhw_delta_base     = d.get("dhw_base",  5.0)
             self.is_fitted = True
-            logger.info(
-                f"[Hydraulic] Geladen: UFH factor={self.learned_factor_ufh:.2f} "
-                f"DHW factor={self.learned_factor_dhw:.2f}"
-            )
         except Exception as e:
             logger.warning(f"[Hydraulic] Laden mislukt: {e}")
 
@@ -629,31 +640,31 @@ class HydraulicPredictor:
         df = df.dropna(subset=["delta_t", "supply_temp", "return_temp"])
         df = df[(df["delta_t"] > 0.1) & (df["delta_t"] < 15.0)].copy()
 
-        conditions   = [df["hvac_mode"] == HvacMode.HEATING.value,
-                        df["hvac_mode"] == HvacMode.DHW.value]
+        conditions = [df["hvac_mode"] == HvacMode.HEATING.value,
+                      df["hvac_mode"] == HvacMode.DHW.value]
         df["sink_temp"] = np.select(conditions, [df["room_temp"], df["dhw_bottom"]], default=20.0)
-        df["p_th_raw"]  = np.select(conditions, [df["delta_t"] * FACTOR_UFH,
-                                                  df["delta_t"] * FACTOR_DHW], default=0.0)
+        df["p_th_raw"] = np.select(conditions, [df["delta_t"] * FACTOR_UFH,
+                                                df["delta_t"] * FACTOR_DHW], default=0.0)
         df["wp_output"] = df["p_th_raw"]
 
         # UFH
         mask_ufh = (
-            (df["hvac_mode"] == HvacMode.HEATING.value)
-            & (df["p_th_raw"] > 0.5)
-            & (df["supply_temp"] > df["room_temp"] + 1.0)
+                (df["hvac_mode"] == HvacMode.HEATING.value)
+                & (df["p_th_raw"] > 0.5)
+                & (df["supply_temp"] > df["room_temp"] + 1.0)
         )
         df_ufh = df[mask_ufh].dropna(subset=self.features + ["supply_temp", "return_temp"])
 
         if len(df_ufh) > 15:
-            self.learned_factor_ufh = (df_ufh["p_th_raw"] / df_ufh["delta_t"]).median()
-            self.learned_lift_ufh   = max(0.2, (df_ufh["return_temp"] - df_ufh["room_temp"]).quantile(0.05))
+            # ← factor_ufh NIET meer leren, altijd fysische constante
+            self.learned_lift_ufh = max(0.2, (df_ufh["return_temp"] - df_ufh["room_temp"]).quantile(0.05))
 
             mask_curve = mask_ufh & (df["temp"] < 15.0) & (df["supply_temp"] > df["room_temp"] + 2.0)
-            df_curve   = df[mask_curve].copy()
+            df_curve = df[mask_curve].copy()
             if len(df_curve) > 50:
                 slopes = (
-                    (df_curve["supply_temp"] - df_curve["room_temp"] - self.learned_lift_ufh)
-                    / (20.0 - df_curve["temp"]).clip(lower=0.1)
+                        (df_curve["supply_temp"] - df_curve["room_temp"] - self.learned_lift_ufh)
+                        / (20.0 - df_curve["temp"]).clip(lower=0.1)
                 )
                 self.learned_ufh_slope = float(np.clip(slopes.median(), 0.1, 1.5))
 
@@ -663,17 +674,17 @@ class HydraulicPredictor:
 
         # DHW
         mask_dhw = (
-            (df["hvac_mode"] == HvacMode.DHW.value)
-            & df["full_quarter"]
-            & (df["p_th_raw"] > 1.5)
-            & (df["delta_t"] > 2.0)
-            & (df["supply_temp"] > df["dhw_bottom"] + 3.0)
+                (df["hvac_mode"] == HvacMode.DHW.value)
+                & df["full_quarter"]
+                & (df["p_th_raw"] > 1.5)
+                & (df["delta_t"] > 2.0)
+                & (df["supply_temp"] > df["dhw_bottom"] + 3.0)
         )
         df_dhw = df[mask_dhw].dropna(subset=self.features + ["supply_temp", "return_temp"]).copy()
 
         if len(df_dhw) > 10:
-            self.learned_factor_dhw = (df_dhw["wp_output"] / df_dhw["delta_t"]).median()
-            self.learned_lift_dhw   = max(1.0, (df_dhw["return_temp"] - df_dhw["dhw_bottom"]).quantile(0.10))
+            # ← factor_dhw NIET meer leren, altijd fysische constante
+            self.learned_lift_dhw = max(1.0, (df_dhw["return_temp"] - df_dhw["dhw_bottom"]).quantile(0.10))
 
             df_dhw["t_bin"] = df_dhw["temp"].round()
             tops = [
@@ -683,15 +694,15 @@ class HydraulicPredictor:
 
             if len(tops) >= 3:
                 df_tops = pd.DataFrame(tops, columns=["p_th_raw", "temp"])
-                reg     = LinearRegression().fit(df_tops[["temp"]], df_tops["p_th_raw"])
+                reg = LinearRegression().fit(df_tops[["temp"]], df_tops["p_th_raw"])
                 p_slope = float(np.clip(reg.coef_[0], -0.15, 0.25))
-                p_base  = float(reg.intercept_)
+                p_base = float(reg.intercept_)
             else:
                 p_slope = 0.0
-                p_base  = df_dhw["delta_t"].median() * self.learned_factor_dhw
+                p_base = df_dhw["delta_t"].median() * FACTOR_DHW  # ← ook hier vaste constante
 
-            self.dhw_delta_slope = p_slope / self.learned_factor_dhw
-            self.dhw_delta_base  = p_base  / self.learned_factor_dhw
+            self.dhw_delta_slope = p_slope / FACTOR_DHW  # ← vaste constante
+            self.dhw_delta_base = p_base / FACTOR_DHW  # ← vaste constante
 
             min_at_35 = self.dhw_delta_base + self.dhw_delta_slope * 35.0
             if min_at_35 < 1.5:
@@ -705,22 +716,20 @@ class HydraulicPredictor:
         joblib.dump({
             "supply_ufh": self.model_supply_ufh,
             "supply_dhw": self.model_supply_dhw,
-            "factor_ufh": self.learned_factor_ufh,
-            "factor_dhw": self.learned_factor_dhw,
-            "lift_ufh":   self.learned_lift_ufh,
-            "lift_dhw":   self.learned_lift_dhw,
-            "ufh_slope":  self.learned_ufh_slope,
-            "dhw_slope":  self.dhw_delta_slope,
-            "dhw_base":   self.dhw_delta_base,
+            "lift_ufh": self.learned_lift_ufh,
+            "lift_dhw": self.learned_lift_dhw,
+            "ufh_slope": self.learned_ufh_slope,
+            "dhw_slope": self.dhw_delta_slope,
+            "dhw_base": self.dhw_delta_base,
         }, self.path)
         logger.info("[Hydraulic] Training compleet.")
 
     def predict_supply(self, mode, p_th, t_out, t_sink):
         if mode == "UFH":
-            factor, min_lift, max_safe = self.learned_factor_ufh, self.learned_lift_ufh, 30.0
+            factor, min_lift, max_safe = FACTOR_UFH, self.learned_lift_ufh, 30.0
             offset = 1.0
         else:
-            factor, min_lift, max_safe = self.learned_factor_dhw, self.learned_lift_dhw, 60.0
+            factor, min_lift, max_safe = FACTOR_DHW, self.learned_lift_dhw, 60.0
             offset = 2.0
 
         delta_t_calc = p_th / factor if p_th > 0 else 0.0
@@ -741,7 +750,7 @@ class HydraulicPredictor:
         return float(np.clip(prediction, min_hard, max_safe))
 
     def predict_delta(self, mode, p_th):
-        factor = self.learned_factor_ufh if mode == "UFH" else self.learned_factor_dhw
+        factor = FACTOR_UFH if mode == "UFH" else FACTOR_DHW
         return p_th / factor if p_th > 0 else 0.0
 
     def get_ufh_slope(self, t_out):
@@ -896,11 +905,13 @@ class PhysicsLinearizer:
     def __init__(
         self,
         perf_map: HPPerformanceMap,
+        hydraulic: HydraulicPredictor,
         horizon:  int   = 96,
         max_iter: int   = 6,
         tol:      float = 0.05,
     ):
         self.perf_map = perf_map
+        self.hydraulic = hydraulic
         self.horizon  = horizon
         self.max_iter = max_iter
         self.tol      = tol
@@ -918,24 +929,36 @@ class PhysicsLinearizer:
         cop_dhw  = np.zeros(T)
 
         for t in range(T):
-            t_out  = float(t_out_arr[t])
+            t_out = float(t_out_arr[t])
             t_room = float(t_room_arr[t])
-            t_dhw  = float(t_dhw_arr[t])
+            t_dhw = float(t_dhw_arr[t])
 
-            p_el_ufh[t] = self.perf_map.predict_pel(HvacMode.HEATING.value, t_out, t_room)
-            cop_ufh[t]  = self.perf_map.predict_cop(HvacMode.HEATING.value, t_out, t_room)
-            p_el_dhw[t] = self.perf_map.predict_pel(HvacMode.DHW.value,     t_out, t_dhw)
-            cop_dhw[t]  = self.perf_map.predict_cop(HvacMode.DHW.value,     t_out, t_dhw)
+            # Supply projecteren via hydraulic curve
+            p_th_ufh_est = self.perf_map.predict_p_th(HvacMode.HEATING.value, t_out, t_room)
+            p_th_dhw_est = self.perf_map.predict_p_th(HvacMode.DHW.value, t_out, t_dhw)
+
+            sup_ufh = self.hydraulic.predict_supply("UFH", p_th_ufh_est, t_out, t_room)
+            sup_dhw = self.hydraulic.predict_supply("DHW", p_th_dhw_est, t_out, t_dhw)
+
+            # delta_setpoint
+            delta_ufh = self.perf_map._delta_setpoint_ufh
+            delta_dhw = self.perf_map._delta_setpoint_dhw
+
+            p_el_ufh[t] = self.perf_map.predict_pel(
+                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh)
+            cop_ufh[t] = self.perf_map.predict_cop(
+                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh)
+            p_el_dhw[t] = self.perf_map.predict_pel(
+                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw)
+            cop_dhw[t] = self.perf_map.predict_cop(
+                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw)
 
         return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw
 
-    def has_converged(
-            self,
-            p_el_ufh_prev: np.ndarray, p_el_dhw_prev: np.ndarray,
-            p_el_ufh_new: np.ndarray, p_el_dhw_new: np.ndarray,
-            ufh_on: np.ndarray = None,
-            dhw_on: np.ndarray = None,
-    ) -> bool:
+    def has_converged(self, p_el_ufh_prev, p_el_dhw_prev,
+                      p_el_ufh_new, p_el_dhw_new,
+                      ufh_on=None, dhw_on=None) -> bool:
+
         if ufh_on is not None and np.any(ufh_on > 0.5):
             delta_ufh = float(np.max(np.abs((p_el_ufh_new - p_el_ufh_prev)[ufh_on > 0.5])))
         else:
@@ -946,9 +969,15 @@ class PhysicsLinearizer:
         else:
             delta_dhw = float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev)))
 
-        delta = max(delta_ufh, delta_dhw)
-        logger.debug(f"[SLP] delta UFH={delta_ufh:.4f}  DHW={delta_dhw:.4f}  tol={self.tol}")
-        return delta < self.tol
+        tol_ufh = self.tol  # 0.05 kW
+        tol_dhw = self.tol  #* 3.0  # 0.15 kW — DHW mag ruimer
+
+        converged = (delta_ufh < tol_ufh) and (delta_dhw < tol_dhw)
+        logger.debug(
+            f"[SLP] delta UFH={delta_ufh:.4f}/{tol_ufh}  "
+            f"DHW={delta_dhw:.4f}/{tol_dhw}  converged={converged}"
+        )
+        return converged
 
 
 # =========================================================

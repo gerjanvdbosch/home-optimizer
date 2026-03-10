@@ -310,6 +310,7 @@ class ThermalMPC:
         # ── SLP-iteraties met convergentiecheck ──────────────────────────
         linearizer = PhysicsLinearizer(
             perf_map=self.perf_map,
+            hydraulic=self.hydraulic,
             horizon=T,
             max_iter=10,
             tol=0.05,
@@ -387,15 +388,14 @@ class ThermalMPC:
                 new_t_dhw = self.t_dhw.value[:-1].copy()
 
                 if iteration == 0:
-                    # Eerste iteratie: volledige update
                     guessed_t_room = new_t_room
                     guessed_t_dhw = new_t_dhw
                 else:
-                    alpha = 0.35  # dampingsfactor (0 = geen update, 1 = volledige update)
+                    alpha_room = 0.35
+                    alpha_dhw = 0.15  # DHW heeft grotere COP-variatie, langzamer updaten
 
-                    # Volgende iteraties: gedempte update
-                    guessed_t_room = alpha * new_t_room + (1 - alpha) * guessed_t_room
-                    guessed_t_dhw = alpha * new_t_dhw + (1 - alpha) * guessed_t_dhw
+                    guessed_t_room = alpha_room * new_t_room + (1 - alpha_room) * guessed_t_room
+                    guessed_t_dhw = alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw
 
 
 # =========================================================
