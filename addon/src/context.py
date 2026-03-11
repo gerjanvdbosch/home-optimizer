@@ -21,7 +21,7 @@ class Context:
     latitude: float | None = None
     longitude: float | None = None
 
-    hvac_mode: int | None = None
+    hvac_mode: HvacMode = HvacMode.OFF
 
     stable_pv: float = 0.0
     stable_wp: float = 0.0
@@ -35,6 +35,8 @@ class Context:
 
     solar_bias: float = 1.0
     load_bias: float = 1.0
+
+    shutter_room: int = 0
 
     room_temp: float = 0.0
 
