@@ -40,13 +40,20 @@ class Collector:
         self.dhw_bottom_slots = []
         self.mode_slots = []
 
-        dhw = HvacMode.DHW.value
-        ufh = HvacMode.HEATING.value
+        ACTIVE_MODES = [
+            m.value
+            for m in HvacMode
+            if m
+            not in (
+                HvacMode.OFF,
+                HvacMode.FROST_PROTECTION,
+            )
+        ]
 
-        self.wp_slots = {dhw: [], ufh: []}
-        self.setpoint_slots = {dhw: [], ufh: []}
-        self.supply_slots = {dhw: [], ufh: []}
-        self.return_slots = {dhw: [], ufh: []}
+        self.wp_slots = {m: [] for m in ACTIVE_MODES}
+        self.setpoint_slots = {m: [] for m in ACTIVE_MODES}
+        self.supply_slots = {m: [] for m in ACTIVE_MODES}
+        self.return_slots = {m: [] for m in ACTIVE_MODES}
 
     def update_forecast(self):
         location = self.client.get_location()
