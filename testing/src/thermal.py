@@ -22,7 +22,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import cross_val_score
 
-from model import ModelSelector
+# from model import ModelSelector
 from utils import add_cyclic_time_features
 from context import HvacMode
 

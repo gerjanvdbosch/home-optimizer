@@ -31,16 +31,23 @@ class Collector:
         self.wp_buffer = deque(maxlen=7)
         self.grid_buffer = deque(maxlen=7)
 
+        self._reset_slots()
+
+    def _reset_slots(self):
         self.pv_slots = []
-        self.wp_slots = []
         self.grid_slots = []
-        self.setpoint_slots = []
-        self.supply_slots = []
-        self.return_slots = []
         self.room_slots = []
         self.dhw_top_slots = []
         self.dhw_bottom_slots = []
         self.mode_slots = []
+
+        dhw = HvacMode.DHW.value
+        ufh = HvacMode.HEATING.value
+
+        self.wp_slots = {dhw: [], ufh: []}
+        self.setpoint_slots = {dhw: [], ufh: []}
+        self.supply_slots = {dhw: [], ufh: []}
+        self.return_slots = {dhw: [], ufh: []}
 
     def update_forecast(self):
         self.client.reload()
@@ -104,8 +111,10 @@ class Collector:
         raw_grid = self.client.get_grid_power()
 
         self._update_slot(self.pv_slots, raw_pv)
-        self._update_slot(self.wp_slots, raw_wp)
         self._update_slot(self.grid_slots, raw_grid)
+
+        if self.context.hvac_mode != HvacMode.OFF:
+            self._update_slot(self.wp_slots[self.context.hvac_mode.value], raw_wp)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -148,10 +157,16 @@ class Collector:
         self._update_slot(self.dhw_bottom_slots, raw_dhw_bottom)
         self._update_slot(self.mode_slots, raw_mode.value)
 
-        if self.context.hvac_mode != HvacMode.OFF:
-            self._update_slot(self.setpoint_slots, self.client.get_target_setpoint())
-            self._update_slot(self.supply_slots, self.client.get_supply_temp())
-            self._update_slot(self.return_slots, self.client.get_return_temp())
+        if raw_mode != HvacMode.OFF:
+            self._update_slot(
+                self.setpoint_slots[raw_mode.value], self.client.get_target_setpoint()
+            )
+            self._update_slot(
+                self.supply_slots[raw_mode.value], self.client.get_supply_temp()
+            )
+            self._update_slot(
+                self.return_slots[raw_mode.value], self.client.get_return_temp()
+            )
 
         logger.info("[Collector] Sensors updated")
 
@@ -172,11 +187,20 @@ class Collector:
 
         # Detecteer kwartierwissel
         if slot_start > self.current_slot_start:
+            hvac_mode = self._hvac_mode(self.mode_slots)
+
+            avg_wp = self._mean(self.wp_slots.get(hvac_mode, []), skip_zeros=True)
+            avg_setpoint = self._mean(
+                self.setpoint_slots.get(hvac_mode, []), skip_zeros=True
+            )
+            avg_supply = self._mean(
+                self.supply_slots.get(hvac_mode, []), skip_zeros=True
+            )
+            avg_return = self._mean(
+                self.return_slots.get(hvac_mode, []), skip_zeros=True
+            )
+
             avg_pv = self._mean(self.pv_slots)
-            avg_wp = self._mean(self.wp_slots, skip_zeros=True)
-            avg_setpoint = self._mean(self.setpoint_slots, skip_zeros=True)
-            avg_supply = self._mean(self.supply_slots, skip_zeros=True)
-            avg_return = self._mean(self.return_slots, skip_zeros=True)
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
@@ -189,18 +213,7 @@ class Collector:
                 avg_import = 0.0
                 avg_export = 0.0
 
-            hvac_mode = self._hvac_mode(self.mode_slots)
-
-            self.pv_slots = []
-            self.wp_slots = []
-            self.grid_slots = []
-            self.setpoint_slots = []
-            self.supply_slots = []
-            self.return_slots = []
-            self.room_slots = []
-            self.dhw_top_slots = []
-            self.dhw_bottom_slots = []
-            self.mode_slots = []
+            self._reset_slots()
 
             shutter_room = self.client.get_shutter_room()
 
