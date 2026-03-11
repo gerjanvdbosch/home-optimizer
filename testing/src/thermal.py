@@ -268,7 +268,7 @@ class HPPerformanceMap:
         d["t_out"] = d["temp"]
         d["t_sink"] = d[sink_col]
         d["supply_temp"] = d["supply_temp"]
-        d["delta_setpoint"] = (d["target_setpoint"] - d["supply_temp"]).clip(-10, 40)
+        d["delta_setpoint"] = (d["target_setpoint"] - d["supply_temp"]).clip(-10, 45)
 
         n = len(d)
         if n < 10:
@@ -340,9 +340,11 @@ class HPPerformanceMap:
             n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
         ).fit(X, y_cop)
 
-        scores = cross_val_score(pel_model, X, y_pel, cv=5, scoring="r2")
+        scores_pel = cross_val_score(pel_model, X, y_pel, cv=5, scoring="r2")
+        scores_cop = cross_val_score(cop_model, X, y_cop, cv=5, scoring="r2")
         logger.info(
-            f"[PerfMap] {label} P_el R2={scores.mean():.3f}+-{scores.std():.3f}  "
+            f"[PerfMap] {label} P_el R2={scores_pel.mean():.3f}+-{scores_pel.std():.3f}  "
+            f"COP R2={scores_cop.mean():.3f}+-{scores_cop.std():.3f}  "
             f"COP mediaan={y_cop.median():.2f}"
         )
 
@@ -418,7 +420,7 @@ class HPPerformanceMap:
                     t_out,
                     t_sink,
                     float(supply_temp),
-                    float(np.clip(delta_setpoint, -5, 20)),
+                    float(np.clip(delta_setpoint, -10, 45)),
                 ]
             ],
             columns=self.FEATURES,
