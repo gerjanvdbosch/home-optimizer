@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
         api.state.coordinator = coordinator
 
-        next_run = datetime.now(timezone.utc) + timedelta(seconds=5)
+        next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
 
         scheduler.add_job(
             collector.update_forecast, "interval", seconds=30, id="forecast"
