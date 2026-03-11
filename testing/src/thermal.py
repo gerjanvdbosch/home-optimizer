@@ -268,7 +268,7 @@ class HPPerformanceMap:
         d["t_out"] = d["temp"]
         d["t_sink"] = d[sink_col]
         d["supply_temp"] = d["supply_temp"]
-        d["delta_setpoint"] = (d["target_setpoint"] - d["supply_temp"]).clip(-2, 20)
+        d["delta_setpoint"] = (d["target_setpoint"] - d["supply_temp"]).clip(-10, 40)
 
         n = len(d)
         if n < 10:
