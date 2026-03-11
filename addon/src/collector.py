@@ -32,29 +32,6 @@ class Collector:
 
         self._reset_slots()
 
-    def _reset_slots(self):
-        self.pv_slots = []
-        self.grid_slots = []
-        self.room_slots = []
-        self.dhw_top_slots = []
-        self.dhw_bottom_slots = []
-        self.mode_slots = []
-
-        ACTIVE_MODES = [
-            m.value
-            for m in HvacMode
-            if m
-            not in (
-                HvacMode.OFF,
-                HvacMode.FROST_PROTECTION,
-            )
-        ]
-
-        self.wp_slots = {m: [] for m in ACTIVE_MODES}
-        self.setpoint_slots = {m: [] for m in ACTIVE_MODES}
-        self.supply_slots = {m: [] for m in ACTIVE_MODES}
-        self.return_slots = {m: [] for m in ACTIVE_MODES}
-
     def update_forecast(self):
         location = self.client.get_location()
         if location != (None, None):
@@ -191,7 +168,9 @@ class Collector:
         if slot_start > self.current_slot_start:
             hvac_mode = self._hvac_mode(self.mode_slots)
 
-            avg_wp = self._mean(self.wp_slots.get(hvac_mode, []), skip_zeros=True)
+            avg_wp = self._mean(
+                self.wp_slots.get(hvac_mode, []), skip_zeros=True, default=0
+            )
             avg_setpoint = self._mean(
                 self.setpoint_slots.get(hvac_mode, []), skip_zeros=True
             )
@@ -283,3 +262,22 @@ class Collector:
             return 2
         else:
             return Counter(v for v in values if v in (1, 2)).most_common(1)[0][0]
+
+    def _reset_slots(self):
+        self.pv_slots = []
+        self.grid_slots = []
+        self.room_slots = []
+        self.dhw_top_slots = []
+        self.dhw_bottom_slots = []
+        self.mode_slots = []
+
+        active_modes: list[int] = [
+            int(m)
+            for m in HvacMode
+            if m not in (HvacMode.OFF, HvacMode.FROST_PROTECTION)
+        ]
+
+        self.wp_slots = {m: [] for m in active_modes}
+        self.setpoint_slots = {m: [] for m in active_modes}
+        self.supply_slots = {m: [] for m in active_modes}
+        self.return_slots = {m: [] for m in active_modes}

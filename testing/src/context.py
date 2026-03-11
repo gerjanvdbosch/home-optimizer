@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 
 
-class HvacMode(Enum):
+class HvacMode(int, Enum):
     OFF = 0
     DHW = 1
     HEATING = 2
