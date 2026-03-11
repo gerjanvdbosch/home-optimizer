@@ -196,7 +196,7 @@ class Collector:
         if slot_start > self.current_slot_start:
             hvac_mode = self._hvac_mode(self.mode_slots)
 
-            avg_wp = self._mean(self.wp_slots.get(hvac_mode, []), skip_zeros=True)
+            avg_wp = self._mean(self.wp_slots.get(hvac_mode, []), skip_zeros=True, default=0)
             avg_setpoint = self._mean(
                 self.setpoint_slots.get(hvac_mode, []), skip_zeros=True
             )
