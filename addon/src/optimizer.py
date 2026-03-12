@@ -225,7 +225,7 @@ class ThermalMPC:
             else:
                 r_min[t], r_max[t] = 19.0, 19.5
 
-            d_min[t] = 49.0 if 20 <= h < 21 else 10.0
+            d_min[t] = 48.0 if 20 <= h < 21 else 10.0
             d_max[t] = 55.0
 
         return r_min, r_max, d_min, d_max

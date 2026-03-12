@@ -1190,7 +1190,7 @@ class ComfortCostCalculator:
         room_over = room_under * 0.5
         tank_over = tank_under * 0.3
         terminal_room = room_under * 0.15
-        terminal_tank = tank_under * 0.40
+        terminal_tank = tank_under * 0.10
 
         logger.debug(
             f"[ComfortCost] prijs={avg_price:.3f}  "
