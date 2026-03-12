@@ -460,8 +460,8 @@ class Optimizer:
         self.perf_map.train(df)
         self.ident.train(df)
         self.hydraulic.train(df)
-        # self.res_ufh.train(df)
-        # self.res_dhw.train(df)
+        self.res_ufh.train(df)
+        self.res_dhw.train(df)
         self.shutter.train(df)
 
         # Herbouw MPC zodat R, C en lag correct zijn na training
