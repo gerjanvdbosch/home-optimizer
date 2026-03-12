@@ -242,7 +242,9 @@ class HPPerformanceMap:
         )
         logger.info(f"[PerfMap] {label}: {base[sink_col].notna().sum()} met {sink_col}")
         logger.info(f"[PerfMap] {label}: {base['delta_t'].notna().sum()} met delta_t")
-        logger.info(f"[PerfMap] {label}: {(base['target_setpoint'] > 0).sum()} met target_setpoint")
+        logger.info(
+            f"[PerfMap] {label}: {(base['target_setpoint'] > 0).sum()} met target_setpoint"
+        )
 
         if label == "DHW":
             mask = (
@@ -300,9 +302,7 @@ class HPPerformanceMap:
         logger.info(
             f"[PerfMap] {label}: return_temp mediaan={d['return_temp'].median():.1f} °C"
         )
-        logger.info(
-            f"[PerfMap] {label}: sink mediaan={d[sink_col].median():.1f} °C"
-        )
+        logger.info(f"[PerfMap] {label}: sink mediaan={d[sink_col].median():.1f} °C")
 
         # Gebruik ALTIJD de fysische flow-factor voor P_th berekening
         # De flow-factor is een materiaaleigenschap van water, geen leerbare parameter
