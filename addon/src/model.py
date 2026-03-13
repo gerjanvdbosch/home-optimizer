@@ -7,8 +7,9 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.model_selection import cross_val_score
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures
+
+# from sklearn.pipeline import make_pipeline
+# from sklearn.preprocessing import PolynomialFeatures
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class ModelSelector:
         return {
             "LinearRegression": LinearRegression(),
             "Ridge": Ridge(alpha=1.0),
-            "Poly2": make_pipeline(PolynomialFeatures(2), Ridge(alpha=1.0)),
+            # "Poly2": make_pipeline(PolynomialFeatures(2), Ridge(alpha=1.0)),
             "RandomForest": RandomForestRegressor(
                 n_estimators=150,
                 max_depth=5,
@@ -103,8 +104,8 @@ class ModelSelector:
                 scores = cross_val_score(model, X, y, cv=cv, scoring="r2")
                 mean = float(scores.mean())
                 std = float(scores.std())
-            except Exception as e:
-                logger.warning(f"[ModelSelector] {label} {name}: mislukt ({e})")
+            except Exception:
+                logger.warning(f"[ModelSelector] {label} {name}: mislukt")
                 continue
 
             adjusted = mean - variance_penalty * std

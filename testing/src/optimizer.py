@@ -467,9 +467,7 @@ class Optimizer:
         # Herbouw MPC zodat R, C en lag correct zijn na training
         self.mpc._build_problem()
 
-    def resolve(
-        self, context: Context, avg_price: float, export_price: float
-    ):
+    def resolve(self, context: Context, avg_price: float, export_price: float):
         """
         Bereken het optimale plan voor de komende 24 uur.
 
@@ -577,10 +575,16 @@ class Optimizer:
 
         plan = self.get_plan(context, shutters)
 
-        total_cost_net = sum(float(r["cost_net"]) for r in plan if (r["time"].date() == today))
-        total_saving = sum(float(r["cost_saving"]) for r in plan if (r["time"].date() == today))
+        total_cost_net = sum(
+            float(r["cost_net"]) for r in plan if (r["time"].date() == today)
+        )
+        total_saving = sum(
+            float(r["cost_saving"]) for r in plan if (r["time"].date() == today)
+        )
 
-        total_cost_gross = sum(float(r["cost_gross"]) for r in plan if r["time"].date() == today)
+        total_cost_gross = sum(
+            float(r["cost_gross"]) for r in plan if r["time"].date() == today
+        )
         total_export_revenue = sum(
             float(self.mpc.p_export.value[t]) * float(export_price) * self.mpc.dt
             for t in range(steps_remaining)
@@ -648,7 +652,9 @@ class Optimizer:
             total_load = p_u[t] + p_d[t] + float(self.mpc.P_base_load.value[t])
 
             cost_gross_val = total_load * prices[t] * self.mpc.dt
-            cost_net_val = (grid[t] * prices[t] - export[t] * export_prices[t]) * self.mpc.dt
+            cost_net_val = (
+                grid[t] * prices[t] - export[t] * export_prices[t]
+            ) * self.mpc.dt
             cost_saving_val = max(0.0, solar_self * prices[t] * self.mpc.dt)
 
             plan.append(

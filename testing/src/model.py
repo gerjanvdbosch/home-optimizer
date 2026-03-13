@@ -7,8 +7,9 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.model_selection import cross_val_score
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures
+
+# from sklearn.pipeline import make_pipeline
+# from sklearn.preprocessing import PolynomialFeatures
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class ModelSelector:
                 scores = cross_val_score(model, X, y, cv=cv, scoring="r2")
                 mean = float(scores.mean())
                 std = float(scores.std())
-            except Exception as e:
+            except Exception:
                 logger.warning(f"[ModelSelector] {label} {name}: mislukt")
                 continue
 

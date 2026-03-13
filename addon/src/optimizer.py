@@ -237,7 +237,7 @@ class ThermalMPC:
         recent_history_df: pd.DataFrame,
         solar_gains: np.ndarray,
         avg_price: float,
-        export_price: float = 0.05,
+        export_price: float,
     ):
         """
         Los het MILP op via SLP-iteraties.
@@ -467,9 +467,7 @@ class Optimizer:
         # Herbouw MPC zodat R, C en lag correct zijn na training
         self.mpc._build_problem()
 
-    def resolve(
-        self, context: Context, avg_price: float = 0.22, export_price: float = 0.05
-    ):
+    def resolve(self, context: Context, avg_price: float, export_price: float):
         """
         Bereken het optimale plan voor de komende 24 uur.
 
@@ -575,6 +573,23 @@ class Optimizer:
             target_pel = p_el_ufh_now
             target_supply_temp = float(self.mpc.plan_t_sup_ufh[0])
 
+        plan = self.get_plan(context, shutters)
+
+        total_cost_net = sum(
+            float(r["cost_net"]) for r in plan if (r["time"].date() == today)
+        )
+        total_saving = sum(
+            float(r["cost_saving"]) for r in plan if (r["time"].date() == today)
+        )
+
+        total_cost_gross = sum(
+            float(r["cost_gross"]) for r in plan if r["time"].date() == today
+        )
+        total_export_revenue = sum(
+            float(self.mpc.p_export.value[t]) * float(export_price) * self.mpc.dt
+            for t in range(steps_remaining)
+        )
+
         return {
             "status": self.mpc.problem.status,
             "mode": mode,
@@ -585,7 +600,11 @@ class Optimizer:
             "solar_self_remaining": round(solar_self_rem, 3),
             "export_remaining": round(export_rem, 3),
             "grid_remaining": round(grid_rem, 3),
-            "plan": self.get_plan(context, shutters),
+            "total_cost_net": round(total_cost_net, 2),
+            "total_saving": round(total_saving, 2),
+            "total_cost_gross": round(total_cost_gross, 2),
+            "total_export_revenue": round(total_export_revenue, 2),
+            "plan": plan,
         }
 
     def get_plan(self, context: Context, shutters: np.ndarray) -> list:
@@ -628,6 +647,16 @@ class Optimizer:
 
             shutter_val = float(shutters[t]) if t < len(shutters) else float("nan")
 
+            # Bruto kosten zonder zon = alles tegen importprijs
+            solar_self = float(self.mpc.p_solar_self.value[t])
+            total_load = p_u[t] + p_d[t] + float(self.mpc.P_base_load.value[t])
+
+            cost_gross_val = total_load * prices[t] * self.mpc.dt
+            cost_net_val = (
+                grid[t] * prices[t] - export[t] * export_prices[t]
+            ) * self.mpc.dt
+            cost_saving_val = max(0.0, solar_self * prices[t] * self.mpc.dt)
+
             plan.append(
                 {
                     "time": ts,
@@ -646,9 +675,11 @@ class Optimizer:
                     "strictness": f"{strict[t]:.0f}",
                     "shutter": f"{shutter_val:.0f}",
                     "price": f"{prices[t]:.2f}",
-                    "cost_ufh": f"{p_u[t] * prices[t] * self.mpc.dt:.2f}",
-                    "cost_dhw": f"{p_d[t] * prices[t] * self.mpc.dt:.2f}",
-                    "cost_net": f"{(grid[t] * prices[t] - export[t] * export_prices[t]) * self.mpc.dt:.2f}"
+                    "cost_ufh": f"{p_u[t] * prices[t] * self.mpc.dt:.3f}",
+                    "cost_dhw": f"{p_d[t] * prices[t] * self.mpc.dt:.3f}",
+                    "cost_gross": f"{cost_gross_val:.3f}",
+                    "cost_net": f"{cost_net_val:.3f}",
+                    "cost_saving": f"{cost_saving_val:.3f}",
                 }
             )
 
