@@ -610,6 +610,11 @@ class Optimizer:
         d_sup = self.mpc.plan_t_sup_dhw
         strict = self.mpc.P_strictness.value
 
+        prices = self.mpc.P_prices.value  # importprijs per kwartier
+        export_prices = self.mpc.P_export_prices.value  # exportprijs per kwartier
+        grid = self.mpc.p_grid.value
+        export = self.mpc.p_export.value
+
         plan = []
         for t in range(T):
             ts = start + timedelta(minutes=t * 15)
@@ -640,6 +645,10 @@ class Optimizer:
                     "supply_dhw": f"{d_sup[t]:.2f}",
                     "strictness": f"{strict[t]:.0f}",
                     "shutter": f"{shutter_val:.0f}",
+                    "price": f"{prices[t]:.2f}",
+                    "cost_ufh": f"{p_u[t] * prices[t] * self.mpc.dt:.2f}",
+                    "cost_dhw": f"{p_d[t] * prices[t] * self.mpc.dt:.2f}",
+                    "cost_net": f"{(grid[t] * prices[t] - export[t] * export_prices[t]) * self.mpc.dt:.2f}"
                 }
             )
 
