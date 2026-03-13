@@ -399,7 +399,7 @@ class ThermalMPC:
 
             # 5. Oplossen
             try:
-                self.problem.solve(solver=cp.HIGHS)
+                self.problem.solve(solver=cp.HIGHS, warm_start=True)
             except Exception as e:
                 logger.error(f"[SLP] Solver exception in iteratie {iteration}: {e}")
                 break
