@@ -34,7 +34,7 @@ class ModelSelector:
         return {
             "LinearRegression": LinearRegression(),
             "Ridge": Ridge(alpha=1.0),
-            "Poly2": make_pipeline(PolynomialFeatures(2), Ridge(alpha=1.0)),
+            # "Poly2": make_pipeline(PolynomialFeatures(2), Ridge(alpha=1.0)),
             "RandomForest": RandomForestRegressor(
                 n_estimators=150,
                 max_depth=5,
@@ -104,7 +104,7 @@ class ModelSelector:
                 mean = float(scores.mean())
                 std = float(scores.std())
             except Exception as e:
-                logger.warning(f"[ModelSelector] {label} {name}: mislukt ({e})")
+                logger.warning(f"[ModelSelector] {label} {name}: mislukt")
                 continue
 
             adjusted = mean - variance_penalty * std

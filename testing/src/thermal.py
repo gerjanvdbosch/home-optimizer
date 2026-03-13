@@ -22,7 +22,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import cross_val_score
 
-# from model import ModelSelector
+from model import ModelSelector
 from utils import add_cyclic_time_features
 from context import HvacMode
 
@@ -335,16 +335,16 @@ class HPPerformanceMap:
         y_pel = d["wp_actual"]
         y_cop = d["cop"]
 
-        pel_model = RandomForestRegressor(
-            n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
-        ).fit(X, y_pel)
+        # pel_model = RandomForestRegressor(
+        #     n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
+        # ).fit(X, y_pel)
+        #
+        # cop_model = RandomForestRegressor(
+        #     n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
+        # ).fit(X, y_cop)
 
-        cop_model = RandomForestRegressor(
-            n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
-        ).fit(X, y_cop)
-
-        # pel_model, _, _ = ModelSelector.select(X, y_pel, f"{label} P_el")
-        # cop_model, _, _ = ModelSelector.select(X, y_cop, f"{label} COP")
+        pel_model, _, _ = ModelSelector.select(X, y_pel, f"{label} P_el")
+        cop_model, _, _ = ModelSelector.select(X, y_cop, f"{label} COP")
 
         scores_pel = cross_val_score(pel_model, X, y_pel, cv=5, scoring="r2")
         scores_cop = cross_val_score(cop_model, X, y_cop, cv=5, scoring="r2")
