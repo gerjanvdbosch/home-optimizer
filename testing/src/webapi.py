@@ -34,6 +34,9 @@ def index(
     coordinator = request.app.state.coordinator
     context = coordinator.context
 
+    avg_price = coordinator.config.avg_price
+    export_price = coordinator.config.export_price
+
     local_tz = datetime.now().astimezone().tzinfo
     today = context.now.astimezone(local_tz).date()
 
@@ -148,36 +151,64 @@ def index(
         total_export = realized_export + future_export
         total_import = realized_import + future_import
 
-        # Voeg de berekende resultaten toe aan de weergave
-        details.extend(
-            [
-                {"label": "Modus", "value": result.get("mode", "-")},
-                {
-                    "label": "Zon opbrengst",
-                    "value": f"{future_pv:.2f}",
-                    "total": f"{total_pv:.2f}",
-                    "unit": "kWh",
-                },
-                {
-                    "label": "Eigen verbruik",
-                    "value": f"{future_self:.2f}",
-                    "total": f"{total_self:.2f}",
-                    "unit": "kWh",
-                },
-                {
-                    "label": "Import net",
-                    "value": f"{future_import:.2f}",
-                    "total": f"{total_import:.2f}",
-                    "unit": "kWh",
-                },
-                {
-                    "label": "Export net",
-                    "value": f"{future_export:.2f}",
-                    "total": f"{total_export:.2f}",
-                    "unit": "kWh",
-                },
-            ]
-        )
+        # Gerealiseerde kosten (verleden)
+        realized_cost = realized_import * avg_price - realized_export * export_price
+
+        # Verwachte kosten (toekomst) komen al uit result
+        future_cost = result.get('total_cost_net', 0.0)
+
+        total_day_cost = realized_cost + future_cost
+        total_day_gross = (realized_import + future_import + realized_self + future_self) * avg_price
+        total_day_saving = (realized_self + future_self) * avg_price
+        total_day_export_rev = (realized_export + future_export) * export_price
+
+        details.extend([
+            {"label": "Modus", "value": result.get("mode", "-")},
+            {
+                "label": "Bruto kosten",
+                "value": f"{total_day_gross:.2f}",
+                "unit": "€",
+            },
+            {
+                "label": "Netto kosten",
+                "value": f"{total_day_cost:.2f}",
+                "unit": "€",
+            },
+            {
+                "label": "Zon besparing",
+                "value": f"{total_day_saving:.2f}",
+                "unit": "€",
+            },
+            {
+                "label": "Export opbrengst",
+                "value": f"{total_day_export_rev:.2f}",
+                "unit": "€",
+            },
+            {
+                "label": "Zon opbrengst",
+                "value": f"{future_pv:.2f}",
+                "total": f"{total_pv:.2f}",
+                "unit": "kWh",
+            },
+            {
+                "label": "Eigen verbruik",
+                "value": f"{future_self:.2f}",
+                "total": f"{total_self:.2f}",
+                "unit": "kWh",
+            },
+            {
+                "label": "Import net",
+                "value": f"{future_import:.2f}",
+                "total": f"{total_import:.2f}",
+                "unit": "kWh",
+            },
+            {
+                "label": "Export net",
+                "value": f"{future_export:.2f}",
+                "total": f"{total_export:.2f}",
+                "unit": "kWh",
+            },
+        ])
 
         details.extend(
             [
@@ -206,7 +237,6 @@ def index(
                         else "-"
                     ),
                     "unit": "kW",
-                    # "color": "#F50057"
                 },
                 {
                     "label": "Load Bias",

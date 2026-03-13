@@ -51,7 +51,7 @@ class Coordinator:
 
     def optimize(self):
         # Stap 1: Los de MPC op via de optimizer
-        result = self.optimizer.resolve(self.context)
+        result = self.optimizer.resolve(self.context, self.config.avg_price, self.config.export_price)
 
         if result:
             logger.info("--- Resultaat ---")
