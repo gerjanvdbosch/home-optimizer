@@ -605,6 +605,8 @@
                     <th>COP</th>
                     <th>Buiten</th>
                     <th>Verbruik</th>
+<!--                    <th>Prijs</th>-->
+                    <th>Kosten</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -654,6 +656,14 @@
                         {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.p_el_dhw | float) }} <span
                             class="unit">kW</span>
                         {% else %}-{% endif %}
+                    </td>
+
+<!--                    <td style="color: var(&#45;&#45;text-muted);">-->
+<!--                        {{ row.price }} <span class="unit">€</span>-->
+<!--                    </td>-->
+
+                    <td style="color: {% if row.cost_net|float < 0 %}#2ca02c{% else %}var(--text-color){% endif %};">
+                        {{ row.cost_net }} <span class="unit">€</span>
                     </td>
                 </tr>
                 {% endfor %}
