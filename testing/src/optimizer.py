@@ -360,10 +360,10 @@ class ThermalMPC:
 
         # Maximaal gelijk aan de comfort-ondergrensboete — anders is opslaan
         # altijd beter dan comfort naleven
-        val_per_K_room = min(val_per_K_room, costs["room_under"] * 2.0)
+        val_per_K_room = min(val_per_K_room, costs["room_under"])
 
         val_per_K_dhw = max_future_price * self.ident.C_tank / avg_cop_dhw_h
-        val_per_K_dhw = min(val_per_K_dhw, costs["tank_under"] * 2.0)
+        val_per_K_dhw = min(val_per_K_dhw, costs["tank_under"])
 
         self.P_val_terminal_room.value = val_per_K_room
         self.P_val_terminal_dhw.value = val_per_K_dhw
