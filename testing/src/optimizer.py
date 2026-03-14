@@ -260,8 +260,8 @@ class ThermalMPC:
         # ── Toestand initialiseren ────────────────────────────────────────
         r_min, r_max, d_min, d_max = self._get_targets(state["now"], T)
 
+        self.P_t_room_init.value = float(state["room_temp"])
         self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
-        self.P_t_dhw_init.value = float(state["dhw_bottom"])
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
         )
