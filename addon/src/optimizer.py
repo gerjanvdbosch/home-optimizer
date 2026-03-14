@@ -213,10 +213,6 @@ class ThermalMPC:
 
         local_tz = datetime.now().astimezone().tzinfo
         now_local = now.astimezone(local_tz)
-        target_dt = now_local.replace(hour=20, minute=0, second=0, microsecond=0)
-
-        if target_dt <= now_local:
-            target_dt += timedelta(days=1)
 
         for t in range(T):
             fut = now_local + timedelta(hours=t * self.dt)
@@ -229,10 +225,7 @@ class ThermalMPC:
             else:
                 r_min[t], r_max[t] = 19.0, 19.5
 
-            if fut >= target_dt:
-                d_min[t] = 48.0
-            else:
-                d_min[t] = 10.0
+            d_min[t] = 48.0 if 20 <= h < 21 else 10.0
             d_max[t] = 55.0
 
         return r_min, r_max, d_min, d_max
