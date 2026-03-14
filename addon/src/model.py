@@ -105,7 +105,7 @@ class ModelSelector:
                 mean = float(scores.mean())
                 std = float(scores.std())
             except Exception:
-                logger.warning(f"[ModelSelector] {label} {name}: mislukt")
+                logger.info(f"[ModelSelector] {label} {name}: mislukt")
                 continue
 
             adjusted = mean - variance_penalty * std

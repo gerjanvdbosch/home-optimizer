@@ -108,6 +108,8 @@ class ThermalMPC:
         self.s_dhw_low = cp.Variable(T, nonneg=True)
         self.s_dhw_high = cp.Variable(T, nonneg=True)
 
+        self.P_terminal_offset = cp.Parameter()
+
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
             self.t_room[0] == self.P_t_room_init,
@@ -196,8 +198,9 @@ class ThermalMPC:
         switching = (cp.sum(self.comp_start) * 0.05) + (valve_switches * 0.05)
 
         stored_heat = (
-            self.t_dhw[T] * self.P_val_terminal_dhw
-            + self.t_room[T] * self.P_val_terminal_room
+            self.t_room[T] * self.P_val_terminal_room
+            + self.t_dhw[T] * self.P_val_terminal_dhw
+            - self.P_terminal_offset
         )
 
         self.problem = cp.Problem(
@@ -258,7 +261,8 @@ class ThermalMPC:
         r_min, r_max, d_min, d_max = self._get_targets(state["now"], T)
 
         self.P_t_room_init.value = float(state["room_temp"])
-        self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
+        # self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
+        self.P_t_dhw_init.value = float(state["dhw_bottom"])
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
         )
@@ -339,6 +343,40 @@ class ThermalMPC:
         p_el_ufh_prev = np.full(T, -999.0)
         p_el_dhw_prev = np.full(T, -999.0)
 
+        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw = linearizer.compute(
+            t_out_arr, guessed_t_room, guessed_t_dhw
+        )
+
+        # Terminal value updaten op basis van actuele COP-schatting
+        surplus = self.P_solar.value - self.P_base_load.value
+        net_price = np.where(surplus > 0, 0.0, self.P_prices.value)
+        max_future_price = float(np.max(net_price))
+        avg_cop_ufh_h = float(np.mean(cop_ufh))
+        avg_cop_dhw_h = float(np.mean(cop_dhw))
+
+        # Terminal value: marginale waarde van 1K extra aan einde horizon
+        # Begrensd op comfort-penalty schaal — anders domineert het de doelfunctie
+        val_per_K_room = max_future_price * self.ident.C / avg_cop_ufh_h
+
+        # Maximaal gelijk aan de comfort-ondergrensboete — anders is opslaan
+        # altijd beter dan comfort naleven
+        val_per_K_room = min(val_per_K_room, costs["room_under"] * 2.0)
+
+        val_per_K_dhw = max_future_price * self.ident.C_tank / avg_cop_dhw_h
+        val_per_K_dhw = min(val_per_K_dhw, costs["tank_under"] * 2.0)
+
+        self.P_val_terminal_room.value = val_per_K_room
+        self.P_val_terminal_dhw.value = val_per_K_dhw
+        self.P_terminal_offset.value = float(t_out_arr[-1]) * (
+            val_per_K_room + val_per_K_dhw
+        )
+
+        logger.info(
+            f"[Terminal] val_room={val_per_K_room:.4f} €/K  "
+            f"val_dhw={val_per_K_dhw:.4f} €/K  "
+            f"max_future_price={max_future_price:.3f} €/kWh"
+        )
+
         for iteration in range(linearizer.max_iter):
 
             # 1. Bereken bevroren vermogen en COP op basis van huidige schatting
@@ -417,9 +455,18 @@ class ThermalMPC:
                     guessed_t_room = new_t_room
                     guessed_t_dhw = new_t_dhw
                 else:
-                    alpha_room = 0.35
-                    alpha_dhw = (
-                        0.15  # DHW heeft grotere COP-variatie, langzamer updaten
+                    # Hoe groter de verandering, hoe voorzichtiger updaten (stabiliteit)
+                    # Hoe verder geconvergeerd, hoe sneller updaten (snelheid)
+                    delta_room = float(np.mean(np.abs(new_t_room - guessed_t_room)))
+                    delta_dhw = float(np.mean(np.abs(new_t_dhw - guessed_t_dhw)))
+
+                    # Alpha daalt bij grote sprongen, stijgt bij kleine (0.1 - 0.6 bereik)
+                    alpha_room = float(np.clip(0.5 / (1.0 + delta_room), 0.15, 0.60))
+                    alpha_dhw = float(np.clip(0.3 / (1.0 + delta_dhw), 0.10, 0.45))
+
+                    logger.info(
+                        f"[SLP] iter={iteration} alpha_room={alpha_room:.2f} (delta={delta_room:.3f})  "
+                        f"alpha_dhw={alpha_dhw:.2f} (delta={delta_dhw:.3f})"
                     )
 
                     guessed_t_room = (
@@ -428,6 +475,29 @@ class ThermalMPC:
                     guessed_t_dhw = (
                         alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw
                     )
+
+        if self.t_room.value is not None:
+            ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]
+            if ufh_steps:
+                for t in [ufh_steps[0], ufh_steps[-1]]:
+                    logger.info(
+                        f"[Debug] t={t:3d} UFH_on  "
+                        f"t_room={self.t_room.value[t + 1]:.2f}  "
+                        f"s_low={self.s_room_low.value[t]:.4f}  "
+                        f"s_high={self.s_room_high.value[t]:.4f}  "
+                        f"r_min={self.P_room_min.value[t]:.1f}"
+                    )
+                logger.info(
+                    f"[Debug] UFH totaal {len(ufh_steps)} stappen  "
+                    f"terminal_room={self.t_room.value[T]:.2f} - {float(t_out_arr[-1]):.1f} = "
+                    f"{self.t_room.value[T] - float(t_out_arr[-1]):.2f}K * "
+                    f"{self.P_val_terminal_room.value:.4f} = "
+                    f"{(self.t_room.value[T] - float(t_out_arr[-1])) * self.P_val_terminal_room.value:.4f}€  "
+                    f"terminal_dhw={self.t_dhw.value[T]:.2f} - {float(t_out_arr[-1]):.1f} = "
+                    f"{self.t_dhw.value[T] - float(t_out_arr[-1]):.2f}K * "
+                    f"{self.P_val_terminal_dhw.value:.4f} = "
+                    f"{(self.t_dhw.value[T] - float(t_out_arr[-1])) * self.P_val_terminal_dhw.value:.4f}€"
+                )
 
 
 # =========================================================
