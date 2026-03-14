@@ -398,7 +398,7 @@ class ThermalMPC:
                 break
 
             status = self.problem.status
-            logger.debug(
+            logger.info(
                 f"[SLP] Iteratie {iteration}: status={status}  "
                 f"P_el UFH[0]={p_el_ufh[0]:.3f} kW  DHW[0]={p_el_dhw[0]:.3f} kW"
             )

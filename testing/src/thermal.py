@@ -1146,7 +1146,7 @@ class PhysicsLinearizer:
         tol_dhw = self.tol  # * 3.0  # 0.15 kW — DHW mag ruimer
 
         converged = (delta_ufh < tol_ufh) and (delta_dhw < tol_dhw)
-        logger.debug(
+        logger.info(
             f"[SLP] delta UFH={delta_ufh:.4f}/{tol_ufh}  "
             f"DHW={delta_dhw:.4f}/{tol_dhw}  converged={converged}"
         )
@@ -1192,7 +1192,7 @@ class ComfortCostCalculator:
         terminal_room = room_under * 0.15
         terminal_tank = tank_under * 0.40
 
-        logger.debug(
+        logger.info(
             f"[ComfortCost] prijs={avg_price:.3f}  "
             f"kamer_onder={room_under:.4f}  tank_onder={tank_under:.4f}  "
             f"term_kamer={terminal_room:.4f}  term_tank={terminal_tank:.4f}"
