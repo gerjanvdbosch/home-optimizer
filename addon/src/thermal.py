@@ -1171,8 +1171,8 @@ class ComfortCostCalculator:
         C_tank: float,
         avg_cop_ufh: float = 3.5,
         avg_cop_dhw: float = 2.5,
-        recovery_hours_room: float = 2.0,
-        recovery_hours_dhw: float = 1.0,
+        recovery_hours_room: float = 4.0,
+        recovery_hours_dhw: float = 2.0,
     ):
         self.C_room = C_room
         self.C_tank = C_tank

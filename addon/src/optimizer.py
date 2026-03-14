@@ -311,8 +311,7 @@ class ThermalMPC:
         self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
         # Strictness: koud buiten = hogere urgentie
-        comfort_threshold = float(self.P_room_min.value[0]) + 1.0
-        delta_t_env = np.maximum(0.0, comfort_threshold - forecast_df.temp.values[:T])
+        delta_t_env = np.maximum(0.0, r_min + 1.0 - forecast_df.temp.values[:T])
         self.P_strictness.value = (3.0 + 0.10 * (delta_t_env**2)) * float(avg_price)
 
         # ── Historische lag-buffer ────────────────────────────────────────
