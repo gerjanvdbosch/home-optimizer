@@ -290,29 +290,6 @@ class ThermalMPC:
             f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K  max: {dhw_demand[:T].max():.2f} K"
         )
 
-        # ── Comfortboetes (dimensioneel correct) ─────────────────────────
-        t_out_now = float(forecast_df.temp.values[0])
-        avg_cop_ufh = self.perf_map.predict_cop(
-            HvacMode.HEATING.value, t_out_now, state["room_temp"]
-        )
-        avg_cop_dhw = self.perf_map.predict_cop(
-            HvacMode.DHW.value, t_out_now, state["dhw_bottom"]
-        )
-
-        costs = ComfortCostCalculator(
-            C_room=self.ident.C,
-            C_tank=self.ident.C_tank,
-            avg_cop_ufh=avg_cop_ufh,
-            avg_cop_dhw=avg_cop_dhw,
-        ).compute(avg_price)
-
-        self.P_cost_room_under.value = costs["room_under"]
-        self.P_cost_room_over.value = costs["room_over"]
-        self.P_cost_dhw_under.value = costs["tank_under"]
-        self.P_cost_dhw_over.value = costs["tank_over"]
-        self.P_val_terminal_room.value = costs["terminal_room"]
-        self.P_val_terminal_dhw.value = costs["terminal_tank"]
-
         # Strictness: koud buiten = hogere urgentie
         delta_t_env = np.maximum(0.0, r_min + 1.0 - forecast_df.temp.values[:T])
         self.P_strictness.value = (3.0 + 0.10 * (delta_t_env**2)) * float(avg_price)
@@ -356,6 +333,21 @@ class ThermalMPC:
         # Terminal value: marginale waarde van 1K extra aan einde horizon
         # Begrensd op comfort-penalty schaal — anders domineert het de doelfunctie
         val_per_K_room = max_future_price * self.ident.C / avg_cop_ufh_h
+
+        # ── Comfortboetes (dimensioneel correct) ─────────────────────────
+        costs = ComfortCostCalculator(
+            C_room=self.ident.C,
+            C_tank=self.ident.C_tank,
+            avg_cop_ufh=avg_cop_ufh_h,
+            avg_cop_dhw=avg_cop_dhw_h,
+        ).compute(avg_price)
+
+        self.P_cost_room_under.value = costs["room_under"]
+        self.P_cost_room_over.value = costs["room_over"]
+        self.P_cost_dhw_under.value = costs["tank_under"]
+        self.P_cost_dhw_over.value = costs["tank_over"]
+        self.P_val_terminal_room.value = costs["terminal_room"]
+        self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
         # Maximaal gelijk aan de comfort-ondergrensboete — anders is opslaan
         # altijd beter dan comfort naleven
