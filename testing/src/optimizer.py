@@ -109,6 +109,7 @@ class ThermalMPC:
         self.s_dhw_high = cp.Variable(T, nonneg=True)
 
         self.P_terminal_offset = cp.Parameter()
+        self.P_switching_cost = cp.Parameter(nonneg=True)
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
@@ -195,7 +196,9 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.10) + (valve_switches * 0.05)
+        switching = (
+            cp.sum(self.comp_start) * self.P_switching_cost + valve_switches * 0.01
+        )
 
         stored_heat = (
             self.t_room[T] * self.P_val_terminal_room
@@ -359,14 +362,52 @@ class ThermalMPC:
         self.P_val_terminal_room.value = val_per_K_room
         self.P_val_terminal_dhw.value = val_per_K_dhw
         self.P_terminal_offset.value = (
-                float(t_out_arr[-1]) * val_per_K_room
-                + float(guessed_t_room[-1]) * val_per_K_dhw
+            float(t_out_arr[-1]) * val_per_K_room
+            + float(guessed_t_room[-1]) * val_per_K_dhw
         )
 
         logger.info(
             f"[Terminal] val_room={val_per_K_room:.4f} €/K  "
             f"val_dhw={val_per_K_dhw:.4f} €/K  "
             f"max_future_price={max_future_price:.3f} €/kWh"
+        )
+
+        min_run_ufh = self.ident.ufh_lag_steps  # = 7 stappen = 105 min
+
+        # DHW: tank warmt snel op, minimale run = tijd om ~10K te stijgen
+        p_th_dhw_avg = float(np.mean(p_el_dhw)) * avg_cop_dhw_h
+        k_rise = p_th_dhw_avg / self.ident.C_tank  # K per uur
+        min_run_dhw = max(
+            2, int(10.0 / (k_rise * self.dt))
+        )  # stappen voor 10K stijging
+
+        heat_loss_now = float(
+            np.mean(np.maximum(0.0, self.P_room_min.value - self.P_temp_out.value))
+            / self.ident.R
+        )
+        demand_factor_ufh = 1.0 / (1.0 + heat_loss_now * self.ident.R)
+
+        dhw_deficit = float(
+            np.mean(np.maximum(0.0, self.P_dhw_min.value - guessed_t_dhw))
+        )
+        demand_factor_dhw = 1.0 / (1.0 + dhw_deficit * self.ident.K_loss_dhw)
+
+        start_energy_ufh = float(np.mean(p_el_ufh)) * min_run_ufh * self.dt
+        start_energy_dhw = float(np.mean(p_el_dhw)) * min_run_dhw * self.dt
+
+        switching_cost_ufh = (
+            avg_price * start_energy_ufh / (avg_cop_ufh_h * (demand_factor_ufh + 0.1))
+        )
+        switching_cost_dhw = (
+            avg_price * start_energy_dhw / (avg_cop_dhw_h * (demand_factor_dhw + 0.1))
+        )
+
+        self.P_switching_cost.value = float(max(switching_cost_ufh, switching_cost_dhw))
+
+        logger.info(
+            f"[Switching] cost={self.P_switching_cost.value:.4f}€  "
+            f"min_run_ufh={min_run_ufh}  min_run_dhw={min_run_dhw}  "
+            f"demand_ufh={demand_factor_ufh:.2f}  demand_dhw={demand_factor_dhw:.2f}"
         )
 
         for iteration in range(linearizer.max_iter):

@@ -117,13 +117,8 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     active = df["hvac_mode"].isin([HvacMode.HEATING.value, HvacMode.DHW.value])
     df = df[~(active & df["wp_actual"].notna() & (df["wp_actual"] < 0.15))]
 
-    # 8. Deelkwartieren: onder 70% van de modus-mediaan
-    for mode_val in [HvacMode.HEATING.value, HvacMode.DHW.value]:
-        mask = df["hvac_mode"] == mode_val
-        if mask.sum() > 10:
-            median_wp = df.loc[mask, "wp_actual"].median()
-            partial = mask & (df["wp_actual"] < 0.70 * median_wp)
-            df = df[~partial]
+    mask_dhw = df["hvac_mode"] == HvacMode.DHW.value
+    df = df[~(mask_dhw & (df["wp_actual"] < 0.5))]
 
     # 9. Annotatie: volledig kwartier (vorige en volgende rij zelfde mode)
     df["full_quarter"] = (df["hvac_mode"] == df["hvac_mode"].shift(1)) & (
