@@ -195,7 +195,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.05) + (valve_switches * 0.05)
+        switching = (cp.sum(self.comp_start) * 0.10) + (valve_switches * 0.05)
 
         stored_heat = (
             self.t_room[T] * self.P_val_terminal_room
@@ -358,8 +358,9 @@ class ThermalMPC:
 
         self.P_val_terminal_room.value = val_per_K_room
         self.P_val_terminal_dhw.value = val_per_K_dhw
-        self.P_terminal_offset.value = float(t_out_arr[-1]) * (
-            val_per_K_room + val_per_K_dhw
+        self.P_terminal_offset.value = (
+                float(t_out_arr[-1]) * val_per_K_room
+                + float(guessed_t_room[-1]) * val_per_K_dhw
         )
 
         logger.info(
@@ -484,8 +485,8 @@ class ThermalMPC:
                     f"{self.t_room.value[T] - float(t_out_arr[-1]):.2f}K * "
                     f"{self.P_val_terminal_room.value:.4f} = "
                     f"{(self.t_room.value[T] - float(t_out_arr[-1])) * self.P_val_terminal_room.value:.4f}€  "
-                    f"terminal_dhw={self.t_dhw.value[T]:.2f} - {float(t_out_arr[-1]):.1f} = "
-                    f"{self.t_dhw.value[T] - float(t_out_arr[-1]):.2f}K * "
+                    f"terminal_dhw={self.t_dhw.value[T]:.2f} - {self.t_room.value[T]:.1f} = "
+                    f"{self.t_dhw.value[T] - self.t_room.value[T]:.2f}K * "
                     f"{self.P_val_terminal_dhw.value:.4f} = "
                     f"{(self.t_dhw.value[T] - float(t_out_arr[-1])) * self.P_val_terminal_dhw.value:.4f}€"
                 )
