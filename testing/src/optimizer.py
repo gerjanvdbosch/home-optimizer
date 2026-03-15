@@ -740,7 +740,7 @@ class Optimizer:
                     "cop_dhw": f"{d_cop[t]:.2f}",
                     "supply_ufh": f"{u_sup[t]:.2f}",
                     "supply_dhw": f"{d_sup[t]:.2f}",
-                    "strictness": f"{strict[t]:.0f}",
+                    "strict": f"{strict[t]:.0f}",
                     "shutter": f"{shutter_val:.0f}",
                     "price": f"{prices[t]:.2f}",
                     "cost_ufh": f"{p_u[t] * prices[t] * self.mpc.dt:.3f}",
