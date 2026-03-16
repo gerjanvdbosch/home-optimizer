@@ -452,7 +452,6 @@ class SystemIdentificator:
         self.K_emit = 0.15
         self.K_tank = 0.25
         self.K_loss_dhw = 0.01
-        self.T_max_dhw = 58.0
         self.ufh_lag_steps = 4
         self._load()
 
@@ -466,7 +465,6 @@ class SystemIdentificator:
             self.K_emit = d.get("K_emit", 0.15)
             self.K_tank = d.get("K_tank", 0.25)
             self.K_loss_dhw = d.get("K_loss_dhw", 0.01)
-            self.T_max_dhw = d.get("T_max_dhw", 58.0)
             self.ufh_lag_steps = d.get("ufh_lag_steps", 4)
             logger.info(
                 f"[SysID] Geladen: R={self.R:.1f} C={self.C:.1f} "
@@ -518,14 +516,10 @@ class SystemIdentificator:
         self._fit_k_tank(df_proc)
         self._fit_dhw_loss(df_proc)
 
-        df_dhw = df_proc[df_proc["hvac_mode"] == HvacMode.DHW.value]
-        if len(df_dhw) > 10:
-            self.T_max_dhw = float(df_dhw["supply_temp"].max())
-
         logger.info(
             f"[SysID] Klaar: R={self.R:.1f} C={self.C:.1f} "
             f"K_emit={self.K_emit:.3f} K_tank={self.K_tank:.3f} "
-            f"K_loss={self.K_loss_dhw:.4f} T_max_dhw={self.T_max_dhw:.1f}"
+            f"K_loss={self.K_loss_dhw:.4f}"
         )
         joblib.dump(
             {
@@ -534,7 +528,6 @@ class SystemIdentificator:
                 "K_emit": self.K_emit,
                 "K_tank": self.K_tank,
                 "K_loss_dhw": self.K_loss_dhw,
-                "T_max_dhw": self.T_max_dhw,
                 "ufh_lag_steps": self.ufh_lag_steps,
             },
             self.path,
