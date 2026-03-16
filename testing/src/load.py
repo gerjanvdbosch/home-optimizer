@@ -26,7 +26,6 @@ class NowCaster:
             return
 
         error = actual_kw - forecasted_kw
-        alpha = 0.0
 
         if error <= 0:
             # Load is lager dan verwacht -> Snel aanpassen (agressief)
@@ -125,7 +124,7 @@ class LoadModel:
         # Dit zorgt dat de optimizer "ruimte" houdt voor het huishouden.
         self.model = HistGradientBoostingRegressor(
             loss="quantile",
-            quantile=0.75,
+            quantile=0.65,
             learning_rate=0.05,
             max_iter=500,
             max_leaf_nodes=31,
