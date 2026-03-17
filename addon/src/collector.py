@@ -257,7 +257,12 @@ class Collector:
         active_modes = [
             v
             for v in values
-            if v not in (HvacMode.OFF.value, HvacMode.FROST_PROTECTION.value)
+            if v
+            in {
+                HvacMode.DHW.value,
+                HvacMode.HEATING.value,
+                HvacMode.LEGIONELLA_PREVENTION.value,
+            }
         ]
 
         if not active_modes:
