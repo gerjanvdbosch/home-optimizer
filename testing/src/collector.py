@@ -259,27 +259,16 @@ class Collector:
         return float(result)
 
     def _hvac_mode(self, values):
-        if all(v == HvacMode.OFF.value for v in values):
+        active_modes = [
+            v
+            for v in values
+            if v not in (HvacMode.OFF.value, HvacMode.FROST_PROTECTION.value)
+        ]
+
+        if not active_modes:
             return HvacMode.OFF.value
-        elif all(v in (HvacMode.OFF.value, HvacMode.DHW.value) for v in values):
-            return HvacMode.DHW.value
-        elif all(v in (HvacMode.OFF.value, HvacMode.HEATING.value) for v in values):
-            return HvacMode.HEATING.value
-        elif all(
-            v in (HvacMode.OFF.value, HvacMode.LEGIONELLA_PREVENTION.value) for v in values
-        ):
-            return HvacMode.LEGIONELLA_PREVENTION.value
-        else:
-            return Counter(
-                v
-                for v in values
-                if v
-                in (
-                    HvacMode.DHW.value,
-                    HvacMode.HEATING.value,
-                    HvacMode.LEGIONELLA_PREVENTION.value,
-                )
-            ).most_common(1)[0][0]
+
+        return Counter(active_modes).most_common(1)[0][0]
 
     def _reset_slots(self):
         self.pv_slots = []
