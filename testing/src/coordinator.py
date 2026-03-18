@@ -129,7 +129,7 @@ if __name__ == "__main__":
         scheduler.add_job(
             coordinator.optimize,
             "interval",
-            seconds=30,
+            minutes=1,
             next_run_time=next_run,
             id="optimize",
         )

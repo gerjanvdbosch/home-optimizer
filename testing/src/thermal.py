@@ -1067,6 +1067,8 @@ class PhysicsLinearizer:
         cop_ufh = np.zeros(T)
         p_el_dhw = np.zeros(T)
         cop_dhw = np.zeros(T)
+        sup_ufh_arr = np.zeros(T)
+        sup_dhw_arr = np.zeros(T)
 
         for t in range(T):
             t_out = float(t_out_arr[t])
@@ -1081,6 +1083,9 @@ class PhysicsLinearizer:
 
             sup_ufh = self.hydraulic.predict_supply("UFH", p_th_ufh_est, t_out, t_room)
             sup_dhw = self.hydraulic.predict_supply("DHW", p_th_dhw_est, t_out, t_dhw)
+
+            sup_ufh_arr[t] = sup_ufh
+            sup_dhw_arr[t] = sup_dhw
 
             # wp_setpoint is vast (bijv. 55°C), supply loopt op met t_dhw
             # delta_setpoint = wp_setpoint - supply_temp
@@ -1104,7 +1109,7 @@ class PhysicsLinearizer:
                 HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw
             )
 
-        return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw
+        return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh_arr, sup_dhw_arr
 
     def has_converged(
         self,
