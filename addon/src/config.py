@@ -7,7 +7,7 @@ from utils import safe_float
 @dataclass
 class Config:
     avg_price: float = 0.22
-    export_price: float = 0.07
+    export_price: float = 0.077
 
     pv_azimuth: float = 148.0
     pv_tilt: float = 50.0
