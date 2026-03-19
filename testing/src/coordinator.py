@@ -119,17 +119,17 @@ if __name__ == "__main__":
         scheduler.add_job(
             collector.update_forecast, "interval", seconds=30, id="forecast"
         )
-        scheduler.add_job(collector.update_load, "interval", seconds=30, id="load")
+        scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
         scheduler.add_job(
-            collector.update_history, "interval", seconds=30, id="history"
+            collector.update_history, "interval", seconds=60, id="history"
         )
-        scheduler.add_job(coordinator.tick, "interval", seconds=30, id="tick")
+        scheduler.add_job(coordinator.tick, "interval", seconds=60, id="tick")
 
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
         scheduler.add_job(
             coordinator.optimize,
             "interval",
-            minutes=1,
+            minutes=2,
             next_run_time=next_run,
             id="optimize",
         )
@@ -138,7 +138,7 @@ if __name__ == "__main__":
         collector.update_history()
 
         coordinator.tick()
-        # coordinator.train()
+        coordinator.train()
 
         scheduler.start()
 

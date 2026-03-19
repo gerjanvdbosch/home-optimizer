@@ -43,6 +43,8 @@ class ThermalMPC:
 
         self.plan_t_sup_ufh = np.zeros(self.horizon)
         self.plan_t_sup_dhw = np.zeros(self.horizon)
+        self.plan_p_el_ufh = np.zeros(self.horizon)
+        self.plan_p_el_dhw = np.zeros(self.horizon)
 
         self._build_problem()
 
@@ -195,7 +197,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.30) + (valve_switches * 0.02)
+        switching = (cp.sum(self.comp_start) * 0.50) + (valve_switches * 0.02)
 
         stored_heat = (
             self.t_room[T] * self.P_val_terminal_room
