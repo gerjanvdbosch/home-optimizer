@@ -315,7 +315,7 @@ class ThermalMPC:
             perf_map=self.perf_map,
             hydraulic=self.hydraulic,
             horizon=T,
-            max_iter=12,
+            max_iter=10,
             tol=0.05,
         )
 
@@ -381,32 +381,16 @@ class ThermalMPC:
                 t_out_arr, guessed_t_room, guessed_t_dhw
             )
 
-            # self.plan_t_sup_ufh = sup_ufh
-            # self.plan_t_sup_dhw = sup_dhw
-            #
-            # # 3. CVXPY-parameters vullen
-            # self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
-            # self.P_fixed_pel_dhw.value = np.clip(p_el_dhw, 0.0, 5.0)
-            # self.P_cop_ufh.value = np.clip(cop_ufh, 1.5, 9.0)
-            # self.P_cop_dhw.value = np.clip(cop_dhw, 1.1, 5.0)
-
             self.plan_t_sup_ufh = sup_ufh
             self.plan_t_sup_dhw = sup_dhw
             self.plan_p_el_ufh = p_el_ufh
             self.plan_p_el_dhw = p_el_dhw
 
-            # DHW: gebruik sessie-gemiddelde zodat de solver timing bepaalt op basis
-            # van zonsurplus, niet op basis van tanktermperatuur
-            avg_pel_dhw = float(np.mean(p_el_dhw))
-            avg_cop_dhw = float(np.mean(cop_dhw))
-            p_el_dhw_flat = np.full(T, avg_pel_dhw)
-            cop_dhw_flat = np.full(T, avg_cop_dhw)
-
             # 3. CVXPY-parameters vullen
             self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
-            self.P_fixed_pel_dhw.value = np.clip(p_el_dhw_flat, 0.0, 5.0)  # ← flat
+            self.P_fixed_pel_dhw.value = np.clip(p_el_dhw, 0.0, 5.0)
             self.P_cop_ufh.value = np.clip(cop_ufh, 1.5, 9.0)
-            self.P_cop_dhw.value = np.clip(cop_dhw_flat, 1.1, 5.0)  # ← flat
+            self.P_cop_dhw.value = np.clip(cop_dhw, 1.1, 5.0)
 
             # 4. Convergentiecheck vóór oplossen
             if iteration > 0 and linearizer.has_converged(
@@ -457,8 +441,8 @@ class ThermalMPC:
                     delta_dhw = float(np.mean(np.abs(new_t_dhw - guessed_t_dhw)))
 
                     # Alpha daalt bij grote sprongen, stijgt bij kleine (0.1 - 0.6 bereik)
-                    alpha_room = float(np.clip(0.4 / (1.0 + 0.05 * delta_room), 0.20, 0.55))
-                    alpha_dhw = float(np.clip(0.4 / (1.0 + 0.05 * delta_dhw), 0.15, 0.50))
+                    alpha_room = float(np.clip(0.5 / (1.0 + delta_room), 0.15, 0.60))
+                    alpha_dhw = float(np.clip(0.3 / (1.0 + delta_dhw), 0.10, 0.45))
 
                     logger.info(
                         f"[SLP] iter={iteration} alpha_room={alpha_room:.2f} (delta={delta_room:.3f})  "

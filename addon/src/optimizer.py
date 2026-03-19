@@ -325,7 +325,7 @@ class ThermalMPC:
         p_el_ufh_prev = np.full(T, -999.0)
         p_el_dhw_prev = np.full(T, -999.0)
 
-        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw = linearizer.compute(
+        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, _, _ = linearizer.compute(
             t_out_arr, guessed_t_room, guessed_t_dhw
         )
 
@@ -375,31 +375,14 @@ class ThermalMPC:
         for iteration in range(linearizer.max_iter):
 
             # 1. Bereken bevroren vermogen en COP op basis van huidige schatting
-            p_el_ufh, cop_ufh, p_el_dhw, cop_dhw = linearizer.compute(
+            p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
                 t_out_arr, guessed_t_room, guessed_t_dhw
             )
 
-            # 2. Supply-temp plan voor rapportage
-            self.plan_t_sup_ufh = np.array(
-                [
-                    guessed_t_room[t]
-                    + self.hydraulic.learned_lift_ufh
-                    + self.hydraulic.get_ufh_slope(t_out_arr[t])
-                    for t in range(T)
-                ],
-                dtype=float,
-            )
-
-            self.plan_t_sup_dhw = np.array(
-                [
-                    guessed_t_dhw[t]
-                    + self.hydraulic.learned_lift_dhw
-                    + self.hydraulic.dhw_delta_base
-                    + self.hydraulic.dhw_delta_slope * t_out_arr[t]
-                    for t in range(T)
-                ],
-                dtype=float,
-            )
+            self.plan_t_sup_ufh = sup_ufh
+            self.plan_t_sup_dhw = sup_dhw
+            self.plan_p_el_ufh = p_el_ufh
+            self.plan_p_el_dhw = p_el_dhw
 
             # 3. CVXPY-parameters vullen
             self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
@@ -470,6 +453,21 @@ class ThermalMPC:
                     guessed_t_dhw = (
                         alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw
                     )
+
+        # Update met correct data
+        if self.t_dhw.value is not None:
+            final_t_room = self.t_room.value[:-1]
+            final_t_dhw = self.t_dhw.value[:-1]
+
+            p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
+                t_out_arr, final_t_room, final_t_dhw
+            )
+            self.plan_p_el_ufh = p_el_ufh
+            self.plan_p_el_dhw = p_el_dhw
+            self.plan_t_sup_ufh = sup_ufh
+            self.plan_t_sup_dhw = sup_dhw
+            self.P_cop_ufh.value = cop_ufh
+            self.P_cop_dhw.value = cop_dhw
 
         if self.t_room.value is not None:
             ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]
@@ -683,8 +681,8 @@ class Optimizer:
 
         u_on = self.mpc.ufh_on.value
         d_on = self.mpc.dhw_on.value
-        p_u = self.mpc.p_el_ufh.value
-        p_d = self.mpc.p_el_dhw.value
+        p_u = self.mpc.plan_p_el_ufh
+        p_d = self.mpc.plan_p_el_dhw
         t_r = self.mpc.t_room.value
         t_d = self.mpc.t_dhw.value
         u_cop = self.mpc.P_cop_ufh.value
