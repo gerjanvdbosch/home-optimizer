@@ -68,6 +68,7 @@ def index(
 
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request, target_date, plan)
+    accuracy_plot_html = _get_accuracy_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
     importance_html = ""
@@ -279,6 +280,7 @@ def index(
             "request": request,
             "forecast_plot": plot_html,
             "importance_plot": importance_html,
+            "accuracy_plot": accuracy_plot_html,
             "details": details,
             "explanation": explanation,
             "measurements": measurements_data,
@@ -1072,3 +1074,177 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
         )
 
     return table_data
+
+
+def _get_accuracy_plot(request, target_date) -> str:
+    """
+    Plot de voorspelde waarden (van de nacht-snapshot) vs de actuele metingen.
+    Toont: kamertemperatuur, boilertemperatuur, PV-productie en basisverbruik.
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = datetime.now().astimezone().tzinfo
+
+    # 1. Snapshot ophalen
+    df_snap = database.get_predictions(target_date)
+
+    # 2. Actuele metingen ophalen
+    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+
+    if df_snap.empty and df_hist.empty:
+        return ""
+
+    fig = go.Figure()
+
+    # ── Actuele waarden (meting) ──────────────────────────────
+    if not df_hist.empty:
+        df_hist = df_hist.copy()
+        df_hist["ts_local"] = (
+            df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+        )
+
+        end_of_day = start_of_day + timedelta(days=1)
+        mask = (df_hist["timestamp"].dt.tz_convert(local_tz) >= start_of_day) & (
+            df_hist["timestamp"].dt.tz_convert(local_tz) < end_of_day
+        )
+        df_hist = df_hist[mask].sort_values("ts_local")
+
+        if not df_hist.empty:
+            # Kamertemperatuur (actief)
+            fig.add_trace(
+                go.Scatter(
+                    x=df_hist["ts_local"],
+                    y=df_hist["room_temp"],
+                    name="Kamer (actual)",
+                    legendgroup="room",
+                    line=dict(color="#FF9100", width=2),
+                    hovertemplate="%{y:.1f} °C<extra></extra>",
+                )
+            )
+
+            # Boilertemperatuur (actief)
+            dhw_actual = (df_hist["dhw_top"] + df_hist["dhw_bottom"]) / 2
+            fig.add_trace(
+                go.Scatter(
+                    x=df_hist["ts_local"],
+                    y=dhw_actual,
+                    name="Boiler (actual)",
+                    legendgroup="dhw",
+                    line=dict(color="#02cfe7", width=2),
+                    hovertemplate="%{y:.1f} °C<extra></extra>",
+                )
+            )
+
+            # PV productie (actief)
+            fig.add_trace(
+                go.Scatter(
+                    x=df_hist["ts_local"],
+                    y=df_hist["pv_actual"],
+                    name="Zon (actual)",
+                    legendgroup="pv",
+                    line=dict(color="#ffcc00", width=1.5),
+                    hovertemplate="%{y:.2f} kW<extra></extra>",
+                    yaxis="y2",
+                )
+            )
+
+    # ── Voorspelde waarden (snapshot) ────────────────────────
+    if not df_snap.empty:
+        df_snap = df_snap.copy()
+        df_snap["ts_local"] = (
+            pd.to_datetime(df_snap["timestamp"])
+            .dt.tz_localize("UTC")
+            .dt.tz_convert(local_tz)
+            .dt.tz_localize(None)
+        )
+
+        # Kamertemperatuur (voorspeld)
+        fig.add_trace(
+            go.Scatter(
+                x=df_snap["ts_local"],
+                y=df_snap["t_room_pred"],
+                name="Kamer (pred)",
+                legendgroup="room",
+                line=dict(color="#FF9100", width=1.5, dash="dash"),
+                opacity=0.7,
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+
+        # Boilertemperatuur (voorspeld)
+        fig.add_trace(
+            go.Scatter(
+                x=df_snap["ts_local"],
+                y=df_snap["t_dhw_pred"],
+                name="Boiler (pred)",
+                legendgroup="dhw",
+                line=dict(color="#02cfe7", width=1.5, dash="dash"),
+                opacity=0.7,
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+
+        # PV productie (voorspeld)
+        fig.add_trace(
+            go.Scatter(
+                x=df_snap["ts_local"],
+                y=df_snap["p_solar_pred"],
+                name="Zon (pred)",
+                legendgroup="pv",
+                line=dict(color="#ffcc00", width=1.5, dash="dash"),
+                opacity=0.7,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                yaxis="y2",
+            )
+        )
+
+        # Basisverbruik (voorspeld)
+        fig.add_trace(
+            go.Scatter(
+                x=df_snap["ts_local"],
+                y=df_snap["p_load_pred"],
+                name="Basis load (pred)",
+                legendgroup="load",
+                line=dict(color="#F50057", width=1.5, dash="dash"),
+                opacity=0.7,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                yaxis="y2",
+            )
+        )
+
+    if not fig.data:
+        return ""
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=380,
+        margin=dict(l=40, r=20, t=50, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            title=None,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        yaxis=dict(
+            title="Temperatuur (°C)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        yaxis2=dict(
+            title="Vermogen (kW)",
+            overlaying="y",
+            side="right",
+            showgrid=False,
+            rangemode="tozero",
+        ),
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+    )

@@ -34,6 +34,7 @@ class Coordinator:
         self.optimizer = Optimizer(config, database)
         self.context = context
         self.config = config
+        self.database = database
         self.collector = collector
 
     def tick(self):
@@ -87,6 +88,25 @@ class Coordinator:
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
 
+    def save_prediction(self):
+        result = getattr(self.context, "result", None)
+        if not result:
+            logger.warning(
+                "[Collector] Geen actief plan beschikbaar, snapshot overgeslagen."
+            )
+            return
+
+        plan = result.get("plan")
+        if not plan:
+            logger.warning("[Collector] Plan is leeg, snapshot overgeslagen.")
+            return
+
+        run_date = plan[0]["time"].date()
+
+        self.database.save_prediction(plan, run_date)
+
+        logger.info(f"[Snapshot] Dagelijkse snapshot opgeslagen voor {run_date}")
+
     def train(self):
         self.solar.train()
         self.load.train()
@@ -116,6 +136,9 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
         scheduler.add_job(collector.update_history, "interval", minutes=1, id="history")
 
+        scheduler.add_job(
+            coordinator.save_prediction, "cron", hour=0, minute=20, id="prediction"
+        )
         scheduler.add_job(coordinator.tick, "interval", minutes=1, id="tick")
         scheduler.add_job(
             coordinator.optimize,

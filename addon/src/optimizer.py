@@ -704,10 +704,13 @@ class Optimizer:
 
             if d_on[t] > 0.5:
                 mode_str = "DHW"
+                hvac_mode = HvacMode.DHW
             elif u_on[t] > 0.5:
                 mode_str = "UFH"
+                hvac_mode = HvacMode.UFH
             else:
                 mode_str = "-"
+                hvac_mode = HvacMode.OFF
 
             shutter_val = float(shutters[t]) if t < len(shutters) else float("nan")
 
@@ -725,6 +728,7 @@ class Optimizer:
                 {
                     "time": ts,
                     "mode": mode_str,
+                    "hvac_mode": hvac_mode.value,
                     "t_out": f"{context.forecast_df.temp.iloc[t]:.1f}",
                     "p_solar": f"{context.forecast_df.power_corrected.iloc[t]:.2f}",
                     "p_load": f"{context.forecast_df.load_corrected.iloc[t]:.2f}",

@@ -34,6 +34,7 @@ class Coordinator:
         self.optimizer = Optimizer(config, database)
         self.context = context
         self.config = config
+        self.database = database
         self.collector = collector
 
     def tick(self):
@@ -89,6 +90,25 @@ class Coordinator:
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
 
+    def save_prediction(self):
+        result = getattr(self.context, "result", None)
+        if not result:
+            logger.warning(
+                "[Collector] Geen actief plan beschikbaar, snapshot overgeslagen."
+            )
+            return
+
+        plan = result.get("plan")
+        if not plan:
+            logger.warning("[Collector] Plan is leeg, snapshot overgeslagen.")
+            return
+
+        run_date = plan[0]["time"].date()
+
+        self.database.save_prediction(plan, run_date)
+
+        logger.info(f"[Snapshot] Dagelijkse snapshot opgeslagen voor {run_date}")
+
     def train(self):
         self.solar.train()
         self.load.train()
@@ -115,6 +135,7 @@ if __name__ == "__main__":
         api.state.coordinator = coordinator
 
         next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
+        next_run2 = datetime.now(timezone.utc) + timedelta(seconds=50)
 
         scheduler.add_job(
             collector.update_forecast, "interval", seconds=30, id="forecast"
@@ -123,8 +144,9 @@ if __name__ == "__main__":
         scheduler.add_job(
             collector.update_history, "interval", seconds=60, id="history"
         )
-        scheduler.add_job(coordinator.tick, "interval", seconds=60, id="tick")
 
+        # scheduler.add_job(coordinator.save_prediction, "cron", hour=0, minute=30, id="prediction")
+        scheduler.add_job(coordinator.tick, "interval", seconds=60, id="tick")
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
         scheduler.add_job(
             coordinator.optimize,
@@ -134,11 +156,19 @@ if __name__ == "__main__":
             id="optimize",
         )
 
+        scheduler.add_job(
+            coordinator.save_prediction,
+            "interval",
+            minutes=1,
+            next_run_time=next_run2,
+            id="prediction",
+        )
+
         collector.update_forecast()
         collector.update_history()
 
         coordinator.tick()
-        coordinator.train()
+        # coordinator.train()
 
         scheduler.start()
 

@@ -506,6 +506,17 @@
         </div>
     </div>
 
+    {% if accuracy_plot %}
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Voorspelling vs Actueel</h3>
+        </div>
+        <div class="chart-container">
+            {{ accuracy_plot | safe }}
+        </div>
+    </div>
+    {% endif %}
+
     {% if details and is_today %}
     <div class="details-grid">
         {% for item in details %}

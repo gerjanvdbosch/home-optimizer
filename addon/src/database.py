@@ -1,10 +1,11 @@
 import logging
 import pandas as pd
-from datetime import datetime
-from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer
+from datetime import datetime, date, timezone
+from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from config import Config
+from utils import safe_float
 
 Base = declarative_base()
 
@@ -49,6 +50,31 @@ class Measurement(Base):
     hvac_mode = Column(Integer)
 
     shutter_room = Column(Integer)
+
+
+class Prediction(Base):
+    __tablename__ = "prediction"
+    timestamp = Column(DateTime, primary_key=True)
+    run_date = Column(Date, primary_key=True)
+
+    hvac_mode = Column(Integer)
+
+    t_room_pred = Column(Float)
+    t_dhw_pred = Column(Float)
+    t_out_pred = Column(Float)
+
+    p_solar_pred = Column(Float)
+    p_load_pred = Column(Float)
+    p_el_ufh_pred = Column(Float)
+    p_el_dhw_pred = Column(Float)
+
+    cop_ufh_pred = Column(Float)
+    cop_dhw_pred = Column(Float)
+
+    supply_ufh_pred = Column(Float)
+    supply_dhw_pred = Column(Float)
+
+    cost_net_pred = Column(Float)
 
 
 class Database:
@@ -218,4 +244,85 @@ class Database:
 
         except Exception as e:
             self.logger.error(f"[DB] Fout bij ophalen training data: {e}")
+            return pd.DataFrame()
+
+    def save_prediction(self, plan: list, run_date: date):
+        if not plan:
+            return
+
+        if run_date is None:
+            return
+
+        todays_rows = [
+            row
+            for row in plan
+            if row.get("time") is not None and row["time"].date() == run_date
+        ]
+
+        if not todays_rows:
+            self.logger.warning(
+                f"[DB] Snapshot: geen tijdstappen gevonden voor {run_date} "
+                f"(plan bevat {len(plan)} rijen)"
+            )
+            return
+
+        session = self.SessionLocal()
+        try:
+            # Verwijder een eventueel bestaande snapshot voor dezelfde dag
+            # (zodat een herstart om 00:05 altijd de meest recente schrijft)
+            session.query(Prediction).filter(Prediction.run_date == run_date).delete()
+
+            for row in todays_rows:
+                ts = row.get("time")
+                if ts is None:
+                    continue
+
+                # Sla op als UTC (naive datetime) — consistent met de rest van de DB
+                ts_utc = ts.astimezone(timezone.utc).replace(tzinfo=None)
+
+                record = Prediction(
+                    run_date=run_date,
+                    timestamp=ts_utc,
+                    hvac_mode=int(row.get("hvac_mode", 0)),
+                    t_room_pred=safe_float(row.get("t_room")),
+                    t_dhw_pred=safe_float(row.get("t_dhw")),
+                    t_out_pred=safe_float(row.get("t_out")),
+                    p_solar_pred=safe_float(row.get("p_solar")),
+                    p_load_pred=safe_float(row.get("p_load")),
+                    p_el_ufh_pred=safe_float(row.get("p_el_ufh")),
+                    p_el_dhw_pred=safe_float(row.get("p_el_dhw")),
+                    cop_ufh_pred=safe_float(row.get("cop_ufh")),
+                    cop_dhw_pred=safe_float(row.get("cop_dhw")),
+                    supply_ufh_pred=safe_float(row.get("supply_ufh")),
+                    supply_dhw_pred=safe_float(row.get("supply_dhw")),
+                    cost_net_pred=safe_float(row.get("cost_net")),
+                )
+                session.add(record)
+
+            session.commit()
+            self.logger.info(
+                f"[DB] Snapshot opgeslagen voor {run_date} ({len(plan)} tijdstappen)"
+            )
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"[DB] Fout bij opslaan snapshot: {e}")
+        finally:
+            session.close()
+
+    def get_predictions(self, target_date: date) -> pd.DataFrame:
+        try:
+            with self.engine.connect() as conn:
+                query = (
+                    select(Prediction)
+                    .where(Prediction.run_date == target_date)
+                    .order_by(Prediction.timestamp.asc())
+                )
+                df = pd.read_sql(query, conn)
+
+            if not df.empty:
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+            return df
+        except Exception as e:
+            self.logger.error(f"[DB] Fout bij ophalen snapshot: {e}")
             return pd.DataFrame()
