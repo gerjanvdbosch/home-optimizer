@@ -1120,7 +1120,7 @@ def _get_accuracy_plot(request, target_date) -> str:
                     y=df_hist["room_temp"],
                     name="Kamer (actual)",
                     legendgroup="room",
-                    line=dict(color="#FF9100", width=2),
+                    line=dict(color="#d05ce3", width=2),
                     hovertemplate="%{y:.1f} °C<extra></extra>",
                 )
             )
@@ -1145,7 +1145,7 @@ def _get_accuracy_plot(request, target_date) -> str:
                     y=df_hist["pv_actual"],
                     name="Zon (actual)",
                     legendgroup="pv",
-                    line=dict(color="#ffcc00", width=1.5),
+                    line=dict(color="#FF9100", width=1.5),
                     hovertemplate="%{y:.2f} kW<extra></extra>",
                     yaxis="y2",
                 )
@@ -1168,7 +1168,7 @@ def _get_accuracy_plot(request, target_date) -> str:
                 y=df_snap["t_room_pred"],
                 name="Kamer (pred)",
                 legendgroup="room",
-                line=dict(color="#FF9100", width=1.5, dash="dash"),
+                line=dict(color="#d05ce3", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
@@ -1194,7 +1194,7 @@ def _get_accuracy_plot(request, target_date) -> str:
                 y=df_snap["p_solar_pred"],
                 name="Zon (pred)",
                 legendgroup="pv",
-                line=dict(color="#ffcc00", width=1.5, dash="dash"),
+                line=dict(color="#FF9100", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.2f} kW<extra></extra>",
                 yaxis="y2",

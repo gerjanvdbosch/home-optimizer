@@ -707,7 +707,7 @@ class Optimizer:
                 hvac_mode = HvacMode.DHW
             elif u_on[t] > 0.5:
                 mode_str = "UFH"
-                hvac_mode = HvacMode.UFH
+                hvac_mode = HvacMode.HEATING
             else:
                 mode_str = "-"
                 hvac_mode = HvacMode.OFF
