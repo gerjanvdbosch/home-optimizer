@@ -1138,18 +1138,17 @@ def _get_accuracy_plot(request, target_date) -> str:
                 )
             )
 
-            # PV productie (actief)
-            fig.add_trace(
-                go.Scatter(
-                    x=df_hist["ts_local"],
-                    y=df_hist["pv_actual"],
-                    name="Zon (actual)",
-                    legendgroup="pv",
-                    line=dict(color="#FF9100", width=1.5),
-                    hovertemplate="%{y:.2f} kW<extra></extra>",
-                    yaxis="y2",
+            if "temp" in df_hist.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_hist["ts_local"],
+                        y=df_hist["temp"],
+                        name="Buiten (actual)",
+                        legendgroup="tout",
+                        line=dict(color="#4CAF50", width=1.5),
+                        hovertemplate="%{y:.1f} °C<extra></extra>",
+                    )
                 )
-            )
 
     # ── Voorspelde waarden (snapshot) ────────────────────────
     if not df_snap.empty:
@@ -1187,33 +1186,19 @@ def _get_accuracy_plot(request, target_date) -> str:
             )
         )
 
-        # PV productie (voorspeld)
-        fig.add_trace(
-            go.Scatter(
-                x=df_snap["ts_local"],
-                y=df_snap["p_solar_pred"],
-                name="Zon (pred)",
-                legendgroup="pv",
-                line=dict(color="#FF9100", width=1.5, dash="dash"),
-                opacity=0.7,
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-                yaxis="y2",
+        # Buitentemp voorspelling — vereist t_out_pred kolom in je snapshot
+        if "t_out_pred" in df_snap.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_snap["ts_local"],
+                    y=df_snap["t_out_pred"],
+                    name="Buiten (pred)",
+                    legendgroup="tout",
+                    line=dict(color="#4CAF50", width=1.5, dash="dash"),
+                    opacity=0.7,
+                    hovertemplate="%{y:.1f} °C<extra></extra>",
+                )
             )
-        )
-
-        # Basisverbruik (voorspeld)
-        fig.add_trace(
-            go.Scatter(
-                x=df_snap["ts_local"],
-                y=df_snap["p_load_pred"],
-                name="Basis load (pred)",
-                legendgroup="load",
-                line=dict(color="#F50057", width=1.5, dash="dash"),
-                opacity=0.7,
-                hovertemplate="%{y:.2f} kW<extra></extra>",
-                yaxis="y2",
-            )
-        )
 
     if not fig.data:
         return ""
@@ -1235,13 +1220,6 @@ def _get_accuracy_plot(request, target_date) -> str:
             title="Temperatuur (°C)",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
-        ),
-        yaxis2=dict(
-            title="Vermogen (kW)",
-            overlaying="y",
-            side="right",
-            showgrid=False,
-            rangemode="tozero",
         ),
     )
 
