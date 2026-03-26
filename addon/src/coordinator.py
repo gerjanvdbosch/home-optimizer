@@ -88,7 +88,7 @@ class Coordinator:
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
 
-    def save_prediction(self):
+    def save_prediction(self, snapshot_type: str):
         result = getattr(self.context, "result", None)
         if not result:
             logger.warning(
@@ -103,9 +103,7 @@ class Coordinator:
 
         run_date = plan[0]["time"].date()
 
-        self.database.save_prediction(plan, run_date)
-
-        logger.info(f"[Snapshot] Dagelijkse snapshot opgeslagen voor {run_date}")
+        self.database.save_prediction(plan, run_date, snapshot_type)
 
     def train(self):
         self.solar.train()
@@ -137,7 +135,18 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_history, "interval", minutes=1, id="history")
 
         scheduler.add_job(
-            coordinator.save_prediction, "cron", hour=0, minute=20, id="prediction"
+            lambda: coordinator.save_prediction("morning"),
+            "cron",
+            hour=6,
+            minute=30,
+            id="prediction_morning",
+        )
+        scheduler.add_job(
+            lambda: coordinator.save_prediction("evening"),
+            "cron",
+            hour=21,
+            minute=30,
+            id="prediction_evening",
         )
         scheduler.add_job(coordinator.tick, "interval", minutes=1, id="tick")
         scheduler.add_job(

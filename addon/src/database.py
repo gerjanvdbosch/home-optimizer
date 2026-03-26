@@ -1,6 +1,6 @@
 import logging
 import pandas as pd
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -246,43 +246,71 @@ class Database:
             self.logger.error(f"[DB] Fout bij ophalen training data: {e}")
             return pd.DataFrame()
 
-    def save_prediction(self, plan: list, run_date: date):
+    def save_prediction(self, plan: list, run_date: date, snapshot_type: str):
         if not plan:
             return
 
         if run_date is None:
             return
 
-        todays_rows = [
-            row
-            for row in plan
-            if row.get("time") is not None and row["time"].date() == run_date
-        ]
+        # Definieer het tijdvenster op basis van snapshot type
+        if snapshot_type == "morning":
+            # Ochtendsnap: 06:30 vandaag → 21:30 vandaag
+            t_start = datetime.combine(
+                run_date, datetime.min.time().replace(hour=6, minute=30)
+            ).replace(tzinfo=timezone.utc)
+            t_end = datetime.combine(
+                run_date, datetime.min.time().replace(hour=21, minute=30)
+            ).replace(tzinfo=timezone.utc)
+        else:
+            # Avondsnap: 21:30 vandaag → 06:30 morgen
+            t_start = datetime.combine(
+                run_date, datetime.min.time().replace(hour=21, minute=30)
+            ).replace(tzinfo=timezone.utc)
+            t_end = datetime.combine(
+                run_date + timedelta(days=1),
+                datetime.min.time().replace(hour=6, minute=30),
+            ).replace(tzinfo=timezone.utc)
 
-        if not todays_rows:
-            self.logger.warning(
-                f"[DB] Snapshot: geen tijdstappen gevonden voor {run_date} "
-                f"(plan bevat {len(plan)} rijen)"
-            )
-            return
+        t_start_naive = t_start.replace(tzinfo=None)
+        t_end_naive = t_end.replace(tzinfo=None)
 
         session = self.SessionLocal()
         try:
-            # Verwijder een eventueel bestaande snapshot voor dezelfde dag
-            # (zodat een herstart om 00:05 altijd de meest recente schrijft)
-            session.query(Prediction).filter(Prediction.run_date == run_date).delete()
+            # Bestaat er al een snapshot voor dit venster? Check op timestamp-range, niet op type-kolom
+            existing = (
+                session.query(Prediction)
+                .filter(
+                    Prediction.run_date == run_date,
+                    Prediction.timestamp >= t_start_naive,
+                    Prediction.timestamp < t_end_naive,
+                )
+                .first()
+            )
 
-            for row in todays_rows:
-                ts = row.get("time")
-                if ts is None:
-                    continue
+            if existing:
+                self.logger.info(
+                    f"[DB] Snapshot {snapshot_type} / {run_date} bestaat al, overgeslagen."
+                )
+                return
 
-                # Sla op als UTC (naive datetime) — consistent met de rest van de DB
-                ts_utc = ts.astimezone(timezone.utc).replace(tzinfo=None)
+            # Filter plan op het tijdvenster
+            relevant_rows = [
+                row
+                for row in plan
+                if t_start <= row["time"].astimezone(timezone.utc) < t_end
+            ]
 
+            if not relevant_rows:
+                self.logger.warning(
+                    f"[DB] Geen tijdstappen in venster voor {snapshot_type} / {run_date}"
+                )
+                return
+
+            for row in relevant_rows:
                 record = Prediction(
                     run_date=run_date,
-                    timestamp=ts_utc,
+                    timestamp=row["time"].astimezone(timezone.utc).replace(tzinfo=None),
                     hvac_mode=int(row.get("hvac_mode", 0)),
                     t_room_pred=safe_float(row.get("t_room")),
                     t_dhw_pred=safe_float(row.get("t_dhw")),
@@ -301,7 +329,7 @@ class Database:
 
             session.commit()
             self.logger.info(
-                f"[DB] Snapshot opgeslagen voor {run_date} ({len(plan)} tijdstappen)"
+                f"[DB] Snapshot {snapshot_type} / {run_date} opgeslagen ({len(relevant_rows)} tijdstappen)"
             )
         except Exception as e:
             session.rollback()

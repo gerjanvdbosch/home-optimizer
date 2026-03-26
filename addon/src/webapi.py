@@ -1118,7 +1118,7 @@ def _get_accuracy_plot(request, target_date) -> str:
                 go.Scatter(
                     x=df_hist["ts_local"],
                     y=df_hist["room_temp"],
-                    name="Kamer (actual)",
+                    name="Kamer",
                     legendgroup="room",
                     line=dict(color="#d05ce3", width=2),
                     hovertemplate="%{y:.1f} °C<extra></extra>",
@@ -1131,7 +1131,7 @@ def _get_accuracy_plot(request, target_date) -> str:
                 go.Scatter(
                     x=df_hist["ts_local"],
                     y=dhw_actual,
-                    name="Boiler (actual)",
+                    name="Boiler",
                     legendgroup="dhw",
                     line=dict(color="#02cfe7", width=2),
                     hovertemplate="%{y:.1f} °C<extra></extra>",
@@ -1143,9 +1143,9 @@ def _get_accuracy_plot(request, target_date) -> str:
                     go.Scatter(
                         x=df_hist["ts_local"],
                         y=df_hist["temp"],
-                        name="Buiten (actual)",
+                        name="Buiten",
                         legendgroup="tout",
-                        line=dict(color="#4CAF50", width=1.5),
+                        line=dict(color="#B0BEC5", width=1.5),
                         hovertemplate="%{y:.1f} °C<extra></extra>",
                     )
                 )
@@ -1165,8 +1165,9 @@ def _get_accuracy_plot(request, target_date) -> str:
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_room_pred"],
-                name="Kamer (pred)",
+                name="Kamer",
                 legendgroup="room",
+                showlegend=False,
                 line=dict(color="#d05ce3", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
@@ -1178,8 +1179,9 @@ def _get_accuracy_plot(request, target_date) -> str:
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_dhw_pred"],
-                name="Boiler (pred)",
+                name="Boiler",
                 legendgroup="dhw",
+                showlegend=False,
                 line=dict(color="#02cfe7", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
@@ -1192,9 +1194,10 @@ def _get_accuracy_plot(request, target_date) -> str:
                 go.Scatter(
                     x=df_snap["ts_local"],
                     y=df_snap["t_out_pred"],
-                    name="Buiten (pred)",
+                    name="Buiten",
                     legendgroup="tout",
-                    line=dict(color="#4CAF50", width=1.5, dash="dash"),
+                    showlegend=False,
+                    line=dict(color="#B0BEC5", width=1.5, dash="dash"),
                     opacity=0.7,
                     hovertemplate="%{y:.1f} °C<extra></extra>",
                 )
