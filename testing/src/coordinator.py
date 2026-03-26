@@ -106,7 +106,7 @@ class Coordinator:
             logger.warning("[Collector] Plan is leeg, snapshot overgeslagen.")
             return
 
-        self.database.save_prediction(plan, snapshot_type)
+        self.database.save_prediction(plan, self.context.now, snapshot_type)
 
     def train(self):
         self.solar.train()
@@ -170,7 +170,7 @@ if __name__ == "__main__":
         collector.update_history()
 
         coordinator.tick()
-        coordinator.train()
+        # coordinator.train()
 
         scheduler.start()
 

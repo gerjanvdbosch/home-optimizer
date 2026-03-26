@@ -245,24 +245,28 @@ class Database:
             self.logger.error(f"[DB] Fout bij ophalen training data: {e}")
             return pd.DataFrame()
 
-    def save_prediction(self, plan: list, snapshot_type: str):
+    def save_prediction(self, plan: list, now, snapshot_type: str):
         if not plan:
             return
 
         local_tz = datetime.now().astimezone().tzinfo
-        today = datetime.now(local_tz).date()
+        now_local = now.astimezone(local_tz)
 
         if snapshot_type == "morning":
-            t_start = datetime.combine(today, time(6, 30), tzinfo=local_tz)
-            t_end = datetime.combine(today, time(21, 30), tzinfo=local_tz)
+            t_start = datetime.combine(now_local, time(6, 30), tzinfo=local_tz)
+            t_end = datetime.combine(now_local, time(21, 30), tzinfo=local_tz)
         else:
-            t_start = datetime.combine(today, time(21, 30), tzinfo=local_tz)
+            t_start = datetime.combine(now_local, time(21, 30), tzinfo=local_tz)
             t_end = datetime.combine(
-                today + timedelta(days=1), time(6, 30), tzinfo=local_tz
+                now_local + timedelta(days=1), time(6, 30), tzinfo=local_tz
             )
 
         t_start_naive = t_start.astimezone(timezone.utc).replace(tzinfo=None)
         t_end_naive = t_end.astimezone(timezone.utc).replace(tzinfo=None)
+
+        self.logger.debug(
+            f"[DB] Opslaan snapshot '{snapshot_type}' voor tijdvenster {t_start} - {t_end}"
+        )
 
         session = self.SessionLocal()
         try:
