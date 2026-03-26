@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
-from datetime import datetime, date, timezone, timedelta
-from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer, Date
+from datetime import datetime, date, timezone, timedelta, time
+from sqlalchemy import create_engine, Column, Float, DateTime, select, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from config import Config
@@ -11,11 +11,9 @@ Base = declarative_base()
 
 
 class SolarForecast(Base):
-    """Het tabel-model voor alle zonne- en weerdata."""
-
     __tablename__ = "solar_forecast"
-
-    timestamp = Column(DateTime, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, unique=True)
 
     # Voorspelling (Solcast)
     pv_estimate = Column(Float)
@@ -33,7 +31,8 @@ class SolarForecast(Base):
 
 class Measurement(Base):
     __tablename__ = "measurement"
-    timestamp = Column(DateTime, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, unique=True)
 
     # De harde metingen
     grid_import = Column(Float)
@@ -54,8 +53,8 @@ class Measurement(Base):
 
 class Prediction(Base):
     __tablename__ = "prediction"
-    timestamp = Column(DateTime, primary_key=True)
-    run_date = Column(Date, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, unique=True)
 
     hvac_mode = Column(Integer)
 
@@ -246,42 +245,30 @@ class Database:
             self.logger.error(f"[DB] Fout bij ophalen training data: {e}")
             return pd.DataFrame()
 
-    def save_prediction(self, plan: list, run_date: date, snapshot_type: str):
+    def save_prediction(self, plan: list, snapshot_type: str):
         if not plan:
             return
 
-        if run_date is None:
-            return
+        local_tz = datetime.now().astimezone().tzinfo
+        today = datetime.now(local_tz).date()
 
-        # Definieer het tijdvenster op basis van snapshot type
         if snapshot_type == "morning":
-            # Ochtendsnap: 06:30 vandaag → 21:30 vandaag
-            t_start = datetime.combine(
-                run_date, datetime.min.time().replace(hour=6, minute=30)
-            ).replace(tzinfo=timezone.utc)
-            t_end = datetime.combine(
-                run_date, datetime.min.time().replace(hour=21, minute=30)
-            ).replace(tzinfo=timezone.utc)
+            t_start = datetime.combine(today, time(6, 30), tzinfo=local_tz)
+            t_end = datetime.combine(today, time(21, 30), tzinfo=local_tz)
         else:
-            # Avondsnap: 21:30 vandaag → 06:30 morgen
-            t_start = datetime.combine(
-                run_date, datetime.min.time().replace(hour=21, minute=30)
-            ).replace(tzinfo=timezone.utc)
+            t_start = datetime.combine(today, time(21, 30), tzinfo=local_tz)
             t_end = datetime.combine(
-                run_date + timedelta(days=1),
-                datetime.min.time().replace(hour=6, minute=30),
-            ).replace(tzinfo=timezone.utc)
+                today + timedelta(days=1), time(6, 30), tzinfo=local_tz
+            )
 
-        t_start_naive = t_start.replace(tzinfo=None)
-        t_end_naive = t_end.replace(tzinfo=None)
+        t_start_naive = t_start.astimezone(timezone.utc).replace(tzinfo=None)
+        t_end_naive = t_end.astimezone(timezone.utc).replace(tzinfo=None)
 
         session = self.SessionLocal()
         try:
-            # Bestaat er al een snapshot voor dit venster? Check op timestamp-range, niet op type-kolom
             existing = (
                 session.query(Prediction)
                 .filter(
-                    Prediction.run_date == run_date,
                     Prediction.timestamp >= t_start_naive,
                     Prediction.timestamp < t_end_naive,
                 )
@@ -290,7 +277,7 @@ class Database:
 
             if existing:
                 self.logger.info(
-                    f"[DB] Snapshot {snapshot_type} / {run_date} bestaat al, overgeslagen."
+                    f"[DB] Snapshot {snapshot_type} bestaat al, overgeslagen."
                 )
                 return
 
@@ -303,13 +290,12 @@ class Database:
 
             if not relevant_rows:
                 self.logger.warning(
-                    f"[DB] Geen tijdstappen in venster voor {snapshot_type} / {run_date}"
+                    f"[DB] Geen tijdstappen in venster voor {snapshot_type}"
                 )
                 return
 
             for row in relevant_rows:
                 record = Prediction(
-                    run_date=run_date,
                     timestamp=row["time"].astimezone(timezone.utc).replace(tzinfo=None),
                     hvac_mode=int(row.get("hvac_mode", 0)),
                     t_room_pred=safe_float(row.get("t_room")),
@@ -329,7 +315,7 @@ class Database:
 
             session.commit()
             self.logger.info(
-                f"[DB] Snapshot {snapshot_type} / {run_date} opgeslagen ({len(relevant_rows)} tijdstappen)"
+                f"[DB] Snapshot {snapshot_type} opgeslagen ({len(relevant_rows)} tijdstappen)"
             )
         except Exception as e:
             session.rollback()
@@ -338,11 +324,17 @@ class Database:
             session.close()
 
     def get_predictions(self, target_date: date) -> pd.DataFrame:
+        t_start = datetime.combine(target_date, time.min)
+        t_end = datetime.combine(target_date + timedelta(days=1), time.min)
+
         try:
             with self.engine.connect() as conn:
                 query = (
                     select(Prediction)
-                    .where(Prediction.run_date == target_date)
+                    .where(
+                        Prediction.timestamp >= t_start,
+                        Prediction.timestamp < t_end,
+                    )
                     .order_by(Prediction.timestamp.asc())
                 )
                 df = pd.read_sql(query, conn)

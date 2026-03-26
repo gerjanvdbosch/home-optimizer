@@ -90,8 +90,8 @@ class Coordinator:
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
 
-        # self.save_prediction("morning")
-        # self.save_prediction("evening")
+        self.save_prediction("morning")
+        self.save_prediction("evening")
 
     def save_prediction(self, snapshot_type: str):
         result = getattr(self.context, "result", None)
@@ -106,9 +106,7 @@ class Coordinator:
             logger.warning("[Collector] Plan is leeg, snapshot overgeslagen.")
             return
 
-        run_date = plan[0]["time"].date()
-
-        self.database.save_prediction(plan, run_date, snapshot_type)
+        self.database.save_prediction(plan, snapshot_type)
 
     def train(self):
         self.solar.train()
@@ -172,7 +170,7 @@ if __name__ == "__main__":
         collector.update_history()
 
         coordinator.tick()
-        # coordinator.train()
+        coordinator.train()
 
         scheduler.start()
 

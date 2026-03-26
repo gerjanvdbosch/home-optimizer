@@ -101,9 +101,7 @@ class Coordinator:
             logger.warning("[Collector] Plan is leeg, snapshot overgeslagen.")
             return
 
-        run_date = plan[0]["time"].date()
-
-        self.database.save_prediction(plan, run_date, snapshot_type)
+        self.database.save_prediction(plan, snapshot_type)
 
     def train(self):
         self.solar.train()
