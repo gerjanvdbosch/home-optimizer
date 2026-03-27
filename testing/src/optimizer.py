@@ -45,13 +45,13 @@ CLIMATE_CONFIG = {
     "dhw": {
         "target": [
             ("00:00", 10.0),
-            ("15:59", 10.0), # <--- ANCHOR: Blijf 10 graden tot één minuut voor vier
-            ("16:00", 50.0), # <--- DEADLINE: Om 16:00 moet de target 50 zijn
-            ("20:00", 50.0), # <--- WINDOW: Blijf 50 graden tot acht uur 's avonds
-            ("20:01", 10.0)  # <--- RELEASE: Direct daarna mag hij weer zakken naar 10
+            ("15:59", 10.0),
+            ("16:00", 50.0), # Deadline: 50 graden
+            ("20:00", 40.0), # Tot 20:00 warm houden
+            ("20:01", 10.0)
         ],
-        "offset_low": 0.5,   # De WP moet dus minimaal 48.0 graden halen (50 - 2)
-        "offset_high": 5.0    # Bij zon mag hij doorladen tot 55.0 graden (50 + 5)
+        "offset_low": 2.0,   # Minimaal 48 graden om 16:00 (50 - 2)
+        "offset_high": 40.0  # <--- BELANGRIJK: Hiermee blijft de opwarm-lijn
     }
 }
 
