@@ -59,13 +59,14 @@ def index(
     if plan:
         for p in plan:
             p_copy = p.copy()
-            # Zet het object om naar tekst voor de tabel
-            p_copy["time"] = p["time"].strftime("%H:%M")
+            local_ts = p["time"].astimezone(local_tz)
+            p_copy["time"] = local_ts.strftime("%H:%M")
             plan_display.append(p_copy)
 
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request, target_date, plan)
-    accuracy_plot_html = _get_accuracy_plot(request, target_date)
+    accuracy_plot_room, accuracy_plot_dhw = _get_accuracy_plots(request, target_date)
+    consumption_plot = _get_consumption_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
 
@@ -269,7 +270,9 @@ def index(
         {
             "request": request,
             "forecast_plot": plot_html,
-            "accuracy_plot": accuracy_plot_html,
+            "accuracy_plot_room": accuracy_plot_room,
+            "accuracy_plot_dhw": accuracy_plot_dhw,
+            "consumption_plot": consumption_plot,
             "details": details,
             "measurements": measurements_data,
             "plan": plan_display,
@@ -660,7 +663,9 @@ def _get_solar_forecast_plot(
                 y_vals = []
 
                 for i in range(len(plan)):
-                    slot_time = plan[i]["time"].replace(tzinfo=None)
+                    slot_time = (
+                        plan[i]["time"].astimezone(local_tz).replace(tzinfo=None)
+                    )
                     val = float(plan[i][f"p_el_{mode_key.lower()}"])
                     is_active = plan[i]["mode"] == mode_key
 
@@ -744,7 +749,7 @@ def _get_solar_forecast_plot(
     )
 
     return pio.to_html(
-        fig, full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False}
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
 
 
@@ -770,7 +775,8 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
     if df.empty:
         return []
 
-    df["timestamp"] = df["timestamp"].dt.tz_convert(local_tz)
+    # Zorg dat de kolom als UTC wordt herkend en dan geconverteerd naar lokaal
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(local_tz)
 
     # Zet tijdzone goed en indexeer
     end_dt = start_dt + timedelta(days=1)
@@ -849,30 +855,26 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
     return table_data
 
 
-def _get_accuracy_plot(request, target_date) -> str:
+def _get_accuracy_plots(request, target_date) -> tuple:
     """
     Plot de voorspelde waarden (van de nacht-snapshot) vs de actuele metingen.
-    Toont: kamertemperatuur, boilertemperatuur, PV-productie en basisverbruik.
+    Geeft 2 grafieken terug (Kamer en Boiler), inclusief de min/max doelbereiken.
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
     local_tz = datetime.now().astimezone().tzinfo
 
-    # 1. Snapshot ophalen
     df_snap = database.get_predictions(target_date)
 
-    # 2. Actuele metingen ophalen
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
         tzinfo=local_tz
     )
     df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
 
     if df_snap.empty and df_hist.empty:
-        return ""
+        return "", ""
 
-    fig = go.Figure()
-
-    # ── Actuele waarden (meting) ──────────────────────────────
+    # --- Data Prep ---
     if not df_hist.empty:
         df_hist = df_hist.copy()
         df_hist["ts_local"] = (
@@ -885,45 +887,6 @@ def _get_accuracy_plot(request, target_date) -> str:
         )
         df_hist = df_hist[mask].sort_values("ts_local")
 
-        if not df_hist.empty:
-            # Kamertemperatuur (actief)
-            fig.add_trace(
-                go.Scatter(
-                    x=df_hist["ts_local"],
-                    y=df_hist["room_temp"],
-                    name="Kamer",
-                    legendgroup="room",
-                    line=dict(color="#d05ce3", width=2),
-                    hovertemplate="%{y:.1f} °C<extra></extra>",
-                )
-            )
-
-            # Boilertemperatuur (actief)
-            dhw_actual = (df_hist["dhw_top"] + df_hist["dhw_bottom"]) / 2
-            fig.add_trace(
-                go.Scatter(
-                    x=df_hist["ts_local"],
-                    y=dhw_actual,
-                    name="Boiler",
-                    legendgroup="dhw",
-                    line=dict(color="#02cfe7", width=2),
-                    hovertemplate="%{y:.1f} °C<extra></extra>",
-                )
-            )
-
-            if "temp" in df_hist.columns:
-                fig.add_trace(
-                    go.Scatter(
-                        x=df_hist["ts_local"],
-                        y=df_hist["temp"],
-                        name="Buiten",
-                        legendgroup="tout",
-                        line=dict(color="#B0BEC5", width=1.5),
-                        hovertemplate="%{y:.1f} °C<extra></extra>",
-                    )
-                )
-
-    # ── Voorspelde waarden (snapshot) ────────────────────────
     if not df_snap.empty:
         df_snap = df_snap.copy()
         df_snap["ts_local"] = (
@@ -933,70 +896,332 @@ def _get_accuracy_plot(request, target_date) -> str:
             .dt.tz_localize(None)
         )
 
-        # Kamertemperatuur (voorspeld)
-        fig.add_trace(
+    # --- Genereer Target Bands (min/max) rechtstreeks uit de optimizer ---
+    T = coordinator.optimizer.mpc.horizon
+    r_min_raw, r_max_raw, d_min_raw, d_max_raw = coordinator.optimizer.mpc._get_targets(
+        start_of_day, T
+    )
+
+    # Voeg een extra tijdstap toe aan het einde (middernacht volgende dag)
+    # zodat de step-line ('hv') strak tot het eind van de as doorloopt.
+    ts_range = [
+        start_of_day.replace(tzinfo=None) + timedelta(minutes=15 * t)
+        for t in range(T + 1)
+    ]
+
+    r_min_arr = list(r_min_raw) + [r_min_raw[-1]]
+    r_max_arr = list(r_max_raw) + [r_max_raw[-1]]
+    d_max_arr = list(d_max_raw) + [d_max_raw[-1]]
+
+    # Voor de boiler y-as schaal clippen we de *weergave* van de ondergrens (bijv. 10.0 naar 40.0)
+    # De logica (wanneer de boiler mag zakken naar 10) komt echter 1-op-1 direct uit je model.
+    d_min_vis = [max(40.0, val) for val in list(d_min_raw) + [d_min_raw[-1]]]
+
+    layout_args = dict(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=300,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(title=None, showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
+        yaxis=dict(
+            title="Temperatuur (°C)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
+        ),
+    )
+
+    # ─── KAMER GRAFIEK ──────────────────────────────────────────
+    fig_room = go.Figure()
+
+    # Min/Max Bands Kamer (zachte, vloeiende vakken, lichter transparant)
+    fig_room.add_trace(
+        go.Scatter(
+            x=ts_range,
+            y=r_max_arr,
+            mode="lines",
+            line=dict(width=0, shape="spline", smoothing=0.6),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig_room.add_trace(
+        go.Scatter(
+            x=ts_range,
+            y=r_min_arr,
+            mode="lines",
+            line=dict(width=0, shape="spline", smoothing=0.6),
+            fill="tonexty",
+            fillcolor="rgba(208, 92, 227, 0.08)",
+            showlegend=True,
+            name="Doel bereik",
+            hoverinfo="skip",
+        )
+    )
+
+    if not df_hist.empty and "room_temp" in df_hist.columns:
+        fig_room.add_trace(
+            go.Scatter(
+                x=df_hist["ts_local"],
+                y=df_hist["room_temp"],
+                name="Kamer Actueel",
+                line=dict(color="#d05ce3", width=2),
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+    if not df_snap.empty and "t_room_pred" in df_snap.columns:
+        fig_room.add_trace(
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_room_pred"],
-                name="Kamer",
-                legendgroup="room",
-                showlegend=False,
+                name="Kamer Voorspeld",
                 line=dict(color="#d05ce3", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
 
-        # Boilertemperatuur (voorspeld)
-        fig.add_trace(
+    fig_room.update_layout(**layout_args)
+
+    # ─── BOILER GRAFIEK ─────────────────────────────────────────
+    fig_dhw = go.Figure()
+
+    # Min/Max Bands Boiler (zachte, vloeiende vakken, lichter transparant)
+    fig_dhw.add_trace(
+        go.Scatter(
+            x=ts_range,
+            y=d_max_arr,
+            mode="lines",
+            line=dict(width=0, shape="spline", smoothing=0.6),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig_dhw.add_trace(
+        go.Scatter(
+            x=ts_range,
+            y=d_min_vis,
+            mode="lines",
+            line=dict(width=0, shape="spline", smoothing=0.6),
+            fill="tonexty",
+            fillcolor="rgba(2, 207, 231, 0.08)",
+            showlegend=True,
+            name="Doel bereik",
+            hoverinfo="skip",
+        )
+    )
+
+    if (
+        not df_hist.empty
+        and "dhw_top" in df_hist.columns
+        and "dhw_bottom" in df_hist.columns
+    ):
+        dhw_actual = (df_hist["dhw_top"] + df_hist["dhw_bottom"]) / 2
+        fig_dhw.add_trace(
+            go.Scatter(
+                x=df_hist["ts_local"],
+                y=dhw_actual,
+                name="Boiler Actueel",
+                line=dict(color="#02cfe7", width=2),
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+    if not df_snap.empty and "t_dhw_pred" in df_snap.columns:
+        fig_dhw.add_trace(
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_dhw_pred"],
-                name="Boiler",
-                legendgroup="dhw",
-                showlegend=False,
+                name="Boiler Voorspeld",
                 line=dict(color="#02cfe7", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
 
-        # Buitentemp voorspelling — vereist t_out_pred kolom in je snapshot
-        if "t_out_pred" in df_snap.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_snap["ts_local"],
-                    y=df_snap["t_out_pred"],
-                    name="Buiten",
-                    legendgroup="tout",
-                    showlegend=False,
-                    line=dict(color="#B0BEC5", width=1.5, dash="dash"),
-                    opacity=0.7,
-                    hovertemplate="%{y:.1f} °C<extra></extra>",
-                )
-            )
+    fig_dhw.update_layout(**layout_args)
 
-    if not fig.data:
-        return ""
+    html_room = pio.to_html(
+        fig_room,
+        full_html=False,
+        include_plotlyjs=True,
+        config={"displayModeBar": False},
+    )
+    html_dhw = pio.to_html(
+        fig_dhw,
+        full_html=False,
+        include_plotlyjs=False,
+        config={"displayModeBar": False},
+    )
+
+    return html_room, html_dhw
+
+
+def _get_consumption_plot(request, target_date) -> str:
+    """
+    Genereert een uurgrafiek (bar chart) van het actuele vs voorspelde warmtepomp verbruik (kWh),
+    uitgesplitst in Vloerverwarming (UFH) en Boiler (DHW).
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = datetime.now().astimezone().tzinfo
+
+    df_snap = database.get_predictions(target_date)
+
+    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_of_day = start_of_day + timedelta(days=1)
+
+    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+
+    # --- Actueel Verbruik (omzetten naar kWh per kwartier) ---
+    if not df_hist.empty:
+        df_hist = df_hist.copy()
+        df_hist["ts_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
+
+        mask = (df_hist["ts_local"] >= start_of_day) & (
+            df_hist["ts_local"] < end_of_day
+        )
+        df_hist = df_hist[mask].copy()
+
+        df_hist["wp_actual"] = pd.to_numeric(
+            df_hist.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["hvac_mode"] = (
+            pd.to_numeric(df_hist.get("hvac_mode", 0), errors="coerce")
+            .fillna(0)
+            .round()
+        )
+
+        # Vermogen (kW) * 0.25h = Energie (kWh). Mode 2 = UFH, Mode 1 & 4 = DHW
+        df_hist["act_ufh"] = 0.0
+        df_hist.loc[df_hist["hvac_mode"] == 2, "act_ufh"] = df_hist["wp_actual"] * 0.25
+
+        df_hist["act_dhw"] = 0.0
+        df_hist.loc[df_hist["hvac_mode"].isin([1, 4]), "act_dhw"] = (
+            df_hist["wp_actual"] * 0.25
+        )
+
+        df_hist.set_index("ts_local", inplace=True)
+        # Sumeer de kwartieren naar hele uren
+        df_hist_hourly = df_hist[["act_ufh", "act_dhw"]].resample("1h").sum()
+    else:
+        df_hist_hourly = pd.DataFrame(columns=["act_ufh", "act_dhw"])
+
+    # --- Verwacht Verbruik (omzetten naar kWh per kwartier) ---
+    if not df_snap.empty:
+        df_snap = df_snap.copy()
+        df_snap["ts_local"] = (
+            pd.to_datetime(df_snap["timestamp"])
+            .dt.tz_localize("UTC")
+            .dt.tz_convert(local_tz)
+        )
+
+        mask_snap = (df_snap["ts_local"] >= start_of_day) & (
+            df_snap["ts_local"] < end_of_day
+        )
+        df_snap = df_snap[mask_snap].copy()
+
+        df_snap["pred_ufh"] = (
+            pd.to_numeric(df_snap.get("p_el_ufh_pred", 0), errors="coerce").fillna(0)
+            * 0.25
+        )
+        df_snap["pred_dhw"] = (
+            pd.to_numeric(df_snap.get("p_el_dhw_pred", 0), errors="coerce").fillna(0)
+            * 0.25
+        )
+
+        df_snap.set_index("ts_local", inplace=True)
+        # Sumeer de kwartieren naar hele uren
+        df_snap_hourly = df_snap[["pred_ufh", "pred_dhw"]].resample("1h").sum()
+    else:
+        df_snap_hourly = pd.DataFrame(columns=["pred_ufh", "pred_dhw"])
+
+    # --- Samenvoegen & Uur-Index uitlijnen ---
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1).fillna(0)
+
+    # We forceren 24 uurs rijen (zodat de as altijd netjes van 00:00 tot 23:00 loopt)
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None),
+        end=(end_of_day - timedelta(hours=1)).replace(tzinfo=None),
+        freq="1h",
+    )
+
+    if not df_plot.empty:
+        df_plot.index = df_plot.index.tz_localize(None)
+
+    df_plot = df_plot.reindex(full_idx).fillna(0)
+
+    # --- Plotly Configuratie ---
+    fig = go.Figure()
+
+    # Actueel UFH (Solide Paars)
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["act_ufh"],
+            name="Actueel UFH",
+            marker_color="#d05ce3",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    # Verwacht UFH (Transparant Paars met randje)
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_ufh"],
+            name="Verwacht UFH",
+            marker_color="rgba(208, 92, 227, 0.2)",
+            marker_line=dict(color="#d05ce3", width=2),
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    # Actueel DHW (Solide Cyaan)
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["act_dhw"],
+            name="Actueel DHW",
+            marker_color="#02cfe7",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    # Verwacht DHW (Transparant Cyaan met randje)
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_dhw"],
+            name="Verwacht DHW",
+            marker_color="rgba(2, 207, 231, 0.2)",
+            marker_line=dict(color="#02cfe7", width=2),
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
 
     fig.update_layout(
+        barmode="group",  # Plaatst balkjes naast elkaar ipv op elkaar
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
         plot_bgcolor="rgb(28, 28, 28)",
-        height=380,
-        margin=dict(l=40, r=20, t=50, b=40),
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         xaxis=dict(
             title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
+            tickformat="%H:%M",
+            dtick=7200000,  # Forceer labels om de 2 uur (ipv elk uur) voor een rustiger beeld
         ),
         yaxis=dict(
-            title="Temperatuur (°C)",
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.1)",
+            title="Verbruik (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
         ),
+        bargap=0.15,
+        bargroupgap=0.05,
     )
 
     return pio.to_html(

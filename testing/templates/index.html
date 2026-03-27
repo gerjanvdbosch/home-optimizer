@@ -494,29 +494,6 @@
         </div>
     </div>
 
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Voorspelling</h3>
-            <div class="header-actions">
-                <button class="explain-btn" onclick="toggle('train')">Train</button>
-            </div>
-        </div>
-        <div class="chart-container">
-            {{ forecast_plot | safe }}
-        </div>
-    </div>
-
-    {% if accuracy_plot %}
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Voorspelling vs Actueel</h3>
-        </div>
-        <div class="chart-container">
-            {{ accuracy_plot | safe }}
-        </div>
-    </div>
-    {% endif %}
-
     {% if details and is_today %}
     <div class="details-grid">
         {% for item in details %}
@@ -540,6 +517,48 @@
     </div>
     {% endif %}
 
+    {% if accuracy_plot_room and accuracy_plot_dhw %}
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Kamer Temperatuur</h3>
+        </div>
+        <div class="chart-container">
+            {{ accuracy_plot_room | safe }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Boiler Temperatuur</h3>
+        </div>
+        <div class="chart-container">
+            {{ accuracy_plot_dhw | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if consumption_plot %}
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Warmtepomp Verbruik (kWh)</h3>
+        </div>
+        <div class="chart-container">
+            {{ consumption_plot | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Voorspelling</h3>
+            <div class="header-actions">
+                <button class="explain-btn" onclick="toggle('train')">Train</button>
+            </div>
+        </div>
+        <div class="chart-container">
+            {{ forecast_plot | safe }}
+        </div>
+    </div>
+
     {% if plan and is_today %}
     <div class="card">
         <div class="header">
@@ -560,7 +579,7 @@
                     <th>COP</th>
                     <th>Buiten</th>
                     <th>Verbruik</th>
-<!--                    <th>Prijs</th>-->
+                    <!--                    <th>Prijs</th>-->
                     <th>Kosten</th>
                 </tr>
                 </thead>
@@ -613,9 +632,9 @@
                         {% else %}-{% endif %}
                     </td>
 
-<!--                    <td style="color: var(&#45;&#45;text-muted);">-->
-<!--                        {{ row.price }} <span class="unit">€</span>-->
-<!--                    </td>-->
+                    <!--                    <td style="color: var(&#45;&#45;text-muted);">-->
+                    <!--                        {{ row.price }} <span class="unit">€</span>-->
+                    <!--                    </td>-->
 
                     <td style="color: {% if row.cost_net|float < 0 %}#2ca02c{% else %}var(--text-color){% endif %};">
                         {{ row.cost_net }} <span class="unit">€</span>

@@ -676,10 +676,8 @@ class Optimizer:
             return []
 
         T = self.mpc.horizon
-        tz = datetime.now().astimezone().tzinfo
-        now_local = context.now.astimezone(tz)
-        minute = (now_local.minute // 15) * 15
-        start = now_local.replace(minute=minute, second=0, microsecond=0)
+        minute = (context.now.minute // 15) * 15
+        start = context.now.replace(minute=minute, second=0, microsecond=0)
 
         u_on = self.mpc.ufh_on.value
         d_on = self.mpc.dhw_on.value
@@ -734,8 +732,8 @@ class Optimizer:
                     "p_load": f"{context.forecast_df.load_corrected.iloc[t]:.2f}",
                     "t_room": f"{t_r[t + 1]:.2f}",
                     "t_dhw": f"{t_d[t + 1]:.2f}",
-                    "p_el_ufh": f"{p_u[t]:.2f}",
-                    "p_el_dhw": f"{p_d[t]:.2f}",
+                    "p_el_ufh": f"{p_u[t] if mode_str == 'UFH' else 0.0:.2f}",
+                    "p_el_dhw": f"{p_d[t] if mode_str == 'DHW' else 0.0:.2f}",
                     "cop_ufh": f"{u_cop[t]:.2f}",
                     "cop_dhw": f"{d_cop[t]:.2f}",
                     "supply_ufh": f"{u_sup[t]:.2f}",

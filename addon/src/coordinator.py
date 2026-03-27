@@ -79,8 +79,11 @@ class Coordinator:
             df_plan = pd.DataFrame(result.get("plan"))
 
             if not df_plan.empty:
+                local_tz = datetime.now().astimezone().tzinfo
                 df_display = df_plan.copy()
-                df_display["time"] = df_display["time"].dt.strftime("%H:%M")
+                df_display["time"] = (
+                    df_display["time"].dt.tz_convert(local_tz).dt.strftime("%H:%M")
+                )
 
                 # Print de tabel
                 print(df_display.to_string(index=False))
@@ -88,20 +91,25 @@ class Coordinator:
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
 
-    def save_prediction(self, snapshot_type: str):
+    def save_prediction(self):
         result = getattr(self.context, "result", None)
         if not result:
             logger.warning(
-                "[Collector] Geen actief plan beschikbaar, snapshot overgeslagen."
+                "[Coordinator] Geen actief plan beschikbaar, snapshot overgeslagen."
             )
             return
 
         plan = result.get("plan")
         if not plan:
-            logger.warning("[Collector] Plan is leeg, snapshot overgeslagen.")
+            logger.warning("[Coordinator] Plan is leeg, snapshot overgeslagen.")
             return
 
-        self.database.save_prediction(plan, self.context.now, snapshot_type)
+        next_hour_start = self.context.now.replace(
+            minute=0, second=0, microsecond=0
+        ) + timedelta(hours=1)
+
+        # Sla de voorspelling op in de database vanaf dat tijdstip
+        self.database.save_prediction(plan, next_hour_start)
 
     def train(self):
         self.solar.train()
@@ -133,18 +141,10 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_history, "interval", minutes=1, id="history")
 
         scheduler.add_job(
-            lambda: coordinator.save_prediction("morning"),
+            coordinator.save_prediction,
             "cron",
-            hour=6,
-            minute=30,
-            id="prediction_morning",
-        )
-        scheduler.add_job(
-            lambda: coordinator.save_prediction("evening"),
-            "cron",
-            hour=21,
-            minute=30,
-            id="prediction_evening",
+            minute=5,
+            id="prediction",
         )
         scheduler.add_job(coordinator.tick, "interval", minutes=1, id="tick")
         scheduler.add_job(
