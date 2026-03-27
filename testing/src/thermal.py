@@ -1091,7 +1091,7 @@ class PhysicsLinearizer:
             # delta_setpoint = wp_setpoint - supply_temp
             # supply_temp ≈ t_dhw + hydraulische lift (loopt op met t_dhw)
             # delta neemt automatisch af naarmate t_dhw stijgt
-            delta_dhw = float(np.clip(self.perf_map._setpoint_dhw - sup_dhw, 0.5, 15.0))
+            delta_dhw = float(np.clip(self.perf_map._setpoint_dhw - sup_dhw, 0.5, 25.0))
 
             # Zelfde voor UFH (minder dramatisch want t_room varieert weinig):
             delta_ufh = float(np.clip(self.perf_map._setpoint_ufh - sup_ufh, 0.5, 8.0))
