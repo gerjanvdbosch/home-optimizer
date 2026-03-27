@@ -1152,6 +1152,11 @@ def _get_consumption_plot(request, target_date) -> str:
 
     df_plot = df_plot.reindex(full_idx).fillna(0)
 
+    # Vervang 0 door None zodat Plotly geen 'streepjes' (borders) tekent voor lege uren
+    # We doen dit alleen voor de kolommen die we plotten
+    for col in ["act_ufh", "act_dhw", "pred_ufh", "pred_dhw"]:
+        df_plot[col] = df_plot[col].apply(lambda x: x if x > 0.001 else None)
+
     # --- Plotly Configuratie ---
     fig = go.Figure()
 
@@ -1225,5 +1230,5 @@ def _get_consumption_plot(request, target_date) -> str:
     )
 
     return pio.to_html(
-        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
     )
