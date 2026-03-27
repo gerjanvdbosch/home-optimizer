@@ -3,8 +3,6 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 
-from sklearn.inspection import permutation_importance
-from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -23,7 +21,6 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 @api.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
-    explain: str = None,
     train: str = None,
     view: str = "hour",
     date_str: str = None,
@@ -71,7 +68,6 @@ def index(
     accuracy_plot_html = _get_accuracy_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
-    importance_html = ""
 
     # Huidige temperaturen veilig ophalen
     room_t = getattr(context, "room_temp", 0.0)
@@ -262,12 +258,6 @@ def index(
             ]
         )
 
-    # 3. Explain (SHAP) data genereren indien aangevraagd (?explain=1)
-    explanation = {}
-    if explain == "1":
-        explanation = _get_explanation_data(coordinator)
-        importance_html = _get_importance_plot_plotly(request)
-
     if train == "1":
         try:
             coordinator.train()
@@ -279,10 +269,8 @@ def index(
         {
             "request": request,
             "forecast_plot": plot_html,
-            "importance_plot": importance_html,
             "accuracy_plot": accuracy_plot_html,
             "details": details,
-            "explanation": explanation,
             "measurements": measurements_data,
             "plan": plan_display,
             "current_view": view_mode,
@@ -757,221 +745,6 @@ def _get_solar_forecast_plot(
 
     return pio.to_html(
         fig, full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False}
-    )
-
-
-def _get_explanation_data(coordinator) -> dict:
-    """Bereidt SHAP data voor."""
-    context = coordinator.context
-    forecaster = coordinator.solar
-
-    if not hasattr(context, "forecast_df") or context.forecast_df is None:
-        return "Geen forecast data beschikbaar."
-
-    if not forecaster.model.is_fitted:
-        return "Model nog niet getraind."
-
-    try:
-        local_tz = datetime.now().astimezone().tzinfo
-        current_time = datetime.now(local_tz)
-        df = context.forecast_df.copy()
-
-        target_col = "power_ml_raw"
-
-        # 3. Zoek 'Nu'
-        target_time = current_time.astimezone(df["timestamp"].dt.tz)
-        idx_now = df["timestamp"].searchsorted(target_time)
-        idx_now = max(0, min(idx_now, len(df) - 1))
-
-        # 4. Slimme Logica: Nu of Piek?
-        prediction_now = df.iloc[idx_now][target_col]
-
-        # Als het donker is (< 0.05 kW), zoek de piek van de dag
-        if prediction_now < 0.05:
-            idx_max = df[target_col].argmax()
-            peak_val = df.iloc[idx_max][target_col]
-
-            if peak_val > 0.1:
-                row = df.iloc[[idx_max]].copy()
-                ts = row["timestamp"].dt.tz_convert(local_tz).iloc[0]
-                time_label = f"Piek om {ts.strftime('%H:%M')}"
-            else:
-                row = df.iloc[[idx_now]].copy()
-                time_label = "Nu (Nacht)"
-        else:
-            row = df.iloc[[idx_now]].copy()
-            time_label = "Nu"
-
-        # 5. Vraag SHAP waardes op
-        shap_data = forecaster.model.explain(row)
-
-        # 6. Formatteren en Opschonen
-        # Haal base en prediction eruit (kleine letters want SolarModel geeft lowercase terug)
-        base_val = shap_data.pop("base", "0.00")
-        pred_val = shap_data.pop("prediction", "0.00")
-
-        # Verwijder rommel
-        shap_data.pop("Info", None)
-        shap_data.pop("_meta_label", None)
-
-        label_map = {
-            "pv_estimate": "Solcast Basis",
-            "pv_estimate10": "Solcast Min (10%)",
-            "pv_estimate90": "Solcast Max (90%)",
-            "radiation": "Straling",
-            "hour_cos": "Tijdstip (Uur)",
-            "hour_sin": "Tijdstip (Cyclisch)",
-            "temp": "Temperatuur",
-            "cloud": "Bewolking",
-            "diffuse": "Diffuus Licht",
-            "tilted": "Dakhelling Effect",
-            "uncertainty": "Onzekerheid",
-            "wind": "Wind",
-            "doy_cos": "Seizoen",
-            "doy_sin": "Seizoen (Cyclisch)",
-        }
-
-        factors = []
-        for key, val_str in shap_data.items():
-            try:
-                val = float(val_str)
-                # Filter verwaarloosbare waardes (< 10 Watt)
-                if abs(val) < 0.01:
-                    continue
-
-                label = label_map.get(key, key)  # Vertaal of gebruik origineel
-
-                factors.append(
-                    {
-                        "label": label,
-                        "value": val_str,
-                        "abs_value": abs(val),
-                        "css_class": "val-pos" if val >= 0 else "val-neg",
-                    }
-                )
-            except Exception:
-                continue
-
-        # Sorteer op absolute impact (grootste bovenaan)
-        factors.sort(key=itemgetter("abs_value"), reverse=True)
-
-        return {
-            "time_label": time_label,
-            "base": base_val,
-            "prediction": pred_val,
-            "factors": factors,
-        }
-
-    except Exception as e:
-        logger.error(f"Error preparing explanation: {e}")
-        return None
-
-
-def _get_importance_plot_plotly(request: Request) -> str:
-    """
-    Genereert een Plotly Bar Chart met de feature importance.
-    Let op: Dit is rekenintensief, dus we doen dit op een beperkte set.
-    """
-    coordinator = request.app.state.coordinator
-    forecaster = coordinator.solar
-    database = coordinator.collector.database
-
-    # 1. Check: Is het model getraind?
-    if not forecaster.model.is_fitted:
-        return "<div class='p-4 text-muted'>Model nog niet getraind.</div>"
-
-    # 2. Data ophalen (Beperk tot laatste 14 dagen voor snelheid)
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
-    df_hist = database.get_history(cutoff_date)
-
-    if df_hist.empty:
-        return "<div class='p-4 text-muted'>Onvoldoende data voor analyse.</div>"
-
-    # 3. Filter op daglicht (cruciaal, anders klopt de importance niet)
-    # We gebruiken dezelfde logica als bij het trainen/analyseren
-    df_hist = df_hist.copy()
-    is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
-
-    df_train = df_hist[is_daytime].copy()
-    df_train = df_train.dropna(subset=["pv_actual", "pv_estimate"])
-
-    if len(df_train) < 10:
-        return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
-
-    # 4. Features voorbereiden
-    try:
-        X = forecaster.model._prepare_features(df_train)
-        y = df_train["pv_actual"].clip(0, coordinator.config.pv_max_kw)
-
-        # 5. Bereken Importance (n_repeats=2 houdt het snel genoeg voor een dashboard)
-        # Voor wetenschappelijke precisie wil je 10, voor een dashboard is 2-3 prima.
-        result = permutation_importance(
-            forecaster.model.model, X, y, n_repeats=3, random_state=42, n_jobs=-1
-        )
-    except Exception as e:
-        logger.error(f"Fout bij berekenen importance: {e}")
-        return "<div class='p-4 text-danger'>Kon importance niet berekenen.</div>"
-
-    # 6. Sorteren en Labelen
-    sorted_idx = result.importances_mean.argsort()
-
-    # Vertaal de labels naar leesbaar Nederlands
-    labels_raw = X.columns[sorted_idx]
-    labels_clean = []
-
-    label_map = {
-        "pv_estimate": "Solcast Basis",
-        "pv_estimate10": "Solcast Min (10%)",
-        "pv_estimate90": "Solcast Max (90%)",
-        "radiation": "Straling",
-        "hour_cos": "Tijdstip (Uur)",
-        "hour_sin": "Tijdstip (Cyclisch)",
-        "temp": "Temperatuur",
-        "cloud": "Bewolking",
-        "diffuse": "Diffuus Licht",
-        "tilted": "Dakhelling Effect",
-        "uncertainty": "Onzekerheid",
-        "wind": "Wind",
-        "doy_cos": "Seizoen",
-        "doy_sin": "Seizoen (Cyclisch)",
-    }
-
-    for label in labels_raw:
-        clean = label_map.get(label, label)  # Pak vertaling of origineel
-        labels_clean.append(clean)
-
-    values = result.importances_mean[sorted_idx]
-
-    # 7. Plotly Grafiek Maken
-    fig = go.Figure(
-        go.Bar(
-            x=values,
-            y=labels_clean,
-            orientation="h",
-            marker=dict(
-                color=values,
-                colorscale="Viridis",  # Of 'Blues', 'Magma'
-                showscale=False,
-            ),
-        )
-    )
-
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgb(28, 28, 28)",
-        plot_bgcolor="rgb(28, 28, 28)",
-        margin=dict(l=20, r=20, t=30, b=30),
-        height=400,
-        xaxis=dict(
-            title="Impact op voorspelling",
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.1)",
-        ),
-        yaxis=dict(showgrid=False),
-    )
-
-    return pio.to_html(
-        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )
 
 
