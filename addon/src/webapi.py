@@ -857,15 +857,14 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
 
 def _get_accuracy_plots(request, target_date) -> tuple:
     """
-    Plot de voorspelde waarden (van de nacht-snapshot) vs de actuele metingen.
-    Geeft 2 grafieken terug (Kamer en Boiler), inclusief de min/max doelbereiken.
+    Genereert vloeiende temperatuurgrafieken voor Kamer en Boiler met Setpoint en Marge.
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
     local_tz = datetime.now().astimezone().tzinfo
 
+    # 1. Data ophalen
     df_snap = database.get_predictions(target_date)
-
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
         tzinfo=local_tz
     )
@@ -874,172 +873,177 @@ def _get_accuracy_plots(request, target_date) -> tuple:
     if df_snap.empty and df_hist.empty:
         return "", ""
 
-    # --- Data Prep ---
+    # 2. Data voorbereiden
     if not df_hist.empty:
         df_hist = df_hist.copy()
         df_hist["ts_local"] = (
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
-
-        end_of_day = start_of_day + timedelta(days=1)
         mask = (df_hist["timestamp"].dt.tz_convert(local_tz) >= start_of_day) & (
-            df_hist["timestamp"].dt.tz_convert(local_tz) < end_of_day
+            df_hist["timestamp"].dt.tz_convert(local_tz)
+            < start_of_day + timedelta(days=1)
         )
         df_hist = df_hist[mask].sort_values("ts_local")
 
     if not df_snap.empty:
         df_snap = df_snap.copy()
         df_snap["ts_local"] = (
-            pd.to_datetime(df_snap["timestamp"])
-            .dt.tz_localize("UTC")
+            pd.to_datetime(df_snap["timestamp"], utc=True)
             .dt.tz_convert(local_tz)
             .dt.tz_localize(None)
         )
 
-    # --- Genereer Target Bands (min/max) rechtstreeks uit de optimizer ---
-    T = coordinator.optimizer.mpc.horizon
-    r_min_raw, r_max_raw, d_min_raw, d_max_raw = coordinator.optimizer.mpc._get_targets(
-        start_of_day, T
+    # 3. Targets ophalen (Unpack 6 waarden: min, max en ideaal target)
+    T = coordinator.optimizer.mpc.horizon + 1
+    r_min, r_max, d_min, d_max, r_target, d_target = (
+        coordinator.optimizer.mpc._get_targets(start_of_day, T)
     )
-
-    # Voeg een extra tijdstap toe aan het einde (middernacht volgende dag)
-    # zodat de step-line ('hv') strak tot het eind van de as doorloopt.
-    ts_range = [
-        start_of_day.replace(tzinfo=None) + timedelta(minutes=15 * t)
-        for t in range(T + 1)
+    ts_targets = [
+        start_of_day.replace(tzinfo=None) + timedelta(minutes=15 * t) for t in range(T)
     ]
 
-    r_min_arr = list(r_min_raw) + [r_min_raw[-1]]
-    r_max_arr = list(r_max_raw) + [r_max_raw[-1]]
-    d_max_arr = list(d_max_raw) + [d_max_raw[-1]]
+    start_ts = start_of_day.replace(tzinfo=None)
+    end_ts = start_ts + timedelta(days=1)
 
-    # Voor de boiler y-as schaal clippen we de *weergave* van de ondergrens (bijv. 10.0 naar 40.0)
-    # De logica (wanneer de boiler mag zakken naar 10) komt echter 1-op-1 direct uit je model.
-    d_min_vis = [max(40.0, val) for val in list(d_min_raw) + [d_min_raw[-1]]]
-
-    layout_args = dict(
+    # 4. Gemeenschappelijke layout instellingen (ZONDER yaxis)
+    common_layout = dict(
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
         plot_bgcolor="rgb(28, 28, 28)",
-        height=300,
+        height=320,
         margin=dict(l=40, r=20, t=30, b=40),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(title=None, showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
-        yaxis=dict(
-            title="Temperatuur (°C)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
+        xaxis=dict(
+            range=[start_ts, end_ts],
+            fixedrange=True,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.05)",
+            tickformat="%H:%M",
+            dtick=7200000,
         ),
     )
 
-    # ─── KAMER GRAFIEK ──────────────────────────────────────────
+    # 5. Helper voor Bandbreedte styling
+    def apply_band_style(fig, x, y_min, y_max, y_target, color):
+        # Marge (vlak) - Gebruik spline voor vloeiende overgangen
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_max,
+                mode="lines",
+                line=dict(width=0, shape="spline", smoothing=0.8),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_min,
+                mode="lines",
+                line=dict(width=0, shape="spline", smoothing=0.8),
+                fill="tonexty",
+                fillcolor=color.replace("0.1", "0.08"),
+                name="Marge",
+                showlegend=True,
+                hoverinfo="skip",
+            )
+        )
+        # Setpoint (stippellijn)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_target,
+                mode="lines",
+                line=dict(
+                    color=color.replace("0.1", "0.3"),
+                    width=1.5,
+                    dash="dot",
+                    shape="spline",
+                    smoothing=0.8,
+                ),
+                name="Setpoint",
+                showlegend=True,
+                hoverinfo="skip",
+            )
+        )
+
+    # --- 6. Kamer Grafiek ---
     fig_room = go.Figure()
-
-    # Min/Max Bands Kamer (zachte, vloeiende vakken, lichter transparant)
-    fig_room.add_trace(
-        go.Scatter(
-            x=ts_range,
-            y=r_max_arr,
-            mode="lines",
-            line=dict(width=0, shape="spline", smoothing=0.6),
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    fig_room.add_trace(
-        go.Scatter(
-            x=ts_range,
-            y=r_min_arr,
-            mode="lines",
-            line=dict(width=0, shape="spline", smoothing=0.6),
-            fill="tonexty",
-            fillcolor="rgba(208, 92, 227, 0.08)",
-            showlegend=True,
-            name="Doel bereik",
-            hoverinfo="skip",
-        )
+    apply_band_style(
+        fig_room, ts_targets, r_min, r_max, r_target, "rgba(208, 92, 227, 0.1)"
     )
 
-    if not df_hist.empty and "room_temp" in df_hist.columns:
+    if not df_hist.empty:
         fig_room.add_trace(
             go.Scatter(
                 x=df_hist["ts_local"],
                 y=df_hist["room_temp"],
-                name="Kamer Actueel",
-                line=dict(color="#d05ce3", width=2),
+                name="Actueel",
+                line=dict(color="#d05ce3", width=2.5),
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
-    if not df_snap.empty and "t_room_pred" in df_snap.columns:
+    if not df_snap.empty:
         fig_room.add_trace(
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_room_pred"],
-                name="Kamer Voorspeld",
+                name="Voorspeld",
                 line=dict(color="#d05ce3", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
+    fig_room.update_layout(**common_layout)
+    fig_room.update_yaxes(
+        title="Kamer Temp (°C)",
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.09)",
+        zeroline=False,
+    )
 
-    fig_room.update_layout(**layout_args)
-
-    # ─── BOILER GRAFIEK ─────────────────────────────────────────
+    # --- 7. Boiler Grafiek ---
     fig_dhw = go.Figure()
 
-    # Min/Max Bands Boiler (zachte, vloeiende vakken, lichter transparant)
-    fig_dhw.add_trace(
-        go.Scatter(
-            x=ts_range,
-            y=d_max_arr,
-            mode="lines",
-            line=dict(width=0, shape="spline", smoothing=0.6),
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    fig_dhw.add_trace(
-        go.Scatter(
-            x=ts_range,
-            y=d_min_vis,
-            mode="lines",
-            line=dict(width=0, shape="spline", smoothing=0.6),
-            fill="tonexty",
-            fillcolor="rgba(2, 207, 231, 0.08)",
-            showlegend=True,
-            name="Doel bereik",
-            hoverinfo="skip",
-        )
+    # Gebruik nu direct de ruwe arrays zonder clipping
+    apply_band_style(
+        fig_dhw, ts_targets, d_min, d_max, d_target, "rgba(2, 207, 231, 0.1)"
     )
 
-    if (
-        not df_hist.empty
-        and "dhw_top" in df_hist.columns
-        and "dhw_bottom" in df_hist.columns
-    ):
-        dhw_actual = (df_hist["dhw_top"] + df_hist["dhw_bottom"]) / 2
+    if not df_hist.empty:
+        dhw_act = (df_hist["dhw_top"] + df_hist["dhw_bottom"]) / 2
         fig_dhw.add_trace(
             go.Scatter(
                 x=df_hist["ts_local"],
-                y=dhw_actual,
-                name="Boiler Actueel",
-                line=dict(color="#02cfe7", width=2),
+                y=dhw_act,
+                name="Actueel",
+                line=dict(color="#02cfe7", width=2.5),
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
-    if not df_snap.empty and "t_dhw_pred" in df_snap.columns:
+    if not df_snap.empty:
         fig_dhw.add_trace(
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_dhw_pred"],
-                name="Boiler Voorspeld",
+                name="Voorspeld",
                 line=dict(color="#02cfe7", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
+    fig_dhw.update_layout(**common_layout)
+    # Range is verwijderd zodat de as automatisch schaalt (bijv. van 10 naar 55)
+    fig_dhw.update_yaxes(
+        title="Boiler Temp (°C)",
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.09)",
+        zeroline=False,
+    )
 
-    fig_dhw.update_layout(**layout_args)
-
+    # --- 8. Export ---
     html_room = pio.to_html(
         fig_room,
         full_html=False,
@@ -1221,5 +1225,5 @@ def _get_consumption_plot(request, target_date) -> str:
     )
 
     return pio.to_html(
-        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
     )

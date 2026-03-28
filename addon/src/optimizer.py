@@ -31,6 +31,26 @@ logger = logging.getLogger(__name__)
 # THERMAL MPC (DPP compliant)
 # =========================================================
 
+CLIMATE_CONFIG = {
+    "room": {
+        "target": [
+            ("00:00", 19.0, 0.5, 1.5),
+            ("09:00", 19.5, 0.5, 1.5),
+            ("17:00", 20.0, 0.5, 1.5),
+            ("22:00", 19.0, 0.5, 1.5),
+        ]
+    },
+    "dhw": {
+        "target": [
+            ("00:00", 20.0, 5.0, 30.0),
+            ("15:59", 20.0, 5.0, 30.0),
+            ("16:00", 50.0, 1.0, 5.0),
+            ("20:00", 50.0, 1.0, 5.0),
+            ("20:01", 20.0, 5.0, 30.0),
+        ]
+    },
+}
+
 
 class ThermalMPC:
     def __init__(self, ident, perf_map, hydraulic, res_dhw):
@@ -210,30 +230,56 @@ class ThermalMPC:
             constraints,
         )
 
-    def _get_targets(self, now, T):
-        r_min = np.zeros(T)
-        r_max = np.zeros(T)
-        d_min = np.zeros(T)
-        d_max = np.zeros(T)
+    def _get_interpolated_values(self, schedule, times_to_predict):
+        sched_mins = []
+        sched_vals = []
 
+        for entry in schedule:
+            t_str = entry[0]
+            vals = entry[1:]  # Pak (temp, low, high)
+            h, m = map(int, t_str.split(":"))
+            sched_mins.append(h * 60 + m)
+            sched_vals.append(vals)
+
+        idx = np.argsort(sched_mins)
+        sched_mins = np.array(sched_mins)[idx]
+        sched_vals = np.array(sched_vals)[idx]
+
+        # Wrap around logica
+        xp = np.concatenate(
+            [[sched_mins[-1] - 1440], sched_mins, [sched_mins[0] + 1440]]
+        )
+        fp = np.vstack([sched_vals[-1], sched_vals, sched_vals[0]])
+
+        query_mins = np.array([(t.hour * 60 + t.minute) for t in times_to_predict])
+
+        # Interpoleer alle 3 de kolommen (Target, Low, High)
+        interp_target = np.interp(query_mins, xp, fp[:, 0])
+        interp_low = np.interp(query_mins, xp, fp[:, 1])
+        interp_high = np.interp(query_mins, xp, fp[:, 2])
+
+        return interp_target, interp_low, interp_high
+
+    def _get_targets(self, now, T):
         local_tz = datetime.now().astimezone().tzinfo
         now_local = now.astimezone(local_tz)
+        future_times = [now_local + timedelta(hours=t * self.dt) for t in range(T)]
 
-        for t in range(T):
-            fut = now_local + timedelta(hours=t * self.dt)
-            h = fut.hour
+        # Kamer
+        r_t, r_l, r_h = self._get_interpolated_values(
+            CLIMATE_CONFIG["room"]["target"], future_times
+        )
+        r_min = r_t - r_l
+        r_max = r_t + r_h
 
-            if 17 <= h < 22:
-                r_min[t], r_max[t] = 20.0, 21.0
-            elif 11 <= h < 17:
-                r_min[t], r_max[t] = 19.5, 22.0
-            else:
-                r_min[t], r_max[t] = 19.0, 19.5
+        # Boiler
+        d_t, d_l, d_h = self._get_interpolated_values(
+            CLIMATE_CONFIG["dhw"]["target"], future_times
+        )
+        d_min = d_t - d_l
+        d_max = d_t + d_h
 
-            d_min[t] = 48.0 if 20 <= h < 21 else 10.0
-            d_max[t] = 55.0
-
-        return r_min, r_max, d_min, d_max
+        return r_min, r_max, d_min, d_max, r_t, d_t
 
     def solve(
         self,
@@ -260,7 +306,7 @@ class ThermalMPC:
         lag = self.ident.ufh_lag_steps
 
         # ── Toestand initialiseren ────────────────────────────────────────
-        r_min, r_max, d_min, d_max = self._get_targets(state["now"], T)
+        r_min, r_max, d_min, d_max, _, _ = self._get_targets(state["now"], T)
 
         self.P_t_room_init.value = float(state["room_temp"])
         self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)

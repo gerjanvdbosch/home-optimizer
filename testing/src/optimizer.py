@@ -37,7 +37,7 @@ CLIMATE_CONFIG = {
             ("00:00", 19.0, 0.5, 1.5),
             ("09:00", 19.5, 0.5, 1.5),
             ("17:00", 20.0, 0.5, 1.5),
-            ("22:00", 19.0, 0.5, 1.5)
+            ("22:00", 19.0, 0.5, 1.5),
         ]
     },
     "dhw": {
@@ -46,10 +46,11 @@ CLIMATE_CONFIG = {
             ("15:59", 20.0, 5.0, 30.0),
             ("16:00", 50.0, 1.0, 5.0),
             ("20:00", 50.0, 1.0, 5.0),
-            ("20:01", 20.0, 5.0, 30.0)
+            ("20:01", 20.0, 5.0, 30.0),
         ]
-    }
+    },
 }
+
 
 class ThermalMPC:
     def __init__(self, ident, perf_map, hydraulic, res_dhw):
@@ -245,7 +246,9 @@ class ThermalMPC:
         sched_vals = np.array(sched_vals)[idx]
 
         # Wrap around logica
-        xp = np.concatenate([[sched_mins[-1] - 1440], sched_mins, [sched_mins[0] + 1440]])
+        xp = np.concatenate(
+            [[sched_mins[-1] - 1440], sched_mins, [sched_mins[0] + 1440]]
+        )
         fp = np.vstack([sched_vals[-1], sched_vals, sched_vals[0]])
 
         query_mins = np.array([(t.hour * 60 + t.minute) for t in times_to_predict])
@@ -263,12 +266,16 @@ class ThermalMPC:
         future_times = [now_local + timedelta(hours=t * self.dt) for t in range(T)]
 
         # Kamer
-        r_t, r_l, r_h = self._get_interpolated_values(CLIMATE_CONFIG["room"]["target"], future_times)
+        r_t, r_l, r_h = self._get_interpolated_values(
+            CLIMATE_CONFIG["room"]["target"], future_times
+        )
         r_min = r_t - r_l
         r_max = r_t + r_h
 
         # Boiler
-        d_t, d_l, d_h = self._get_interpolated_values(CLIMATE_CONFIG["dhw"]["target"], future_times)
+        d_t, d_l, d_h = self._get_interpolated_values(
+            CLIMATE_CONFIG["dhw"]["target"], future_times
+        )
         d_min = d_t - d_l
         d_max = d_t + d_h
 
