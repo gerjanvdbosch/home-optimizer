@@ -1365,11 +1365,7 @@ def _get_solar_plot(request, target_date) -> str:
                 y=df_temp_15["temp"],
                 name="Buiten °C",
                 mode="lines",
-                line=dict(
-                    color="rgba(255,255,255,0.25)",
-                    width=1.5,
-                    shape="linear"
-                ),
+                line=dict(color="rgba(255,255,255,0.25)", width=1.5, shape="linear"),
                 yaxis="y2",
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
@@ -1394,7 +1390,7 @@ def _get_solar_plot(request, target_date) -> str:
                         color="rgba(255,255,255,0.25)",
                         width=1.5,
                         dash="dot",
-                        shape="linear"
+                        shape="linear",
                     ),
                     yaxis="y2",
                     showlegend=False,
