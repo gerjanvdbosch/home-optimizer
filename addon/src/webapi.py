@@ -67,6 +67,7 @@ def index(
     plot_html = _get_solar_forecast_plot(request, target_date, plan)
     accuracy_plot_room, accuracy_plot_dhw = _get_accuracy_plots(request, target_date)
     consumption_plot = _get_consumption_plot(request, target_date)
+    solar_plot = _get_solar_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
 
@@ -273,6 +274,7 @@ def index(
             "accuracy_plot_room": accuracy_plot_room,
             "accuracy_plot_dhw": accuracy_plot_dhw,
             "consumption_plot": consumption_plot,
+            "solar_plot": solar_plot,
             "details": details,
             "measurements": measurements_data,
             "plan": plan_display,
@@ -1222,6 +1224,199 @@ def _get_consumption_plot(request, target_date) -> str:
         ),
         bargap=0.15,
         bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
+    )
+
+
+def _get_solar_plot(request, target_date) -> str:
+    """
+    Genereert een uurgrafiek (bar chart) van actuele vs voorspelde zonproductie (kWh)
+    met buitentemperatuur als overlay op de rechter y-as.
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = datetime.now().astimezone().tzinfo
+
+    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
+    end_of_day = start_of_day + timedelta(days=1)
+
+    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+    df_snap = database.get_predictions(target_date)
+
+    # --- 1. Actuele productie per uur ---
+    if not df_hist.empty:
+        df_hist = df_hist.copy()
+        df_hist["ts_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
+        mask = (df_hist["ts_local"] >= start_of_day) & (
+            df_hist["ts_local"] < end_of_day
+        )
+        df_hist = df_hist[mask].copy()
+
+        df_hist["pv_actual"] = (
+            pd.to_numeric(df_hist.get("pv_actual", 0), errors="coerce")
+            .fillna(0)
+            .clip(lower=0)
+        )
+
+        df_hist["temp"] = pd.to_numeric(df_hist.get("temp", None), errors="coerce")
+
+        df_hist_hourly = (
+            df_hist.set_index("ts_local")[["pv_actual", "temp"]]
+            .resample("1h")
+            .agg({"pv_actual": "sum", "temp": "mean"})
+        )
+        df_hist_hourly["pv_actual"] *= 0.25  # kW → kWh
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(
+            columns=["pv_actual", "temp"], index=pd.DatetimeIndex([])
+        )
+
+    # --- 2. Voorspelde productie per uur (uit snapshot) ---
+    if not df_snap.empty:
+        df_snap = df_snap.copy()
+        df_snap["ts_local"] = pd.to_datetime(
+            df_snap["timestamp"], utc=True
+        ).dt.tz_convert(local_tz)
+        mask_snap = (df_snap["ts_local"] >= start_of_day) & (
+            df_snap["ts_local"] < end_of_day
+        )
+        df_snap = df_snap[mask_snap].copy()
+
+        df_snap["pred_solar"] = (
+            pd.to_numeric(df_snap.get("p_solar_pred", 0), errors="coerce").fillna(0)
+            * 0.25  # kW → kWh
+        )
+        df_snap["pred_temp"] = pd.to_numeric(
+            df_snap.get("t_out_pred", None), errors="coerce"
+        )
+
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_solar", "pred_temp"]]
+            .resample("1h")
+            .agg({"pred_solar": "sum", "pred_temp": "mean"})
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(
+            columns=["pred_solar", "pred_temp"], index=pd.DatetimeIndex([])
+        )
+
+    # --- 3. Samenvoegen ---
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
+    )
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+    df_plot = df_plot.reindex(full_idx).infer_objects(copy=False)
+
+    # Alleen solar bars naar None bij 0 — temperatuur mag 0 zijn
+    for col in ["pv_actual", "pred_solar"]:
+        if col in df_plot.columns:
+            df_plot[col] = (
+                df_plot[col]
+                .fillna(0.0)
+                .astype(float)
+                .apply(lambda x: x if x > 0.001 else None)
+            )
+
+    # Combineer actuele en voorspelde temperatuur tot één lijn
+    # Actueel waar beschikbaar, anders voorspelling
+    df_plot["temp_line"] = df_plot["temp"].combine_first(df_plot["pred_temp"])
+
+    # --- 4. Plotly ---
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pv_actual"],
+            name="Actueel",
+            marker_color="#FF9100",
+            yaxis="y1",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_solar"],
+            name="Verwacht",
+            marker_color="rgba(255, 145, 0, 0.2)",
+            marker_line=dict(color="#FF9100", width=2),
+            yaxis="y1",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    # Temperatuurlijn — gesplitst in actueel (solid) en voorspelling (stippel)
+    # Actueel gedeelte
+    temp_actual = df_plot["temp"].dropna()
+    if not temp_actual.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=temp_actual.index,
+                y=temp_actual.values,
+                name="Buiten °C",
+                mode="lines",
+                line=dict(color="rgba(255,255,255,0.45)", width=1.5),
+                yaxis="y2",
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+
+    # Voorspelling gedeelte (vanaf laatste actuele meting)
+    last_actual_ts = (
+        temp_actual.index[-1] if not temp_actual.empty else df_plot.index[0]
+    )
+    temp_pred = df_plot.loc[df_plot.index >= last_actual_ts, "pred_temp"].dropna()
+    if not temp_pred.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=temp_pred.index,
+                y=temp_pred.values,
+                name="Buiten °C (verwacht)",
+                mode="lines",
+                line=dict(color="rgba(255,255,255,0.25)", width=1.5, dash="dot"),
+                yaxis="y2",
+                showlegend=False,
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            title=None,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            tickformat="%H:%M",
+            dtick=7200000,
+        ),
+        yaxis=dict(
+            title="Productie (kWh)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        yaxis2=dict(
+            title="Temp (°C)",
+            overlaying="y",
+            side="right",
+            showgrid=False,
+            tickfont=dict(color="rgba(255,255,255,0.35)"),
+            zeroline=False,
+        ),
+        bargap=0.15,
+        bargroupgap=0.50,
     )
 
     return pio.to_html(
