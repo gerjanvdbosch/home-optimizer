@@ -34,24 +34,20 @@ logger = logging.getLogger(__name__)
 CLIMATE_CONFIG = {
     "room": {
         "target": [
-            ("00:00", 19.0),
-            ("09:00", 19.5),
-            ("17:00", 20.0),
-            ("22:00", 19.0)
-        ],
-        "offset_low": 0.5,  # Altijd minimaal (target - 0.5)
-        "offset_high": 1.5   # Maximaal (target + 1.5) voor opslag/zon
+            ("00:00", 19.0, 0.5, 1.5),
+            ("09:00", 19.5, 0.5, 1.5),
+            ("17:00", 20.0, 0.5, 1.5),
+            ("22:00", 19.0, 0.5, 1.5)
+        ]
     },
     "dhw": {
         "target": [
-            ("00:00", 10.0),
-            ("15:59", 10.0),
-            ("16:00", 50.0), # Deadline: 50 graden
-            ("20:00", 40.0), # Tot 20:00 warm houden
-            ("20:01", 10.0)
-        ],
-        "offset_low": 2.0,   # Minimaal 48 graden om 16:00 (50 - 2)
-        "offset_high": 40.0  # <--- BELANGRIJK: Hiermee blijft de opwarm-lijn
+            ("00:00", 20.0, 5.0, 30.0),
+            ("15:59", 20.0, 5.0, 30.0),
+            ("16:00", 50.0, 1.0, 5.0),
+            ("20:00", 50.0, 1.0, 5.0),
+            ("20:01", 20.0, 5.0, 30.0)
+        ]
     }
 }
 
@@ -234,52 +230,49 @@ class ThermalMPC:
         )
 
     def _get_interpolated_values(self, schedule, times_to_predict):
-        """
-        Interpoleren van targets op basis van een lijst met (tijd, waarde) tuples.
-        """
-        # 1. Converteer schedule naar minuten en waarden
-        # We voegen 00:00 en 24:00 toe om de cirkel rond te maken (wrap-around)
         sched_mins = []
         sched_vals = []
 
-        for t_str, val in schedule:
+        for entry in schedule:
+            t_str = entry[0]
+            vals = entry[1:]  # Pak (temp, low, high)
             h, m = map(int, t_str.split(":"))
             sched_mins.append(h * 60 + m)
-            sched_vals.append(val)
+            sched_vals.append(vals)
 
-        # Sorteer op tijd (voor de zekerheid)
         idx = np.argsort(sched_mins)
         sched_mins = np.array(sched_mins)[idx]
         sched_vals = np.array(sched_vals)[idx]
 
-        # Wrap around logica: voeg gisteravond laat en morgenochtend vroeg toe
+        # Wrap around logica
         xp = np.concatenate([[sched_mins[-1] - 1440], sched_mins, [sched_mins[0] + 1440]])
-        fp = np.concatenate([[sched_vals[-1]], sched_vals, [sched_vals[0]]])
+        fp = np.vstack([sched_vals[-1], sched_vals, sched_vals[0]])
 
-        # 2. Bereken minuten sinds middernacht voor alle gevraagde tijden
         query_mins = np.array([(t.hour * 60 + t.minute) for t in times_to_predict])
 
-        # 3. Gebruik numpy interpolation
-        return np.interp(query_mins, xp, fp)
+        # Interpoleer alle 3 de kolommen (Target, Low, High)
+        interp_target = np.interp(query_mins, xp, fp[:, 0])
+        interp_low = np.interp(query_mins, xp, fp[:, 1])
+        interp_high = np.interp(query_mins, xp, fp[:, 2])
+
+        return interp_target, interp_low, interp_high
 
     def _get_targets(self, now, T):
         local_tz = datetime.now().astimezone().tzinfo
         now_local = now.astimezone(local_tz)
-
-        # Maak een lijst van alle toekomstige tijdstippen
         future_times = [now_local + timedelta(hours=t * self.dt) for t in range(T)]
 
-        # Kamer targets
-        r_targets = self._get_interpolated_values(CLIMATE_CONFIG["room"]["target"], future_times)
-        r_min = r_targets - CLIMATE_CONFIG["room"]["offset_low"]
-        r_max = r_targets + CLIMATE_CONFIG["room"]["offset_high"]
+        # Kamer
+        r_t, r_l, r_h = self._get_interpolated_values(CLIMATE_CONFIG["room"]["target"], future_times)
+        r_min = r_t - r_l
+        r_max = r_t + r_h
 
-        # Boiler targets
-        d_targets = self._get_interpolated_values(CLIMATE_CONFIG["dhw"]["target"], future_times)
-        d_min = d_targets - CLIMATE_CONFIG["dhw"]["offset_low"]
-        d_max = d_targets + CLIMATE_CONFIG["dhw"]["offset_high"]
+        # Boiler
+        d_t, d_l, d_h = self._get_interpolated_values(CLIMATE_CONFIG["dhw"]["target"], future_times)
+        d_min = d_t - d_l
+        d_max = d_t + d_h
 
-        return r_min, r_max, d_min, d_max, r_targets, d_targets
+        return r_min, r_max, d_min, d_max, r_t, d_t
 
     def solve(
         self,
