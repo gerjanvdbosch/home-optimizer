@@ -42,9 +42,19 @@ class Coordinator:
 
         self.collector.update_sensors()
 
+        if self.context.forecast_df is not None:
+            df = self.context.forecast_df.copy()
+            df = self.solar.update_nowcast(df)
+            df = self.load.update_nowcast(df)
+
+            self.context.forecast_df = df
+
+    def update_forecast(self):
+        self.collector.update_forecast()
+
         df = self.context.forecast_df_raw.copy()
-        df = self.solar.update(df)
-        df = self.load.update(df)
+        df = self.solar.update_forecast(df)
+        df = self.load.update_forecast(df)
 
         self.context.forecast_df = df
 
@@ -135,7 +145,7 @@ if __name__ == "__main__":
         next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
 
         scheduler.add_job(
-            collector.update_forecast, "interval", minutes=15, id="forecast"
+            coordinator.update_forecast, "interval", minutes=15, id="forecast"
         )
         scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
         scheduler.add_job(collector.update_history, "interval", minutes=1, id="history")
@@ -158,9 +168,8 @@ if __name__ == "__main__":
 
         logger.info("[System] Engine running")
 
-        collector.update_forecast()
+        coordinator.update_forecast()
         collector.update_history()
-
         coordinator.tick()
 
         scheduler.start()

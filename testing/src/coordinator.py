@@ -153,7 +153,7 @@ if __name__ == "__main__":
         next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
 
         scheduler.add_job(
-            coordinator.update_forecast, "interval", seconds=30, id="forecast"
+            coordinator.update_forecast, "interval", minutes=2, id="forecast"
         )
         scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
         scheduler.add_job(
@@ -175,9 +175,8 @@ if __name__ == "__main__":
             id="optimize",
         )
 
-        collector.update_history()
-
         coordinator.update_forecast()
+        collector.update_history()
         coordinator.tick()
         # coordinator.train()
 
