@@ -1234,7 +1234,7 @@ def _get_consumption_plot(request, target_date) -> str:
 def _get_solar_plot(request, target_date) -> str:
     """
     Genereert een uurgrafiek (bar chart) van actuele vs voorspelde zonproductie (kWh)
-    met buitentemperatuur als overlay op de rechter y-as.
+    met buitentemperatuur als vloeiende overlay op de rechter y-as.
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
@@ -1261,19 +1261,13 @@ def _get_solar_plot(request, target_date) -> str:
             .clip(lower=0)
         )
 
-        df_hist["temp"] = pd.to_numeric(df_hist.get("temp", None), errors="coerce")
-
         df_hist_hourly = (
-            df_hist.set_index("ts_local")[["pv_actual", "temp"]]
-            .resample("1h")
-            .agg({"pv_actual": "sum", "temp": "mean"})
+            df_hist.set_index("ts_local")[["pv_actual"]].resample("1h").sum()
+            * 0.25  # kW → kWh
         )
-        df_hist_hourly["pv_actual"] *= 0.25  # kW → kWh
         df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
     else:
-        df_hist_hourly = pd.DataFrame(
-            columns=["pv_actual", "temp"], index=pd.DatetimeIndex([])
-        )
+        df_hist_hourly = pd.DataFrame(columns=["pv_actual"], index=pd.DatetimeIndex([]))
 
     # --- 2. Voorspelde productie per uur (uit snapshot) ---
     if not df_snap.empty:
@@ -1295,24 +1289,40 @@ def _get_solar_plot(request, target_date) -> str:
         )
 
         df_snap_hourly = (
-            df_snap.set_index("ts_local")[["pred_solar", "pred_temp"]]
-            .resample("1h")
-            .agg({"pred_solar": "sum", "pred_temp": "mean"})
+            df_snap.set_index("ts_local")[["pred_solar"]].resample("1h").sum()
         )
         df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
     else:
         df_snap_hourly = pd.DataFrame(
-            columns=["pred_solar", "pred_temp"], index=pd.DatetimeIndex([])
+            columns=["pred_solar"], index=pd.DatetimeIndex([])
         )
 
-    # --- 3. Samenvoegen ---
+    # --- 3. Kwartier temperatuurdata voor vloeiende lijn ---
+    if not df_hist.empty and "temp" in df_hist.columns:
+        df_temp_15 = df_hist.set_index("ts_local")[["temp"]].copy()
+        df_temp_15["temp"] = pd.to_numeric(df_temp_15["temp"], errors="coerce")
+        df_temp_15 = df_temp_15.dropna()
+        df_temp_15.index = df_temp_15.index.tz_localize(None)
+    else:
+        df_temp_15 = pd.DataFrame(columns=["temp"], index=pd.DatetimeIndex([]))
+
+    # Voorspelde temperatuur uit snapshot (kwartier)
+    if not df_snap.empty and "pred_temp" in df_snap.columns:
+        df_temp_pred_15 = df_snap.copy()
+        df_temp_pred_15["ts_naive"] = df_temp_pred_15["ts_local"].dt.tz_localize(None)
+        df_temp_pred_15 = df_temp_pred_15.set_index("ts_naive")[["pred_temp"]].dropna()
+    else:
+        df_temp_pred_15 = pd.DataFrame(
+            columns=["pred_temp"], index=pd.DatetimeIndex([])
+        )
+
+    # --- 4. Samenvoegen voor bars ---
     full_idx = pd.date_range(
         start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
     )
     df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
     df_plot = df_plot.reindex(full_idx).infer_objects(copy=False)
 
-    # Alleen solar bars naar None bij 0 — temperatuur mag 0 zijn
     for col in ["pv_actual", "pred_solar"]:
         if col in df_plot.columns:
             df_plot[col] = (
@@ -1322,11 +1332,7 @@ def _get_solar_plot(request, target_date) -> str:
                 .apply(lambda x: x if x > 0.001 else None)
             )
 
-    # Combineer actuele en voorspelde temperatuur tot één lijn
-    # Actueel waar beschikbaar, anders voorspelling
-    df_plot["temp_line"] = df_plot["temp"].combine_first(df_plot["pred_temp"])
-
-    # --- 4. Plotly ---
+    # --- 5. Plotly ---
     fig = go.Figure()
 
     fig.add_trace(
@@ -1351,40 +1357,52 @@ def _get_solar_plot(request, target_date) -> str:
         )
     )
 
-    # Temperatuurlijn — gesplitst in actueel (solid) en voorspelling (stippel)
-    # Actueel gedeelte
-    temp_actual = df_plot["temp"].dropna()
-    if not temp_actual.empty:
+    # Actuele temperatuur — vloeiende lijn op kwartierdata
+    if not df_temp_15.empty:
         fig.add_trace(
             go.Scatter(
-                x=temp_actual.index,
-                y=temp_actual.values,
+                x=df_temp_15.index,
+                y=df_temp_15["temp"],
                 name="Buiten °C",
                 mode="lines",
-                line=dict(color="rgba(255,255,255,0.45)", width=1.5),
+                line=dict(
+                    color="rgba(255,255,255,0.45)",
+                    width=1.5,
+                    shape="spline",
+                    smoothing=0.8,
+                ),
                 yaxis="y2",
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
 
-    # Voorspelling gedeelte (vanaf laatste actuele meting)
-    last_actual_ts = (
-        temp_actual.index[-1] if not temp_actual.empty else df_plot.index[0]
-    )
-    temp_pred = df_plot.loc[df_plot.index >= last_actual_ts, "pred_temp"].dropna()
-    if not temp_pred.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=temp_pred.index,
-                y=temp_pred.values,
-                name="Buiten °C (verwacht)",
-                mode="lines",
-                line=dict(color="rgba(255,255,255,0.25)", width=1.5, dash="dot"),
-                yaxis="y2",
-                showlegend=False,
-                hovertemplate="%{y:.1f} °C<extra></extra>",
-            )
+    # Voorspelde temperatuur — stippel vanaf laatste actuele meting
+    last_actual_ts = df_temp_15.index[-1] if not df_temp_15.empty else None
+    if not df_temp_pred_15.empty:
+        pred_from = (
+            df_temp_pred_15[df_temp_pred_15.index >= last_actual_ts]
+            if last_actual_ts is not None
+            else df_temp_pred_15
         )
+        if not pred_from.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=pred_from.index,
+                    y=pred_from["pred_temp"],
+                    name="Buiten °C (verwacht)",
+                    mode="lines",
+                    line=dict(
+                        color="rgba(255,255,255,0.25)",
+                        width=1.5,
+                        dash="dot",
+                        shape="spline",
+                        smoothing=0.8,
+                    ),
+                    yaxis="y2",
+                    showlegend=False,
+                    hovertemplate="%{y:.1f} °C<extra></extra>",
+                )
+            )
 
     fig.update_layout(
         barmode="group",
@@ -1415,8 +1433,8 @@ def _get_solar_plot(request, target_date) -> str:
             tickfont=dict(color="rgba(255,255,255,0.35)"),
             zeroline=False,
         ),
-        bargap=0.15,
-        bargroupgap=0.50,
+        bargap=0.50,
+        bargroupgap=0.05,
     )
 
     return pio.to_html(
