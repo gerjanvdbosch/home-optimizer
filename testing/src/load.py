@@ -303,28 +303,29 @@ class LoadForecaster:
 
         return lag_lookup
 
-    def update(self, df):
-        current_time = self.context.now
+    def update_nowcast(self, df):
+        if "load_ml" not in df.columns:
+            return df
 
-        # 1. Gerichte lag-lookup: slechts 2 × N timestamps ipv 8 dagen aan rijen
-        #    Profiel zit al in het model (geheugen) — geen DB-call meer voor profile
-        lag_lookup = self._get_lag_lookup(df["timestamp"])
-
-        # 2. Base Prediction (Machine Learning)
-        df["load_ml"] = self.model.predict(df, lag_lookup=lag_lookup)
-
-        # 3. Update NowCaster state
-        idx_now = df["timestamp"].searchsorted(current_time)
+        idx_now = df["timestamp"].searchsorted(self.context.now)
         row_now = df.iloc[min(idx_now, len(df) - 1)]
 
-        predicted_now = row_now["load_ml"]
-
         self.nowcaster.update(
-            actual_kw=self.context.stable_load, forecasted_kw=predicted_now
+            actual_kw=self.context.stable_load,
+            forecasted_kw=row_now["load_ml"],
         )
 
-        # 3. Apply NowCaster (Correctie projecteren over de tijd)
-        df["load_corrected"] = self.nowcaster.apply(df, current_time, "load_ml")
+        df["load_corrected"] = self.nowcaster.apply(df, self.context.now, "load_ml")
+
+        self.context.load_bias = round(self.nowcaster.current_ratio, 3)
+
+        return df
+
+    def update_forecast(self, df):
+        lag_lookup = self._get_lag_lookup(df["timestamp"])
+
+        df["load_ml"] = self.model.predict(df, lag_lookup=lag_lookup)
+        df["load_corrected"] = self.nowcaster.apply(df, self.context.now, "load_ml")
 
         self.context.load_bias = round(self.nowcaster.current_ratio, 3)
 
