@@ -1182,8 +1182,8 @@ class ComfortCostCalculator:
         tank_under = kwh_per_K_tank * avg_price
         room_over = room_under * 0.5
         tank_over = tank_under * 0.3
-        terminal_room = room_under * 0.25
-        terminal_tank = tank_under * 0.50
+        terminal_room = room_under * 0.8
+        terminal_tank = tank_under * 0.5
 
         logger.info(
             f"[ComfortCost] prijs={avg_price:.3f}  "

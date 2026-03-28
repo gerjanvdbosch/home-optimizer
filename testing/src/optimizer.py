@@ -217,7 +217,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.50) + (valve_switches * 0.05)
+        switching = (cp.sum(self.comp_start) * 0.15) + (valve_switches * 0.05)
 
         stored_heat = (
             self.t_room[T] * self.P_val_terminal_room
