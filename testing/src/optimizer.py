@@ -43,11 +43,11 @@ CLIMATE_CONFIG = {
     "dhw": {
         "target": [
             ("00:00", 20.0, 5.0, 30.0),
-            ("12:00", 20.0, 5.0, 35.0),
-            ("15:59", 20.0, 5.0, 35.0),
-            ("16:00", 50.0, 1.0, 5.0),
-            ("20:00", 50.0, 1.0, 5.0),
-            ("20:01", 20.0, 5.0, 30.0),
+            ("13:00", 20.0, 5.0, 35.0),
+            ("17:59", 20.0, 5.0, 35.0),
+            ("18:00", 50.0, 1.0, 5.0),
+            ("19:00", 50.0, 1.0, 5.0),
+            ("19:01", 20.0, 5.0, 30.0),
         ]
     },
 }
@@ -571,8 +571,8 @@ class Optimizer:
         self.perf_map.train(df)
         self.ident.train(df)
         self.hydraulic.train(df)
-        # self.res_ufh.train(df)
-        # self.res_dhw.train(df)
+        self.res_ufh.train(df)
+        self.res_dhw.train(df)
         self.shutter.train(df)
 
         # Herbouw MPC zodat R, C en lag correct zijn na training
