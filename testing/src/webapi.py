@@ -990,7 +990,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_room_pred"],
-                name="Voorspeld",
+                name="Voorspelling",
                 line=dict(color="#d05ce3", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
@@ -1028,7 +1028,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
             go.Scatter(
                 x=df_snap["ts_local"],
                 y=df_snap["t_dhw_pred"],
-                name="Voorspeld",
+                name="Voorspelling",
                 line=dict(color="#02cfe7", width=1.5, dash="dash"),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
