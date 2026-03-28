@@ -1420,7 +1420,7 @@ def _get_solar_plot(request, target_date) -> str:
             gridcolor="rgba(255,255,255,0.1)",
         ),
         yaxis2=dict(
-            title="Temperatuur (°C)",
+            title="Temp (°C)",
             overlaying="y",
             side="right",
             showgrid=False,
