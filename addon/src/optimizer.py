@@ -315,7 +315,7 @@ class ThermalMPC:
         self.P_t_air_init.value = t_room_init
         # Beste schatting t_mass: gelijk aan lucht tenzij UFH recent aan was
         # (zonder vloersensor kunnen we niet beter)
-        self.P_t_mass_init.value = float(state.get("t_mass_est", t_room_init))
+        self.P_t_mass_init.value = float(state.get("t_mass_est", t_room_init  + 1.5))
         self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
