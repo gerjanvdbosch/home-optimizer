@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
         api.state.coordinator = coordinator
 
-        next_run = datetime.now(timezone.utc) + timedelta(seconds=10)
+        next_run = datetime.now(timezone.utc) + timedelta(seconds=15)
 
         scheduler.add_job(
             coordinator.update_forecast, "interval", minutes=2, id="forecast"
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         coordinator.update_forecast()
         collector.update_history()
         coordinator.tick()
-        # coordinator.train()
+        coordinator.train()
 
         scheduler.start()
 

@@ -453,6 +453,10 @@ class SystemIdentificator:
         self.K_tank = 0.25
         self.K_loss_dhw = 0.01
         self.ufh_lag_steps = 4
+        self.C_air = 3.0  # kWh/K  — lucht + lichte oppervlakken (snelle massa)
+        self.C_mass = 27.0  # kWh/K  — vloer + beton (trage massa)
+        self.R_im = 1.2  # K/kW   — koppeling massa ↔ lucht
+        self.R_oa = 15.0  # K/kW   — verlies lucht → buiten (= R initieel)
         self._load()
 
     def _load(self):
@@ -466,10 +470,16 @@ class SystemIdentificator:
             self.K_tank = d.get("K_tank", 0.25)
             self.K_loss_dhw = d.get("K_loss_dhw", 0.01)
             self.ufh_lag_steps = d.get("ufh_lag_steps", 4)
+            self.C_air = d.get("C_air", 3.0)
+            self.C_mass = d.get("C_mass", 27.0)
+            self.R_im = d.get("R_im", 1.2)
+            self.R_oa = d.get("R_oa", self.R)
             logger.info(
                 f"[SysID] Geladen: R={self.R:.1f} C={self.C:.1f} "
                 f"K_emit={self.K_emit:.3f} K_tank={self.K_tank:.3f} "
                 f"Lag={self.ufh_lag_steps * 15}m K_loss={self.K_loss_dhw:.4f}"
+                f"C_air={self.C_air:.2f} C_mass={self.C_mass:.2f} "
+                f"R_im={self.R_im:.3f} R_oa={self.R_oa:.2f}"
             )
         except Exception as e:
             logger.error(f"[SysID] Laden mislukt: {e}")
@@ -515,6 +525,7 @@ class SystemIdentificator:
         self._fit_k_emit(df_proc)
         self._fit_k_tank(df_proc)
         self._fit_dhw_loss(df_proc)
+        self._fit_two_state()
 
         logger.info(
             f"[SysID] Klaar: R={self.R:.1f} C={self.C:.1f} "
@@ -529,6 +540,10 @@ class SystemIdentificator:
                 "K_tank": self.K_tank,
                 "K_loss_dhw": self.K_loss_dhw,
                 "ufh_lag_steps": self.ufh_lag_steps,
+                "C_air": self.C_air,
+                "C_mass": self.C_mass,
+                "R_im": self.R_im,
+                "R_oa": self.R_oa,
             },
             self.path,
         )
@@ -688,6 +703,78 @@ class SystemIdentificator:
             loss = -(d["dT_tank"] / d["dt_hours"]) / t_diff
             self.K_loss_dhw = float(np.clip(loss.quantile(0.25), 0.001, 0.05))
             logger.info(f"[SysID] K_loss_dhw={self.K_loss_dhw:.4f}")
+
+    def _fit_two_state(self):
+        """
+        2-state parameterschatting.
+
+        Wat zeker is (uit data):
+          R_oa = R            — verliespad lucht → buiten
+          C_air + C_mass = C  — massa-behoud
+          τ_lag = R_im × C_air — gemeten vertraging
+
+        Wat een gefundeerde prior is (niet meetbaar zonder vloersensor):
+          C_air ≈ 8% van C    — lucht + lichte oppervlakken, zware bouw
+          R_im afgeleid uit τ_lag en C_air
+
+        De solar-event methode wordt NIET gebruikt: de meting (0.29 kWh/K)
+        valt consequent buiten het fysisch verdedigbare bereik, wat betekent
+        dat de proxy (PV × 0.15) niet representatief is voor dit huis.
+        """
+
+        # ── 1. R_oa: zeker, identiek aan totale verliesweerstand ─────────────
+        self.R_oa = self.R
+
+        # ── 2. C_air: prior op basis van bouwtype ────────────────────────────
+        # Zware bouw (beton/baksteen + UFH): lucht + meubels + lichte laag
+        # is typisch 5-12% van totale thermische massa.
+        # We gebruiken 8% als centraal anker voor zware bouw.
+        # Zonder vloersensor is dit de meest eerlijke schatting.
+        C_air_prior_frac = 0.08
+        C_air_prior = C_air_prior_frac * self.C
+
+        # Harde fysische grenzen:
+        #   Ondergrens: lucht alleen in ~100m² woning ≈ 0.35 kWh/K, met meubels ~0.6
+        #   Bovengrens: 15% van C (lichte bouw maximum)
+        c_air_lower = max(0.6, 0.04 * self.C)
+        c_air_upper = 0.15 * self.C
+        self.C_air = float(np.clip(C_air_prior, c_air_lower, c_air_upper))
+
+        # ── 3. R_im: afgeleid uit gemeten lag en C_air ────────────────────────
+        # τ_lag = R_im × C_air  →  R_im = τ_lag / C_air
+        # Dit is de enige vergelijking die R_im direct koppelt aan meetdata.
+        tau_lag_h = (self.ufh_lag_steps * 15) / 60.0  # uren
+        R_im_from_lag = tau_lag_h / max(self.C_air, 0.3)
+
+        # Sanity check: R_im moet kleiner zijn dan 1/K_emit (totale weerstand)
+        R_total = 1.0 / max(self.K_emit, 0.05)
+        R_im_max = 0.85 * R_total  # vloer→lucht is hooguit 85% van totaal
+
+        self.R_im = float(np.clip(R_im_from_lag, 0.3, R_im_max))
+
+        # ── 4. C_mass: rest ───────────────────────────────────────────────────
+        self.C_mass = float(max(self.C - self.C_air, 5.0))
+
+        # ── 5. Consistentiecheck ─────────────────────────────────────────────
+        tau_air_implied = self.R_im * self.C_air * 60  # minuten
+        tau_mass_implied = self.R_im * self.C_mass * 60
+
+        logger.info(
+            f"[SysID] 2-state: "
+            f"C_air={self.C_air:.2f} kWh/K ({self.C_air / self.C * 100:.1f}%), "
+            f"C_mass={self.C_mass:.2f} kWh/K, "
+            f"R_im={self.R_im:.3f} K/kW, R_oa={self.R_oa:.2f} K/kW | "
+            f"τ_lucht={tau_air_implied:.0f}min (input lag={self.ufh_lag_steps * 15}min), "
+            f"τ_massa={tau_mass_implied:.0f}min"
+        )
+
+        # Waarschuw als R_im geclipt werd (prior en lag zijn inconsistent)
+        if R_im_from_lag > R_im_max:
+            logger.warning(
+                f"[SysID] R_im uit lag ({R_im_from_lag:.3f}) > R_total ({R_total:.3f}). "
+                f"Lag-meting en K_emit zijn inconsistent. R_im geclipped naar {self.R_im:.3f}. "
+                f"Overweeg C_air_prior_frac te verhogen."
+            )
 
 
 # =========================================================
@@ -1027,8 +1114,7 @@ class DhwResidualPredictor:
 
         df_feat = add_cyclic_time_features(forecast_df.copy(), "timestamp")
         predictions = self.model.predict(df_feat[self.features])
-        predictions = np.where(predictions < 0.8, 0.0, predictions)
-        return predictions * 1.5
+        return np.where(predictions < 0.8, 0.0, predictions)
 
 
 # =========================================================

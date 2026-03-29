@@ -71,12 +71,14 @@ class ThermalMPC:
 
     def _build_problem(self):
         T = self.horizon
-        R = self.ident.R
-        C = self.ident.C
-        lag = self.ident.ufh_lag_steps
+        C_air = self.ident.C_air  # snelle massa [kWh/K]
+        C_mass = self.ident.C_mass  # trage massa  [kWh/K]
+        R_im = self.ident.R_im  # massa ↔ lucht [K/kW]
+        R_oa = self.ident.R_oa  # lucht → buiten [K/kW]
 
         # ── Parameters ────────────────────────────────────────────────────
-        self.P_t_room_init = cp.Parameter()
+        self.P_t_air_init = cp.Parameter()
+        self.P_t_mass_init = cp.Parameter()
         self.P_t_dhw_init = cp.Parameter()
         self.P_init_ufh = cp.Parameter(nonneg=True)
         self.P_init_dhw = cp.Parameter(nonneg=True)
@@ -108,7 +110,6 @@ class ThermalMPC:
         self.P_fixed_pel_ufh = cp.Parameter(T, nonneg=True)
         self.P_fixed_pel_dhw = cp.Parameter(T, nonneg=True)
 
-        self.P_hist_heat = cp.Parameter(lag, nonneg=True)
         self.P_dhw_demand = cp.Parameter(T, nonneg=True)
 
         # ── Variabelen ────────────────────────────────────────────────────
@@ -123,7 +124,8 @@ class ThermalMPC:
         self.p_export = cp.Variable(T, nonneg=True)
         self.p_solar_self = cp.Variable(T, nonneg=True)
 
-        self.t_room = cp.Variable(T + 1)
+        self.t_air = cp.Variable(T + 1)  # luchttemperatuur (snel, comfort)
+        self.t_mass = cp.Variable(T + 1)  # vloeremperatuur  (traag, buffer)
         self.t_dhw = cp.Variable(T + 1, nonneg=True)
 
         self.s_room_low = cp.Variable(T, nonneg=True)
@@ -135,7 +137,8 @@ class ThermalMPC:
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
-            self.t_room[0] == self.P_t_room_init,
+            self.t_air[0] == self.P_t_air_init,
+            self.t_mass[0] == self.P_t_mass_init,
             self.t_dhw[0] == self.P_t_dhw_init,
         ]
 
@@ -145,39 +148,37 @@ class ThermalMPC:
         for t in range(1, T):
             constraints += [self.comp_start[t] >= comp_on[t] - comp_on[t - 1]]
 
-        # Exponentieel aflopende kernel voor vloertraagheid
-        tau = max(1.0, lag / 2.0)
-        kernel_np = np.array([np.exp(-i / tau) for i in range(lag)])
-        kernel_np /= kernel_np.sum()
-        kernel = cp.Constant(kernel_np[::-1])
-
-        p_th_ufh_future = cp.multiply(self.p_el_ufh, self.P_cop_ufh)
-        p_th_ufh_lagged = cp.hstack([self.P_hist_heat, p_th_ufh_future])
-
         for t in range(T):
             p_el_wp = self.p_el_ufh[t] + self.p_el_dhw[t]
             p_th_dhw_now = self.p_el_dhw[t] * self.P_cop_dhw[t]
-            active_heat = kernel @ p_th_ufh_lagged[t : t + lag]
+            p_th_ufh_now = self.p_el_ufh[t] * self.P_cop_ufh[t]
 
             constraints += [
                 # Stroombalans
                 p_el_wp + self.P_base_load[t] == self.p_grid[t] + self.p_solar_self[t],
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
-                # Thermische balans kamer
-                self.t_room[t + 1]
-                == self.t_room[t]
+                # Luchttemperatuur
+                self.t_air[t + 1]
+                == self.t_air[t]
                 + (
-                    (active_heat - (self.t_room[t] - self.P_temp_out[t]) / R)
-                    * self.dt
-                    / C
+                    (self.t_mass[t] - self.t_air[t]) / R_im  # warmte van vloer
+                    - (self.t_air[t] - self.P_temp_out[t]) / R_oa  # verlies naar buiten
                 )
-                + (self.P_solar_gain[t] * self.dt),
+                * self.dt
+                / C_air
+                + self.P_solar_gain[t] * self.dt,  # zon treft ALLEEN lucht
+                # Vloermassa
+                self.t_mass[t + 1]
+                == self.t_mass[t]
+                + (p_th_ufh_now - (self.t_mass[t] - self.t_air[t]) / R_im)
+                * self.dt
+                / C_mass,
                 # Thermische balans boiler
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
                 + (
                     (p_th_dhw_now * self.dt) / self.ident.C_tank
-                    - (self.t_dhw[t] - self.t_room[t])
+                    - (self.t_dhw[t] - self.t_air[t])
                     * (self.ident.K_loss_dhw * self.dt)
                 )
                 - self.P_dhw_demand[t],
@@ -186,9 +187,10 @@ class ThermalMPC:
                 # Vermogen is exact het geleerde profiel als hij aan staat
                 self.p_el_ufh[t] == self.ufh_on[t] * self.P_fixed_pel_ufh[t],
                 self.p_el_dhw[t] == self.dhw_on[t] * self.P_fixed_pel_dhw[t],
+                # Comfort wordt gemeten in de lucht (thermostaat)
+                self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
+                self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 # Comfortlimieten met slack
-                self.t_room[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
-                self.t_room[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
                 self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
             ]
@@ -220,8 +222,10 @@ class ThermalMPC:
         )
         switching = (cp.sum(self.comp_start) * 0.15) + (valve_switches * 0.05)
 
+        # Terminal value op t_mass: vloer houdt warmte vast na horizoneinde.
+        # t_air aan het einde is vluchtig (lekt snel weg via R_oa).
         stored_heat = (
-            self.t_room[T] * self.P_val_terminal_room
+            self.t_mass[T] * self.P_val_terminal_room
             + self.t_dhw[T] * self.P_val_terminal_dhw
             - self.P_terminal_offset
         )
@@ -286,7 +290,6 @@ class ThermalMPC:
         self,
         state: dict,
         forecast_df: pd.DataFrame,
-        recent_history_df: pd.DataFrame,
         solar_gains: np.ndarray,
         avg_price: float,
         export_price: float,
@@ -304,12 +307,15 @@ class ThermalMPC:
         export_price      : teruglevertarief [euro/kWh]
         """
         T = self.horizon
-        lag = self.ident.ufh_lag_steps
 
         # ── Toestand initialiseren ────────────────────────────────────────
-        r_min, r_max, d_min, d_max, _, _ = self._get_targets(state["now"], T)
+        r_min, r_max, d_min, d_max, r_t, d_t = self._get_targets(state["now"], T)
 
-        self.P_t_room_init.value = float(state["room_temp"])
+        t_room_init = float(state["room_temp"])
+        self.P_t_air_init.value = t_room_init
+        # Beste schatting t_mass: gelijk aan lucht tenzij UFH recent aan was
+        # (zonder vloersensor kunnen we niet beter)
+        self.P_t_mass_init.value = float(state.get("t_mass_est", t_room_init))
         self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
@@ -349,14 +355,6 @@ class ThermalMPC:
         delta_t_env = np.maximum(0.0, r_min + 1.0 - forecast_df.temp.values[:T])
         self.P_strictness.value = (3.0 + 0.10 * (delta_t_env**2)) * effective_prices
 
-        # ── Historische lag-buffer ────────────────────────────────────────
-        hist_heat = np.zeros(lag)
-        if not recent_history_df.empty and "wp_output" in recent_history_df.columns:
-            vals = recent_history_df["wp_output"].tail(lag).values
-            if len(vals) > 0:
-                hist_heat[-len(vals) :] = vals
-        self.P_hist_heat.value = hist_heat.astype(float)
-
         # ── SLP-iteraties met convergentiecheck ──────────────────────────
         linearizer = PhysicsLinearizer(
             perf_map=self.perf_map,
@@ -367,15 +365,15 @@ class ThermalMPC:
         )
 
         t_out_arr = forecast_df.temp.values[:T].astype(float)
-        guessed_t_room = np.full(T, float(state["room_temp"]))
+        guessed_t_mass = np.full(T, t_room_init)
         guessed_t_dhw = np.full(T, float(state["dhw_bottom"]))
 
         # Sentinel: convergentiecheck slaat eerste iteratie altijd over
         p_el_ufh_prev = np.full(T, -999.0)
         p_el_dhw_prev = np.full(T, -999.0)
 
-        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, _, _ = linearizer.compute(
-            t_out_arr, guessed_t_room, guessed_t_dhw
+        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
+            t_out_arr, guessed_t_mass, guessed_t_dhw
         )
 
         # Terminal value updaten op basis van actuele COP-schatting
@@ -384,14 +382,23 @@ class ThermalMPC:
 
         # Terminal value: marginale waarde van 1K extra aan einde horizon
         # Begrensd op comfort-penalty schaal — anders domineert het de doelfunctie
-        val_per_K_room = effective_max_price * self.ident.C / avg_cop_ufh_h
+        val_per_K_room = effective_max_price * self.ident.C_mass / avg_cop_ufh_h
+
+        C_comfort = self.ident.C_air + (
+            self.ident.C_mass * 0.1
+        )  # Lucht + 10% van de massa
+
+        recovery_h_room = 2.0
+        recovery_h_dhw = 1.0
 
         # ── Comfortboetes (dimensioneel correct) ─────────────────────────
         costs = ComfortCostCalculator(
-            C_room=self.ident.C,
+            C_room=C_comfort,
             C_tank=self.ident.C_tank,
             avg_cop_ufh=avg_cop_ufh_h,
             avg_cop_dhw=avg_cop_dhw_h,
+            recovery_hours_room=recovery_h_room,
+            recovery_hours_dhw=recovery_h_dhw,
         ).compute(avg_price)
 
         self.P_cost_room_under.value = costs["room_under"]
@@ -410,9 +417,10 @@ class ThermalMPC:
 
         self.P_val_terminal_room.value = val_per_K_room
         self.P_val_terminal_dhw.value = val_per_K_dhw
+
         self.P_terminal_offset.value = (
-            float(t_out_arr[-1]) * val_per_K_room
-            + float(guessed_t_room[-1]) * val_per_K_dhw
+            r_t[-1] * val_per_K_room  # Waarde woonkamer t.o.v. target
+            + d_t[-1] * val_per_K_dhw  # Waarde boiler t.o.v. target
         )
 
         logger.info(
@@ -422,10 +430,9 @@ class ThermalMPC:
         )
 
         for iteration in range(linearizer.max_iter):
-
             # 1. Bereken bevroren vermogen en COP op basis van huidige schatting
             p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
-                t_out_arr, guessed_t_room, guessed_t_dhw
+                t_out_arr, guessed_t_mass, guessed_t_dhw
             )
 
             self.plan_t_sup_ufh = sup_ufh
@@ -474,43 +481,35 @@ class ThermalMPC:
                 break
 
             # 6. Toestandstrajectorie bijwerken voor volgende iteratie
-            if self.t_room.value is not None:
-                new_t_room = self.t_room.value[:-1].copy()
+            if self.t_air.value is not None:
+                new_t_mass = self.t_mass.value[:-1].copy()
                 new_t_dhw = self.t_dhw.value[:-1].copy()
 
                 if iteration == 0:
-                    guessed_t_room = new_t_room
+                    guessed_t_mass = new_t_mass
                     guessed_t_dhw = new_t_dhw
                 else:
-                    # Hoe groter de verandering, hoe voorzichtiger updaten (stabiliteit)
-                    # Hoe verder geconvergeerd, hoe sneller updaten (snelheid)
-                    delta_room = float(np.mean(np.abs(new_t_room - guessed_t_room)))
+                    delta_mass = float(np.mean(np.abs(new_t_mass - guessed_t_mass)))
                     delta_dhw = float(np.mean(np.abs(new_t_dhw - guessed_t_dhw)))
 
-                    # Alpha daalt bij grote sprongen, stijgt bij kleine (0.1 - 0.6 bereik)
-                    alpha_room = float(np.clip(0.5 / (1.0 + delta_room), 0.15, 0.60))
+                    alpha_mass = float(np.clip(0.6 / (1.0 + delta_mass), 0.20, 0.70))
                     alpha_dhw = float(np.clip(0.3 / (1.0 + delta_dhw), 0.10, 0.45))
 
-                    logger.info(
-                        f"[SLP] iter={iteration} alpha_room={alpha_room:.2f} (delta={delta_room:.3f})  "
-                        f"alpha_dhw={alpha_dhw:.2f} (delta={delta_dhw:.3f})"
-                    )
-
-                    guessed_t_room = (
-                        alpha_room * new_t_room + (1 - alpha_room) * guessed_t_room
+                    guessed_t_mass = (
+                        alpha_mass * new_t_mass + (1 - alpha_mass) * guessed_t_mass
                     )
                     guessed_t_dhw = (
                         alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw
                     )
 
         # Update met correct data
-        if self.t_dhw.value is not None:
-            final_t_room = self.t_room.value[:-1]
+        if self.t_mass.value is not None:
+            final_t_mass = self.t_mass.value[:-1]
             final_t_dhw = self.t_dhw.value[:-1]
-
             p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
-                t_out_arr, final_t_room, final_t_dhw
+                t_out_arr, final_t_mass, final_t_dhw
             )
+
             self.plan_p_el_ufh = p_el_ufh
             self.plan_p_el_dhw = p_el_dhw
             self.plan_t_sup_ufh = sup_ufh
@@ -518,27 +517,21 @@ class ThermalMPC:
             self.P_cop_ufh.value = cop_ufh
             self.P_cop_dhw.value = cop_dhw
 
-        if self.t_room.value is not None:
+        if self.t_air.value is not None:
             ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]
             if ufh_steps:
                 for t in [ufh_steps[0], ufh_steps[-1]]:
                     logger.info(
                         f"[Debug] t={t:3d} UFH_on  "
-                        f"t_room={self.t_room.value[t + 1]:.2f}  "
+                        f"t_air={self.t_air.value[t + 1]:.2f}  "
+                        f"t_mass={self.t_mass.value[t + 1]:.2f}  "
                         f"s_low={self.s_room_low.value[t]:.4f}  "
-                        f"s_high={self.s_room_high.value[t]:.4f}  "
                         f"r_min={self.P_room_min.value[t]:.1f}"
                     )
                 logger.info(
-                    f"[Debug] UFH totaal {len(ufh_steps)} stappen  "
-                    f"terminal_room={self.t_room.value[T]:.2f} - {float(t_out_arr[-1]):.1f} = "
-                    f"{self.t_room.value[T] - float(t_out_arr[-1]):.2f}K * "
-                    f"{self.P_val_terminal_room.value:.4f} = "
-                    f"{(self.t_room.value[T] - float(t_out_arr[-1])) * self.P_val_terminal_room.value:.4f}€  "
-                    f"terminal_dhw={self.t_dhw.value[T]:.2f} - {self.t_room.value[T]:.1f} = "
-                    f"{self.t_dhw.value[T] - self.t_room.value[T]:.2f}K * "
-                    f"{self.P_val_terminal_dhw.value:.4f} = "
-                    f"{(self.t_dhw.value[T] - float(t_out_arr[-1])) * self.P_val_terminal_dhw.value:.4f}€"
+                    f"[Debug] UFH {len(ufh_steps)} stappen  "
+                    f"terminal t_mass={self.t_mass.value[T]:.2f}  "
+                    f"t_air={self.t_air.value[T]:.2f}"
                 )
 
 
@@ -549,6 +542,7 @@ class ThermalMPC:
 
 class Optimizer:
     def __init__(self, config, database):
+        self._t_mass_estimate = None
         self.db = database
         self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path, config.tank_liters)
@@ -558,7 +552,6 @@ class Optimizer:
         )
         self.res_dhw = DhwResidualPredictor(config.dhw_model_path)
         self.shutter = ShutterPredictor(config.shutter_model_path)
-
         self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic, self.res_dhw)
 
     def train(self, days_back: int = 730):
@@ -596,21 +589,6 @@ class Optimizer:
             "dhw_bottom": context.dhw_bottom,
         }
 
-        # Recente geschiedenis voor de lag-buffer
-        cutoff = context.now - timedelta(hours=4)
-        raw_hist = self.db.get_history(cutoff_date=cutoff)
-
-        recent_history_df = pd.DataFrame()
-        if not raw_hist.empty:
-            raw_hist = raw_hist.copy()
-            raw_hist.set_index("timestamp", inplace=True)
-            recent_history_df = (
-                raw_hist.resample("15min")
-                .mean(numeric_only=True)
-                .fillna(0)
-                .reset_index()
-            )
-
         # Zonopwarming voorspellen
         shutter_room = float(getattr(context, "shutter_room", 100.0))
         shutters = self.shutter.predict(context.forecast_df, shutter_room)
@@ -621,15 +599,20 @@ class Optimizer:
             f"gem={np.mean(solar_gains):.3f} K/uur"
         )
 
+        if self._t_mass_estimate is not None:
+            state["t_mass_est"] = self._t_mass_estimate
+
         # Oplossen
         self.mpc.solve(
             state=state,
             forecast_df=context.forecast_df,
-            recent_history_df=recent_history_df,
             solar_gains=solar_gains,
             avg_price=avg_price,
             export_price=export_price,
         )
+
+        if self.mpc.t_mass.value is not None:
+            self._t_mass_estimate = float(self.mpc.t_mass.value[1])
 
         # Lege uitvoer bij solver-fout
         if self.mpc.p_el_ufh.value is None:
@@ -730,7 +713,7 @@ class Optimizer:
         d_on = self.mpc.dhw_on.value
         p_u = self.mpc.plan_p_el_ufh
         p_d = self.mpc.plan_p_el_dhw
-        t_r = self.mpc.t_room.value
+        t_r = self.mpc.t_air.value
         t_d = self.mpc.t_dhw.value
         u_cop = self.mpc.P_cop_ufh.value
         d_cop = self.mpc.P_cop_dhw.value
