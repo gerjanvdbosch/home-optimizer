@@ -860,6 +860,46 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
     return table_data
 
 
+def _get_day_data(database, target_date: date, local_tz):
+    """
+    Haalt zowel de historie als de voorspellingen (inclusief gisteren ivm UTC) op,
+    converteert deze naar lokale tijd en filtert strak op de gevraagde dag (00:00 - 24:00).
+    Retourneert: (df_hist, df_snap, start_of_day, end_of_day)
+    """
+    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
+    end_of_day = start_of_day + timedelta(days=1)
+
+    # --- 1. Historie ---
+    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+    if not df_hist.empty:
+        df_hist = df_hist.copy()
+        df_hist["ts_local"] = pd.to_datetime(
+            df_hist["timestamp"], utc=True
+        ).dt.tz_convert(local_tz)
+        df_hist = df_hist[
+            (df_hist["ts_local"] >= start_of_day) & (df_hist["ts_local"] < end_of_day)
+        ].copy()
+
+    # --- 2. Voorspellingen (Snapshots) ---
+    df_today = database.get_predictions(target_date)
+    df_yest = database.get_predictions(target_date - timedelta(days=1))
+
+    if df_today.empty and df_yest.empty:
+        df_snap = pd.DataFrame()
+    else:
+        df_snap = (
+            pd.concat([df_yest, df_today]).drop_duplicates(subset=["timestamp"]).copy()
+        )
+        df_snap["ts_local"] = pd.to_datetime(
+            df_snap["timestamp"], utc=True
+        ).dt.tz_convert(local_tz)
+        df_snap = df_snap[
+            (df_snap["ts_local"] >= start_of_day) & (df_snap["ts_local"] < end_of_day)
+        ].copy()
+
+    return df_hist, df_snap, start_of_day, end_of_day
+
+
 def _get_accuracy_plots(request, target_date) -> tuple:
     """
     Genereert vloeiende temperatuurgrafieken voor Kamer en Boiler met Setpoint en Marge.
@@ -868,35 +908,21 @@ def _get_accuracy_plots(request, target_date) -> tuple:
     database = coordinator.collector.database
     local_tz = datetime.now().astimezone().tzinfo
 
-    # 1. Data ophalen
-    df_snap = database.get_predictions(target_date)
-    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
-        tzinfo=local_tz
+    # 1. Data ophalen & direct filteren voor deze dag
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
     )
-    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
 
     if df_snap.empty and df_hist.empty:
         return "", ""
 
-    # 2. Data voorbereiden
+    # 2. Data voorbereiden (timezone info verwijderen voor plotly lijn)
     if not df_hist.empty:
-        df_hist = df_hist.copy()
-        df_hist["ts_local"] = (
-            df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
-        )
-        mask = (df_hist["timestamp"].dt.tz_convert(local_tz) >= start_of_day) & (
-            df_hist["timestamp"].dt.tz_convert(local_tz)
-            < start_of_day + timedelta(days=1)
-        )
-        df_hist = df_hist[mask].sort_values("ts_local")
+        df_hist["ts_local"] = df_hist["ts_local"].dt.tz_localize(None)
+        df_hist = df_hist.sort_values("ts_local")
 
     if not df_snap.empty:
-        df_snap = df_snap.copy()
-        df_snap["ts_local"] = (
-            pd.to_datetime(df_snap["timestamp"], utc=True)
-            .dt.tz_convert(local_tz)
-            .dt.tz_localize(None)
-        )
+        df_snap["ts_local"] = df_snap["ts_local"].dt.tz_localize(None)
 
     # 3. Targets ophalen (Unpack 6 waarden: min, max en ideaal target)
     T = coordinator.optimizer.mpc.horizon + 1
@@ -1073,29 +1099,15 @@ def _get_consumption_plot(request, target_date) -> str:
     database = coordinator.collector.database
     local_tz = datetime.now().astimezone().tzinfo
 
-    df_snap = database.get_predictions(target_date)
-    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
-    end_of_day = start_of_day + timedelta(days=1)
-
-    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
+    )
 
     # --- 1. Actueel Verbruik ---
     if not df_hist.empty:
-        df_hist = df_hist.copy()
-        df_hist["ts_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
-        mask = (df_hist["ts_local"] >= start_of_day) & (
-            df_hist["ts_local"] < end_of_day
-        )
-        df_hist = df_hist[mask].copy()
-
         df_hist["wp_actual"] = pd.to_numeric(
             df_hist.get("wp_actual", 0), errors="coerce"
         ).fillna(0)
-        df_hist["hvac_mode"] = (
-            pd.to_numeric(df_hist.get("hvac_mode", 0), errors="coerce")
-            .fillna(0)
-            .round()
-        )
 
         df_hist["act_ufh"] = 0.0
         df_hist.loc[df_hist["hvac_mode"] == 2, "act_ufh"] = df_hist["wp_actual"] * 0.25
@@ -1116,15 +1128,6 @@ def _get_consumption_plot(request, target_date) -> str:
 
     # --- 2. Verwacht Verbruik ---
     if not df_snap.empty:
-        df_snap = df_snap.copy()
-        df_snap["ts_local"] = pd.to_datetime(
-            df_snap["timestamp"], utc=True
-        ).dt.tz_convert(local_tz)
-        mask_snap = (df_snap["ts_local"] >= start_of_day) & (
-            df_snap["ts_local"] < end_of_day
-        )
-        df_snap = df_snap[mask_snap].copy()
-
         df_snap["pred_ufh"] = (
             pd.to_numeric(df_snap.get("p_el_ufh_pred", 0), errors="coerce").fillna(0)
             * 0.25
@@ -1244,21 +1247,12 @@ def _get_solar_plot(request, target_date) -> str:
     database = coordinator.collector.database
     local_tz = datetime.now().astimezone().tzinfo
 
-    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
-    end_of_day = start_of_day + timedelta(days=1)
-
-    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
-    df_snap = database.get_predictions(target_date)
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
+    )
 
     # --- 1. Actuele productie per uur ---
     if not df_hist.empty:
-        df_hist = df_hist.copy()
-        df_hist["ts_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
-        mask = (df_hist["ts_local"] >= start_of_day) & (
-            df_hist["ts_local"] < end_of_day
-        )
-        df_hist = df_hist[mask].copy()
-
         df_hist["pv_actual"] = (
             pd.to_numeric(df_hist.get("pv_actual", 0), errors="coerce")
             .fillna(0)
@@ -1275,15 +1269,6 @@ def _get_solar_plot(request, target_date) -> str:
 
     # --- 2. Voorspelde productie per uur (uit snapshot) ---
     if not df_snap.empty:
-        df_snap = df_snap.copy()
-        df_snap["ts_local"] = pd.to_datetime(
-            df_snap["timestamp"], utc=True
-        ).dt.tz_convert(local_tz)
-        mask_snap = (df_snap["ts_local"] >= start_of_day) & (
-            df_snap["ts_local"] < end_of_day
-        )
-        df_snap = df_snap[mask_snap].copy()
-
         df_snap["pred_solar"] = (
             pd.to_numeric(df_snap.get("p_solar_pred", 0), errors="coerce").fillna(0)
             * 0.25  # kW → kWh
@@ -1415,21 +1400,12 @@ def _get_base_load_plot(request, target_date) -> str:
     database = coordinator.collector.database
     local_tz = datetime.now().astimezone().tzinfo
 
-    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
-    end_of_day = start_of_day + timedelta(days=1)
-
-    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
-    df_snap = database.get_predictions(target_date)
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
+    )
 
     # --- 1. Actuele base load per uur ---
     if not df_hist.empty:
-        df_hist = df_hist.copy()
-        df_hist["ts_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
-        mask = (df_hist["ts_local"] >= start_of_day) & (
-            df_hist["ts_local"] < end_of_day
-        )
-        df_hist = df_hist[mask].copy()
-
         df_hist["grid_import"] = pd.to_numeric(
             df_hist.get("grid_import", 0), errors="coerce"
         ).fillna(0)
@@ -1460,15 +1436,6 @@ def _get_base_load_plot(request, target_date) -> str:
 
     # --- 2. Voorspelde base load per uur (uit snapshot) ---
     if not df_snap.empty:
-        df_snap = df_snap.copy()
-        df_snap["ts_local"] = pd.to_datetime(
-            df_snap["timestamp"], utc=True
-        ).dt.tz_convert(local_tz)
-        mask_snap = (df_snap["ts_local"] >= start_of_day) & (
-            df_snap["ts_local"] < end_of_day
-        )
-        df_snap = df_snap[mask_snap].copy()
-
         # Ondersteun 'p_load_pred' of 'load_pred' afhankelijk van hoe het opgeslagen wordt
         load_col = "p_load_pred" if "p_load_pred" in df_snap.columns else "load_pred"
         df_snap["pred_base"] = (

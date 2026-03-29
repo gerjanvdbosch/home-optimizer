@@ -102,7 +102,6 @@ class Coordinator:
 
         # Sla het plan op in de context voor de UI of verdere verwerking
         self.context.result = result
-
         self.save_prediction()
 
     def save_prediction(self):
@@ -158,12 +157,6 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
         scheduler.add_job(
             collector.update_history, "interval", seconds=60, id="history"
-        )
-        scheduler.add_job(
-            coordinator.save_prediction,
-            "cron",
-            minute=5,
-            id="prediction",
         )
         scheduler.add_job(coordinator.tick, "interval", seconds=60, id="tick")
         scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
