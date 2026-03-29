@@ -62,6 +62,9 @@ class ThermalMPC:
         self.horizon = 96
         self.dt = 0.25
 
+        self._last_t_mass_model = None
+        self._last_t_air_pred = None
+
         self.plan_t_sup_ufh = np.zeros(self.horizon)
         self.plan_t_sup_dhw = np.zeros(self.horizon)
         self.plan_p_el_ufh = np.zeros(self.horizon)
@@ -286,6 +289,88 @@ class ThermalMPC:
 
         return r_min, r_max, d_min, d_max, r_t, d_t
 
+    def _robust_trend(self, recent_df: pd.DataFrame) -> float:
+        """Schat dT/dt via Weighted Least Squares over de laatste 2 uur."""
+        df = recent_df.tail(8).copy()
+        if len(df) < 4:
+            logger.warning(
+                f"[Optimizer] Te weinig data voor trend (slechts {len(df)} punten)"
+            )
+            return 0.0
+
+        # Regime-check: negeer data voor een HVAC switch
+        if df["hvac_mode"].nunique() > 1:
+            df = df[df["hvac_mode"] == df["hvac_mode"].iloc[-1]]
+            if len(df) < 3:
+                logger.warning(
+                    f"[Optimizer] Na regime-wissel slechts {len(df)} punten over"
+                )
+                return 0.0
+
+        t0 = df["timestamp"].iloc[0]
+        x = (df["timestamp"] - t0).dt.total_seconds().values / 3600.0
+        y = df["room_temp"].values
+
+        weights = np.exp(x - x[-1])
+        W = np.diag(weights)
+        A = np.vstack([x, np.ones(len(x))]).T
+
+        try:
+            a, _ = np.linalg.lstsq(W @ A, W @ y, rcond=None)[0]
+            logger.info(
+                f"[Optimizer] WLS trend: dT/dt={a:.3f} K/h over {len(df)} punten"
+            )
+            return float(a)
+        except Exception as e:
+            logger.warning(f"[Optimizer] WLS trend failed: {e}")
+            return 0.0
+
+    def _get_steady_state(self, t_air: float, t_out: float) -> float:
+        """Bereken T_mass op basis van thermisch evenwicht (geen dynamiek)."""
+        q_loss = (t_air - t_out) / self.ident.R_oa
+        return float(t_air + (self.ident.R_im * q_loss))
+
+    def update_and_get_initial_state(
+        self,
+        state: dict,
+        recent_df: pd.DataFrame,
+        forecast_df: pd.DataFrame,
+        current_solar_gain: float,
+    ) -> float:
+        """
+        De 'State Observer'. Bepaalt de start-temperatuur van de vloer.
+        """
+        t_air_meas = float(state["room_temp"])
+        t_out_now = float(forecast_df.temp.iloc[0])
+
+        # 1. Bepaal of we een koude start hebben of een observer-update
+        if self._last_t_air_pred is None or self._last_t_mass_model is None:
+            # KOUDE START: Gebruik Fysische Inversie
+            dT_dt = self._robust_trend(recent_df)
+
+            # Q_mass = C_air * (dT/dt - solar) + Q_loss
+            q_mass = (self.ident.C_air * (dT_dt - current_solar_gain)) + (
+                t_air_meas - t_out_now
+            ) / self.ident.R_oa
+            t_mass_init = t_air_meas + (self.ident.R_im * q_mass)
+
+            logger.info(
+                f"[MPC-Engine] Koude start inversie: T_mass={t_mass_init:.2f}°C"
+            )
+        else:
+            # RUNTIME: Luenberger Observer
+            error = t_air_meas - self._last_t_air_pred
+            K = np.clip(self.dt / (self.ident.R_im * self.ident.C_air), 0.05, 0.5)
+
+            t_mass_init = self._last_t_mass_model + K * error
+            logger.info(
+                f"[MPC-Engine] Observer update: K={K:.3f}, Error={error:.3f}K -> T_mass={t_mass_init:.2f}°C"
+            )
+
+        # Sanity check
+        t_mass_init = float(np.clip(t_mass_init, t_air_meas - 1.0, t_air_meas + 5.0))
+        return t_mass_init
+
     def solve(
         self,
         state: dict,
@@ -293,6 +378,7 @@ class ThermalMPC:
         solar_gains: np.ndarray,
         avg_price: float,
         export_price: float,
+        recent_df: pd.DataFrame,
     ):
         """
         Los het MILP op via SLP-iteraties.
@@ -313,9 +399,12 @@ class ThermalMPC:
 
         t_room_init = float(state["room_temp"])
         self.P_t_air_init.value = t_room_init
-        # Beste schatting t_mass: gelijk aan lucht tenzij UFH recent aan was
-        # (zonder vloersensor kunnen we niet beter)
-        self.P_t_mass_init.value = float(state.get("t_mass_est", t_room_init  + 1.5))
+
+        t_mass_init = self.update_and_get_initial_state(
+            state, recent_df, forecast_df, solar_gains[0]
+        )
+
+        self.P_t_mass_init.value = t_mass_init
         self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
@@ -482,6 +571,9 @@ class ThermalMPC:
 
             # 6. Toestandstrajectorie bijwerken voor volgende iteratie
             if self.t_air.value is not None:
+                self._last_t_air_pred = float(self.t_air.value[1])
+                self._last_t_mass_model = float(self.t_mass.value[1])
+
                 new_t_mass = self.t_mass.value[:-1].copy()
                 new_t_dhw = self.t_dhw.value[:-1].copy()
 
@@ -542,7 +634,6 @@ class ThermalMPC:
 
 class Optimizer:
     def __init__(self, config, database):
-        self._t_mass_estimate = None
         self.db = database
         self.perf_map = HPPerformanceMap(config.hp_model_path)
         self.ident = SystemIdentificator(config.rc_model_path, config.tank_liters)
@@ -572,15 +663,13 @@ class Optimizer:
         self.mpc._build_problem()
 
     def resolve(self, context: Context, avg_price: float, export_price: float):
-        """
-        Bereken het optimale plan voor de komende 24 uur.
+        # 1. Data verzamelen
+        recent_df = self.db.get_history(cutoff_date=context.now - timedelta(hours=2))
 
-        Parameters
-        ----------
-        context      : huidige context (sensoren, forecast, tijdstip)
-        avg_price    : importprijs [euro/kWh] — lever dit van buiten aan
-        export_price : teruglevertarief [euro/kWh]
-        """
+        shutter_room = float(getattr(context, "shutter_room", 100.0))
+        shutters = self.shutter.predict(context.forecast_df, shutter_room)
+        solar_gains = self.res_ufh.predict(context.forecast_df, shutters)
+
         state = {
             "now": context.now,
             "hvac_mode": context.hvac_mode.value,
@@ -599,9 +688,6 @@ class Optimizer:
             f"gem={np.mean(solar_gains):.3f} K/uur"
         )
 
-        if self._t_mass_estimate is not None:
-            state["t_mass_est"] = self._t_mass_estimate
-
         # Oplossen
         self.mpc.solve(
             state=state,
@@ -609,6 +695,7 @@ class Optimizer:
             solar_gains=solar_gains,
             avg_price=avg_price,
             export_price=export_price,
+            recent_df=recent_df,
         )
 
         if self.mpc.t_mass.value is not None:
@@ -760,8 +847,8 @@ class Optimizer:
                     "t_out": f"{context.forecast_df.temp.iloc[t]:.2f}",
                     "p_solar": f"{context.forecast_df.power_corrected.iloc[t]:.2f}",
                     "p_load": f"{context.forecast_df.load_corrected.iloc[t]:.2f}",
-                    "t_room": f"{t_r[t + 1]:.2f}",
-                    "t_dhw": f"{t_d[t + 1]:.2f}",
+                    "t_room": f"{t_r[t]:.2f}",
+                    "t_dhw": f"{t_d[t]:.2f}",
                     "p_el_ufh": f"{p_u[t] if mode_str == 'UFH' else 0.0:.2f}",
                     "p_el_dhw": f"{p_d[t] if mode_str == 'DHW' else 0.0:.2f}",
                     "cop_ufh": f"{u_cop[t]:.2f}",
