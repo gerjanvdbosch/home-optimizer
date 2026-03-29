@@ -68,6 +68,7 @@ def index(
     accuracy_plot_room, accuracy_plot_dhw = _get_accuracy_plots(request, target_date)
     consumption_plot = _get_consumption_plot(request, target_date)
     solar_plot = _get_solar_plot(request, target_date)
+    base_load_plot = _get_base_load_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
 
@@ -275,6 +276,7 @@ def index(
             "accuracy_plot_dhw": accuracy_plot_dhw,
             "consumption_plot": consumption_plot,
             "solar_plot": solar_plot,
+            "base_load_plot": base_load_plot,
             "details": details,
             "measurements": measurements_data,
             "plan": plan_display,
@@ -362,8 +364,8 @@ def _get_solar_forecast_plot(
 
         df_hist_plot = df_hist_smooth.reset_index()
 
-    x_start = start_of_day
-    x_end = end_of_day
+    x_start = start_of_day.replace(tzinfo=None)
+    x_end = end_of_day.replace(tzinfo=None)
 
     fig = go.Figure()
 
@@ -730,6 +732,7 @@ def _get_solar_forecast_plot(
             gridcolor="rgba(255,255,255,0.1)",
             range=[x_start, x_end],
             fixedrange=False,  # Sta zoomen toe
+            dtick=7200000,
         ),
         yaxis=dict(
             title="Vermogen (kW)",
@@ -1216,8 +1219,10 @@ def _get_consumption_plot(request, target_date) -> str:
             title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
+            range=[start_of_day.replace(tzinfo=None), end_of_day.replace(tzinfo=None)],
             tickformat="%H:%M",
             dtick=7200000,
+            fixedrange=True,
         ),
         yaxis=dict(
             title="Verbruik (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
@@ -1234,7 +1239,7 @@ def _get_consumption_plot(request, target_date) -> str:
 def _get_solar_plot(request, target_date) -> str:
     """
     Genereert een uurgrafiek (bar chart) van actuele vs voorspelde zonproductie (kWh)
-    met buitentemperatuur als vloeiende overlay op de rechter y-as.
+    met één doorlopende buitentemperatuurlijn (als vloeiende overlay op de achtergrond).
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
@@ -1297,24 +1302,13 @@ def _get_solar_plot(request, target_date) -> str:
             columns=["pred_solar"], index=pd.DatetimeIndex([])
         )
 
-    # --- 3. Kwartier temperatuurdata voor vloeiende lijn ---
+    # --- 3. Kwartier temperatuurdata voor 1 vloeiende lijn (direct uit de merged history) ---
+    df_temp_15 = pd.DataFrame(columns=["temp"], index=pd.DatetimeIndex([]))
     if not df_hist.empty and "temp" in df_hist.columns:
         df_temp_15 = df_hist.set_index("ts_local")[["temp"]].copy()
         df_temp_15["temp"] = pd.to_numeric(df_temp_15["temp"], errors="coerce")
         df_temp_15 = df_temp_15.dropna()
         df_temp_15.index = df_temp_15.index.tz_localize(None)
-    else:
-        df_temp_15 = pd.DataFrame(columns=["temp"], index=pd.DatetimeIndex([]))
-
-    # Voorspelde temperatuur uit snapshot (kwartier)
-    if not df_snap.empty and "pred_temp" in df_snap.columns:
-        df_temp_pred_15 = df_snap.copy()
-        df_temp_pred_15["ts_naive"] = df_temp_pred_15["ts_local"].dt.tz_localize(None)
-        df_temp_pred_15 = df_temp_pred_15.set_index("ts_naive")[["pred_temp"]].dropna()
-    else:
-        df_temp_pred_15 = pd.DataFrame(
-            columns=["pred_temp"], index=pd.DatetimeIndex([])
-        )
 
     # --- 4. Samenvoegen voor bars ---
     full_idx = pd.date_range(
@@ -1334,6 +1328,20 @@ def _get_solar_plot(request, target_date) -> str:
 
     # --- 5. Plotly ---
     fig = go.Figure()
+
+    # Actuele temperatuur — vloeiende lijn op kwartierdata
+    if not df_temp_15.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df_temp_15.index,
+                y=df_temp_15["temp"],
+                name="Buiten temp",
+                mode="lines",
+                line=dict(color="rgba(255,255,255,0.25)", width=1.5, shape="linear"),
+                yaxis="y2",
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
 
     fig.add_trace(
         go.Bar(
@@ -1357,47 +1365,6 @@ def _get_solar_plot(request, target_date) -> str:
         )
     )
 
-    # Actuele temperatuur — vloeiende lijn op kwartierdata
-    if not df_temp_15.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=df_temp_15.index,
-                y=df_temp_15["temp"],
-                name="Buiten °C",
-                mode="lines",
-                line=dict(color="rgba(255,255,255,0.25)", width=1.5, shape="linear"),
-                yaxis="y2",
-                hovertemplate="%{y:.1f} °C<extra></extra>",
-            )
-        )
-
-    # Voorspelde temperatuur — stippel vanaf laatste actuele meting
-    last_actual_ts = df_temp_15.index[-1] if not df_temp_15.empty else None
-    if not df_temp_pred_15.empty:
-        pred_from = (
-            df_temp_pred_15[df_temp_pred_15.index >= last_actual_ts]
-            if last_actual_ts is not None
-            else df_temp_pred_15
-        )
-        if not pred_from.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=pred_from.index,
-                    y=pred_from["pred_temp"],
-                    name="Buiten °C (verwacht)",
-                    mode="lines",
-                    line=dict(
-                        color="rgba(255,255,255,0.25)",
-                        width=1.5,
-                        dash="dot",
-                        shape="linear",
-                    ),
-                    yaxis="y2",
-                    showlegend=False,
-                    hovertemplate="%{y:.1f} °C<extra></extra>",
-                )
-            )
-
     fig.update_layout(
         barmode="group",
         template="plotly_dark",
@@ -1411,8 +1378,10 @@ def _get_solar_plot(request, target_date) -> str:
             title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
+            range=[start_of_day.replace(tzinfo=None), end_of_day.replace(tzinfo=None)],
             tickformat="%H:%M",
             dtick=7200000,
+            fixedrange=True,
         ),
         yaxis=dict(
             title="Productie (kWh)",
@@ -1433,4 +1402,151 @@ def _get_solar_plot(request, target_date) -> str:
 
     return pio.to_html(
         fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
+    )
+
+
+def _get_base_load_plot(request, target_date) -> str:
+    """
+    Genereert een uurgrafiek (bar chart) van actuele vs voorspelde base load (kWh).
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = datetime.now().astimezone().tzinfo
+
+    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
+    end_of_day = start_of_day + timedelta(days=1)
+
+    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+    df_snap = database.get_predictions(target_date)
+
+    # --- 1. Actuele base load per uur ---
+    if not df_hist.empty:
+        df_hist = df_hist.copy()
+        df_hist["ts_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
+        mask = (df_hist["ts_local"] >= start_of_day) & (
+            df_hist["ts_local"] < end_of_day
+        )
+        df_hist = df_hist[mask].copy()
+
+        df_hist["grid_import"] = pd.to_numeric(
+            df_hist.get("grid_import", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["grid_export"] = pd.to_numeric(
+            df_hist.get("grid_export", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["pv_actual"] = pd.to_numeric(
+            df_hist.get("pv_actual", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["wp_actual"] = pd.to_numeric(
+            df_hist.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+
+        total_load = (
+            df_hist["grid_import"] - df_hist["grid_export"] + df_hist["pv_actual"]
+        ).clip(lower=0)
+        df_hist["base_actual"] = (total_load - df_hist["wp_actual"]).clip(lower=0)
+
+        df_hist_hourly = (
+            df_hist.set_index("ts_local")[["base_actual"]].resample("1h").sum()
+            * 0.25  # kW → kWh
+        )
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(
+            columns=["base_actual"], index=pd.DatetimeIndex([])
+        )
+
+    # --- 2. Voorspelde base load per uur (uit snapshot) ---
+    if not df_snap.empty:
+        df_snap = df_snap.copy()
+        df_snap["ts_local"] = pd.to_datetime(
+            df_snap["timestamp"], utc=True
+        ).dt.tz_convert(local_tz)
+        mask_snap = (df_snap["ts_local"] >= start_of_day) & (
+            df_snap["ts_local"] < end_of_day
+        )
+        df_snap = df_snap[mask_snap].copy()
+
+        # Ondersteun 'p_load_pred' of 'load_pred' afhankelijk van hoe het opgeslagen wordt
+        load_col = "p_load_pred" if "p_load_pred" in df_snap.columns else "load_pred"
+        df_snap["pred_base"] = (
+            pd.to_numeric(df_snap.get(load_col, 0), errors="coerce").fillna(0)
+            * 0.25  # kW → kWh
+        )
+
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_base"]].resample("1h").sum()
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(columns=["pred_base"], index=pd.DatetimeIndex([]))
+
+    # --- 3. Samenvoegen voor bars ---
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
+    )
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+    df_plot = df_plot.reindex(full_idx).infer_objects(copy=False)
+
+    for col in ["base_actual", "pred_base"]:
+        if col in df_plot.columns:
+            df_plot[col] = (
+                df_plot[col]
+                .fillna(0.0)
+                .astype(float)
+                .apply(lambda x: x if x > 0.001 else None)
+            )
+
+    # --- 4. Plotly ---
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["base_actual"],
+            name="Actueel",
+            marker_color="#F50057",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_base"],
+            name="Verwacht",
+            marker_color="rgba(245, 0, 87, 0.2)",
+            marker_line=dict(color="#F50057", width=2),
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            title=None,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            range=[start_of_day.replace(tzinfo=None), end_of_day.replace(tzinfo=None)],
+            tickformat="%H:%M",
+            dtick=7200000,
+            fixedrange=True,
+        ),
+        yaxis=dict(
+            title="Verbruik (kWh)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        bargap=0.50,
+        bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
     )

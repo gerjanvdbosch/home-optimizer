@@ -550,10 +550,21 @@
     {% if solar_plot %}
     <div class="card">
         <div class="header">
-            <h3 style="margin: 0;">Weersvoorspelling</h3>
+            <h3 style="margin: 0;">Zonne-energie</h3>
         </div>
         <div class="chart-container">
             {{ solar_plot | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if base_load_plot %}
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Basis verbruik</h3>
+        </div>
+        <div class="chart-container">
+            {{ base_load_plot | safe }}
         </div>
     </div>
     {% endif %}
