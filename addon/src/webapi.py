@@ -1219,7 +1219,6 @@ def _get_consumption_plot(request, target_date) -> str:
             title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
-            range=[start_of_day.replace(tzinfo=None), end_of_day.replace(tzinfo=None)],
             tickformat="%H:%M",
             dtick=7200000,
             fixedrange=True,
@@ -1302,18 +1301,17 @@ def _get_solar_plot(request, target_date) -> str:
             columns=["pred_solar"], index=pd.DatetimeIndex([])
         )
 
-    # --- 3. Kwartier temperatuurdata voor 1 vloeiende lijn (direct uit de merged history) ---
-    df_temp_15 = pd.DataFrame(columns=["temp"], index=pd.DatetimeIndex([]))
-    if not df_hist.empty and "temp" in df_hist.columns:
-        df_temp_15 = df_hist.set_index("ts_local")[["temp"]].copy()
-        df_temp_15["temp"] = pd.to_numeric(df_temp_15["temp"], errors="coerce")
-        df_temp_15 = df_temp_15.dropna()
-        df_temp_15.index = df_temp_15.index.tz_localize(None)
+    # --- 3. Temperatuur voorspelling voor vloeiende lijn ---
+    df_temp_pred = pd.DataFrame(columns=["pred_temp"], index=pd.DatetimeIndex([]))
+    if not df_snap.empty and "pred_temp" in df_snap.columns:
+        df_temp_pred = df_snap.set_index("ts_local")[["pred_temp"]].copy()
+        df_temp_pred = df_temp_pred.dropna()
+        df_temp_pred.index = df_temp_pred.index.tz_localize(None)
 
     # --- 4. Samenvoegen voor bars ---
-    full_idx = pd.date_range(
-        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
-    )
+    x_start = start_of_day.replace(tzinfo=None)
+
+    full_idx = pd.date_range(start=x_start, periods=24, freq="1h")
     df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
     df_plot = df_plot.reindex(full_idx).infer_objects(copy=False)
 
@@ -1329,15 +1327,20 @@ def _get_solar_plot(request, target_date) -> str:
     # --- 5. Plotly ---
     fig = go.Figure()
 
-    # Actuele temperatuur — vloeiende lijn op kwartierdata
-    if not df_temp_15.empty:
+    # Verwachte temperatuur — vloeiende lijn (spline)
+    if not df_temp_pred.empty:
         fig.add_trace(
             go.Scatter(
-                x=df_temp_15.index,
-                y=df_temp_15["temp"],
+                x=df_temp_pred.index,
+                y=df_temp_pred["pred_temp"],
                 name="Buiten temp",
                 mode="lines",
-                line=dict(color="rgba(255,255,255,0.25)", width=1.5, shape="linear"),
+                line=dict(
+                    color="rgba(255,255,255,0.25)",
+                    width=2,
+                    shape="spline",
+                    smoothing=0.8,
+                ),
                 yaxis="y2",
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
@@ -1378,7 +1381,6 @@ def _get_solar_plot(request, target_date) -> str:
             title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
-            range=[start_of_day.replace(tzinfo=None), end_of_day.replace(tzinfo=None)],
             tickformat="%H:%M",
             dtick=7200000,
             fixedrange=True,
@@ -1533,7 +1535,6 @@ def _get_base_load_plot(request, target_date) -> str:
             title=None,
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
-            range=[start_of_day.replace(tzinfo=None), end_of_day.replace(tzinfo=None)],
             tickformat="%H:%M",
             dtick=7200000,
             fixedrange=True,
