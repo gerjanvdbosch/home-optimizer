@@ -104,23 +104,32 @@ class Coordinator:
 
     def save_prediction(self):
         result = getattr(self.context, "result", None)
-        if not result:
-            logger.warning(
-                "[Coordinator] Geen actief plan beschikbaar, snapshot overgeslagen."
-            )
+        if not result or not result.get("plan"):
             return
 
         plan = result.get("plan")
-        if not plan:
-            logger.warning("[Coordinator] Plan is leeg, snapshot overgeslagen.")
-            return
+        now_utc = self.context.now  # Dit is de UTC tijd uit de context
 
-        next_hour_start = self.context.now.replace(
+        # 1. Definieer een minimale 'lock' buffer van 1 uur.
+        min_buffer = timedelta(hours=1)
+
+        # 2. Bereken de starttijd (Nu + buffer) en rond af naar het VOLGENDE hele uur
+        # Voorbeeld: Nu 11:15 -> 12:15 -> Snapshot vanaf 13:00
+        # Voorbeeld: Nu 11:55 -> 12:55 -> Snapshot vanaf 13:00
+        target_time = now_utc + min_buffer
+        save_from_utc = target_time.replace(
             minute=0, second=0, microsecond=0
         ) + timedelta(hours=1)
 
-        # Sla de voorspelling op in de database vanaf dat tijdstip
-        self.database.save_prediction(plan, next_hour_start)
+        # 3. Converteer naar lokale tijd voor de logregel
+        save_from_local = save_from_utc.astimezone()
+
+        logger.info(
+            f"[Coordinator] Snapshot opslaan vanaf: {save_from_local.strftime('%H:%M')}"
+        )
+
+        # 4. Sla de voorspelling op (intern gebruiken we de UTC save_from voor de database)
+        self.database.save_prediction(plan, save_from_utc)
 
     def train(self):
         self.solar.train()
