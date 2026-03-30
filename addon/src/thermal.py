@@ -744,7 +744,7 @@ class SystemIdentificator:
         # τ_lag = R_im × C_air  →  R_im = τ_lag / C_air
         # Dit is de enige vergelijking die R_im direct koppelt aan meetdata.
         tau_lag_h = (self.ufh_lag_steps * 15) / 60.0  # uren
-        R_im_from_lag = tau_lag_h / max(self.C_air, 0.3)
+        R_im_from_lag = tau_lag_h / max(self.C_air, 0.5)
 
         # Sanity check: R_im moet kleiner zijn dan 1/K_emit (totale weerstand)
         R_total = 1.0 / max(self.K_emit, 0.05)
@@ -1240,47 +1240,45 @@ class PhysicsLinearizer:
 class ComfortCostCalculator:
     """
     Comfortboetes in euro per graad afwijking — dimensioneel correct.
-
-    boete [euro/K] = herstelenergie [kWh/K] * prijs [euro/kWh]
+    De boete wordt gebaseerd op de maximale elektriciteitsprijs. Hierdoor
+    is het oplossen van een temperatuurtekort op een gemiddeld/goedkoop moment
+    altijd goedkoper dan de comfortboete accepteren.
     """
 
     def __init__(
         self,
         C_room: float,
         C_tank: float,
-        avg_cop_ufh: float = 3.5,
-        avg_cop_dhw: float = 2.5,
-        recovery_hours_room: float = 4.0,
-        recovery_hours_dhw: float = 1.0,
+        avg_cop_ufh: float,
+        avg_cop_dhw: float,
     ):
         self.C_room = C_room
         self.C_tank = C_tank
         self.avg_cop_ufh = avg_cop_ufh
         self.avg_cop_dhw = avg_cop_dhw
-        self.recovery_hours_room = recovery_hours_room
-        self.recovery_hours_dhw = recovery_hours_dhw
 
-    def compute(self, avg_price: float) -> dict:
-        kwh_per_K_room = self.C_room / self.avg_cop_ufh / self.recovery_hours_room
-        kwh_per_K_tank = self.C_tank / self.avg_cop_dhw / self.recovery_hours_dhw
+    def compute(self, max_price: float) -> dict:
+        # Fysieke energie (kWh) nodig om de hele massa 1 Kelvin op te warmen
+        kwh_per_K_room = self.C_room / self.avg_cop_ufh
+        kwh_per_K_tank = self.C_tank / self.avg_cop_dhw
 
-        room_under = kwh_per_K_room * avg_price
-        tank_under = kwh_per_K_tank * avg_price
-        room_over = room_under * 0.5
-        tank_over = tank_under * 0.3
-        terminal_room = room_under * 0.25
-        terminal_tank = tank_under * 0.5
+        # Waardeer de boete (en de restwaarde) op het allerduurste moment
+        room_under = kwh_per_K_room * max_price
+        tank_under = kwh_per_K_tank * max_price
+
+        # Oververhitting is minder erg (behoudens harde maximum temperatuur constraints)
+        room_over = room_under * 0.1
+        tank_over = tank_under * 0.1
 
         logger.info(
-            f"[ComfortCost] prijs={avg_price:.3f}  "
-            f"kamer_onder={room_under:.4f}  tank_onder={tank_under:.4f}  "
-            f"term_kamer={terminal_room:.4f}  term_tank={terminal_tank:.4f}"
+            f"[ComfortCost] max_prijs={max_price:.3f} €/kWh | "
+            f"waarde_kamer={room_under:.4f} €/K | waarde_tank={tank_under:.4f} €/K"
         )
         return {
             "room_under": room_under,
             "room_over": room_over,
             "tank_under": tank_under,
             "tank_over": tank_over,
-            "terminal_room": terminal_room,
-            "terminal_tank": terminal_tank,
+            "terminal_room": room_under,  # Restwarmte is exact evenveel waard
+            "terminal_tank": tank_under,
         }

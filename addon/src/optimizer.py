@@ -80,6 +80,7 @@ class ThermalMPC:
         R_oa = self.ident.R_oa  # lucht → buiten [K/kW]
 
         # ── Parameters ────────────────────────────────────────────────────
+        self.L = self.ident.ufh_lag_steps
         self.P_t_air_init = cp.Parameter()
         self.P_t_mass_init = cp.Parameter()
         self.P_t_dhw_init = cp.Parameter()
@@ -112,6 +113,7 @@ class ThermalMPC:
         self.P_cop_dhw = cp.Parameter(T, nonneg=True)
         self.P_fixed_pel_ufh = cp.Parameter(T, nonneg=True)
         self.P_fixed_pel_dhw = cp.Parameter(T, nonneg=True)
+        self.P_ufh_p_th_hist = cp.Parameter(self.L, nonneg=True)
 
         self.P_dhw_demand = cp.Parameter(T, nonneg=True)
 
@@ -154,7 +156,14 @@ class ThermalMPC:
         for t in range(T):
             p_el_wp = self.p_el_ufh[t] + self.p_el_dhw[t]
             p_th_dhw_now = self.p_el_dhw[t] * self.P_cop_dhw[t]
-            p_th_ufh_now = self.p_el_ufh[t] * self.P_cop_ufh[t]
+
+            if t < self.L:
+                # Pak waarde uit historie
+                # We mappen t=0 op hist[L-1], t=1 op hist[L-2], etc.
+                p_th_delayed = self.P_ufh_p_th_hist[self.L - 1 - t]
+            else:
+                # Pak de beslissing van (t - lag) geleden
+                p_th_delayed = self.p_el_ufh[t - self.L] * self.P_cop_ufh[t - self.L]
 
             constraints += [
                 # Stroombalans
@@ -173,7 +182,7 @@ class ThermalMPC:
                 # Vloermassa
                 self.t_mass[t + 1]
                 == self.t_mass[t]
-                + (p_th_ufh_now - (self.t_mass[t] - self.t_air[t]) / R_im)
+                + (p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im)
                 * self.dt
                 / C_mass,
                 # Thermische balans boiler
@@ -436,6 +445,25 @@ class ThermalMPC:
         dhw_demand = self.res_dhw.predict(forecast_df)
         self.P_dhw_demand.value = dhw_demand[:T].astype(float)
 
+        hist_p_th = np.zeros(self.L)
+        if not recent_df.empty:
+            # Sorteer op tijd aflopend (nieuwste eerst)
+            df_sorted = recent_df.sort_values("timestamp", ascending=False)
+
+            for i in range(self.L):
+                if i < len(df_sorted):
+                    row = df_sorted.iloc[i]
+                    # Bereken wat het thermisch vermogen was in dat kwartier
+                    if row["hvac_mode"] == HvacMode.HEATING.value:
+                        # Gebruik supply/return als die er zijn, anders schatting uit perf_map
+                        dt = max(0, row["supply_temp"] - row["return_temp"])
+                        # Gebruik de factor uit thermal.py (bijv. 1.256)
+                        hist_p_th[i] = dt * 1.256
+                    else:
+                        hist_p_th[i] = 0.0
+
+        self.P_ufh_p_th_hist.value = hist_p_th
+
         logger.info(
             f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K  max: {dhw_demand[:T].max():.2f} K"
         )
@@ -469,52 +497,33 @@ class ThermalMPC:
         avg_cop_ufh_h = float(np.mean(cop_ufh))
         avg_cop_dhw_h = float(np.mean(cop_dhw))
 
-        # Terminal value: marginale waarde van 1K extra aan einde horizon
-        # Begrensd op comfort-penalty schaal — anders domineert het de doelfunctie
-        val_per_K_room = effective_max_price * self.ident.C_mass / avg_cop_ufh_h
+        # Voor de fysieke waarde en boete telt de VOLLEDIGE op te warmen massa
+        C_total_room = self.ident.C_air + self.ident.C_mass
 
-        C_comfort = self.ident.C_air + (
-            self.ident.C_mass * 0.1
-        )  # Lucht + 10% van de massa
-
-        recovery_h_room = 2.0
-        recovery_h_dhw = 1.0
-
-        # ── Comfortboetes (dimensioneel correct) ─────────────────────────
+        # ── Comfortboetes en Terminal Values (dimensioneel correct) ──
+        # We voeden de maximale toekomstige prijs in, zodat comfort de hoogste economische prioriteit krijgt
         costs = ComfortCostCalculator(
-            C_room=C_comfort,
+            C_room=C_total_room,
             C_tank=self.ident.C_tank,
             avg_cop_ufh=avg_cop_ufh_h,
             avg_cop_dhw=avg_cop_dhw_h,
-            recovery_hours_room=recovery_h_room,
-            recovery_hours_dhw=recovery_h_dhw,
-        ).compute(avg_price)
+        ).compute(effective_max_price)
 
         self.P_cost_room_under.value = costs["room_under"]
         self.P_cost_room_over.value = costs["room_over"]
         self.P_cost_dhw_under.value = costs["tank_under"]
         self.P_cost_dhw_over.value = costs["tank_over"]
+
         self.P_val_terminal_room.value = costs["terminal_room"]
         self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
-        # Maximaal gelijk aan de comfort-ondergrensboete — anders is opslaan
-        # altijd beter dan comfort naleven
-        val_per_K_room = min(val_per_K_room, costs["room_under"])
-
-        val_per_K_dhw = effective_max_price * self.ident.C_tank / avg_cop_dhw_h
-        val_per_K_dhw = min(val_per_K_dhw, costs["tank_under"])
-
-        self.P_val_terminal_room.value = val_per_K_room
-        self.P_val_terminal_dhw.value = val_per_K_dhw
-
         self.P_terminal_offset.value = (
-            r_t[-1] * val_per_K_room  # Waarde woonkamer t.o.v. target
-            + d_t[-1] * val_per_K_dhw  # Waarde boiler t.o.v. target
+            r_t[-1] * costs["terminal_room"] + d_t[-1] * costs["terminal_tank"]
         )
 
         logger.info(
-            f"[Terminal] val_room={val_per_K_room:.4f} €/K  "
-            f"val_dhw={val_per_K_dhw:.4f} €/K  "
+            f"[Terminal] val_room={costs['terminal_room']:.4f} €/K  "
+            f"val_dhw={costs['terminal_tank']:.4f} €/K  "
             f"max_future_price={effective_max_price:.3f} €/kWh"
         )
 
@@ -665,10 +674,6 @@ class Optimizer:
     def resolve(self, context: Context, avg_price: float, export_price: float):
         # 1. Data verzamelen
         recent_df = self.db.get_history(cutoff_date=context.now - timedelta(hours=2))
-
-        shutter_room = float(getattr(context, "shutter_room", 100.0))
-        shutters = self.shutter.predict(context.forecast_df, shutter_room)
-        solar_gains = self.res_ufh.predict(context.forecast_df, shutters)
 
         state = {
             "now": context.now,
