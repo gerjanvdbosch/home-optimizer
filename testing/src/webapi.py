@@ -1136,11 +1136,8 @@ def _get_ufh_consumption_plot(request, target_date) -> str:
     full_idx = pd.date_range(
         start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
     )
-    df_plot = (
-        pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
-        .reindex(full_idx)
-        .fillna(0.0)
-    )
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+    df_plot = df_plot.reindex(full_idx).infer_objects(copy=False).fillna(0.0)
 
     fig = go.Figure()
     fig.add_trace(
@@ -1230,11 +1227,8 @@ def _get_dhw_consumption_plot(request, target_date) -> str:
     full_idx = pd.date_range(
         start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
     )
-    df_plot = (
-        pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
-        .reindex(full_idx)
-        .fillna(0.0)
-    )
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+    df_plot = df_plot.reindex(full_idx).infer_objects(copy=False).fillna(0.0)
 
     fig = go.Figure()
     fig.add_trace(

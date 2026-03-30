@@ -1,6 +1,7 @@
 import os
+import json
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from utils import safe_float
 
 
@@ -44,11 +45,60 @@ class Config:
     hydraulic_model_path: str = "data/hydraulic_model.joblib"
     shutter_model_path: str = "data/shutter_model.joblib"
 
-    solar_model_ratio: float = 0.0
+    solar_model_ratio: float = 0.7
+
+    room_target: list = field(
+        default_factory=lambda: [
+            ("00:00", 19.0, 0.5, 1.5),
+            ("06:00", 19.0, 0.5, 1.5),
+            ("10:00", 19.5, 0.5, 1.5),
+            ("17:00", 20.0, 0.5, 1.5),
+            ("22:00", 19.0, 0.5, 1.5),
+        ]
+    )
+
+    dhw_target: list = field(
+        default_factory=lambda: [
+            ("00:00", 20.0, 5.0, 30.0),
+            ("19:59", 20.0, 5.0, 35.0),
+            ("20:00", 50.0, 2.0, 5.0),
+            ("21:00", 50.0, 2.0, 5.0),
+            ("21:01", 20.0, 5.0, 30.0),
+        ]
+    )
 
     webapi_host: str = "127.0.0.1"
     webapi_port: int = 8000
 
     @staticmethod
     def load():
-        return Config(solar_model_ratio=safe_float(os.getenv("SOLAR_MODEL_RATIO", 0.7)))
+        # Helper om JSON strings uit de Add-on config te parsen naar de juiste tuples
+        def parse_schedule(env_name, default_value):
+            raw = os.getenv(env_name)
+            if not raw:
+                return default_value
+            try:
+                data = json.loads(raw)
+                # Omzetten van dict-lijst naar tuple-lijst
+                return [
+                    (
+                        str(i["time"]),
+                        float(i["target"]),
+                        float(i["low_margin"]),
+                        float(i["high_margin"]),
+                    )
+                    for i in data
+                ]
+            except Exception:
+                return default_value
+
+        # Maak een basis instance voor de defaults
+        defaults = Config()
+
+        return Config(
+            solar_model_ratio=safe_float(
+                os.getenv("SOLAR_MODEL_RATIO", defaults.solar_model_ratio)
+            ),
+            room_target=parse_schedule("CLIMATE_ROOM_JSON", defaults.room_target),
+            dhw_target=parse_schedule("CLIMATE_DHW_JSON", defaults.dhw_target),
+        )

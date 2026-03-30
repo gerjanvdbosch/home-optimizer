@@ -33,30 +33,10 @@ logger = logging.getLogger(__name__)
 # THERMAL MPC (DPP compliant)
 # =========================================================
 
-CLIMATE_CONFIG = {
-    "room": {
-        "target": [
-            ("00:00", 19.0, 0.5, 1.5),
-            ("06:00", 19.0, 0.5, 1.5),
-            ("09:00", 19.5, 0.5, 1.5),
-            ("17:00", 20.0, 0.5, 1.5),
-            ("22:00", 19.0, 0.5, 1.5),
-        ]
-    },
-    "dhw": {
-        "target": [
-            ("00:00", 20.0, 5.0, 30.0),
-            ("19:59", 20.0, 5.0, 35.0),
-            ("20:00", 50.0, 2.0, 5.0),
-            ("21:00", 50.0, 2.0, 5.0),
-            ("21:01", 20.0, 5.0, 30.0),
-        ]
-    },
-}
-
 
 class ThermalMPC:
-    def __init__(self, ident, perf_map, hydraulic, res_dhw):
+    def __init__(self, config, ident, perf_map, hydraulic, res_dhw):
+        self.config = config
         self.ident = ident
         self.perf_map = perf_map
         self.hydraulic = hydraulic
@@ -286,14 +266,14 @@ class ThermalMPC:
 
         # Kamer
         r_t, r_l, r_h = self._get_interpolated_values(
-            CLIMATE_CONFIG["room"]["target"], future_times
+            self.config.room_target, future_times
         )
         r_min = r_t - r_l
         r_max = r_t + r_h
 
         # Boiler
         d_t, d_l, d_h = self._get_interpolated_values(
-            CLIMATE_CONFIG["dhw"]["target"], future_times
+            self.config.dhw_target, future_times
         )
         d_min = d_t - d_l
         d_max = d_t + d_h
@@ -654,7 +634,9 @@ class Optimizer:
         )
         self.res_dhw = DhwResidualPredictor(config.dhw_model_path)
         self.shutter = ShutterPredictor(config.shutter_model_path)
-        self.mpc = ThermalMPC(self.ident, self.perf_map, self.hydraulic, self.res_dhw)
+        self.mpc = ThermalMPC(
+            config, self.ident, self.perf_map, self.hydraulic, self.res_dhw
+        )
 
     def train(self, days_back: int = 730):
         cutoff = datetime.now() - timedelta(days=days_back)
