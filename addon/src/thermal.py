@@ -477,7 +477,7 @@ class SystemIdentificator:
             logger.info(
                 f"[SysID] Geladen: R={self.R:.1f} C={self.C:.1f} "
                 f"K_emit={self.K_emit:.3f} K_tank={self.K_tank:.3f} "
-                f"Lag={self.ufh_lag_steps * 15}m K_loss={self.K_loss_dhw:.4f}"
+                f"Lag={self.ufh_lag_steps * 15}m K_loss={self.K_loss_dhw:.4f} "
                 f"C_air={self.C_air:.2f} C_mass={self.C_mass:.2f} "
                 f"R_im={self.R_im:.3f} R_oa={self.R_oa:.2f}"
             )
