@@ -1262,13 +1262,11 @@ class ComfortCostCalculator:
         kwh_per_K_room = self.C_room / self.avg_cop_ufh
         kwh_per_K_tank = self.C_tank / self.avg_cop_dhw
 
-        # Waardeer de boete (en de restwaarde) op het allerduurste moment
+        # De waarde van 1 graad warmte (en de kosten als je die tekort komt)
         room_under = kwh_per_K_room * max_price
         tank_under = kwh_per_K_tank * max_price
-
-        # Oververhitting is minder erg (behoudens harde maximum temperatuur constraints)
-        room_over = room_under * 0.1
-        tank_over = tank_under * 0.1
+        room_over = room_under
+        tank_over = tank_under
 
         logger.info(
             f"[ComfortCost] max_prijs={max_price:.3f} €/kWh | "
@@ -1279,6 +1277,6 @@ class ComfortCostCalculator:
             "room_over": room_over,
             "tank_under": tank_under,
             "tank_over": tank_over,
-            "terminal_room": room_under,  # Restwarmte is exact evenveel waard
+            "terminal_room": room_under,
             "terminal_tank": tank_under,
         }
