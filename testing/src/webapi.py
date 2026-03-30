@@ -1,12 +1,15 @@
 import logging
+
 import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
+import tzlocal
 
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from datetime import timedelta, datetime, timezone, date, time
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from context import HvacMode
 
@@ -34,7 +37,7 @@ def index(
     avg_price = coordinator.config.avg_price
     export_price = coordinator.config.export_price
 
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
     today = context.now.astimezone(local_tz).date()
 
     if date_str:
@@ -305,7 +308,7 @@ def _get_solar_forecast_plot(
     if not hasattr(context, "forecast_df") or context.forecast_df is None:
         return "<div class='p-4 text-muted'>Geen forecast data beschikbaar.</div>"
 
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
 
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
@@ -768,7 +771,7 @@ def _get_energy_table(request: Request, view_mode: str, target_date: date):
     database = coordinator.collector.database
 
     # 1. Algemene Data Fetch (Gedeeld)
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
     start_dt = datetime.combine(target_date, datetime.min.time()).replace(
         tzinfo=local_tz
     )
@@ -906,7 +909,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
 
     # 1. Data ophalen & direct filteren voor deze dag
     df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
@@ -1097,7 +1100,7 @@ def _get_consumption_plot(request, target_date) -> str:
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
 
     df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
         database, target_date, local_tz
@@ -1245,7 +1248,7 @@ def _get_solar_plot(request, target_date) -> str:
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
 
     df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
         database, target_date, local_tz
@@ -1398,7 +1401,7 @@ def _get_base_load_plot(request, target_date) -> str:
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
 
     df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
         database, target_date, local_tz

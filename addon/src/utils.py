@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
+import tzlocal
 
-from datetime import datetime
+from zoneinfo import ZoneInfo
+from datetime import timezone
 
 
 def round_half(x):
@@ -25,22 +27,28 @@ def to_kw(watts):
         return 0.0
 
 
-def add_cyclic_time_features(df: pd.DataFrame, col_name="timestamp") -> pd.DataFrame:
+def add_cyclic_time_features(
+    df: pd.DataFrame, col_name="timestamp", local_tz=True
+) -> pd.DataFrame:
     """
-    Voegt cyclische tijd-features toe (hour, day, doy) als sin/cos paren.
-    Neemt minuten mee voor hogere precisie.
+    Voegt cyclische tijd-features toe.
+
+    local_tz=True:  Gebruikt lokale tijd (geschikt voor Load/Base verbruik).
+    local_tz=False: Gebruikt UTC (geschikt voor PV/Zon ivm voorkomen van zomertijd-sprongen).
     """
     if df is None or col_name not in df.columns:
         return df
 
-    # Huidige tijdzone van de omgeving
-    tz = datetime.now().astimezone().tzinfo
+    # 1. Converteer naar de juiste tijdzone
+    if local_tz:
+        tz = ZoneInfo(tzlocal.get_localzone_name())
+    else:
+        tz = timezone.utc
 
     df = df.copy()
     dt = df[col_name].dt.tz_convert(tz).dt
 
-    # 1. Tijd van de dag (0..24 uur)
-    # We voegen minuten toe voor precisie (bv. 14:30 wordt 14.5)
+    # 2. Tijd van de dag (0..24 uur) met minuten precisie
     precise_hour = dt.hour + (dt.minute / 60.0)
 
     df["hour_sin"] = np.sin(2 * np.pi * precise_hour / 24.0)

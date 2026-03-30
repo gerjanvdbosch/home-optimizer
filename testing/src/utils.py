@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
+import tzlocal
 
-from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 
 
 def round_half(x):
@@ -25,22 +27,28 @@ def to_kw(watts):
         return 0.0
 
 
-def add_cyclic_time_features(df: pd.DataFrame, col_name="timestamp") -> pd.DataFrame:
+def add_cyclic_time_features(
+    df: pd.DataFrame, col_name="timestamp", local_tz=True
+) -> pd.DataFrame:
     """
-    Voegt cyclische tijd-features toe (hour, day, doy) als sin/cos paren.
-    Neemt minuten mee voor hogere precisie.
+    Voegt cyclische tijd-features toe.
+
+    local_tz=True:  Gebruikt lokale tijd (geschikt voor Load/Base verbruik).
+    local_tz=False: Gebruikt UTC (geschikt voor PV/Zon ivm voorkomen van zomertijd-sprongen).
     """
     if df is None or col_name not in df.columns:
         return df
 
-    # Huidige tijdzone van de omgeving
-    tz = datetime.now().astimezone().tzinfo
+    # 1. Converteer naar de juiste tijdzone
+    if local_tz:
+        tz = ZoneInfo(tzlocal.get_localzone_name())
+    else:
+        tz = timezone.utc
 
     df = df.copy()
     dt = df[col_name].dt.tz_convert(tz).dt
 
-    # 1. Tijd van de dag (0..24 uur)
-    # We voegen minuten toe voor precisie (bv. 14:30 wordt 14.5)
+    # 2. Tijd van de dag (0..24 uur) met minuten precisie
     precise_hour = dt.hour + (dt.minute / 60.0)
 
     df["hour_sin"] = np.sin(2 * np.pi * precise_hour / 24.0)
@@ -70,37 +78,45 @@ def generate_sunny_forecast(start_time=None):
 
     for ts in timestamps:
         # Uur van de dag als float (bijv 14.25 voor 14:15)
+        # We gebruiken ts.hour % 24 voor het geval we over meerdere dagen itereren
         hour = ts.hour + ts.minute / 60.0
 
-        # --- PV MODEL (Zonnig) ---
-        # Zon tussen 07:00 en 19:00, piek om 13:00
-        if 7.0 <= hour <= 19.0:
-            # Sinus curve voor zonlicht
-            solar_intensity = np.sin(np.pi * (hour - 7) / 12)
-            pv = round(2.0 * solar_intensity, 3)  # Piek van 3.5 kW
+        # --- PV MODEL (Afgestemd op log) ---
+        # Zon tussen 07:15 en 19:00, piek van 1.16 kW rond 13:00
+        if 7.25 <= hour <= 19.0:
+            # Piek in het midden van de dag (11.75 uren zonlicht)
+            solar_intensity = np.sin(np.pi * (hour - 7.25) / 11.75)
+            pv = round(1.16 * solar_intensity, 2)
         else:
             pv = 0.0
 
-        # --- TEMP MODEL ---
-        # Koudst om 05:00, warmst om 15:00
-        temp = round(8 + 7 * np.sin(np.pi * (hour - 9) / 12), 1)
+        # --- TEMP MODEL (Afgestemd op log) ---
+        # Koudst rond 07:00 (2.6°C), warmst rond 14:00 (10.3°C)
+        # Midden is 6.45°C, amplitude is 3.85°C.
+        temp = round(6.45 + 3.85 * np.sin(np.pi * (hour - 10.5) / 12), 1)
 
-        # --- LOAD MODEL (Huisverbruik) ---
-        # Basislast 0.15kW + piek om 08:00 en 18:00
-        load = 0.15
+        # --- LOAD MODEL (Huisverbruik afgestemd op log) ---
+        # Basislast ~0.18kW + ochtendpiek + avondpiek
+        load = 0.18
         if 7.0 <= hour <= 9.0:
-            load += 0.4 * np.sin(np.pi * (hour - 7) / 2)
+            # Ochtendpiek van +0.20 kW (tot ~0.38 kW)
+            load += 0.20 * np.sin(np.pi * (hour - 7.0) / 2.0)
         if 17.0 <= hour <= 20.0:
-            load += 0.8 * np.sin(np.pi * (hour - 17) / 3)
-        load = round(load + np.random.uniform(0, 0.05), 3)
+            # Avondpiek van +0.53 kW (tot ~0.71 kW)
+            load += 0.53 * np.sin(np.pi * (hour - 17.0) / 3.0)
+
+        # Voeg hele lichte natuurlijke ruis toe (tussen -0.02 en +0.02)
+        load = round(load + np.random.uniform(-0.02, 0.02), 2)
+        # Zorg dat load nooit onrealistisch laag wordt
+        load = max(0.12, load)
 
         # --- DATA RIJ ---
         row = {
             "timestamp": ts,
             "period_start": 0.0,
             "pv_estimate": pv,
-            "pv_estimate10": round(pv * 0.8, 3),
-            "pv_estimate90": round(pv * 1.2, 3),
+            "pv_estimate10": round(pv * 0.8, 2),
+            "pv_estimate90": round(pv * 1.2, 2),
             "temp": temp,
             "cloud": 0.0 if pv > 0 else 10.0,  # Helder
             "wind": round(np.random.uniform(2, 5), 1),

@@ -10,7 +10,9 @@ import logging
 import numpy as np
 import pandas as pd
 import cvxpy as cp
+import tzlocal
 
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta
 from context import Context, HvacMode
 from thermal import (
@@ -278,7 +280,7 @@ class ThermalMPC:
         return interp_target, interp_low, interp_high
 
     def _get_targets(self, now, T):
-        local_tz = datetime.now().astimezone().tzinfo
+        local_tz = ZoneInfo(tzlocal.get_localzone_name())
         now_local = now.astimezone(local_tz)
         future_times = [now_local + timedelta(hours=t * self.dt) for t in range(T)]
 
@@ -722,7 +724,7 @@ class Optimizer:
             }
 
         # Dagstatistieken
-        tz = datetime.now().astimezone().tzinfo
+        tz = ZoneInfo(tzlocal.get_localzone_name())
         now_local = context.now.astimezone(tz)
         today = now_local.date()
 
@@ -849,7 +851,7 @@ class Optimizer:
                     "time": ts,
                     "mode": mode_str,
                     "hvac_mode": hvac_mode.value,
-                    "t_out": f"{context.forecast_df.temp.iloc[t]:.2f}",
+                    "t_out": f"{context.forecast_df.temp.iloc[t]:.1f}",
                     "p_solar": f"{context.forecast_df.power_corrected.iloc[t]:.2f}",
                     "p_load": f"{context.forecast_df.load_corrected.iloc[t]:.2f}",
                     "t_room": f"{t_r[t]:.2f}",
