@@ -1,828 +1,1556 @@
-<!DOCTYPE html>
-<html lang="nl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home Optimizer</title>
-    <style>
-        :root {
-            --bg-color: rgb(17, 17, 17);
-            --card-bg: rgb(28, 28, 28);
-            --text-color: rgb(225, 225, 225);
-            --text-muted: rgba(225, 225, 225, 0.6);
-            --primary-color: rgb(0, 154, 199);
-            --border-color: rgba(225, 225, 225, 0.12);
+import logging
+
+import plotly.graph_objects as go
+import plotly.io as pio
+import pandas as pd
+import tzlocal
+
+from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from datetime import timedelta, datetime, timezone, date, time
+from zoneinfo import ZoneInfo
+from pathlib import Path
+from context import HvacMode
+
+logger = logging.getLogger(__name__)
+
+api = FastAPI(title="Home Optimizer API")
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+@api.get("/", response_class=HTMLResponse)
+def index(
+    request: Request,
+    train: str = None,
+    view: str = "hour",
+    date_str: str = None,
+):
+    """
+    Dashboard Home. Leest status direct uit Context.
+    """
+    coordinator = request.app.state.coordinator
+    context = coordinator.context
+
+    avg_price = coordinator.config.avg_price
+    export_price = coordinator.config.export_price
+
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+    today = context.now.astimezone(local_tz).date()
+
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            target_date = today
+    else:
+        target_date = today
+
+    # Navigatie datums berekenen
+    prev_date = target_date - timedelta(days=1)
+    next_date = target_date + timedelta(days=1)
+
+    # Is het vandaag? (Voor UI highlight en auto-refresh logica)
+    is_today = target_date == today
+
+    result = context.result if hasattr(context, "result") else None
+    plan = result.get("plan") if result else None
+
+    plan_display = []
+    if plan:
+        for p in plan:
+            p_copy = p.copy()
+            local_ts = p["time"].astimezone(local_tz)
+            p_copy["time"] = local_ts.strftime("%H:%M")
+            plan_display.append(p_copy)
+
+    # 1. Grafieken genereren
+    plot_html = _get_solar_forecast_plot(request, target_date, plan)
+    accuracy_plot_room, accuracy_plot_dhw = _get_accuracy_plots(request, target_date)
+    ufh_plot = _get_ufh_consumption_plot(request, target_date)
+    dhw_plot = _get_dhw_consumption_plot(request, target_date)
+    solar_plot = _get_solar_plot(request, target_date)
+    base_load_plot = _get_base_load_plot(request, target_date)
+    view_mode = "15min" if view == "15min" else "hour"
+    measurements_data = _get_energy_table(request, view_mode, target_date)
+
+    # Huidige temperaturen veilig ophalen
+    room_t = getattr(context, "room_temp", 0.0)
+    dhw_t = (
+        getattr(context, "dhw_top", 0.0) + getattr(context, "dhw_bottom", 0.0)
+    ) / 2.0
+
+    # Actuele COP bepalen uit het plan (rij 0 is 'nu')
+    current_cop = "-"
+    if plan and len(plan) > 0:
+        current_mode = result.get("mode", "OFF")
+        if current_mode == "UFH":
+            current_cop = plan[0].get("cop_ufh", "-")
+        elif current_mode == "DHW":
+            current_cop = plan[0].get("cop_dhw", "-")
+
+    # Gestructureerde lijst maken
+    details = []
+    if result:
+        realized_pv = 0.0
+        realized_self = 0.0
+        realized_export = 0.0
+        realized_import = 0.0
+
+        # Haal historische data op vanaf het begin van de geselecteerde dag (UTC)
+        start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+            tzinfo=local_tz
+        )
+        database = coordinator.collector.database
+        df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+
+        if not df_hist.empty:
+            df_hist["timestamp_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
+
+            # Filter de historie: vanaf middernacht tot 'nu' (voorkomt dubbel tellen met de toekomst)
+            local_now = context.now.astimezone(local_tz)
+            cutoff = local_now if is_today else start_of_day + timedelta(days=1)
+
+            mask = (df_hist["timestamp_local"] >= start_of_day) & (
+                df_hist["timestamp_local"] < cutoff
+            )
+            df_past = df_hist[mask].copy()
+
+            if not df_past.empty:
+                # Veilige omzetting naar numeriek (voorkom lege of corrupte strings)
+                for col in ["pv_actual", "grid_import", "grid_export"]:
+                    if col in df_past.columns:
+                        df_past[col] = (
+                            pd.to_numeric(df_past[col], errors="coerce")
+                            .fillna(0.0)
+                            .clip(lower=0.0)
+                        )
+
+                # Bereken gerealiseerde kWh (kwartierwaarden = kW * 0.25)
+                if "pv_actual" in df_past.columns:
+                    realized_pv = df_past["pv_actual"].sum() * 0.25
+                if "grid_import" in df_past.columns:
+                    realized_import = df_past["grid_import"].sum() * 0.25
+                if "grid_export" in df_past.columns:
+                    realized_export = df_past["grid_export"].sum() * 0.25
+
+                # Gerealiseerd eigen verbruik = Zonne-energie - Teruglevering (per 15 min kwartier bekeken)
+                if "pv_actual" in df_past.columns and "grid_export" in df_past.columns:
+                    self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(
+                        lower=0.0
+                    )
+                    realized_self = self_kw.sum() * 0.25
+
+        # Haal de verwachte rest-van-de-dag (toekomst) op uit je optimizer resultaat
+        future_pv = result.get("pv_remaining", 0.0) if is_today else 0.0
+        future_self = result.get("solar_self_remaining", 0.0) if is_today else 0.0
+        future_export = result.get("export_remaining", 0.0) if is_today else 0.0
+        future_import = result.get("grid_remaining", 0.0) if is_today else 0.0
+
+        # Totale dagwaarde = Gerealiseerd (verleden) + Verwacht (toekomst)
+        total_pv = realized_pv + future_pv
+        total_self = realized_self + future_self
+        total_export = realized_export + future_export
+        total_import = realized_import + future_import
+
+        # Gerealiseerde kosten (verleden)
+        realized_cost = realized_import * avg_price - realized_export * export_price
+
+        # Verwachte kosten (toekomst) komen al uit result
+        future_cost = result.get("total_cost_net", 0.0)
+
+        total_day_cost = realized_cost + future_cost
+        total_day_gross = (
+            realized_import + future_import + realized_self + future_self
+        ) * avg_price
+        total_day_saving = (realized_self + future_self) * avg_price
+        total_day_export_rev = (realized_export + future_export) * export_price
+
+        details.extend(
+            [
+                {"label": "Modus", "value": result.get("mode", "-")},
+                {
+                    "label": "Bruto kosten",
+                    "value": f"{total_day_gross:.2f}",
+                    "unit": "€",
+                },
+                {
+                    "label": "Netto kosten",
+                    "value": f"{total_day_cost:.2f}",
+                    "unit": "€",
+                },
+                {
+                    "label": "Zon besparing",
+                    "value": f"{total_day_saving:.2f}",
+                    "unit": "€",
+                },
+                {
+                    "label": "Export opbrengst",
+                    "value": f"{total_day_export_rev:.2f}",
+                    "unit": "€",
+                },
+                {
+                    "label": "Zon opbrengst",
+                    "value": f"{future_pv:.2f}",
+                    "total": f"{total_pv:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Eigen verbruik",
+                    "value": f"{future_self:.2f}",
+                    "total": f"{total_self:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Import net",
+                    "value": f"{future_import:.2f}",
+                    "total": f"{total_import:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Export net",
+                    "value": f"{future_export:.2f}",
+                    "total": f"{total_export:.2f}",
+                    "unit": "kWh",
+                },
+            ]
+        )
+
+        details.extend(
+            [
+                {"label": "Kamer Temp", "value": f"{room_t:.1f}", "unit": "°C"},
+                {"label": "Boiler Temp", "value": f"{dhw_t:.1f}", "unit": "°C"},
+                {
+                    "label": "Zon nu",
+                    "value": (
+                        f"{context.stable_pv:.2f}"
+                        if getattr(context, "stable_pv", None) is not None
+                        else "-"
+                    ),
+                    "unit": "kW",
+                    # "color": "#FF9100"
+                },
+                {
+                    "label": "Zon Bias",
+                    "value": f"{context.solar_bias * 100:.1f}",
+                    "unit": "%",
+                },
+                {
+                    "label": "Load nu",
+                    "value": (
+                        f"{context.stable_load:.2f}"
+                        if getattr(context, "stable_load", None) is not None
+                        else "-"
+                    ),
+                    "unit": "kW",
+                },
+                {
+                    "label": "Load Bias",
+                    "value": f"{context.load_bias:.2f}",
+                    "unit": "kW",
+                },
+                {
+                    "label": "Doel Aanvoer",
+                    "value": f"{result.get('target_supply_temp', 0):.1f}",
+                    "unit": "°C",
+                },
+                {
+                    "label": "Doel Vermogen",
+                    "value": f"{result.get('target_pel_kw', 0):.2f}",
+                    "unit": "kW",
+                },
+                {"label": "Verwachte COP", "value": current_cop, "unit": ""},
+            ]
+        )
+
+    if train == "1":
+        try:
+            coordinator.train()
+        except Exception as e:
+            logger.error(f"Fout bij trainen van modellen: {e}")
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "forecast_plot": plot_html,
+            "accuracy_plot_room": accuracy_plot_room,
+            "accuracy_plot_dhw": accuracy_plot_dhw,
+            "ufh_plot": ufh_plot,
+            "dhw_plot": dhw_plot,
+            "solar_plot": solar_plot,
+            "base_load_plot": base_load_plot,
+            "details": details,
+            "measurements": measurements_data,
+            "plan": plan_display,
+            "current_view": view_mode,
+            "target_date": target_date,
+            "prev_date": prev_date,
+            "next_date": next_date,
+            "is_today": is_today,
+            "today_date": today,
+        },
+    )
+
+
+def _get_solar_forecast_plot(
+    request: Request, target_date: date, plan: list = None
+) -> str:
+    """
+    Genereert de interactieve Plotly grafiek.
+    Past smoothing toe op historische data voor mooie weergave.
+    """
+    coordinator = request.app.state.coordinator
+    context = coordinator.context
+    database = coordinator.collector.database
+
+    # Check of er data is
+    if not hasattr(context, "forecast_df") or context.forecast_df is None:
+        return "<div class='p-4 text-muted'>Geen forecast data beschikbaar.</div>"
+
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+    local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
+
+    start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_of_day = datetime.combine(target_date, datetime.max.time()).replace(
+        tzinfo=local_tz
+    )
+
+    # --- 1. FORECAST DATA VOORBEREIDING ---
+    df = context.forecast_df.copy()
+    df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+
+    for col in [
+        "pv_estimate",
+        "pv_actual",
+        "power_ml",
+        "power_ml_raw",
+        "power_corrected",
+        "load_corrected",
+    ]:
+        if col in df.columns:
+            df[col] = df[col].round(2)
+
+    if df.empty:
+        return ""
+
+    # --- 2. HISTORIE OPHALEN & SMOOTHEN ---
+    cutoff_date = start_of_day.astimezone(timezone.utc)
+
+    df_hist = database.get_history(cutoff_date)
+    df_hist_plot = pd.DataFrame()
+
+    if not df_hist.empty:
+        df_hist["timestamp_local"] = (
+            df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+        )
+
+        # --- A. HISTORIE: VLOEIENDE LIJN (FIX VOOR HET STUITEREN) ---
+        # 1. Zet index
+        df_hist_smooth = (
+            df_hist.set_index("timestamp_local")
+            .sort_index()
+            .apply(pd.to_numeric, errors="coerce")
+        )
+
+        df_hist_smooth["base_load"] = (
+            df_hist_smooth["grid_import"]
+            - df_hist_smooth["grid_export"]
+            + df_hist_smooth["pv_actual"]
+            - df_hist_smooth.get("wp_actual")
+        ).clip(lower=0)
+
+        # 4. Laatste check op negatieve waarden
+        df_hist_smooth["pv_actual"] = df_hist_smooth["pv_actual"].clip(lower=0).round(2)
+
+        df_hist_plot = df_hist_smooth.reset_index()
+
+    x_start = start_of_day.replace(tzinfo=None)
+    x_end = end_of_day.replace(tzinfo=None)
+
+    fig = go.Figure()
+
+    # --- 1. SOLCAST TOTAAL (HISTORIE + TOEKOMST) ---
+    sol_x = []
+    sol_y = []
+
+    # Voeg historie toe
+    if not df_hist_plot.empty:
+        df_hist_sol = df_hist_plot[df_hist_plot["timestamp_local"] <= local_now]
+        for i, row in df_hist_sol.iterrows():
+            sol_x.append(row["timestamp_local"])
+            sol_y.append(row["pv_estimate"])
+
+    # Voeg toekomst toe (vanaf het laatste punt in de historie of nu)
+    last_ts = sol_x[-1] if sol_x else local_now
+    df_future_sol = df[df["timestamp_local"] > last_ts]
+
+    for i, row in df_future_sol.iterrows():
+        sol_x.append(row["timestamp_local"])
+        sol_y.append(row["pv_estimate"])
+
+    # --- 2. OPSCHONEN (VOOR DE NACHT-BREUK) ---
+    # Dezelfde logica als je al had: haal de 0-lijnen 's nachts weg
+    clean_sol_x = []
+    clean_sol_y = []
+
+    for i in range(len(sol_x)):
+        val = sol_y[i]
+        is_active = val > 0.01
+        next_active = i < len(sol_x) - 1 and sol_y[i + 1] > 0.01
+        prev_active = i > 0 and sol_y[i - 1] > 0.01
+
+        if is_active or next_active or prev_active:
+            clean_sol_x.append(sol_x[i])
+            clean_sol_y.append(val)
+        else:
+            if clean_sol_x and clean_sol_y[-1] is not None:
+                clean_sol_x.append(sol_x[i])
+                clean_sol_y.append(None)
+
+    # --- 3. TEKEN DE GECOMBINEERDE LIJN ---
+    if clean_sol_x:
+        fig.add_trace(
+            go.Scatter(
+                x=clean_sol_x,
+                y=clean_sol_y,
+                mode="lines",
+                name="Solcast",
+                line=dict(color="#888888", dash="dash", width=1),
+                opacity=0.5,
+                connectgaps=False,
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+            )
+        )
+
+    if not df_hist_plot.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["base_load"],
+                name="Base load",
+                mode="lines",
+                legendgroup="load",
+                line=dict(color="#F50057", width=1, shape="hv"),
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                opacity=0.8,
+            )
+        )
+
+        # Verbind historie met 'nu' punt
+        fig.add_trace(
+            go.Scatter(
+                x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
+                y=[df_hist_plot["base_load"].iloc[-1], context.stable_load],
+                mode="lines",
+                line=dict(color="#F50057", width=1, shape="hv"),
+                showlegend=False,
+                legendgroup="load",
+                hoverinfo="skip",
+                opacity=0.8,
+            )
+        )
+
+        # --- 1. HISTORISCHE SOLAR (pv_actual) ZONDER 0-LIJN ---
+        pv_x = []
+        pv_y = []
+        for i in range(len(df_hist_plot)):
+            val = df_hist_plot.iloc[i]["pv_actual"]
+            ts = df_hist_plot.iloc[i]["timestamp_local"]
+
+            # Check of dit punt, het volgende of het vorige punt positief is
+            is_active = val > 0.01
+            next_is_active = (
+                i < len(df_hist_plot) - 1
+                and df_hist_plot.iloc[i + 1]["pv_actual"] > 0.01
+            )
+            prev_is_active = i > 0 and df_hist_plot.iloc[i - 1]["pv_actual"] > 0.01
+
+            # We nemen het punt mee als het zelf actief is,
+            # OF als het de 0 is die direct naast een actief blok ligt (voor de ramp)
+            if is_active or next_is_active or prev_is_active:
+                pv_x.append(ts)
+                pv_y.append(val)
+            else:
+                # Alleen None toevoegen als we net uit een actieve zone komen
+                # Dit breekt de lijn zodat hij 's nachts niet over de bodem loopt
+                if pv_x and pv_y[-1] is not None:
+                    pv_x.append(ts)
+                    pv_y.append(None)
+
+        if pv_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=pv_x,
+                    y=pv_y,
+                    name="Solar",
+                    mode="lines",
+                    legendgroup="solar",
+                    line=dict(color="#FF9100", width=1.5),
+                    fill="tozeroy",
+                    fillcolor="rgba(255, 145, 0, 0.07)",
+                    connectgaps=False,  # Zorg dat de Nones de lijn echt breken
+                    hovertemplate="%{y:.2f} kW<extra></extra>",
+                )
+            )
+
+        # --- 2. VERBINDING NAAR 'NU' (Alleen als er productie is) ---
+        if not df_hist_plot.empty and (
+            df_hist_plot["pv_actual"].iloc[-1] > 0.01 or context.stable_pv > 0.01
+        ):
+            last_ts = df_hist_plot["timestamp_local"].iloc[-1]
+            last_val = df_hist_plot["pv_actual"].iloc[-1]
+
+            # Alleen tekenen als we niet al een 'None' hebben aan het einde
+            fig.add_trace(
+                go.Scatter(
+                    x=[last_ts, local_now],
+                    y=[last_val, context.stable_pv],
+                    mode="lines",
+                    line=dict(color="#FF9100", width=1.5),
+                    fill="tozeroy",
+                    fillcolor="rgba(255, 145, 0, 0.07)",
+                    showlegend=False,
+                    hoverinfo="skip",
+                    legendgroup="solar",
+                )
+            )
+
+        # --- HISTORISCH VERBRUIK WARMTEPOMP (DHW & UFH) ---
+        # 1. Zorg dat we met getallen werken en vang ontbrekende kolommen/data op
+        # Dit voorkomt de 'round' of 'float' errors in de lambda
+        temp_df = df_hist_plot.copy()
+        temp_df["hvac_mode"] = pd.to_numeric(
+            temp_df.get("hvac_mode", 0), errors="coerce"
+        ).fillna(0)
+        temp_df["wp_actual"] = pd.to_numeric(
+            temp_df.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+
+        for mode_id, mode_key, color, fill, label in [
+            (
+                HvacMode.HEATING.value,
+                "ufh",
+                "#d05ce3",
+                "rgba(208, 92, 227, 0.15)",
+                "UFH",
+            ),
+            (HvacMode.DHW.value, "dhw", "#02cfe7", "rgba(0, 229, 255, 0.15)", "DHW"),
+        ]:
+            hist_x = []
+            hist_y = []
+
+            # 2. Gebruik vectorized selection (veel sneller en veiliger dan .apply)
+            # We pakken wp_actual waar de mode matcht, anders 0
+            mask = temp_df["hvac_mode"].round() == mode_id
+            wp_mode_series = temp_df["wp_actual"].where(mask, 0)
+
+            # 3. Bouw de grafiekpunten op (exact hetzelfde als voorheen)
+            for i in range(len(temp_df)):
+                val = wp_mode_series.iloc[i]
+                ts = temp_df.iloc[i]["timestamp_local"]
+
+                is_active = val > 0.01
+                was_active = i > 0 and wp_mode_series.iloc[i - 1] > 0.01
+                is_last = i == len(temp_df) - 1 or wp_mode_series.iloc[i + 1] <= 0.01
+
+                if is_active:
+                    if not was_active:
+                        hist_x.append(ts - timedelta(seconds=1))
+                        hist_y.append(0.0)
+
+                    hist_x.append(ts)
+                    hist_y.append(val)
+
+                    if is_last:
+                        # Gebruik hier de echte volgende timestamp voor een strakke aansluiting
+                        end_ts = ts + timedelta(minutes=15)
+                        hist_x.append(end_ts)
+                        hist_y.append(0.0)
+                        hist_x.append(end_ts)
+                        hist_y.append(None)
+
+            if hist_x:
+                fig.add_trace(
+                    go.Scatter(
+                        x=hist_x,
+                        y=hist_y,
+                        name=f"{label}",
+                        legendgroup=label,
+                        mode="lines",
+                        line=dict(color=color, width=1.5, shape="hv"),
+                        fill="tozeroy",
+                        fillcolor=fill,
+                        connectgaps=False,
+                        hovertemplate="%{y:.2f} kW<extra></extra>",
+                    )
+                )
+
+    if "power_corrected" in df.columns:
+        df_future = df[df["timestamp_local"] >= local_now].copy()
+
+        # We beginnen bij het huidige bolletje (Now)
+        corr_x = [local_now]
+        corr_y = [context.stable_pv]
+
+        for i in range(len(df_future)):
+            val = df_future.iloc[i]["power_corrected"]
+            ts = df_future.iloc[i]["timestamp_local"]
+
+            is_active = val > 0.01
+            # Check buren voor natuurlijke helling (ramp)
+            next_active = (
+                i < len(df_future) - 1
+                and df_future.iloc[i + 1]["power_corrected"] > 0.01
+            )
+            prev_active = (
+                i > 0 and df_future.iloc[i - 1]["power_corrected"] > 0.01
+            ) or (context.stable_pv > 0.01 and i == 0)
+
+            if is_active or next_active or prev_active:
+                corr_x.append(ts)
+                corr_y.append(val)
+            else:
+                # Breekt de lijn als het donker is
+                if corr_x and corr_y[-1] is not None:
+                    corr_x.append(ts)
+                    corr_y.append(None)
+
+        if len(corr_x) > 1:
+            fig.add_trace(
+                go.Scatter(
+                    x=corr_x,
+                    y=corr_y,
+                    mode="lines",
+                    showlegend=False,
+                    legendgroup="solar",
+                    line=dict(color="#ffffff", dash="dash", width=1.5),
+                    fill="tozeroy",
+                    opacity=0.8,
+                    fillcolor="rgba(255, 255, 255, 0.05)",
+                    connectgaps=False,  # Zorg dat de Nones de lijn echt verbreken
+                    hovertemplate="%{y:.2f} kW<extra></extra>",
+                )
+            )
+
+    # E. Load Forecast (Rood)
+    if "load_corrected" in df.columns:
+        df_future_load = df[df["timestamp_local"] >= local_now]
+
+        # Verbind 'nu' met de toekomst
+        x_load_future = [local_now] + df_future_load["timestamp_local"].tolist()
+        y_load_future = [context.stable_load] + df_future_load[
+            "load_corrected"
+        ].tolist()
+
+        fig.add_trace(
+            go.Scatter(
+                x=x_load_future,
+                y=y_load_future,
+                mode="lines",
+                name="Base load",
+                showlegend=False,
+                legendgroup="load",
+                # Dash voor toekomst, solid voor historie
+                line=dict(color="#F50057", width=1, shape="hv"),
+                hovertemplate="%{y:.2f} kW<extra></extra>",
+                opacity=0.8,
+            )
+        )
+
+        # --- PLANNING: TOON VOLLEDIGE DAGPLANNING ---
+        if plan:
+            for mode_key, color, fill, label in [
+                ("UFH", "#d05ce3", "rgba(208, 92, 227, 0.15)", "UFH"),
+                ("DHW", "#02cfe7", "rgba(0, 229, 255, 0.15)", "DHW"),
+            ]:
+                x_vals = []
+                y_vals = []
+
+                for i in range(len(plan)):
+                    slot_time = (
+                        plan[i]["time"].astimezone(local_tz).replace(tzinfo=None)
+                    )
+                    val = float(plan[i][f"p_el_{mode_key.lower()}"])
+                    is_active = plan[i]["mode"] == mode_key
+
+                    # Bepaal of dit het begin of einde is van een blok
+                    was_active = i > 0 and plan[i - 1]["mode"] == mode_key
+                    is_last_active = is_active and (
+                        i == len(plan) - 1 or plan[i + 1]["mode"] != mode_key
+                    )
+
+                    if is_active:
+                        if not was_active:
+                            # Start van blok: verticaal omhoog vanaf 0
+                            x_vals.append(slot_time - timedelta(seconds=1))
+                            y_vals.append(0.0)
+
+                        # Voeg het datapunt toe (de hoogte uit de tabel)
+                        x_vals.append(slot_time)
+                        y_vals.append(val)
+
+                        if is_last_active:
+                            # Einde van blok: verticaal omlaag naar 0
+                            end_of_slot = slot_time + timedelta(minutes=15)
+                            x_vals.append(end_of_slot)
+                            y_vals.append(0.0)
+                            x_vals.append(end_of_slot)
+                            y_vals.append(
+                                None
+                            )  # Onderbreek de lijn voor het volgende blok
+
+                if x_vals:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_vals,
+                            y=y_vals,
+                            name=label,
+                            mode="lines",
+                            line=dict(
+                                color=color, width=1.5, shape="hv"
+                            ),  # 'hv' zorgt voor strakke trappetjes
+                            fill="tozeroy",
+                            fillcolor=fill,
+                            connectgaps=False,
+                            showlegend=False,
+                            hovertemplate="%{y:.2f} kW<extra></extra>",
+                            legendgroup=label,
+                        )
+                    )
+
+    fig.add_vline(
+        x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        xaxis=dict(
+            title=None,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            range=[x_start, x_end],
+            fixedrange=False,  # Sta zoomen toe
+            dtick=7200000,
+        ),
+        yaxis=dict(
+            title="Vermogen (kW)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            fixedrange=True,  # Y-as vast
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            itemdoubleclick=False,
+        ),
+        margin=dict(l=40, r=20, t=60, b=40),
+        height=450,
+        hovermode="x unified",
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+    )
+
+
+def _get_energy_table(request: Request, view_mode: str, target_date: date):
+    """
+    Haalt data op en verwerkt deze op basis van de modus:
+    - "15min": Toont vermogen (kW) met smoothing.
+    - "hour":  Toont energie (kWh) per uur (sommatie).
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+
+    # 1. Algemene Data Fetch (Gedeeld)
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+    start_dt = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    start_utc = start_dt.astimezone(timezone.utc)
+
+    # Haal data op (get_history haalt alles op NA de datum, dus we moeten straks filteren op eindtijd)
+    df = database.get_history(start_utc)
+
+    if df.empty:
+        return []
+
+    # Zorg dat de kolom als UTC wordt herkend en dan geconverteerd naar lokaal
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(local_tz)
+
+    # Zet tijdzone goed en indexeer
+    end_dt = start_dt + timedelta(days=1)
+    df = df[(df["timestamp"] >= start_dt) & (df["timestamp"] < end_dt)]
+
+    df = df.set_index("timestamp").sort_index()
+
+    # Kolommen die we gaan bewerken
+    process_cols = ["grid_import", "grid_export", "pv_actual", "wp_actual"]
+    # Zorg dat kolommen bestaan (voorkom key errors)
+    process_cols = [c for c in df.columns if c in process_cols]
+
+    # --- SPLITSING IN LOGICA ---
+    if view_mode == "hour":
+        # A. UUR-MODUS (kWh)
+        df[process_cols] = df[process_cols].apply(pd.to_numeric, errors="coerce")
+        df[process_cols] = df[process_cols].fillna(0.0)
+
+        # 1. kW naar kWh (delen door 4)
+        df[process_cols] = df[process_cols] * 0.25
+
+        # Energie-waarden tellen we op (sum)
+        # De modus bepalen we door de meest voorkomende waarde te kiezen (lambda x.mode)
+        agg_map = {
+            "grid_import": "sum",
+            "grid_export": "sum",
+            "pv_actual": "sum",
+            "wp_actual": "sum",
+            "hvac_mode": lambda x: (
+                x[x != 0].mode().iloc[0] if not x[x != 0].mode().empty else 0
+            ),
         }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
+        # Voer de bewerking uit
+        df = df.resample("1h", label="left").agg(agg_map)
 
-        .plotly-notifier {
-            display: none !important;
-        }
+        # 3. Filter toekomst weg (anders heb je lege rijen voor vanavond)
+        if target_date == datetime.now(local_tz).date():
+            current_hour = datetime.now(local_tz).replace(
+                minute=0, second=0, microsecond=0
+            )
+            df = df[df.index <= current_hour]
 
-        .dashboard-container {
-            width: 100%;
-            max-width: 1200px;
-        }
+    # --- EINDE SPLITSING ---
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-        }
+    # 2. Bereken Totalen (Gedeelde logica)
+    # De wiskunde is nu voor beide gelijk (of het nu kW of kWh is)
+    df["total_calc"] = (df["grid_import"] - df["grid_export"] + df["pv_actual"]).clip(
+        lower=0.0
+    )
+    df["wp_actual"] = df.get("wp_actual", 0.0).clip(lower=0.0)
+    df["base_calc"] = (df["total_calc"] - df["wp_actual"]).clip(lower=0.0)
 
-        h1 {
-            margin: 0 0 16px 0;
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--text-color);
-        }
+    # 3. Formatteren voor output
+    df = df.reset_index().sort_values("timestamp", ascending=False)
 
-        .card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            padding: 4px; /* Iets padding zodat de grafiek niet tegen de rand plakt */
-            overflow: hidden;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-        }
+    table_data = []
+    for _, row in df.iterrows():
+        raw_mode = row.get("hvac_mode", 0)
+        mode = int(round(raw_mode)) if pd.notna(raw_mode) else 0
 
-        .chart-container {
-            width: 100%;
-            display: block;
-        }
-
-        /* GRID STYLING VOOR DE DATA ONDERAAN */
-        .details-grid {
-            display: grid;
-            /* Automatisch kolommen maken van minimaal 140px breed */
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 12px;
-            margin-bottom: 30px;
-        }
-
-        .stat-item {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 12px 16px;
-            display: flex;
-            flex-direction: column;
-            transition: border-color 0.2s;
-        }
-
-        .stat-item:hover {
-            border-color: var(--primary-color);
-        }
-
-        .stat-label {
-            font-size: 0.75rem; /* 12px */
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-muted);
-            margin-bottom: 6px;
-        }
-
-        .stat-value {
-            font-size: 1.1rem;
-            font-weight: 500;
-            color: var(--text-color);
-        }
-
-        /* Highlight classes voor Status en Starttijd */
-        .stat-item.highlight {
-            border-color: var(--primary-color);
-            background-color: rgba(68, 115, 158, 0.1); /* Zeer subtiele blauwe gloed */
-        }
-
-        .stat-item.highlight .stat-value {
-            color: var(--primary-color); /* Iets feller blauw voor de tekst */
-        }
-
-        .empty-msg {
-            text-align: center;
-            color: var(--text-muted);
-            font-style: italic;
-            margin-bottom: 20px;
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px; /* Ruimte tussen de knoppen */
-        }
-
-        .explain-btn {
-            background: transparent;
-            border: 1px solid var(--border-color);
-            color: var(--text-muted);
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            margin-left: 4px;
-            transition: all 0.2s;
-        }
-
-        .explain-btn:hover {
-            border-color: var(--primary-color);
-            color: var(--primary-color);
-        }
-
-        .explain-container {
-            margin-bottom: 20px;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 15px;
-        }
-
-        .explain-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-        }
-
-        .explain-table th {
-            text-align: left;
-            color: var(--text-muted);
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 8px;
-        }
-
-        .explain-table td {
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .val-pos {
-            color: #2ca02c;
-        }
-
-        /* Groen voor positieve impact */
-        .val-neg {
-            color: #ff5555;
-        }
-
-        /* Rood voor negatieve impact */
-        .val-base {
-            color: var(--primary-color);
-            font-weight: bold;
-        }
-
-        .loading-overlay {
-            display: none; /* Standaard verborgen */
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgb(17, 17, 17, 0.9);
-            z-index: 9999; /* Boven alles */
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-            backdrop-filter: blur(2px); /* Mooi blur effect */
-        }
-
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid rgba(255, 255, 255, 0.1);
-            border-top: 5px solid var(--primary-color); /* Blauwe rand */
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 15px;
-        }
-
-        .loading-text {
-            color: var(--text-color);
-            font-size: 1.1rem;
-            font-weight: 500;
-        }
-
-        /* TABEL STYLING */
-        .table-container {
-            //max-height: 400px; /* Scrollbaar als de dag lang is */
-            overflow-y: auto;
-        }
-
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-            color: var(--text-color);
-        }
-
-        .data-table th, .data-table td {
-            padding: 8px 10px;
-            text-align: right;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .data-table th {
-            text-align: right;
-            position: sticky;
-            top: 0;
-            background-color: var(--card-bg); /* Zodat header over data heen schuift */
-            font-weight: 600;
-            color: var(--text-muted);
-            z-index: 1;
-        }
-
-        /* Eerste kolom (Tijd) links uitlijnen */
-        .data-table th:first-child, .data-table td:first-child {
-            text-align: left;
-        }
-
-        .data-table tr:hover {
-            background-color: rgba(255, 255, 255, 0.05);
-        }
-
-        .col-highlight {
-            color: var(--primary-color);
-            font-weight: 500;
-        }
-
-        /* Toggle Switch Styling */
-        .toggle-container {
-            display: flex;
-            background-color: rgba(255, 255, 255, 0.05);
-            border-radius: 6px;
-            padding: 2px;
-            gap: 2px;
-        }
-
-        .toggle-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            padding: 4px 10px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            border-radius: 4px;
-            text-decoration: none; /* Het wordt een <a> tag */
-            display: block;
-        }
-
-        .toggle-btn:hover {
-            color: var(--text-color);
-        }
-
-        .toggle-btn.active {
-            background-color: var(--primary-color);
-            color: white;
-            font-weight: 500;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
+        table_data.append(
+            {
+                "time": row["timestamp"].strftime("%H:%M"),
+                # We gebruiken dezelfde keys, de template past de eenheid aan
+                "pv": f"{row['pv_actual']:.2f}",
+                "wp": f"{row['wp_actual']:.2f}",
+                "import": f"{row['grid_import']:.2f}",
+                "export": f"{row['grid_export']:.2f}",
+                "total": f"{row['total_calc']:.2f}",
+                "base": f"{row['base_calc']:.2f}",
+                "mode": mode,
             }
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Datum Navigatie Styling */
-        .top-bar {
-            display: flex;
-            justify-content: space-between; /* Duwt H1 naar links, Nav naar rechts */
-            align-items: center; /* Verticaal centreren */
-            margin-bottom: 20px; /* Ruimte onder de balk */
-            flex-wrap: wrap; /* Op mobiel mag het onder elkaar zakken */
-            gap: 10px;
-        }
-
-        /* Pas H1 aan: geen marge onderaan meer nodig */
-        h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--text-color);
-        }
-
-        /* Zorg dat de datum tekst niet verspringt */
-        .date-display {
-            font-weight: 500;
-            color: var(--text-color);
-            min-width: 90px; /* Vaste breedte voorkomt springen */
-            text-align: center;
-            font-size: 0.85rem;
-        }
-
-        .nav-btn {
-            /* Iets groter klikgebied maken */
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 1.5rem; /* Pijltjes iets groter */
-            line-height: 1;
-            padding: 0 2px;
-            transition: color 0.2s;
-        }
-
-        .nav-btn:hover {
-            color: var(--primary-color);
-        }
-
-        /* Nieuwe wrapper om de knop en de selector naast elkaar te houden */
-        .nav-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 12px; /* Ruimte tussen NU knop en de datum-selector */
-        }
-
-        /* De NU knop als losse, opvallende knop */
-        .today-btn {
-            text-decoration: none;
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--text-color);
-            background: rgba(255, 255, 255, 0.05);
-            padding: 7px 14px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            backdrop-filter: blur(4px);
-            transition: all 0.2s;
-        }
-
-        .today-btn:hover {
-            background-color: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-            box-shadow: 0 4px 12px rgba(0, 154, 199, 0.3);
-        }
-
-        /* Update nav-bar: margin-right op de oude knop kan nu weg */
-        .nav-bar {
-            display: flex;
-            align-items: center;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 50px;
-            padding: 4px 12px;
-            gap: 8px;
-            margin: 0;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-
-        .badge {
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            display: inline-block;
-            min-width: 40px;
-            text-align: center;
-        }
-
-        .badge-ufh {
-            background: rgba(208, 92, 227, 0.15);
-            color: #d05ce3;
-            border: 1px solid rgba(208, 92, 227, 0.3);
-        }
-
-        .badge-dhw {
-            background: rgba(0, 229, 255, 0.15);
-            color: #02cfe7;
-            border: 1px solid rgba(0, 229, 255, 0.3);
-        }
-
-        .badge-off {
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-muted);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        /* Maak inactieve rijen iets transparanter voor meer rust */
-        .row-off {
-            opacity: 0.6;
-        }
-
-        /* Zorg dat de tabel op mobiel niet breekt */
-        .data-table th, .data-table td {
-            white-space: nowrap;
-        }
-
-        .unit {
-            font-size: 0.75em; /* Nog ietsje kleiner */
-            color: rgba(225, 225, 225, 0.35); /* Stuk lichter dan de rest van de tekst (35% zichtbaar) */
-            font-weight: normal;
-            margin-left: 2px; /* Klein beetje ademruimte tussen getal en eenheid */
-        }
-
-        /* --- TOON MEER / GRADIENT STYLING --- */
-        .hidden-row {
-            display: none;
-        }
-
-        .table-fade-container {
-            position: relative;
-        }
-
-        .table-fade-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 80px;
-            /* Gradient die perfect overloopt in de achtergrondkleur van je card (rgb 28,28,28) */
-            background: linear-gradient(to bottom, rgba(28, 28, 28, 0) 0%, rgba(28, 28, 28, 0.8) 50%, rgba(28, 28, 28, 1) 100%);
-            display: flex;
-            align-items: flex-end;
-            justify-content: center;
-            padding-bottom: 10px;
-            pointer-events: none; /* Klikken gaat door de gradient heen... */
-        }
-
-        .show-more-btn {
-            pointer-events: auto; /* ...behalve op de knop zelf */
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 8px 24px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-            transition: background-color 0.2s, transform 0.1s;
-        }
-
-        .show-more-btn:active {
-            transform: translateY(1px);
-        }
-    </style>
-</head>
-<body>
-
-<div class="dashboard-container">
-    <div class="top-bar">
-        <h1>Home Optimizer</h1>
-
-        <!-- Groepeer de NU knop en de Navigatie-balk samen -->
-        <div class="nav-wrapper">
-            {% if not is_today %}
-            <a href="?date_str={{ today_date }}&view={{ current_view }}" class="today-btn">NU</a>
-            {% endif %}
-
-            <div class="nav-bar">
-                <a href="?date_str={{ prev_date }}&view={{ current_view }}" class="nav-btn">&lsaquo;</a>
-
-                <span class="date-display">
-                {% if is_today %}
-                    Vandaag
-                {% else %}
-                    {{ target_date.strftime('%d-%m-%Y') }}
-                {% endif %}
-            </span>
-
-                <a href="?date_str={{ next_date }}&view={{ current_view }}" class="nav-btn">&rsaquo;</a>
-            </div>
-        </div>
-    </div>
-
-    {% if details and is_today %}
-    <div class="details-grid">
-        {% for item in details %}
-        <div class="stat-item">
-            <span class="stat-label">{{ item.label }}</span>
-            <span class="stat-value" {% if item.color %}style="color: {{ item.color }};" {% endif %}>
-                {{ item.value }}
-
-                {% if item.total %}
-                    <span style="font-size: 0.8em; color: var(--text-muted); font-weight: normal; margin: 0 2px;">
-                        / {{ item.total }}
-                    </span>
-                {% endif %}
-
-                {% if item.unit %}
-                    <span class="unit">{{ item.unit }}</span>
-                {% endif %}
-            </span>
-        </div>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    {% if accuracy_plot_room and accuracy_plot_dhw %}
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Kamer temperatuur</h3>
-        </div>
-        <div class="chart-container">
-            {{ accuracy_plot_room | safe }}
-        </div>
-    </div>
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Boiler temperatuur</h3>
-        </div>
-        <div class="chart-container">
-            {{ accuracy_plot_dhw | safe }}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if consumption_plot %}
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Warmtepomp verbruik</h3>
-        </div>
-        <div class="chart-container">
-            {{ consumption_plot | safe }}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if solar_plot %}
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Zonne-energie</h3>
-        </div>
-        <div class="chart-container">
-            {{ solar_plot | safe }}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if base_load_plot %}
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Basis verbruik</h3>
-        </div>
-        <div class="chart-container">
-            {{ base_load_plot | safe }}
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Voorspelling</h3>
-            <div class="header-actions">
-                <button class="explain-btn" onclick="toggle('train')">Train</button>
-            </div>
-        </div>
-        <div class="chart-container">
-            {{ forecast_plot | safe }}
-        </div>
-    </div>
-
-    {% if plan and is_today %}
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Planning</h3>
-        </div>
-
-        <div class="table-container table-fade-container">
-            <table class="data-table">
-                <thead>
-                <tr>
-                    <th style="text-align: left;">Tijd</th>
-                    <th>Zon</th>
-                    <th>Basis</th>
-                    <th style="text-align: center;">Mode</th>
-                    <th>Kamer</th>
-                    <th>Boiler</th>
-                    <th>Aanvoer</th>
-                    <th>COP</th>
-                    <th>Buiten</th>
-                    <th>Verbruik</th>
-                    <!--                    <th>Prijs</th>-->
-                    <th>Kosten</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for row in plan %}
-                <tr class="{% if row.mode == '-' %}row-off{% endif %} {% if loop.index > 10 %}hidden-plan-row hidden-row{% endif %}">
-                    <!-- Tijd -->
-                    <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
-
-                    <td style="color: {% if row.p_solar|float > 0.1 %}#FF9100{% else %}var(--text-muted){% endif %};">
-                        {{ row.p_solar }} <span class="unit">kW</span>
-                    </td>
-
-                    <td style="color: {% if row.p_load|float > 0.5 %}#F50057{% else %}var(--text-muted){% endif %};">
-                        {{ row.p_load }} <span class="unit">kW</span>
-                    </td>
-
-                    <!-- Modus (Actie) -->
-                    <td style="text-align: center;">
-                        <span class="badge {% if row.mode == 'UFH' %}badge-ufh{% elif row.mode == 'DHW' %}badge-dhw{% else %}badge-off{% endif %}">
-                            {{ row.mode }}
-                        </span>
-                    </td>
-
-                    <!-- Temperaturen (Status) -->
-                    <td style="font-weight: 500;">{{ row.t_room }} <span class="unit">&deg;C</span></td>
-                    <td style="font-weight: 500;">{{ row.t_dhw }} <span class="unit">&deg;C</span></td>
-
-                    <!-- Warmtepomp Data -->
-                    <td style="color: var(--text-muted);">
-                        {% if row.mode == 'UFH' %}{{ "%.1f"|format(row.supply_ufh | float) }} <span
-                            class="unit">&deg;C</span>
-                        {% elif row.mode == 'DHW' %}{{ "%.1f"|format(row.supply_dhw | float) }} <span class="unit">&deg;C</span>
-                        {% else %}-{% endif %}
-                    </td>
-
-                    <td style="color: var(--text-muted);">
-                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.cop_ufh | float) }}
-                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.cop_dhw | float) }}
-                        {% else %}-{% endif %}
-                    </td>
-
-                    <!-- Weer & Stroom (Context) -->
-                    <td style="color: var(--text-muted);">{{ row.t_out }} <span class="unit">&deg;C</span></td>
-
-                    <td style="font-weight: {% if row.mode != '-' %}600{% else %}normal{% endif %}; color: {% if row.mode != '-' %}var(--text-color){% else %}var(--text-muted){% endif %};">
-                        {% if row.mode == 'UFH' %}{{ "%.2f"|format(row.p_el_ufh | float) }} <span class="unit">kW</span>
-                        {% elif row.mode == 'DHW' %}{{ "%.2f"|format(row.p_el_dhw | float) }} <span
-                            class="unit">kW</span>
-                        {% else %}-{% endif %}
-                    </td>
-
-                    <!--                    <td style="color: var(&#45;&#45;text-muted);">-->
-                    <!--                        {{ row.price }} <span class="unit">€</span>-->
-                    <!--                    </td>-->
-
-                    <td style="color: {% if row.cost_net|float < 0 %}#2ca02c{% else %}var(--text-color){% endif %};">
-                        {{ row.cost_net }} <span class="unit">€</span>
-                    </td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-
-            <!-- Laat overlay alleen zien als er meer dan 20 rijen zijn -->
-            {% if plan|length > 10 %}
-            <div class="table-fade-overlay" id="plan-overlay">
-                <button class="show-more-btn" onclick="showMore('plan')">Toon meer</button>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">
-                Energiebalans
-                <!-- Dynamische titel -->
-                {% if current_view == 'hour' %}(kWh){% else %}(kW){% endif %}
-            </h3>
-
-            <!-- DE TOGGLE KNOPPEN -->
-            <div class="toggle-container">
-                <!-- We behouden andere parameters (zoals explain) niet simpel in href,
-                     maar voor een dashboard is een harde link vaak prima. -->
-                <a href="?view=15min&date_str={{ target_date }}"
-                   class="toggle-btn {% if current_view == '15min' %}active{% endif %}">
-                    15m
-                </a>
-                <a href="?view=hour&date_str={{ target_date }}"
-                   class="toggle-btn {% if current_view == 'hour' %}active{% endif %}">
-                    1h
-                </a>
-            </div>
-        </div>
-
-        <div class="table-container table-fade-container">
-            {% if measurements %}
-            <table class="data-table">
-                <thead>
-                <tr>
-                    {% set unit = 'kWh' if current_view == 'hour' else 'kW' %}
-                    <th style="text-align: left;">Tijd</th>
-                    <th>Zon</th>
-                    <th>Basis</th>
-                    <th style="text-align: center;">Mode</th>
-                    <th>Verbruik</th>
-                    <th>Totaal</th>
-                    <th>Import</th>
-                    <th>Export</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for row in measurements %}
-                <tr class="{% if row.base == row.import %}row-off{% endif %} {% if loop.index > 10 %}hidden-meas-row hidden-row{% endif %}">
-                    <!-- Tijd -->
-                    <td style="text-align: left; color: var(--text-muted);">{{ row.time }}</td>
-
-                    <!-- Zon -->
-                    <td style="color: {% if row.pv|float > 0.05 %}#FF9100{% else %}var(--text-muted){% endif %};">
-                        {{ row.pv }} <span class="unit">{{ unit }}</span>
-                    </td>
-
-                    <!-- Basis Load (Huis) -->
-                    <td style="color: {% if row.base|float > 0.1 %}#F50057{% else %}var(--text-muted){% endif %};">
-                        {{ row.base }} <span class="unit">{{ unit }}</span>
-                    </td>
-
-                    <!-- WP Mode Badge -->
-                    <td style="text-align: center;">
-                        {% if row.mode == 2 %}
-                        <span class="badge badge-ufh">UFH</span>
-                        {% elif row.mode == 1 or row.mode == 4 %}
-                        <span class="badge badge-dhw">DHW</span>
-                        {% else %}
-                        <span class="badge badge-off">-</span>
-                        {% endif %}
-                    </td>
-
-                    <!-- WP Verbruik -->
-                    <td style="font-weight: {% if row.wp|float > 0 %}600{% else %}normal{% endif %}; color: {% if row.mode == 0 %}var(--text-muted){% endif %};">
-                        {{ row.wp }} <span class="unit">{{ unit }}</span>
-                    </td>
-
-                    <!-- Totaal Huis Verbruik -->
-                    <td style="font-weight: bold; color: var(--text-color);">
-                        {{ row.total }} <span class="unit">{{ unit }}</span>
-                    </td>
-
-                    <!-- Grid Import (Nu Neuraal) -->
-                    <td style="color: {% if row.import|float > 0.05 %}var(--text-color){% else %}var(--text-muted){% endif %};">
-                        {{ row.import }} <span class="unit">{{ unit }}</span>
-                    </td>
-
-                    <!-- Grid Export (Nu Neutraal) -->
-                    <td style="color: {% if row.export|float > 0.05 %}var(--text-color){% else %}var(--text-muted){% endif %};">
-                        {{ row.export }} <span class="unit">{{ unit }}</span>
-                    </td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            <!-- Laat overlay alleen zien als er meer dan 20 rijen zijn -->
-            {% if measurements|length > 10 %}
-            <div class="table-fade-overlay" id="meas-overlay">
-                <button class="show-more-btn" onclick="showMore('meas')">Toon meer</button>
-            </div>
-            {% endif %}
-            {% else %}
-            <div class="empty-msg">Geen metingen beschikbaar.</div>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<div id="loading-overlay" class="loading-overlay">
-    <div class="spinner"></div>
-    <div class="loading-text">Laden...</div>
-</div>
-
-<script>
-    function toggle(name) {
-        // 1. Toon de loader direct
-        const loader = document.getElementById('loading-overlay');
-        if (loader) {
-            loader.style.display = 'flex';
-        }
-
-        setTimeout(() => {
-            const url = new URL(window.location.href);
-
-            // Onthoud of de huidige knop al aan stond
-            const wasActive = url.searchParams.get(name) === '1';
-
-            url.search = '';
-
-            // 2. Zet de gekozen knop aan (tenzij hij al aan stond, dan blijft hij uit na de reset)
-            if (!wasActive) {
-                url.searchParams.set(name, '1');
-            }
-
-            window.location.href = url.toString();
-        }, 10);
-    }
-
-    function showMore(type) {
-        // Haal de verborgen rijen op voor deze tabel (plan of meas)
-        const hiddenRows = document.querySelectorAll('.hidden-' + type + '-row');
-
-        // Verwijder de .hidden-row class om ze zichtbaar te maken
-        hiddenRows.forEach(row => {
-            row.classList.remove('hidden-row');
-        });
-
-        // Verberg de gradient overlay met de knop
-        const overlay = document.getElementById(type + '-overlay');
-        if (overlay) {
-            overlay.style.display = 'none';
-        }
-    }
-</script>
-</body>
-</html>
+        )
+
+    return table_data
+
+
+def _get_day_data(database, target_date: date, local_tz):
+    """
+    Haalt zowel de historie als de voorspellingen (inclusief gisteren ivm UTC) op,
+    converteert deze naar lokale tijd en filtert strak op de gevraagde dag (00:00 - 24:00).
+    Retourneert: (df_hist, df_snap, start_of_day, end_of_day)
+    """
+    start_of_day = datetime.combine(target_date, time.min).replace(tzinfo=local_tz)
+    end_of_day = start_of_day + timedelta(days=1)
+
+    # --- 1. Historie ---
+    df_hist = database.get_history(start_of_day.astimezone(timezone.utc))
+    if not df_hist.empty:
+        df_hist = df_hist.copy()
+        df_hist["ts_local"] = pd.to_datetime(
+            df_hist["timestamp"], utc=True
+        ).dt.tz_convert(local_tz)
+        df_hist = df_hist[
+            (df_hist["ts_local"] >= start_of_day) & (df_hist["ts_local"] < end_of_day)
+        ].copy()
+
+    # --- 2. Voorspellingen (Snapshots) ---
+    df_today = database.get_predictions(target_date)
+    df_yest = database.get_predictions(target_date - timedelta(days=1))
+
+    if df_today.empty and df_yest.empty:
+        df_snap = pd.DataFrame()
+    else:
+        df_snap = (
+            pd.concat([df_yest, df_today]).drop_duplicates(subset=["timestamp"]).copy()
+        )
+        df_snap["ts_local"] = pd.to_datetime(
+            df_snap["timestamp"], utc=True
+        ).dt.tz_convert(local_tz)
+        df_snap = df_snap[
+            (df_snap["ts_local"] >= start_of_day) & (df_snap["ts_local"] < end_of_day)
+        ].copy()
+
+    return df_hist, df_snap, start_of_day, end_of_day
+
+
+def _get_accuracy_plots(request, target_date) -> tuple:
+    """
+    Genereert vloeiende temperatuurgrafieken voor Kamer en Boiler met Setpoint en Marge.
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    # 1. Data ophalen & direct filteren voor deze dag
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
+    )
+
+    if df_snap.empty and df_hist.empty:
+        return "", ""
+
+    # 2. Data voorbereiden (timezone info verwijderen voor plotly lijn)
+    if not df_hist.empty:
+        df_hist["ts_local"] = df_hist["ts_local"].dt.tz_localize(None)
+        df_hist = df_hist.sort_values("ts_local")
+
+    if not df_snap.empty:
+        df_snap["ts_local"] = df_snap["ts_local"].dt.tz_localize(None)
+
+    # 3. Targets ophalen (Unpack 6 waarden: min, max en ideaal target)
+    T = coordinator.optimizer.mpc.horizon + 1
+    r_min, r_max, d_min, d_max, r_target, d_target = (
+        coordinator.optimizer.mpc._get_targets(start_of_day, T)
+    )
+    ts_targets = [
+        start_of_day.replace(tzinfo=None) + timedelta(minutes=15 * t) for t in range(T)
+    ]
+
+    start_ts = start_of_day.replace(tzinfo=None)
+    end_ts = start_ts + timedelta(days=1)
+
+    # 4. Gemeenschappelijke layout instellingen (ZONDER yaxis)
+    common_layout = dict(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            range=[start_ts, end_ts],
+            fixedrange=True,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.05)",
+            tickformat="%H:%M",
+            dtick=7200000,
+        ),
+    )
+
+    # 5. Helper voor Bandbreedte styling
+    def apply_band_style(fig, x, y_min, y_max, y_target, color):
+        # Marge (vlak) - Gebruik spline voor vloeiende overgangen
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_max,
+                mode="lines",
+                line=dict(width=0, shape="spline", smoothing=0.8),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_min,
+                mode="lines",
+                line=dict(width=0, shape="spline", smoothing=0.8),
+                fill="tonexty",
+                fillcolor=color.replace("0.1", "0.08"),
+                name="Marge",
+                showlegend=True,
+                hoverinfo="skip",
+            )
+        )
+        # Setpoint (stippellijn)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_target,
+                mode="lines",
+                line=dict(
+                    color=color.replace("0.1", "0.3"),
+                    width=1.5,
+                    dash="dot",
+                    shape="spline",
+                    smoothing=0.8,
+                ),
+                name="Setpoint",
+                showlegend=True,
+                hoverinfo="skip",
+            )
+        )
+
+    # --- 6. Kamer Grafiek ---
+    fig_room = go.Figure()
+    apply_band_style(
+        fig_room, ts_targets, r_min, r_max, r_target, "rgba(208, 92, 227, 0.1)"
+    )
+
+    if not df_hist.empty:
+        fig_room.add_trace(
+            go.Scatter(
+                x=df_hist["ts_local"],
+                y=df_hist["room_temp"],
+                name="Actueel",
+                line=dict(color="#d05ce3", width=2.5),
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+    if not df_snap.empty:
+        fig_room.add_trace(
+            go.Scatter(
+                x=df_snap["ts_local"],
+                y=df_snap["t_room_pred"],
+                name="Voorspelling",
+                line=dict(color="#d05ce3", width=1.5, dash="dash"),
+                opacity=0.7,
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+    fig_room.update_layout(**common_layout)
+    fig_room.update_yaxes(
+        title="Kamer Temp (°C)",
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.09)",
+        zeroline=False,
+    )
+
+    # --- 7. Boiler Grafiek ---
+    fig_dhw = go.Figure()
+
+    # Gebruik nu direct de ruwe arrays zonder clipping
+    apply_band_style(
+        fig_dhw, ts_targets, d_min, d_max, d_target, "rgba(2, 207, 231, 0.1)"
+    )
+
+    if not df_hist.empty:
+        dhw_act = (df_hist["dhw_top"] + df_hist["dhw_bottom"]) / 2
+        fig_dhw.add_trace(
+            go.Scatter(
+                x=df_hist["ts_local"],
+                y=dhw_act,
+                name="Actueel",
+                line=dict(color="#02cfe7", width=2.5),
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+    if not df_snap.empty:
+        fig_dhw.add_trace(
+            go.Scatter(
+                x=df_snap["ts_local"],
+                y=df_snap["t_dhw_pred"],
+                name="Voorspelling",
+                line=dict(color="#02cfe7", width=1.5, dash="dash"),
+                opacity=0.7,
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+    fig_dhw.update_layout(**common_layout)
+    # Range is verwijderd zodat de as automatisch schaalt (bijv. van 10 naar 55)
+    fig_dhw.update_yaxes(
+        title="Boiler Temp (°C)",
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.09)",
+        zeroline=False,
+    )
+
+    # --- 8. Export ---
+    html_room = pio.to_html(
+        fig_room,
+        full_html=False,
+        include_plotlyjs=True,
+        config={"displayModeBar": False},
+    )
+    html_dhw = pio.to_html(
+        fig_dhw,
+        full_html=False,
+        include_plotlyjs=False,
+        config={"displayModeBar": False},
+    )
+
+    return html_room, html_dhw
+
+
+def _get_ufh_consumption_plot(request, target_date) -> str:
+    """Grafiek voor UFH verbruik: Actueel vs Voorspeld (kWh)"""
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    df_hist, df_snap, start_of_day, _ = _get_day_data(database, target_date, local_tz)
+
+    # 1. Actueel UFH
+    if not df_hist.empty:
+        df_hist["wp_actual"] = pd.to_numeric(
+            df_hist.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["act_ufh"] = 0.0
+        # Filter op HEATING mode (2)
+        df_hist.loc[df_hist["hvac_mode"] == HvacMode.HEATING.value, "act_ufh"] = (
+            df_hist["wp_actual"] * 0.25
+        )
+        df_hist_hourly = df_hist.set_index("ts_local")[["act_ufh"]].resample("1h").sum()
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(columns=["act_ufh"], index=pd.DatetimeIndex([]))
+
+    # 2. Verwacht UFH
+    if not df_snap.empty:
+        df_snap["pred_ufh"] = (
+            pd.to_numeric(df_snap.get("p_el_ufh_pred", 0), errors="coerce").fillna(0)
+            * 0.25
+        )
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_ufh"]].resample("1h").sum()
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(columns=["pred_ufh"], index=pd.DatetimeIndex([]))
+
+    # 3. Samenvoegen & Plotten
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
+    )
+    df_plot = (
+        pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+        .reindex(full_idx)
+        .fillna(0.0)
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["act_ufh"].apply(lambda x: x if x > 0.001 else None),
+            name="Actueel",
+            marker_color="#d05ce3",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_ufh"].apply(lambda x: x if x > 0.001 else None),
+            name="Verwacht",
+            marker_color="rgba(208, 92, 227, 0.2)",
+            marker_line=dict(color="#d05ce3", width=2),
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        barmode="group",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(tickformat="%H:%M", dtick=7200000, fixedrange=True),
+        yaxis=dict(
+            title="Verbruik UFH (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
+        ),
+        bargap=0.50,
+        bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
+    )
+
+
+def _get_dhw_consumption_plot(request, target_date) -> str:
+    """Grafiek voor DHW verbruik: Actueel vs Voorspeld (kWh)"""
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    df_hist, df_snap, start_of_day, _ = _get_day_data(database, target_date, local_tz)
+
+    # 1. Actueel DHW
+    if not df_hist.empty:
+        df_hist["wp_actual"] = pd.to_numeric(
+            df_hist.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["act_dhw"] = 0.0
+        # Filter op DHW mode (1 of 4)
+        df_hist.loc[df_hist["hvac_mode"].isin([HvacMode.DHW.value, HvacMode.LEGIONELLA_PREVENTION.value]), "act_dhw"] = (
+            df_hist["wp_actual"] * 0.25
+        )
+        df_hist_hourly = df_hist.set_index("ts_local")[["act_dhw"]].resample("1h").sum()
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(columns=["act_dhw"], index=pd.DatetimeIndex([]))
+
+    # 2. Verwacht DHW
+    if not df_snap.empty:
+        df_snap["pred_dhw"] = (
+            pd.to_numeric(df_snap.get("p_el_dhw_pred", 0), errors="coerce").fillna(0)
+            * 0.25
+        )
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_dhw"]].resample("1h").sum()
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(columns=["pred_dhw"], index=pd.DatetimeIndex([]))
+
+    # 3. Samenvoegen & Plotten
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
+    )
+    df_plot = (
+        pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+        .reindex(full_idx)
+        .fillna(0.0)
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["act_dhw"].apply(lambda x: x if x > 0.001 else None),
+            name="Actueel",
+            marker_color="#02cfe7",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_dhw"].apply(lambda x: x if x > 0.001 else None),
+            name="Verwacht",
+            marker_color="rgba(2, 207, 231, 0.2)",
+            marker_line=dict(color="#02cfe7", width=2),
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        barmode="group",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(tickformat="%H:%M", dtick=7200000, fixedrange=True),
+        yaxis=dict(
+            title="Verbruik DHW (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
+        ),
+        bargap=0.50,
+        bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
+    )
+
+
+def _get_solar_plot(request, target_date) -> str:
+    """
+    Genereert een uurgrafiek (bar chart) van actuele vs voorspelde zonproductie (kWh)
+    met één doorlopende buitentemperatuurlijn (als vloeiende overlay op de achtergrond).
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
+    )
+
+    # --- 1. Actuele productie per uur ---
+    if not df_hist.empty:
+        df_hist["pv_actual"] = (
+            pd.to_numeric(df_hist.get("pv_actual", 0), errors="coerce")
+            .fillna(0)
+            .clip(lower=0)
+        )
+
+        df_hist_hourly = (
+            df_hist.set_index("ts_local")[["pv_actual"]].resample("1h").sum()
+            * 0.25  # kW → kWh
+        )
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(columns=["pv_actual"], index=pd.DatetimeIndex([]))
+
+    # --- 2. Voorspelde productie per uur (uit snapshot) ---
+    if not df_snap.empty:
+        df_snap["pred_solar"] = (
+            pd.to_numeric(df_snap.get("p_solar_pred", 0), errors="coerce").fillna(0)
+            * 0.25  # kW → kWh
+        )
+        df_snap["pred_temp"] = pd.to_numeric(
+            df_snap.get("t_out_pred", None), errors="coerce"
+        )
+
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_solar"]].resample("1h").sum()
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(
+            columns=["pred_solar"], index=pd.DatetimeIndex([])
+        )
+
+    # --- 3. Temperatuur voorspelling voor vloeiende lijn ---
+    df_temp_pred = pd.DataFrame(columns=["pred_temp"], index=pd.DatetimeIndex([]))
+    if not df_snap.empty and "pred_temp" in df_snap.columns:
+        df_temp_pred = df_snap.set_index("ts_local")[["pred_temp"]].copy()
+        df_temp_pred = df_temp_pred.dropna()
+        df_temp_pred.index = df_temp_pred.index.tz_localize(None)
+
+    # --- 4. Samenvoegen voor bars ---
+    x_start = start_of_day.replace(tzinfo=None)
+
+    full_idx = pd.date_range(start=x_start, periods=24, freq="1h")
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+    df_plot = df_plot.reindex(full_idx).infer_objects(copy=False)
+
+    for col in ["pv_actual", "pred_solar"]:
+        if col in df_plot.columns:
+            df_plot[col] = (
+                df_plot[col]
+                .fillna(0.0)
+                .astype(float)
+                .apply(lambda x: x if x > 0.001 else None)
+            )
+
+    # --- 5. Plotly ---
+    fig = go.Figure()
+
+    # Verwachte temperatuur — vloeiende lijn (spline)
+    if not df_temp_pred.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df_temp_pred.index,
+                y=df_temp_pred["pred_temp"],
+                name="Buiten temp",
+                mode="lines",
+                line=dict(
+                    color="rgba(255,255,255,0.25)",
+                    width=2,
+                    shape="spline",
+                    smoothing=0.8,
+                ),
+                yaxis="y2",
+                hovertemplate="%{y:.1f} °C<extra></extra>",
+            )
+        )
+
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pv_actual"],
+            name="Actueel",
+            marker_color="#FF9100",
+            yaxis="y1",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_solar"],
+            name="Verwacht",
+            marker_color="rgba(255, 145, 0, 0.2)",
+            marker_line=dict(color="#FF9100", width=2),
+            yaxis="y1",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            title=None,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            tickformat="%H:%M",
+            dtick=7200000,
+            fixedrange=True,
+        ),
+        yaxis=dict(
+            title="Productie (kWh)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        yaxis2=dict(
+            title="Temp (°C)",
+            overlaying="y",
+            side="right",
+            showgrid=False,
+            tickfont=dict(color="rgba(255,255,255,0.35)"),
+            zeroline=False,
+        ),
+        bargap=0.50,
+        bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
+    )
+
+
+def _get_base_load_plot(request, target_date) -> str:
+    """
+    Genereert een uurgrafiek (bar chart) van actuele vs voorspelde base load (kWh).
+    """
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
+        database, target_date, local_tz
+    )
+
+    # --- 1. Actuele base load per uur ---
+    if not df_hist.empty:
+        df_hist["grid_import"] = pd.to_numeric(
+            df_hist.get("grid_import", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["grid_export"] = pd.to_numeric(
+            df_hist.get("grid_export", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["pv_actual"] = pd.to_numeric(
+            df_hist.get("pv_actual", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["wp_actual"] = pd.to_numeric(
+            df_hist.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+
+        total_load = (
+            df_hist["grid_import"] - df_hist["grid_export"] + df_hist["pv_actual"]
+        ).clip(lower=0)
+        df_hist["base_actual"] = (total_load - df_hist["wp_actual"]).clip(lower=0)
+
+        df_hist_hourly = (
+            df_hist.set_index("ts_local")[["base_actual"]].resample("1h").sum()
+            * 0.25  # kW → kWh
+        )
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(
+            columns=["base_actual"], index=pd.DatetimeIndex([])
+        )
+
+    # --- 2. Voorspelde base load per uur (uit snapshot) ---
+    if not df_snap.empty:
+        # Ondersteun 'p_load_pred' of 'load_pred' afhankelijk van hoe het opgeslagen wordt
+        load_col = "p_load_pred" if "p_load_pred" in df_snap.columns else "load_pred"
+        df_snap["pred_base"] = (
+            pd.to_numeric(df_snap.get(load_col, 0), errors="coerce").fillna(0)
+            * 0.25  # kW → kWh
+        )
+
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_base"]].resample("1h").sum()
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(columns=["pred_base"], index=pd.DatetimeIndex([]))
+
+    # --- 3. Samenvoegen voor bars ---
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
+    )
+    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+    df_plot = df_plot.reindex(full_idx).infer_objects(copy=False)
+
+    for col in ["base_actual", "pred_base"]:
+        if col in df_plot.columns:
+            df_plot[col] = (
+                df_plot[col]
+                .fillna(0.0)
+                .astype(float)
+                .apply(lambda x: x if x > 0.001 else None)
+            )
+
+    # --- 4. Plotly ---
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["base_actual"],
+            name="Actueel",
+            marker_color="#F50057",
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df_plot.index,
+            y=df_plot["pred_base"],
+            name="Verwacht",
+            marker_color="rgba(245, 0, 87, 0.2)",
+            marker_line=dict(color="#F50057", width=2),
+            hovertemplate="%{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            title=None,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            tickformat="%H:%M",
+            dtick=7200000,
+            fixedrange=True,
+        ),
+        yaxis=dict(
+            title="Verbruik (kWh)",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        bargap=0.50,
+        bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+    )

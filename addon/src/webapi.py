@@ -69,7 +69,8 @@ def index(
     # 1. Grafieken genereren
     plot_html = _get_solar_forecast_plot(request, target_date, plan)
     accuracy_plot_room, accuracy_plot_dhw = _get_accuracy_plots(request, target_date)
-    consumption_plot = _get_consumption_plot(request, target_date)
+    ufh_plot = _get_ufh_consumption_plot(request, target_date)
+    dhw_plot = _get_dhw_consumption_plot(request, target_date)
     solar_plot = _get_solar_plot(request, target_date)
     base_load_plot = _get_base_load_plot(request, target_date)
     view_mode = "15min" if view == "15min" else "hour"
@@ -277,7 +278,8 @@ def index(
             "forecast_plot": plot_html,
             "accuracy_plot_room": accuracy_plot_room,
             "accuracy_plot_dhw": accuracy_plot_dhw,
-            "consumption_plot": consumption_plot,
+            "ufh_plot": ufh_plot,
+            "dhw_plot": dhw_plot,
             "solar_plot": solar_plot,
             "base_load_plot": base_load_plot,
             "details": details,
@@ -1094,90 +1096,58 @@ def _get_accuracy_plots(request, target_date) -> tuple:
     return html_room, html_dhw
 
 
-def _get_consumption_plot(request, target_date) -> str:
-    """
-    Genereert een uurgrafiek (bar chart) van het actuele vs voorspelde warmtepomp verbruik (kWh).
-    """
+def _get_ufh_consumption_plot(request, target_date) -> str:
+    """Grafiek voor UFH verbruik: Actueel vs Voorspeld (kWh)"""
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
     local_tz = ZoneInfo(tzlocal.get_localzone_name())
 
-    df_hist, df_snap, start_of_day, end_of_day = _get_day_data(
-        database, target_date, local_tz
-    )
+    df_hist, df_snap, start_of_day, _ = _get_day_data(database, target_date, local_tz)
 
-    # --- 1. Actueel Verbruik ---
+    # 1. Actueel UFH
     if not df_hist.empty:
         df_hist["wp_actual"] = pd.to_numeric(
             df_hist.get("wp_actual", 0), errors="coerce"
         ).fillna(0)
-
         df_hist["act_ufh"] = 0.0
-        df_hist.loc[df_hist["hvac_mode"] == 2, "act_ufh"] = df_hist["wp_actual"] * 0.25
-        df_hist["act_dhw"] = 0.0
-        df_hist.loc[df_hist["hvac_mode"].isin([1, 4]), "act_dhw"] = (
+        # Filter op HEATING mode (2)
+        df_hist.loc[df_hist["hvac_mode"] == HvacMode.HEATING.value, "act_ufh"] = (
             df_hist["wp_actual"] * 0.25
         )
-
-        # Resample en verwijder direct de tijdzone info van de index
-        df_hist_hourly = (
-            df_hist.set_index("ts_local")[["act_ufh", "act_dhw"]].resample("1h").sum()
-        )
+        df_hist_hourly = df_hist.set_index("ts_local")[["act_ufh"]].resample("1h").sum()
         df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
     else:
-        df_hist_hourly = pd.DataFrame(
-            columns=["act_ufh", "act_dhw"], index=pd.DatetimeIndex([])
-        )
+        df_hist_hourly = pd.DataFrame(columns=["act_ufh"], index=pd.DatetimeIndex([]))
 
-    # --- 2. Verwacht Verbruik ---
+    # 2. Verwacht UFH
     if not df_snap.empty:
         df_snap["pred_ufh"] = (
             pd.to_numeric(df_snap.get("p_el_ufh_pred", 0), errors="coerce").fillna(0)
             * 0.25
         )
-        df_snap["pred_dhw"] = (
-            pd.to_numeric(df_snap.get("p_el_dhw_pred", 0), errors="coerce").fillna(0)
-            * 0.25
-        )
-
-        # Resample en verwijder direct de tijdzone info van de index
         df_snap_hourly = (
-            df_snap.set_index("ts_local")[["pred_ufh", "pred_dhw"]].resample("1h").sum()
+            df_snap.set_index("ts_local")[["pred_ufh"]].resample("1h").sum()
         )
         df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
     else:
-        df_snap_hourly = pd.DataFrame(
-            columns=["pred_ufh", "pred_dhw"], index=pd.DatetimeIndex([])
-        )
+        df_snap_hourly = pd.DataFrame(columns=["pred_ufh"], index=pd.DatetimeIndex([]))
 
-    # --- 3. Samenvoegen ---
-    df_plot = pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
-
-    # Maak de volledige 24-uurs index (naive/geen TZ)
+    # 3. Samenvoegen & Plotten
     full_idx = pd.date_range(
         start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
     )
+    df_plot = (
+        pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+        .reindex(full_idx)
+        .fillna(0.0)
+    )
 
-    # Reindex en fix de FutureWarning door infer_objects te gebruiken voor de fillna
-    df_plot = df_plot.reindex(full_idx)
-    df_plot = df_plot.infer_objects(copy=False).fillna(0.0)
-
-    # --- 4. Opschonen voor Plotly (verberg 0-bars) ---
-    for col in ["act_ufh", "act_dhw", "pred_ufh", "pred_dhw"]:
-        if col in df_plot.columns:
-            # Zet om naar float en vervang kleine waarden door None
-            df_plot[col] = (
-                df_plot[col].astype(float).apply(lambda x: x if x > 0.001 else None)
-            )
-
-    # --- 5. Plotly ---
     fig = go.Figure()
-
     fig.add_trace(
         go.Bar(
             x=df_plot.index,
-            y=df_plot["act_ufh"],
-            name="Actueel UFH",
+            y=df_plot["act_ufh"].apply(lambda x: x if x > 0.001 else None),
+            name="Actueel",
             marker_color="#d05ce3",
             hovertemplate="%{y:.2f} kWh<extra></extra>",
         )
@@ -1185,18 +1155,93 @@ def _get_consumption_plot(request, target_date) -> str:
     fig.add_trace(
         go.Bar(
             x=df_plot.index,
-            y=df_plot["pred_ufh"],
-            name="Verwacht UFH",
+            y=df_plot["pred_ufh"].apply(lambda x: x if x > 0.001 else None),
+            name="Verwacht",
             marker_color="rgba(208, 92, 227, 0.2)",
             marker_line=dict(color="#d05ce3", width=2),
             hovertemplate="%{y:.2f} kWh<extra></extra>",
         )
     )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        barmode="group",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(tickformat="%H:%M", dtick=7200000, fixedrange=True),
+        yaxis=dict(
+            title="Verbruik UFH (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
+        ),
+        bargap=0.5,
+        bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=True, config={"displayModeBar": False}
+    )
+
+
+def _get_dhw_consumption_plot(request, target_date) -> str:
+    """Grafiek voor DHW verbruik: Actueel vs Voorspeld (kWh)"""
+    coordinator = request.app.state.coordinator
+    database = coordinator.collector.database
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    df_hist, df_snap, start_of_day, _ = _get_day_data(database, target_date, local_tz)
+
+    # 1. Actueel DHW
+    if not df_hist.empty:
+        df_hist["wp_actual"] = pd.to_numeric(
+            df_hist.get("wp_actual", 0), errors="coerce"
+        ).fillna(0)
+        df_hist["act_dhw"] = 0.0
+        # Filter op DHW mode (1 of 4)
+        df_hist.loc[
+            df_hist["hvac_mode"].isin(
+                [HvacMode.DHW.value, HvacMode.LEGIONELLA_PREVENTION.value]
+            ),
+            "act_dhw",
+        ] = (
+            df_hist["wp_actual"] * 0.25
+        )
+        df_hist_hourly = df_hist.set_index("ts_local")[["act_dhw"]].resample("1h").sum()
+        df_hist_hourly.index = df_hist_hourly.index.tz_localize(None)
+    else:
+        df_hist_hourly = pd.DataFrame(columns=["act_dhw"], index=pd.DatetimeIndex([]))
+
+    # 2. Verwacht DHW
+    if not df_snap.empty:
+        df_snap["pred_dhw"] = (
+            pd.to_numeric(df_snap.get("p_el_dhw_pred", 0), errors="coerce").fillna(0)
+            * 0.25
+        )
+        df_snap_hourly = (
+            df_snap.set_index("ts_local")[["pred_dhw"]].resample("1h").sum()
+        )
+        df_snap_hourly.index = df_snap_hourly.index.tz_localize(None)
+    else:
+        df_snap_hourly = pd.DataFrame(columns=["pred_dhw"], index=pd.DatetimeIndex([]))
+
+    # 3. Samenvoegen & Plotten
+    full_idx = pd.date_range(
+        start=start_of_day.replace(tzinfo=None), periods=24, freq="1h"
+    )
+    df_plot = (
+        pd.concat([df_hist_hourly, df_snap_hourly], axis=1)
+        .reindex(full_idx)
+        .fillna(0.0)
+    )
+
+    fig = go.Figure()
     fig.add_trace(
         go.Bar(
             x=df_plot.index,
-            y=df_plot["act_dhw"],
-            name="Actueel DHW",
+            y=df_plot["act_dhw"].apply(lambda x: x if x > 0.001 else None),
+            name="Actueel",
             marker_color="#02cfe7",
             hovertemplate="%{y:.2f} kWh<extra></extra>",
         )
@@ -1204,8 +1249,8 @@ def _get_consumption_plot(request, target_date) -> str:
     fig.add_trace(
         go.Bar(
             x=df_plot.index,
-            y=df_plot["pred_dhw"],
-            name="Verwacht DHW",
+            y=df_plot["pred_dhw"].apply(lambda x: x if x > 0.001 else None),
+            name="Verwacht",
             marker_color="rgba(2, 207, 231, 0.2)",
             marker_line=dict(color="#02cfe7", width=2),
             hovertemplate="%{y:.2f} kWh<extra></extra>",
@@ -1213,26 +1258,19 @@ def _get_consumption_plot(request, target_date) -> str:
     )
 
     fig.update_layout(
-        barmode="group",
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
         plot_bgcolor="rgb(28, 28, 28)",
         height=320,
         margin=dict(l=40, r=20, t=30, b=40),
+        barmode="group",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(
-            title=None,
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.1)",
-            tickformat="%H:%M",
-            dtick=7200000,
-            fixedrange=True,
-        ),
+        xaxis=dict(tickformat="%H:%M", dtick=7200000, fixedrange=True),
         yaxis=dict(
-            title="Verbruik (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
+            title="Verbruik DHW (kWh)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"
         ),
-        bargap=0.15,
+        bargap=0.5,
         bargroupgap=0.05,
     )
 
@@ -1386,7 +1424,7 @@ def _get_solar_plot(request, target_date) -> str:
             tickfont=dict(color="rgba(255,255,255,0.35)"),
             zeroline=False,
         ),
-        bargap=0.50,
+        bargap=0.5,
         bargroupgap=0.05,
     )
 
@@ -1514,7 +1552,7 @@ def _get_base_load_plot(request, target_date) -> str:
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
         ),
-        bargap=0.50,
+        bargap=0.5,
         bargroupgap=0.05,
     )
 

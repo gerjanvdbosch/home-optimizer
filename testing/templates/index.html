@@ -517,7 +517,7 @@
     </div>
     {% endif %}
 
-    {% if accuracy_plot_room and accuracy_plot_dhw %}
+    {% if accuracy_plot_room %}
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Kamer temperatuur</h3>
@@ -526,6 +526,20 @@
             {{ accuracy_plot_room | safe }}
         </div>
     </div>
+    {% endif %}
+
+    {% if ufh_plot %}
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Vloerverwarming verbruik</h3>
+        </div>
+        <div class="chart-container">
+            {{ ufh_plot | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if  accuracy_plot_dhw %}
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Boiler temperatuur</h3>
@@ -536,13 +550,13 @@
     </div>
     {% endif %}
 
-    {% if consumption_plot %}
+    {% if dhw_plot %}
     <div class="card">
         <div class="header">
-            <h3 style="margin: 0;">Warmtepomp verbruik</h3>
+            <h3 style="margin: 0;">Boiler verbruik</h3>
         </div>
         <div class="chart-container">
-            {{ consumption_plot | safe }}
+            {{ dhw_plot | safe }}
         </div>
     </div>
     {% endif %}
