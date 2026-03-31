@@ -934,15 +934,12 @@ class HydraulicPredictor:
     def predict_supply(self, mode, p_th, t_out, t_sink):
         if mode == "UFH":
             factor, min_lift, max_safe = FACTOR_UFH, self.learned_lift_ufh, 30.0
-            offset = 1.0
         else:
             factor, min_lift, max_safe = FACTOR_DHW, self.learned_lift_dhw, 60.0
-            offset = 2.0
 
         delta_t_calc = p_th / factor if p_th > 0 else 0.0
-        physical = t_sink + min_lift + delta_t_calc + offset
         min_hard = t_sink + min_lift + delta_t_calc
-        prediction = physical
+        prediction = min_hard
 
         if self.is_fitted:
             data = pd.DataFrame([[p_th, t_out, t_sink]], columns=self.features)
@@ -951,8 +948,7 @@ class HydraulicPredictor:
                     self.model_supply_ufh if mode == "UFH" else self.model_supply_dhw
                 )
                 if ml_model is not None:
-                    val = float(ml_model.predict(data)[0])
-                    prediction = 0.7 * val + 0.3 * physical
+                    prediction = float(ml_model.predict(data)[0])
             except Exception:
                 pass
 

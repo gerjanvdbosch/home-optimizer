@@ -2,7 +2,6 @@ import os
 import json
 
 from dataclasses import dataclass, field
-from utils import safe_float
 
 
 @dataclass
@@ -96,20 +95,7 @@ class Config:
         defaults = Config()
 
         return Config(
-            solar_model_ratio=safe_float(
-                os.getenv("SOLAR_MODEL_RATIO", defaults.solar_model_ratio)
-            ),
-            room_target=parse_schedule("CLIMATE_ROOM_JSON", defaults.room_target),
-            dhw_target=parse_schedule("CLIMATE_DHW_JSON", defaults.dhw_target),
-        )
-
-        # Maak een basis instance voor de defaults
-        defaults = Config()
-
-        return Config(
-            solar_model_ratio=safe_float(
-                os.getenv("SOLAR_MODEL_RATIO", defaults.solar_model_ratio)
-            ),
+            solar_model_ratio=defaults.solar_model_ratio,
             room_target=parse_schedule("CLIMATE_ROOM_JSON", defaults.room_target),
             dhw_target=parse_schedule("CLIMATE_DHW_JSON", defaults.dhw_target),
         )

@@ -395,15 +395,16 @@ class ThermalMPC:
         # Bij 0°C buiten (vriespunt) accepteren we 0.0°C dip (strikte bewaking).
         t_out_forecast = forecast_df.temp.values[:T]
 
-        # factor: 0.0 bij 15 graden of warmer, 1.0 bij 0 graden of kouder
-        strictness_factor = np.clip((15.0 - t_out_forecast) / 15.0, 0, 1)
+        # 1. Strictness factor: 1.0 bij 0°C (vriespunt), 0.0 bij 20°C (zacht)
+        strictness_factor = np.clip((20.0 - t_out_forecast) / 20.0, 0, 1)
 
-        # De marge krimpt naarmate het kouder wordt:
-        # Als het 15°C is: marge = 0.2 * (1 - 0) = 0.2
-        # Als het 0°C is: marge = 0.2 * (1 - 1) = 0.0
-        dynamic_tolerance = 0.2 * (1.0 - strictness_factor)
+        # 2. Bepaal de tolerantie (de 'sag' die we toestaan):
+        # In de diepste winter (factor 1.0) mag hij 0.2°C zakken (jouw eis).
+        # In het voorjaar (factor 0.0) mag hij 0.6°C zakken (meer ruimte voor zon).
+        # We interpoleren lineair tussen deze twee fysische uitersten.
+        dynamic_tolerance = 0.6 - (0.4 * strictness_factor)
 
-        # De uiteindelijke grens waarbij de 'Big-M' boete (stroom inkopen) start:
+        # 3. De uiteindelijke grens waarbij de Factor 50 boete start:
         r_min = r_t - dynamic_tolerance
 
         t_room_init = float(state["room_temp"])

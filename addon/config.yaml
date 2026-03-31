@@ -16,12 +16,10 @@ ingress_stream: true
 panel_title: Optimizer
 panel_icon: mdi:home-lightning-bolt-outline
 options:
-  solar:
-    model_ratio: 0.7
   climate:
     room_schedule:
       - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
-      - { time: "06:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
+      - { time: "08:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
       - { time: "10:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
       - { time: "17:00", target: 20.0, low_margin: 0.5, high_margin: 1.5 }
       - { time: "22:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
@@ -33,8 +31,6 @@ options:
       - { time: "21:01", target: 20.0, low_margin: 5.0, high_margin: 30.0 }
   log_level: info
 schema:
-  solar:
-    model_ratio: "float(0,1)?"
   climate:
     room_schedule:
       - time: str
