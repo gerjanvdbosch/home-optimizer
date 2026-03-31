@@ -50,7 +50,7 @@ class Config:
     room_target: list = field(
         default_factory=lambda: [
             ("00:00", 19.0, 0.5, 1.5),
-            ("06:00", 19.0, 0.5, 1.5),
+            ("08:00", 19.0, 0.5, 1.5),
             ("10:00", 19.5, 0.5, 1.5),
             ("17:00", 20.0, 0.5, 1.5),
             ("22:00", 19.0, 0.5, 1.5),
@@ -91,6 +91,17 @@ class Config:
                 ]
             except Exception:
                 return default_value
+
+        # Maak een basis instance voor de defaults
+        defaults = Config()
+
+        return Config(
+            solar_model_ratio=safe_float(
+                os.getenv("SOLAR_MODEL_RATIO", defaults.solar_model_ratio)
+            ),
+            room_target=parse_schedule("CLIMATE_ROOM_JSON", defaults.room_target),
+            dhw_target=parse_schedule("CLIMATE_DHW_JSON", defaults.dhw_target),
+        )
 
         # Maak een basis instance voor de defaults
         defaults = Config()

@@ -81,7 +81,6 @@ class ThermalMPC:
         self.P_dhw_min = cp.Parameter(T, nonneg=True)
         self.P_dhw_max = cp.Parameter(T, nonneg=True)
         self.P_solar_gain = cp.Parameter(T)
-        self.P_strictness = cp.Parameter(T, nonneg=True)
 
         self.P_cost_room_under = cp.Parameter(nonneg=True)
         self.P_cost_room_over = cp.Parameter(nonneg=True)
@@ -120,7 +119,11 @@ class ThermalMPC:
         self.s_dhw_low = cp.Variable(T, nonneg=True)
         self.s_dhw_high = cp.Variable(T, nonneg=True)
 
-        self.P_terminal_offset = cp.Parameter()
+        self.s_term_room_under = cp.Variable(nonneg=True)  # Voor de terminal value
+        self.s_term_dhw_under = cp.Variable(nonneg=True)  # Voor de terminal value
+
+        self.P_term_target_mass = cp.Parameter()
+        self.P_term_target_dhw = cp.Parameter()
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
@@ -187,6 +190,10 @@ class ThermalMPC:
                 # Comfortlimieten met slack
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
                 self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
+                # Dwingt af dat we aan het eind minimaal op target eindigen,
+                # of anders de slack-variabele (en dus een boete) incasseren
+                self.t_mass[T] + self.s_term_room_under >= self.P_term_target_mass,
+                self.t_dhw[T] + self.s_term_dhw_under >= self.P_term_target_dhw,
             ]
 
         # ── Doelfunctie ───────────────────────────────────────────────────
@@ -198,13 +205,11 @@ class ThermalMPC:
             * self.dt
         )
 
-        extra_penalty = cp.multiply(cp.pos(self.s_room_low - 0.25), self.P_strictness)
         comfort = cp.sum(
             self.s_room_low * self.P_cost_room_under
             + self.s_room_high * self.P_cost_room_over
             + self.s_dhw_low * self.P_cost_dhw_under
             + self.s_dhw_high * self.P_cost_dhw_over
-            + extra_penalty
         )
 
         # Hoge straf op compressorstart, lage straf op klep-wissel
@@ -216,16 +221,13 @@ class ThermalMPC:
         )
         switching = (cp.sum(self.comp_start) * 0.15) + (valve_switches * 0.05)
 
-        # Terminal value op t_mass: vloer houdt warmte vast na horizoneinde.
-        # t_air aan het einde is vluchtig (lekt snel weg via R_oa).
-        stored_heat = (
-            self.t_mass[T] * self.P_val_terminal_room
-            + self.t_dhw[T] * self.P_val_terminal_dhw
-            - self.P_terminal_offset
+        terminal_penalty = (
+            self.s_term_room_under * self.P_val_terminal_room
+            + self.s_term_dhw_under * self.P_val_terminal_dhw
         )
 
         self.problem = cp.Problem(
-            cp.Minimize(net_cost + comfort + switching - stored_heat),
+            cp.Minimize(net_cost + comfort + switching + terminal_penalty),
             constraints,
         )
 
@@ -388,6 +390,22 @@ class ThermalMPC:
         # ── Toestand initialiseren ────────────────────────────────────────
         r_min, r_max, d_min, d_max, r_t, d_t = self._get_targets(state["now"], T)
 
+        # We bepalen hoe 'strikt' we moeten zijn op basis van de buitentemperatuur.
+        # Bij 15°C buiten (mild) accepteren we de 0.2°C dip die je noemde.
+        # Bij 0°C buiten (vriespunt) accepteren we 0.0°C dip (strikte bewaking).
+        t_out_forecast = forecast_df.temp.values[:T]
+
+        # factor: 0.0 bij 15 graden of warmer, 1.0 bij 0 graden of kouder
+        strictness_factor = np.clip((15.0 - t_out_forecast) / 15.0, 0, 1)
+
+        # De marge krimpt naarmate het kouder wordt:
+        # Als het 15°C is: marge = 0.2 * (1 - 0) = 0.2
+        # Als het 0°C is: marge = 0.2 * (1 - 1) = 0.0
+        dynamic_tolerance = 0.2 * (1.0 - strictness_factor)
+
+        # De uiteindelijke grens waarbij de 'Big-M' boete (stroom inkopen) start:
+        r_min = r_t - dynamic_tolerance
+
         t_room_init = float(state["room_temp"])
         self.P_t_air_init.value = t_room_init
 
@@ -447,12 +465,8 @@ class ThermalMPC:
         self.P_ufh_p_th_hist.value = hist_p_th
 
         logger.info(
-            f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K  max: {dhw_demand[:T].max():.2f} K"
+            f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K max: {dhw_demand[:T].max():.2f} K"
         )
-
-        # Strictness: koud buiten = hogere urgentie
-        delta_t_env = np.maximum(0.0, r_min + 1.0 - forecast_df.temp.values[:T])
-        self.P_strictness.value = (3.0 + 0.10 * (delta_t_env**2)) * effective_prices
 
         # ── SLP-iteraties met convergentiecheck ──────────────────────────
         linearizer = PhysicsLinearizer(
@@ -499,8 +513,18 @@ class ThermalMPC:
         self.P_val_terminal_room.value = costs["terminal_room"]
         self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
-        self.P_terminal_offset.value = (
-            r_t[-1] * costs["terminal_room"] + d_t[-1] * costs["terminal_tank"]
+        t_out_end = float(t_out_arr[-1])
+
+        # Fysische steady-state vloertemperatuur nodig om kamer op target te houden
+        t_mass_ss = r_t[-1] + self.ident.R_im * (r_t[-1] - t_out_end) / self.ident.R_oa
+
+        # Vul de parameters voor de CVXPY solver
+        self.P_term_target_mass.value = t_mass_ss
+        self.P_term_target_dhw.value = d_t[-1]
+
+        logger.info(
+            f"[Terminal] Doel t_mass_ss={t_mass_ss:.2f}°C  "
+            f"(r_t={r_t[-1]:.1f}°C  t_out={t_out_end:.1f}°C)"
         )
 
         logger.info(
@@ -576,7 +600,7 @@ class ThermalMPC:
                     delta_dhw = float(np.mean(np.abs(new_t_dhw - guessed_t_dhw)))
 
                     alpha_mass = float(np.clip(0.6 / (1.0 + delta_mass), 0.20, 0.70))
-                    alpha_dhw = float(np.clip(0.3 / (1.0 + delta_dhw), 0.10, 0.45))
+                    alpha_dhw = float(np.clip(0.2 / (1.0 + delta_dhw), 0.05, 0.30))
 
                     guessed_t_mass = (
                         alpha_mass * new_t_mass + (1 - alpha_mass) * guessed_t_mass
@@ -795,7 +819,6 @@ class Optimizer:
         d_cop = self.mpc.P_cop_dhw.value
         u_sup = self.mpc.plan_t_sup_ufh
         d_sup = self.mpc.plan_t_sup_dhw
-        strict = self.mpc.P_strictness.value
 
         prices = self.mpc.P_prices.value  # importprijs per kwartier
         export_prices = self.mpc.P_export_prices.value  # exportprijs per kwartier
@@ -844,7 +867,6 @@ class Optimizer:
                     "cop_dhw": f"{d_cop[t]:.2f}",
                     "supply_ufh": f"{u_sup[t]:.2f}",
                     "supply_dhw": f"{d_sup[t]:.2f}",
-                    "strict": f"{strict[t]:.0f}",
                     "shutter": f"{shutter_val:.0f}",
                     "price": f"{prices[t]:.2f}",
                     "cost_ufh": f"{p_u[t] * prices[t] * self.mpc.dt:.3f}",

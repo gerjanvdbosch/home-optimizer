@@ -1258,25 +1258,30 @@ class ComfortCostCalculator:
         self.avg_cop_dhw = avg_cop_dhw
 
     def compute(self, max_price: float) -> dict:
-        # Fysieke energie (kWh) nodig om de hele massa 1 Kelvin op te warmen
-        kwh_per_K_room = self.C_room / self.avg_cop_ufh
-        kwh_per_K_tank = self.C_tank / self.avg_cop_dhw
+        # Thermodynamische kosten om de volledige thermische massa 1 graad te verwarmen
+        cost_to_heat_1k_room = (self.C_room / self.avg_cop_ufh) * max_price
+        cost_to_heat_1k_tank = (self.C_tank / self.avg_cop_dhw) * max_price
 
-        # De waarde van 1 graad warmte (en de kosten als je die tekort komt)
-        room_under = kwh_per_K_room * max_price
-        tank_under = kwh_per_K_tank * max_price
-        room_over = room_under
-        tank_over = tank_under
+        # Wiskundige harde grens: Boete moet strict groter zijn dan de fysieke opwarmkosten
+        # Anders kiest de optimizer voor temperatuurverlies. Epsilon = 1% extra.
+        room_under = cost_to_heat_1k_room * 1.01
+        tank_under = cost_to_heat_1k_tank * 1.01
 
-        logger.info(
-            f"[ComfortCost] max_prijs={max_price:.3f} €/kWh | "
-            f"waarde_kamer={room_under:.4f} €/K | waarde_tank={tank_under:.4f} €/K"
-        )
+        # Oververhitting boete: zonne-overschot opslaan is prima, maar niet oneindig
+        # Maak dit goedkoper dan onderkoeling, zodat pre-heating toegestaan is.
+        room_over = cost_to_heat_1k_room * 0.1
+        tank_over = cost_to_heat_1k_tank * 0.1
+
+        # Terminal Value = Waarde van de restwarmte op t=Horizon.
+        # Exact gelijk aan de opwarmkosten, anders laat hij het huis afkoelen in de laatste uren.
+        terminal_room = cost_to_heat_1k_room
+        terminal_tank = cost_to_heat_1k_tank
+
         return {
             "room_under": room_under,
             "room_over": room_over,
             "tank_under": tank_under,
             "tank_over": tank_over,
-            "terminal_room": room_under,
-            "terminal_tank": tank_under,
+            "terminal_room": terminal_room,
+            "terminal_tank": terminal_tank,
         }
