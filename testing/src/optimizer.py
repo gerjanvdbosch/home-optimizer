@@ -41,7 +41,7 @@ class ThermalMPC:
         self.perf_map = perf_map
         self.hydraulic = hydraulic
         self.res_dhw = res_dhw
-        self.horizon = 96
+        self.horizon = 144
         self.dt = 0.25
 
         self._last_t_mass_model = None
@@ -504,6 +504,9 @@ class ThermalMPC:
             C_tank=self.ident.C_tank,
             avg_cop_ufh=avg_cop_ufh_h,
             avg_cop_dhw=avg_cop_dhw_h,
+            export_price=export_price,
+            K_loss_dhw=self.ident.K_loss_dhw,
+            horizon_h=self.horizon * self.dt,
         ).compute(effective_max_price)
 
         self.P_cost_room_under.value = costs["room_under"]

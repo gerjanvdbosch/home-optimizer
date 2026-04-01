@@ -525,7 +525,7 @@ class SystemIdentificator:
         self._fit_k_emit(df_proc)
         self._fit_k_tank(df_proc)
         self._fit_dhw_loss(df_proc)
-        self._fit_two_state(df_proc)
+        self._fit_two_state()
 
         logger.info(
             f"[SysID] Klaar: R={self.R:.1f} C={self.C:.1f} "
@@ -704,62 +704,7 @@ class SystemIdentificator:
             self.K_loss_dhw = float(np.clip(loss.quantile(0.25), 0.001, 0.05))
             logger.info(f"[SysID] K_loss_dhw={self.K_loss_dhw:.4f}")
 
-    def _fit_solar_c_air(self, df_proc: pd.DataFrame):
-        """
-        Leert C_air via de regressie-methode (Helling van dT/dt t.o.v. Zon).
-        Dit is ongevoelig voor constante verliezen naar buiten of de vloer.
-        """
-        df = df_proc.copy().sort_values("timestamp")
-        # dT_dt in uren
-        df["dt_hours"] = df["timestamp"].diff().dt.total_seconds() / 3600.0
-        df["dT_dt"] = df["room_temp"].diff() / df["dt_hours"]
-
-        # Filter: WP uit, Zon moet aanwezig zijn, dT/dt moet positief zijn
-        mask = (
-                (df["hvac_mode"] == HvacMode.OFF.value) &
-                (df["hvac_mode"].shift(1) == HvacMode.OFF.value) &
-                (df["pv_actual"] > 1.0) &
-                (df["dT_dt"] > 0) &
-                (df["dT_dt"] < 2.0)  # Filter ruis/fouten
-        )
-
-        d = df[mask].dropna(subset=["pv_actual", "dT_dt"])
-
-        if len(d) < 10:
-            return 0.08 * self.C
-
-        # Lineaire Regressie: dT/dt = a * PV + b
-        # De helling 'a' vertelt ons hoeveel K/uur we stijgen per kW PV
-        x = d["pv_actual"].values
-        y = d["dT_dt"].values
-
-        # We dwingen de fit door de data
-        A = np.vstack([x, np.ones(len(x))]).T
-        slope, intercept = np.linalg.lstsq(A, y, rcond=None)[0]
-
-        if slope <= 0:
-            logger.warning(f"[SysID] Geen positieve solar correlatie gevonden (slope={slope:.3f})")
-            return 0.08 * self.C
-
-        # Fysische koppeling:
-        # Q_solar = C_air * dT_dt  ->  (PV * factor) = C_air * (slope * PV)
-        # C_air = factor / slope
-        # We gebruiken 0.15 als fysische proxy-constante (verhouding glas/PV & absorptie)
-        solar_proxy_factor = 0.15
-        learned_c_air = solar_proxy_factor / slope
-
-        # Fysische grenzen voor jouw huis (C=15.2)
-        learned_c_air = np.clip(learned_c_air, 0.6, 0.30 * self.C)
-
-        learned_frac = learned_c_air / self.C
-        logger.info(
-            f"[SysID] C_air geleerd via regressie: {learned_c_air:.2f} kWh/K "
-            f"({learned_frac * 100:.1f}%) | slope={slope:.3f} K/h per kW"
-        )
-
-        return float(learned_c_air)
-
-    def _fit_two_state(self, df_proc: pd.DataFrame = None):
+    def _fit_two_state(self):
         """
         2-state parameterschatting.
 
@@ -793,11 +738,7 @@ class SystemIdentificator:
         #   Bovengrens: 15% van C (lichte bouw maximum)
         c_air_lower = max(0.6, 0.04 * self.C)
         c_air_upper = 0.15 * self.C
-
-        if df_proc is not None:
-            self.C_air = self._fit_solar_c_air(df_proc)
-        else:
-            self.C_air = float(np.clip(C_air_prior, c_air_lower, c_air_upper))
+        self.C_air = float(np.clip(C_air_prior, c_air_lower, c_air_upper))
 
         # ── 3. R_im: afgeleid uit gemeten lag en C_air ────────────────────────
         # τ_lag = R_im × C_air  →  R_im = τ_lag / C_air
@@ -1187,7 +1128,7 @@ class PhysicsLinearizer:
         self,
         perf_map: HPPerformanceMap,
         hydraulic: HydraulicPredictor,
-        horizon: int = 96,
+        horizon: int = 144,
         max_iter: int = 6,
         tol: float = 0.05,
     ):
@@ -1306,11 +1247,26 @@ class ComfortCostCalculator:
         C_tank: float,
         avg_cop_ufh: float,
         avg_cop_dhw: float,
+        K_loss_dhw: float,
+        export_price: float,
+        horizon_h: float = 24.0,
     ):
         self.C_room = C_room
         self.C_tank = C_tank
         self.avg_cop_ufh = avg_cop_ufh
         self.avg_cop_dhw = avg_cop_dhw
+
+        # Fractie van de overtollige warmte die verloren gaat binnen de horizon
+        # τ_tank = 1/K_loss_dhw (uren)
+        # frac = 1 - exp(-horizon / τ) = gedeelte dat als standby-verlies wegloopt
+        tau_tank_h = 1.0 / max(K_loss_dhw, 0.001)
+        self.frac_tank_lost = 1.0 - np.exp(-horizon_h / tau_tank_h)
+        self.export_price = export_price
+
+        logger.info(
+            f"[ComfortCost] τ_tank={tau_tank_h:.0f}h  "
+            f"frac_lost_24h={self.frac_tank_lost:.3f}"
+        )
 
     def compute(self, max_price: float) -> dict:
         # Thermodynamische kosten om de volledige thermische massa 1 graad te verwarmen
@@ -1322,16 +1278,20 @@ class ComfortCostCalculator:
         room_under = cost_to_heat_1k_room * 1.01
         tank_under = cost_to_heat_1k_tank * 1.01
 
-        # Oververhitting boete: zonne-overschot opslaan is prima, maar niet oneindig
-        # Maak dit goedkoper dan onderkoeling, zodat pre-heating toegestaan is.
-        room_over = cost_to_heat_1k_room * 0.1
-        tank_over = cost_to_heat_1k_tank * 0.1
+        # Te warm in kamer = gemiste exportopbrengst van overtollige energie
+        room_over = cost_to_heat_1k_room * (self.export_price / max(max_price, 0.001))
 
-        # Terminal Value = Waarde van de restwarmte op t=Horizon.
-        # Exact gelijk aan de opwarmkosten, anders laat hij het huis afkoelen in de laatste uren.
+        # Te warm in tank = standby-verlies binnen de horizon
+        tank_over = cost_to_heat_1k_room * self.frac_tank_lost
+
         terminal_room = cost_to_heat_1k_room
         terminal_tank = cost_to_heat_1k_tank
 
+        logger.info(
+            f"[ComfortCost] max_prijs={max_price:.3f} | "
+            f"kamer_onder={room_under:.4f} over={room_over:.4f} | "
+            f"tank_onder={tank_under:.4f} over={tank_over:.4f}"
+        )
         return {
             "room_under": room_under,
             "room_over": room_over,

@@ -291,10 +291,6 @@ class Database:
                 record.cost_net_pred = safe_float(row.get("cost_net"))
 
             session.commit()
-            self.logger.info(
-                f"[DB] Snapshot opgeslagen vanaf {start_time.strftime('%H:%M')} "
-                f"({len(relevant_rows)} tijdstappen bijgewerkt)"
-            )
         except Exception as e:
             session.rollback()
             self.logger.error(f"[DB] Fout bij opslaan snapshot: {e}")

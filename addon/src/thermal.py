@@ -1128,7 +1128,7 @@ class PhysicsLinearizer:
         self,
         perf_map: HPPerformanceMap,
         hydraulic: HydraulicPredictor,
-        horizon: int = 96,
+        horizon: int = 144,
         max_iter: int = 6,
         tol: float = 0.05,
     ):
@@ -1247,11 +1247,26 @@ class ComfortCostCalculator:
         C_tank: float,
         avg_cop_ufh: float,
         avg_cop_dhw: float,
+        K_loss_dhw: float,
+        export_price: float,
+        horizon_h: float = 24.0,
     ):
         self.C_room = C_room
         self.C_tank = C_tank
         self.avg_cop_ufh = avg_cop_ufh
         self.avg_cop_dhw = avg_cop_dhw
+
+        # Fractie van de overtollige warmte die verloren gaat binnen de horizon
+        # τ_tank = 1/K_loss_dhw (uren)
+        # frac = 1 - exp(-horizon / τ) = gedeelte dat als standby-verlies wegloopt
+        tau_tank_h = 1.0 / max(K_loss_dhw, 0.001)
+        self.frac_tank_lost = 1.0 - np.exp(-horizon_h / tau_tank_h)
+        self.export_price = export_price
+
+        logger.info(
+            f"[ComfortCost] τ_tank={tau_tank_h:.0f}h  "
+            f"frac_lost_24h={self.frac_tank_lost:.3f}"
+        )
 
     def compute(self, max_price: float) -> dict:
         # Thermodynamische kosten om de volledige thermische massa 1 graad te verwarmen
@@ -1263,16 +1278,20 @@ class ComfortCostCalculator:
         room_under = cost_to_heat_1k_room * 1.01
         tank_under = cost_to_heat_1k_tank * 1.01
 
-        # Oververhitting boete: zonne-overschot opslaan is prima, maar niet oneindig
-        # Maak dit goedkoper dan onderkoeling, zodat pre-heating toegestaan is.
-        room_over = cost_to_heat_1k_room * 0.1
-        tank_over = cost_to_heat_1k_tank * 0.1
+        # Te warm in kamer = gemiste exportopbrengst van overtollige energie
+        room_over = cost_to_heat_1k_room * (self.export_price / max(max_price, 0.001))
 
-        # Terminal Value = Waarde van de restwarmte op t=Horizon.
-        # Exact gelijk aan de opwarmkosten, anders laat hij het huis afkoelen in de laatste uren.
+        # Te warm in tank = standby-verlies binnen de horizon
+        tank_over = cost_to_heat_1k_room * self.frac_tank_lost
+
         terminal_room = cost_to_heat_1k_room
         terminal_tank = cost_to_heat_1k_tank
 
+        logger.info(
+            f"[ComfortCost] max_prijs={max_price:.3f} | "
+            f"kamer_onder={room_under:.4f} over={room_over:.4f} | "
+            f"tank_onder={tank_under:.4f} over={tank_over:.4f}"
+        )
         return {
             "room_under": room_under,
             "room_over": room_over,
