@@ -163,7 +163,7 @@ if __name__ == "__main__":
         scheduler.add_job(
             coordinator.update_forecast, "interval", minutes=2, id="forecast"
         )
-        scheduler.add_job(collector.update_load, "interval", seconds=5, id="load")
+        scheduler.add_job(collector.update_load, "interval", seconds=60, id="load")
         scheduler.add_job(
             collector.update_history, "interval", seconds=60, id="history"
         )
