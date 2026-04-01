@@ -180,7 +180,7 @@ if __name__ == "__main__":
         coordinator.update_forecast()
         collector.update_history()
         coordinator.tick()
-        # coordinator.train()
+        coordinator.train()
 
         scheduler.start()
 

@@ -525,7 +525,7 @@ class SystemIdentificator:
         self._fit_k_emit(df_proc)
         self._fit_k_tank(df_proc)
         self._fit_dhw_loss(df_proc)
-        self._fit_two_state()
+        self._fit_two_state(df_proc)
 
         logger.info(
             f"[SysID] Klaar: R={self.R:.1f} C={self.C:.1f} "
@@ -704,7 +704,62 @@ class SystemIdentificator:
             self.K_loss_dhw = float(np.clip(loss.quantile(0.25), 0.001, 0.05))
             logger.info(f"[SysID] K_loss_dhw={self.K_loss_dhw:.4f}")
 
-    def _fit_two_state(self):
+    def _fit_solar_c_air(self, df_proc: pd.DataFrame):
+        """
+        Leert C_air via de regressie-methode (Helling van dT/dt t.o.v. Zon).
+        Dit is ongevoelig voor constante verliezen naar buiten of de vloer.
+        """
+        df = df_proc.copy().sort_values("timestamp")
+        # dT_dt in uren
+        df["dt_hours"] = df["timestamp"].diff().dt.total_seconds() / 3600.0
+        df["dT_dt"] = df["room_temp"].diff() / df["dt_hours"]
+
+        # Filter: WP uit, Zon moet aanwezig zijn, dT/dt moet positief zijn
+        mask = (
+                (df["hvac_mode"] == HvacMode.OFF.value) &
+                (df["hvac_mode"].shift(1) == HvacMode.OFF.value) &
+                (df["pv_actual"] > 1.0) &
+                (df["dT_dt"] > 0) &
+                (df["dT_dt"] < 2.0)  # Filter ruis/fouten
+        )
+
+        d = df[mask].dropna(subset=["pv_actual", "dT_dt"])
+
+        if len(d) < 10:
+            return 0.08 * self.C
+
+        # Lineaire Regressie: dT/dt = a * PV + b
+        # De helling 'a' vertelt ons hoeveel K/uur we stijgen per kW PV
+        x = d["pv_actual"].values
+        y = d["dT_dt"].values
+
+        # We dwingen de fit door de data
+        A = np.vstack([x, np.ones(len(x))]).T
+        slope, intercept = np.linalg.lstsq(A, y, rcond=None)[0]
+
+        if slope <= 0:
+            logger.warning(f"[SysID] Geen positieve solar correlatie gevonden (slope={slope:.3f})")
+            return 0.08 * self.C
+
+        # Fysische koppeling:
+        # Q_solar = C_air * dT_dt  ->  (PV * factor) = C_air * (slope * PV)
+        # C_air = factor / slope
+        # We gebruiken 0.15 als fysische proxy-constante (verhouding glas/PV & absorptie)
+        solar_proxy_factor = 0.15
+        learned_c_air = solar_proxy_factor / slope
+
+        # Fysische grenzen voor jouw huis (C=15.2)
+        learned_c_air = np.clip(learned_c_air, 0.6, 0.30 * self.C)
+
+        learned_frac = learned_c_air / self.C
+        logger.info(
+            f"[SysID] C_air geleerd via regressie: {learned_c_air:.2f} kWh/K "
+            f"({learned_frac * 100:.1f}%) | slope={slope:.3f} K/h per kW"
+        )
+
+        return float(learned_c_air)
+
+    def _fit_two_state(self, df_proc: pd.DataFrame = None):
         """
         2-state parameterschatting.
 
@@ -738,7 +793,11 @@ class SystemIdentificator:
         #   Bovengrens: 15% van C (lichte bouw maximum)
         c_air_lower = max(0.6, 0.04 * self.C)
         c_air_upper = 0.15 * self.C
-        self.C_air = float(np.clip(C_air_prior, c_air_lower, c_air_upper))
+
+        if df_proc is not None:
+            self.C_air = self._fit_solar_c_air(df_proc)
+        else:
+            self.C_air = float(np.clip(C_air_prior, c_air_lower, c_air_upper))
 
         # ── 3. R_im: afgeleid uit gemeten lag en C_air ────────────────────────
         # τ_lag = R_im × C_air  →  R_im = τ_lag / C_air
