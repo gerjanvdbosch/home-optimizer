@@ -125,6 +125,14 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
         df["hvac_mode"] == df["hvac_mode"].shift(-1)
     )
 
+    # 10. Base load
+    df["base_load"] = (
+        df["grid_import"].fillna(0)
+        - df["grid_export"].fillna(0)
+        + df["pv_actual"].fillna(0)
+        - df["wp_actual"].fillna(0)
+    ).clip(lower=0)
+
     return df
 
 
@@ -979,6 +987,7 @@ class UfhResidualPredictor:
             "solar",
             "effective_solar",
             "shutter_room",
+            "internal_load",
             "wind",
             "hour_sin",
             "hour_cos",
@@ -1015,9 +1024,22 @@ class UfhResidualPredictor:
             ),
         )
 
+        is_heating = df_proc["hvac_mode"] == HvacMode.HEATING.value
+        just_stopped = (not is_heating.shift(1)) & (~is_heating)
+        just_started = (not is_heating.shift(1)) & is_heating
+
+        df_proc["post_heat_cooldown"] = (
+            just_stopped.rolling(window=4, min_periods=1).max().fillna(0).astype(bool)
+        )
+        df_proc["warmup_transient"] = (
+            just_started.rolling(window=2, min_periods=1).max().fillna(0).astype(bool)
+        )
+
         dt_hours = df_proc["timestamp"].diff().dt.total_seconds().shift(-1) / 3600
-        mask = (df_proc["hvac_mode"] == HvacMode.HEATING.value) | (
-            df_proc["wp_output"] < 0.1
+        mask = (
+            (is_heating | (df_proc["wp_output"] < 0.1))
+            & ~df_proc["post_heat_cooldown"]
+            & ~df_proc["warmup_transient"]
         )
         df_feat = df_proc[mask].copy()
         dt = dt_hours[mask]
@@ -1035,9 +1057,14 @@ class UfhResidualPredictor:
         df_feat["effective_solar"] = df_feat["solar"] * (
             df_feat.get("shutter_room", 100) / 100.0
         )
+        # internal_load: basisverbruik als proxy voor bezetting/interne warmte
+        df_feat["internal_load"] = df_feat.get("base_load", 0.0)
 
         train_set = df_feat[self.features + ["target"]].dropna()
-        train_set = train_set[train_set["target"].between(-1.2, 1.2)]
+
+        q_low = train_set["target"].quantile(0.01)
+        q_high = train_set["target"].quantile(0.99)
+        train_set = train_set[train_set["target"].between(q_low, q_high)]
 
         if len(train_set) > 10:
             self.model = RandomForestRegressor(
@@ -1055,6 +1082,7 @@ class UfhResidualPredictor:
         df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
         df["shutter_room"] = shutters
         df["effective_solar"] = df["solar"] * (df["shutter_room"] / 100.0)
+        df["internal_load"] = df.get("load_corrected", 0.0)
 
         for col in self.features:
             if col not in df.columns:
@@ -1087,11 +1115,33 @@ class DhwResidualPredictor:
             logger.warning(f"[DHW Residual] Laden mislukt: {e}")
 
     def train(self, df: pd.DataFrame):
-        df = df.copy().sort_values("timestamp")
-        df["dhw_diff"] = df["dhw_top"].diff()
-        mask_shower = (df["hvac_mode"] != HvacMode.DHW.value) & (df["dhw_diff"] < -0.5)
+        df = clean_thermal_data(df).copy().sort_values("timestamp")
+
+        # Detectie: gebruik dhw_top (gevoelig voor onttrekking)
+        df["dhw_diff_top"] = df["dhw_top"].diff()
+
+        # Kwantificering: gebruik gemiddelde (consistent met MPC state-variabele)
+        df["dhw_avg"] = (df["dhw_top"] + df["dhw_bottom"]) / 2.0
+        df["dhw_diff_avg"] = df["dhw_avg"].diff()
+
+        # Markeer post-DHW stratificatieperiode
+        is_dhw = df["hvac_mode"] == HvacMode.DHW.value
+        just_stopped_dhw = (is_dhw.shift(1)) & (~is_dhw)
+        df["post_dhw_stratification"] = (
+            just_stopped_dhw.rolling(window=4, min_periods=1)
+            .max()
+            .fillna(0)
+            .astype(bool)
+        )
+
+        mask_shower = (
+            (df["hvac_mode"] != HvacMode.DHW.value)
+            & (df["dhw_diff_top"] < -0.5)
+            & (df["dhw_diff_avg"] < 0.0)
+            & ~df["post_dhw_stratification"]
+        )
         df["demand"] = 0.0
-        df.loc[mask_shower, "demand"] = df["dhw_diff"].abs()
+        df.loc[mask_shower, "demand"] = df["dhw_diff_avg"].abs()
         df = add_cyclic_time_features(df, "timestamp")
 
         if len(df) > 100:
@@ -1128,7 +1178,7 @@ class PhysicsLinearizer:
         self,
         perf_map: HPPerformanceMap,
         hydraulic: HydraulicPredictor,
-        horizon: int = 144,
+        horizon: int = 96,
         max_iter: int = 6,
         tol: float = 0.05,
     ):
@@ -1269,21 +1319,22 @@ class ComfortCostCalculator:
         )
 
     def compute(self, max_price: float) -> dict:
-        # Thermodynamische kosten om de volledige thermische massa 1 graad te verwarmen
+        # Kosten om 1K te herstellen op het duurste moment
         cost_to_heat_1k_room = (self.C_room / self.avg_cop_ufh) * max_price
         cost_to_heat_1k_tank = (self.C_tank / self.avg_cop_dhw) * max_price
 
-        # Wiskundige harde grens: Boete moet strict groter zijn dan de fysieke opwarmkosten
-        # Anders kiest de optimizer voor temperatuurverlies. Epsilon = 1% extra.
+        # Te koud: je MOET energie kopen om te herstellen, tegen max_price
+        # Epsilon zodat optimizer altijd herstelt i.p.v. boete accepteert
         room_under = cost_to_heat_1k_room * 1.01
         tank_under = cost_to_heat_1k_tank * 1.01
 
-        # Te warm in kamer = gemiste exportopbrengst van overtollige energie
-        room_over = cost_to_heat_1k_room * (self.export_price / max(max_price, 0.001))
+        # Te warm: energie die je had kunnen exporteren, gewaardeerd tegen export_price
+        # Geen magic number: dit IS de economische waarde van overtollige warmte
+        room_over = (self.C_room / self.avg_cop_ufh) * self.export_price
+        tank_over = cost_to_heat_1k_tank * self.frac_tank_lost
 
-        # Te warm in tank = standby-verlies binnen de horizon
-        tank_over = cost_to_heat_1k_room * self.frac_tank_lost
-
+        # Terminal: zelfde logica als under, maar zonder epsilon
+        # (terminal is een zachte grens, geen harde boete per tijdstap)
         terminal_room = cost_to_heat_1k_room
         terminal_tank = cost_to_heat_1k_tank
 
@@ -1292,6 +1343,7 @@ class ComfortCostCalculator:
             f"kamer_onder={room_under:.4f} over={room_over:.4f} | "
             f"tank_onder={tank_under:.4f} over={tank_over:.4f}"
         )
+
         return {
             "room_under": room_under,
             "room_over": room_over,

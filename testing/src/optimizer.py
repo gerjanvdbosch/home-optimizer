@@ -41,7 +41,7 @@ class ThermalMPC:
         self.perf_map = perf_map
         self.hydraulic = hydraulic
         self.res_dhw = res_dhw
-        self.horizon = 144
+        self.horizon = 96
         self.dt = 0.25
 
         self._last_t_mass_model = None
@@ -390,23 +390,6 @@ class ThermalMPC:
         # ── Toestand initialiseren ────────────────────────────────────────
         r_min, r_max, d_min, d_max, r_t, d_t = self._get_targets(state["now"], T)
 
-        # We bepalen hoe 'strikt' we moeten zijn op basis van de buitentemperatuur.
-        # Bij 15°C buiten (mild) accepteren we de 0.2°C dip die je noemde.
-        # Bij 0°C buiten (vriespunt) accepteren we 0.0°C dip (strikte bewaking).
-        t_out_forecast = forecast_df.temp.values[:T]
-
-        # 1. Strictness factor: 1.0 bij 0°C (vriespunt), 0.0 bij 20°C (zacht)
-        strictness_factor = np.clip((20.0 - t_out_forecast) / 20.0, 0, 1)
-
-        # 2. Bepaal de tolerantie (de 'sag' die we toestaan):
-        # In de diepste winter (factor 1.0) mag hij 0.2°C zakken (jouw eis).
-        # In het voorjaar (factor 0.0) mag hij 0.6°C zakken (meer ruimte voor zon).
-        # We interpoleren lineair tussen deze twee fysische uitersten.
-        dynamic_tolerance = 0.6 - (0.4 * strictness_factor)
-
-        # 3. De uiteindelijke grens waarbij de Factor 50 boete start:
-        r_min = r_t - dynamic_tolerance
-
         t_room_init = float(state["room_temp"])
         self.P_t_air_init.value = t_room_init
 
@@ -518,13 +501,13 @@ class ThermalMPC:
         self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
         t_out_end = float(t_out_arr[-1])
-
-        # Fysische steady-state vloertemperatuur nodig om kamer op target te houden
-        t_mass_ss = r_t[-1] + self.ident.R_im * (r_t[-1] - t_out_end) / self.ident.R_oa
+        t_mass_ss = (
+            r_min[-1] + self.ident.R_im * (r_min[-1] - t_out_end) / self.ident.R_oa
+        )
 
         # Vul de parameters voor de CVXPY solver
         self.P_term_target_mass.value = t_mass_ss
-        self.P_term_target_dhw.value = d_t[-1]
+        self.P_term_target_dhw.value = d_min[-1]
 
         logger.info(
             f"[Terminal] Doel t_mass_ss={t_mass_ss:.2f}°C  "
