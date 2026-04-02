@@ -20,8 +20,8 @@ options:
     room_schedule:
       - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
       - { time: "08:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
-      - { time: "10:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
-      - { time: "17:00", target: 20.0, low_margin: 0.5, high_margin: 1.5 }
+      - { time: "12:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
+      - { time: "18:00", target: 20.0, low_margin: 0.5, high_margin: 1.5 }
       - { time: "22:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     dhw_schedule:
       - { time: "00:00", target: 20.0, low_margin: 5.0, high_margin: 30.0 }
