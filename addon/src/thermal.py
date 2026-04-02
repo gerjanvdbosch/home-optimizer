@@ -1025,8 +1025,8 @@ class UfhResidualPredictor:
         )
 
         is_heating = df_proc["hvac_mode"] == HvacMode.HEATING.value
-        just_stopped = (not is_heating.shift(1)) & (~is_heating)
-        just_started = (not is_heating.shift(1)) & is_heating
+        just_stopped = is_heating.shift(1).fillna(False) & ~is_heating
+        just_started = ~is_heating.shift(1).fillna(True) & is_heating
 
         df_proc["post_heat_cooldown"] = (
             just_stopped.rolling(window=4, min_periods=1).max().fillna(0).astype(bool)
@@ -1126,7 +1126,7 @@ class DhwResidualPredictor:
 
         # Markeer post-DHW stratificatieperiode
         is_dhw = df["hvac_mode"] == HvacMode.DHW.value
-        just_stopped_dhw = (is_dhw.shift(1)) & (~is_dhw)
+        just_stopped_dhw = is_dhw.shift(1).fillna(False) & ~is_dhw
         df["post_dhw_stratification"] = (
             just_stopped_dhw.rolling(window=4, min_periods=1)
             .max()
