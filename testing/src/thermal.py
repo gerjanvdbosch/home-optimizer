@@ -1267,13 +1267,13 @@ class PhysicsLinearizer:
         else:
             delta_dhw = float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev)))
 
-        tol_ufh = self.tol  # 0.05 kW
-        tol_dhw = self.tol  # * 3.0  # 0.15 kW — DHW mag ruimer
+        tol_ufh = self.tol
+        tol_dhw = self.tol * 3 # 0.15 kW — DHW mag ruimer
 
         converged = (delta_ufh < tol_ufh) and (delta_dhw < tol_dhw)
         logger.info(
-            f"[SLP] delta UFH={delta_ufh:.4f}/{tol_ufh}  "
-            f"DHW={delta_dhw:.4f}/{tol_dhw}  converged={converged}"
+            f"[SLP] delta UFH={delta_ufh:.4f}/{tol_ufh:.2f}  "
+            f"DHW={delta_dhw:.4f}/{tol_dhw:.2f}  converged={converged}"
         )
         return converged
 

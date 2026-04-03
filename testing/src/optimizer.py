@@ -49,8 +49,6 @@ class ThermalMPC:
 
         self.plan_t_sup_ufh = np.zeros(self.horizon)
         self.plan_t_sup_dhw = np.zeros(self.horizon)
-        self.plan_p_el_ufh = np.zeros(self.horizon)
-        self.plan_p_el_dhw = np.zeros(self.horizon)
 
         self._build_problem()
 
@@ -457,7 +455,7 @@ class ThermalMPC:
             perf_map=self.perf_map,
             hydraulic=self.hydraulic,
             horizon=T,
-            max_iter=10,
+            max_iter=50,
             tol=0.05,
         )
 
@@ -528,8 +526,6 @@ class ThermalMPC:
 
             self.plan_t_sup_ufh = sup_ufh
             self.plan_t_sup_dhw = sup_dhw
-            self.plan_p_el_ufh = p_el_ufh
-            self.plan_p_el_dhw = p_el_dhw
 
             # 3. CVXPY-parameters vullen
             self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
@@ -583,33 +579,13 @@ class ThermalMPC:
                     guessed_t_mass = new_t_mass
                     guessed_t_dhw = new_t_dhw
                 else:
-                    delta_mass = float(np.mean(np.abs(new_t_mass - guessed_t_mass)))
-                    delta_dhw = float(np.mean(np.abs(new_t_dhw - guessed_t_dhw)))
-
-                    alpha_mass = float(np.clip(0.6 / (1.0 + delta_mass), 0.20, 0.70))
-                    alpha_dhw = float(np.clip(0.2 / (1.0 + delta_dhw), 0.05, 0.30))
-
+                    alpha = 0.50
                     guessed_t_mass = (
-                        alpha_mass * new_t_mass + (1 - alpha_mass) * guessed_t_mass
+                            alpha * new_t_mass + (1 - alpha) * guessed_t_mass
                     )
                     guessed_t_dhw = (
-                        alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw
+                            alpha * new_t_dhw + (1 - alpha) * guessed_t_dhw
                     )
-
-        # Update met correct data
-        if self.t_mass.value is not None:
-            final_t_mass = self.t_mass.value[:-1]
-            final_t_dhw = self.t_dhw.value[:-1]
-            p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
-                t_out_arr, final_t_mass, final_t_dhw
-            )
-
-            self.plan_p_el_ufh = p_el_ufh
-            self.plan_p_el_dhw = p_el_dhw
-            self.plan_t_sup_ufh = sup_ufh
-            self.plan_t_sup_dhw = sup_dhw
-            self.P_cop_ufh.value = cop_ufh
-            self.P_cop_dhw.value = cop_dhw
 
         if self.t_air.value is not None:
             ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]
@@ -798,8 +774,8 @@ class Optimizer:
 
         u_on = self.mpc.ufh_on.value
         d_on = self.mpc.dhw_on.value
-        p_u = self.mpc.plan_p_el_ufh
-        p_d = self.mpc.plan_p_el_dhw
+        p_u = self.mpc.p_el_ufh.value
+        p_d = self.mpc.p_el_dhw.value
         t_r = self.mpc.t_air.value
         t_d = self.mpc.t_dhw.value
         u_cop = self.mpc.P_cop_ufh.value
@@ -848,8 +824,8 @@ class Optimizer:
                     "p_load": f"{context.forecast_df.load_corrected.iloc[t]:.2f}",
                     "t_room": f"{t_r[t]:.2f}",
                     "t_dhw": f"{t_d[t]:.2f}",
-                    "p_el_ufh": f"{p_u[t] if mode_str == 'UFH' else 0.0:.2f}",
-                    "p_el_dhw": f"{p_d[t] if mode_str == 'DHW' else 0.0:.2f}",
+                    "p_el_ufh": f"{p_u[t]:.2f}",
+                    "p_el_dhw": f"{p_d[t]:.2f}",
                     "cop_ufh": f"{u_cop[t]:.2f}",
                     "cop_dhw": f"{d_cop[t]:.2f}",
                     "supply_ufh": f"{u_sup[t]:.2f}",
