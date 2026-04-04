@@ -457,8 +457,8 @@ class ThermalMPC:
             horizon=T,
             max_iter=25,
             relax_iter=0.70,
-            tol_ufh=0.1,
-            tol_dhw=0.15,
+            tol_ufh=0.15,
+            tol_dhw=0.1,
         )
 
         t_out_arr = forecast_df.temp.values[:T].astype(float)
