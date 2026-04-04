@@ -84,12 +84,33 @@ def index(
 
     # Actuele COP bepalen uit het plan (rij 0 is 'nu')
     current_cop = "-"
+    avg_ufh_cop_str = "-"
+    avg_dhw_cop_str = "-"
+
     if plan and len(plan) > 0:
         current_mode = result.get("mode", "OFF")
         if current_mode == "UFH":
             current_cop = plan[0].get("cop_ufh", "-")
         elif current_mode == "DHW":
             current_cop = plan[0].get("cop_dhw", "-")
+
+        ufh_cops_today = []
+        dhw_cops_today = []
+
+        for p in plan:
+            # Controleer of de stap in het plan binnen 'vandaag' valt
+            p_date = p["time"].astimezone(local_tz).date()
+            if p_date == today:
+                mode = int(p["hvac_mode"])
+                if mode == HvacMode.HEATING.value:
+                    ufh_cops_today.append(float(p["cop_ufh"]))
+                elif mode == HvacMode.DHW.value:
+                    dhw_cops_today.append(float(p["cop_dhw"]))
+
+        if ufh_cops_today:
+            avg_ufh_cop_str = f"{sum(ufh_cops_today) / len(ufh_cops_today):.2f}"
+        if dhw_cops_today:
+            avg_dhw_cop_str = f"{sum(dhw_cops_today) / len(dhw_cops_today):.2f}"
 
     # Gestructureerde lijst maken
     details = []
@@ -262,6 +283,8 @@ def index(
                     "unit": "kW",
                 },
                 {"label": "Verwachte COP", "value": current_cop, "unit": ""},
+                {"label": "Gem. COP UFH", "value": avg_ufh_cop_str, "unit": ""},
+                {"label": "Gem. COP DHW", "value": avg_dhw_cop_str, "unit": ""},
             ]
         )
 
