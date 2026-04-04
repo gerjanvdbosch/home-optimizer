@@ -83,16 +83,16 @@ def index(
     ) / 2.0
 
     # Actuele COP bepalen uit het plan (rij 0 is 'nu')
-    current_cop = "-"
+    # current_cop = "-"
     avg_ufh_cop_str = "-"
     avg_dhw_cop_str = "-"
 
     if plan and len(plan) > 0:
-        current_mode = result.get("mode", "OFF")
-        if current_mode == "UFH":
-            current_cop = plan[0].get("cop_ufh", "-")
-        elif current_mode == "DHW":
-            current_cop = plan[0].get("cop_dhw", "-")
+        # current_mode = result.get("mode", "OFF")
+        # if current_mode == "UFH":
+        #     current_cop = plan[0].get("cop_ufh", "-")
+        # elif current_mode == "DHW":
+        #     current_cop = plan[0].get("cop_dhw", "-")
 
         ufh_cops_today = []
         dhw_cops_today = []
@@ -308,17 +308,17 @@ def index(
                     "value": f"{getattr(context, 'temp_bias', 0.0):+.2f}",
                     "unit": "°C",
                 },
-                {
-                    "label": "Doel Aanvoer",
-                    "value": f"{result.get('target_supply_temp', 0):.1f}",
-                    "unit": "°C",
-                },
-                {
-                    "label": "Doel Vermogen",
-                    "value": f"{result.get('target_pel_kw', 0):.2f}",
-                    "unit": "kW",
-                },
-                {"label": "Verwachte COP", "value": current_cop, "unit": ""},
+                # {
+                #     "label": "Doel Aanvoer",
+                #     "value": f"{result.get('target_supply_temp', 0):.1f}",
+                #     "unit": "°C",
+                # },
+                # {
+                #     "label": "Doel Vermogen",
+                #     "value": f"{result.get('target_pel_kw', 0):.2f}",
+                #     "unit": "kW",
+                # },
+                # {"label": "Verwachte COP", "value": current_cop, "unit": ""},
                 {"label": "Gem. COP UFH", "value": avg_ufh_cop_str, "unit": ""},
                 {"label": "Gem. COP DHW", "value": avg_dhw_cop_str, "unit": ""},
             ]
