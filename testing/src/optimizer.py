@@ -41,7 +41,7 @@ class ThermalMPC:
         self.perf_map = perf_map
         self.hydraulic = hydraulic
         self.res_dhw = res_dhw
-        self.horizon = 96
+        self.horizon = 144
         self.dt = 0.25
 
         self._last_t_mass_model = None
@@ -217,7 +217,7 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.15) + (valve_switches * 0.05)
+        switching = (cp.sum(self.comp_start) * 0.1) + (valve_switches * 0.1)
 
         terminal_penalty = (
             self.s_term_room_under * self.P_val_terminal_room
@@ -455,8 +455,10 @@ class ThermalMPC:
             perf_map=self.perf_map,
             hydraulic=self.hydraulic,
             horizon=T,
-            max_iter=50,
-            tol=0.05,
+            max_iter=25,
+            relax_iter=0.70,
+            tol_ufh=0.1,
+            tol_dhw=0.15,
         )
 
         t_out_arr = forecast_df.temp.values[:T].astype(float)
@@ -486,8 +488,6 @@ class ThermalMPC:
             avg_cop_ufh=avg_cop_ufh_h,
             avg_cop_dhw=avg_cop_dhw_h,
             export_price=export_price,
-            K_loss_dhw=self.ident.K_loss_dhw,
-            horizon_h=self.horizon * self.dt,
         ).compute(effective_max_price)
 
         self.P_cost_room_under.value = costs["room_under"]
@@ -518,6 +518,9 @@ class ThermalMPC:
             f"max_future_price={effective_max_price:.3f} €/kWh"
         )
 
+        d_ufh_prev = 999.0
+        d_dhw_prev = 999.0
+
         for iteration in range(linearizer.max_iter):
             # 1. Bereken bevroren vermogen en COP op basis van huidige schatting
             p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
@@ -533,15 +536,18 @@ class ThermalMPC:
             self.P_cop_ufh.value = np.clip(cop_ufh, 1.5, 9.0)
             self.P_cop_dhw.value = np.clip(cop_dhw, 1.1, 5.0)
 
-            # 4. Convergentiecheck vóór oplossen
-            if iteration > 0 and linearizer.has_converged(
+            has_converged, delta_ufh, delta_dhw = linearizer.has_converged(
                 p_el_ufh_prev,
                 p_el_dhw_prev,
                 p_el_ufh,
                 p_el_dhw,
                 ufh_on=self.ufh_on.value,
                 dhw_on=self.dhw_on.value,
-            ):
+                iteration=iteration,
+            )
+
+            # 4. Convergentiecheck vóór oplossen
+            if iteration > 0 and has_converged:
                 logger.info(f"[SLP] Geconvergeerd na {iteration} iteraties.")
                 break
 
@@ -579,13 +585,47 @@ class ThermalMPC:
                     guessed_t_mass = new_t_mass
                     guessed_t_dhw = new_t_dhw
                 else:
-                    alpha = 0.50
-                    guessed_t_mass = (
-                            alpha * new_t_mass + (1 - alpha) * guessed_t_mass
-                    )
-                    guessed_t_dhw = (
-                            alpha * new_t_dhw + (1 - alpha) * guessed_t_dhw
-                    )
+                    # Basis leersnelheid
+                    alpha_mass = 0.3
+                    alpha_dhw  = 0.3
+
+                    # --- A. OSCILLATIE DETECTIE ---
+                    # Als de afwijking deze stap groter is dan de vorige,
+                    # betekent dit dat we over het optimum heen schieten (klapperen).
+                    # We halveren dan de alpha om de beweging te dempen.
+                    if delta_ufh >= d_ufh_prev:
+                        alpha_mass *= 0.4
+                    if delta_dhw >= d_dhw_prev:
+                        alpha_dhw *= 0.4
+
+                    # --- B. SELECTIEVE DEGRADATIE (Soft Landing) ---
+                    start_relax = int(linearizer.max_iter * linearizer.relax_iter)
+
+                    if iteration > start_relax:
+                        over_steps = iteration - start_relax
+                        # Gebruik 0.8 voor een snellere landing bij 144 stappen
+                        decay = (0.85 ** over_steps)
+
+                        # Alleen degradatie toepassen als het specifieke deel nog niet stabiel is
+                        if delta_ufh > linearizer.tol_ufh:
+                            alpha_mass *= decay
+
+                        if delta_dhw > linearizer.tol_dhw:
+                            alpha_dhw *= decay
+
+                    # --- C. VEILIGHEIDSBODEM ---
+                    # Nooit helemaal naar 0, anders leert de solver niets meer.
+                    # 0.02 is klein genoeg om elke oscillatie te stoppen.
+                    alpha_mass = max(alpha_mass, 0.01)
+                    alpha_dhw  = max(alpha_dhw, 0.01)
+
+                    # --- D. DE UPDATE (Under-relaxation) ---
+                    guessed_t_mass = (alpha_mass * new_t_mass + (1 - alpha_mass) * guessed_t_mass)
+                    guessed_t_dhw  = (alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw)
+
+                    # Onthoud deltas voor de volgende iteratie-check
+                    d_ufh_prev = delta_ufh
+                    d_dhw_prev = delta_dhw
 
         if self.t_air.value is not None:
             ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]

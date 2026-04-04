@@ -1180,13 +1180,17 @@ class PhysicsLinearizer:
         hydraulic: HydraulicPredictor,
         horizon: int = 96,
         max_iter: int = 6,
-        tol: float = 0.05,
+        tol_ufh: float = 0.05,
+        tol_dhw: float = 0.05,
+        relax_iter: float = 0.7,
     ):
         self.perf_map = perf_map
         self.hydraulic = hydraulic
         self.horizon = horizon
         self.max_iter = max_iter
-        self.tol = tol
+        self.relax_iter = relax_iter
+        self.tol_ufh = tol_ufh
+        self.tol_dhw = tol_dhw
 
     def compute(
         self,
@@ -1251,7 +1255,21 @@ class PhysicsLinearizer:
         p_el_dhw_new,
         ufh_on=None,
         dhw_on=None,
-    ) -> bool:
+        iteration=0,
+    ) -> tuple:
+        start_relax = int(self.max_iter * self.relax_iter)
+        relax_factor = 1.0
+        if iteration > start_relax:
+            # Hoeveel stappen zitten we over het startpunt heen?
+            over_steps = iteration - start_relax
+            relax_factor = 1.1**over_steps
+
+            logger.debug(
+                f"[SLP] Iteration {iteration}/{self.max_iter}, relax_factor={relax_factor:.2f}"
+            )
+
+        tol_ufh = self.tol_ufh * relax_factor
+        tol_dhw = self.tol_dhw * relax_factor
 
         if ufh_on is not None and np.any(ufh_on > 0.5):
             delta_ufh = float(
@@ -1267,15 +1285,14 @@ class PhysicsLinearizer:
         else:
             delta_dhw = float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev)))
 
-        tol_ufh = self.tol
-        tol_dhw = self.tol * 3 # 0.15 kW — DHW mag ruimer
-
         converged = (delta_ufh < tol_ufh) and (delta_dhw < tol_dhw)
+
         logger.info(
             f"[SLP] delta UFH={delta_ufh:.4f}/{tol_ufh:.2f}  "
             f"DHW={delta_dhw:.4f}/{tol_dhw:.2f}  converged={converged}"
         )
-        return converged
+
+        return converged, delta_ufh, delta_dhw
 
 
 # =========================================================
@@ -1297,44 +1314,30 @@ class ComfortCostCalculator:
         C_tank: float,
         avg_cop_ufh: float,
         avg_cop_dhw: float,
-        K_loss_dhw: float,
         export_price: float,
-        horizon_h: float = 24.0,
     ):
         self.C_room = C_room
         self.C_tank = C_tank
         self.avg_cop_ufh = avg_cop_ufh
         self.avg_cop_dhw = avg_cop_dhw
-
-        # Fractie van de overtollige warmte die verloren gaat binnen de horizon
-        # τ_tank = 1/K_loss_dhw (uren)
-        # frac = 1 - exp(-horizon / τ) = gedeelte dat als standby-verlies wegloopt
-        tau_tank_h = 1.0 / max(K_loss_dhw, 0.001)
-        self.frac_tank_lost = 1.0 - np.exp(-horizon_h / tau_tank_h)
         self.export_price = export_price
-
-        logger.info(
-            f"[ComfortCost] τ_tank={tau_tank_h:.0f}h  "
-            f"frac_lost_24h={self.frac_tank_lost:.3f}"
-        )
 
     def compute(self, max_price: float) -> dict:
         # Kosten om 1K te herstellen op het duurste moment
+        # Kosten om 1K te herstellen (voor ondergrenzen)
         cost_to_heat_1k_room = (self.C_room / self.avg_cop_ufh) * max_price
         cost_to_heat_1k_tank = (self.C_tank / self.avg_cop_dhw) * max_price
 
-        # Te koud: je MOET energie kopen om te herstellen, tegen max_price
-        # Epsilon zodat optimizer altijd herstelt i.p.v. boete accepteert
+        # ONDER: Gebruik max_price (comfort is prioriteit)
         room_under = cost_to_heat_1k_room * 1.01
         tank_under = cost_to_heat_1k_tank * 1.01
 
-        # Te warm: energie die je had kunnen exporteren, gewaardeerd tegen export_price
-        # Geen magic number: dit IS de economische waarde van overtollige warmte
+        # OVER: De waarde van de energie is wat het oplevert bij export!
+        # Dit is de 'opportunity cost'.
         room_over = (self.C_room / self.avg_cop_ufh) * self.export_price
-        tank_over = cost_to_heat_1k_tank * self.frac_tank_lost
+        tank_over = (self.C_tank / self.avg_cop_dhw) * self.export_price
 
-        # Terminal: zelfde logica als under, maar zonder epsilon
-        # (terminal is een zachte grens, geen harde boete per tijdstap)
+        # Terminal waarden
         terminal_room = cost_to_heat_1k_room
         terminal_tank = cost_to_heat_1k_tank
 
