@@ -1212,11 +1212,6 @@ class ComfortCostCalculator:
 
 
 class PWATable:
-    """
-    Vervangt PhysicsLinearizer.compute() volledig.
-    Pre-computed grid — geen iteraties, geen oscillatie.
-    """
-
     def __init__(self, perf_map: HPPerformanceMap, hydraulic: HydraulicPredictor):
         self.perf_map = perf_map
         self.hydraulic = hydraulic
@@ -1290,7 +1285,6 @@ class PWATable:
         t_room_arr: np.ndarray,
         t_dhw_arr: np.ndarray,
     ) -> tuple:
-        """Drop-in vervanging voor PhysicsLinearizer.compute()."""
         T = len(t_out_arr)
         p_el_ufh = np.zeros(T)
         cop_ufh = np.zeros(T)

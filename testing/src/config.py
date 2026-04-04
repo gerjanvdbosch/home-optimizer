@@ -25,6 +25,7 @@ class Config:
     sensor_target_setpoint: str = "sensor.warmtepomp_setpoint_waarde"
     sensor_supply_temp: str = "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
     sensor_return_temp: str = "sensor.ecodan_heatpump_ca09ec_retour_temp"
+    sensor_outside_temp: str = "sensor.ecodan_heatpump_ca09ec_buiten_temp"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 
     sensor_shutter_room: str = "sensor.woonkamer_rolluik"
@@ -43,6 +44,7 @@ class Config:
     hp_model_path: str = "data/hp_model.joblib"
     hydraulic_model_path: str = "data/hydraulic_model.joblib"
     shutter_model_path: str = "data/shutter_model.joblib"
+    temp_model_path: str = "data/temp_model.joblib"
 
     solar_model_ratio: float = 0.7
 
