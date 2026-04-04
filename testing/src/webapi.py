@@ -967,6 +967,7 @@ def _get_day_data(database, target_date: date, local_tz):
 def _get_accuracy_plots(request, target_date) -> tuple:
     """
     Genereert vloeiende temperatuurgrafieken voor Kamer en Boiler met Setpoint en Marge.
+    Gebruikt uitsluitend Spline Interpolatie voor vloeiende lijnen.
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
@@ -1000,7 +1001,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
     start_ts = start_of_day.replace(tzinfo=None)
     end_ts = start_ts + timedelta(days=1)
 
-    # 4. Gemeenschappelijke layout instellingen (ZONDER yaxis)
+    # 4. Gemeenschappelijke layout instellingen
     common_layout = dict(
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
@@ -1019,9 +1020,9 @@ def _get_accuracy_plots(request, target_date) -> tuple:
         ),
     )
 
-    # 5. Helper voor Bandbreedte styling
+    # 5. Helper voor Bandbreedte styling met Spline
     def apply_band_style(fig, x, y_min, y_max, y_target, color):
-        # Marge (vlak) - Gebruik spline voor vloeiende overgangen
+        # Marge (vlak)
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -1076,7 +1077,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_hist["ts_local"],
                 y=df_hist["room_temp"],
                 name="Actueel",
-                line=dict(color="#d05ce3", width=2.5),
+                line=dict(color="#d05ce3", width=2.5, shape="spline", smoothing=1.3),
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
@@ -1086,7 +1087,13 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_snap["ts_local"],
                 y=df_snap["t_room_pred"],
                 name="Voorspelling",
-                line=dict(color="#d05ce3", width=1.5, dash="dash"),
+                line=dict(
+                    color="#d05ce3",
+                    width=1.5,
+                    dash="dash",
+                    shape="spline",
+                    smoothing=1.3,
+                ),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
@@ -1101,8 +1108,6 @@ def _get_accuracy_plots(request, target_date) -> tuple:
 
     # --- 7. Boiler Grafiek ---
     fig_dhw = go.Figure()
-
-    # Gebruik nu direct de ruwe arrays zonder clipping
     apply_band_style(
         fig_dhw, ts_targets, d_min, d_max, d_target, "rgba(2, 207, 231, 0.1)"
     )
@@ -1114,7 +1119,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_hist["ts_local"],
                 y=dhw_act,
                 name="Actueel",
-                line=dict(color="#02cfe7", width=2.5),
+                line=dict(color="#02cfe7", width=2.5, shape="spline", smoothing=1.3),
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
@@ -1124,13 +1129,18 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_snap["ts_local"],
                 y=df_snap["t_dhw_pred"],
                 name="Voorspelling",
-                line=dict(color="#02cfe7", width=1.5, dash="dash"),
+                line=dict(
+                    color="#02cfe7",
+                    width=1.5,
+                    dash="dash",
+                    shape="spline",
+                    smoothing=1.3,
+                ),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
     fig_dhw.update_layout(**common_layout)
-    # Range is verwijderd zodat de as automatisch schaalt (bijv. van 10 naar 55)
     fig_dhw.update_yaxes(
         title="Boiler Temp (°C)",
         showgrid=True,
