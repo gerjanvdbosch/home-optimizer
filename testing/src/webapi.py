@@ -119,6 +119,8 @@ def index(
         realized_self = 0.0
         realized_export = 0.0
         realized_import = 0.0
+        realized_ufh = 0.0
+        realized_dhw = 0.0
 
         # Haal historische data op vanaf het begin van de geselecteerde dag (UTC)
         start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
@@ -129,8 +131,6 @@ def index(
 
         if not df_hist.empty:
             df_hist["timestamp_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
-
-            # Filter de historie: vanaf middernacht tot 'nu' (voorkomt dubbel tellen met de toekomst)
             local_now = context.now.astimezone(local_tz)
             cutoff = local_now if is_today else start_of_day + timedelta(days=1)
 
@@ -140,31 +140,33 @@ def index(
             df_past = df_hist[mask].copy()
 
             if not df_past.empty:
-                # Veilige omzetting naar numeriek (voorkom lege of corrupte strings)
-                for col in ["pv_actual", "grid_import", "grid_export"]:
+                for col in ["pv_actual", "grid_import", "grid_export", "wp_actual", "hvac_mode"]:
                     if col in df_past.columns:
-                        df_past[col] = (
-                            pd.to_numeric(df_past[col], errors="coerce")
-                            .fillna(0.0)
-                            .clip(lower=0.0)
-                        )
+                        df_past[col] = pd.to_numeric(df_past[col], errors="coerce").fillna(0.0)
 
-                # Bereken gerealiseerde kWh (kwartierwaarden = kW * 0.25)
-                if "pv_actual" in df_past.columns:
-                    realized_pv = df_past["pv_actual"].sum() * 0.25
-                if "grid_import" in df_past.columns:
-                    realized_import = df_past["grid_import"].sum() * 0.25
-                if "grid_export" in df_past.columns:
-                    realized_export = df_past["grid_export"].sum() * 0.25
+                realized_pv = df_past["pv_actual"].sum() * 0.25
+                realized_import = df_past["grid_import"].sum() * 0.25
+                realized_export = df_past["grid_export"].sum() * 0.25
 
-                # Gerealiseerd eigen verbruik = Zonne-energie - Teruglevering (per 15 min kwartier bekeken)
-                if "pv_actual" in df_past.columns and "grid_export" in df_past.columns:
-                    self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(
-                        lower=0.0
-                    )
-                    realized_self = self_kw.sum() * 0.25
+                # Bereken specifiek verbruik per modus uit historie
+                ufh_mask = df_past["hvac_mode"] == HvacMode.HEATING.value
+                realized_ufh = df_past.loc[ufh_mask, "wp_actual"].sum() * 0.25
 
-        # Haal de verwachte rest-van-de-dag (toekomst) op uit je optimizer resultaat
+                dhw_mask = df_past["hvac_mode"].isin([HvacMode.DHW.value, HvacMode.LEGIONELLA_PREVENTION.value])
+                realized_dhw = df_past.loc[dhw_mask, "wp_actual"].sum() * 0.25
+
+                self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(lower=0.0)
+                realized_self = self_kw.sum() * 0.25
+
+        # --- TOEKOMSTIG VERBRUIK (Rest van vandaag uit het plan) ---
+        future_ufh = 0.0
+        future_dhw = 0.0
+        if plan and is_today:
+            for p in plan:
+                if p["time"].astimezone(local_tz).date() == today:
+                    future_ufh += float(p.get("p_el_ufh", 0)) * 0.25
+                    future_dhw += float(p.get("p_el_dhw", 0)) * 0.25
+
         future_pv = result.get("pv_remaining", 0.0) if is_today else 0.0
         future_self = result.get("solar_self_remaining", 0.0) if is_today else 0.0
         future_export = result.get("export_remaining", 0.0) if is_today else 0.0
@@ -234,6 +236,18 @@ def index(
                     "label": "Export net",
                     "value": f"{future_export:.2f}",
                     "total": f"{total_export:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Verbruik UFH",
+                    "value": f"{future_ufh:.2f}",
+                    "total": f"{realized_ufh + future_ufh:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Verbruik DHW",
+                    "value": f"{future_dhw:.2f}",
+                    "total": f"{realized_dhw + future_dhw:.2f}",
                     "unit": "kWh",
                 },
             ]

@@ -21,8 +21,7 @@ from thermal import (
     HydraulicPredictor,
     UfhResidualPredictor,
     DhwResidualPredictor,
-    PhysicsLinearizer,
-    ComfortCostCalculator,
+    ComfortCostCalculator, ThermalEKF, PWATable,
 )
 from shutter import ShutterPredictor
 
@@ -44,11 +43,21 @@ class ThermalMPC:
         self.horizon = 144
         self.dt = 0.25
 
-        self._last_t_mass_model = None
-        self._last_t_air_pred = None
+        # EKF vervangt Luenberger observer
+        self.ekf = ThermalEKF(ident)
+
+        # PWA vervangt PhysicsLinearizer
+        self.pwa = PWATable(perf_map, hydraulic)
 
         self.plan_t_sup_ufh = np.zeros(self.horizon)
         self.plan_t_sup_dhw = np.zeros(self.horizon)
+
+        # Warm-start state
+        self._prev_ufh_on = None
+        self._prev_dhw_on = None
+        self._prev_t_mass = None
+        self._prev_t_dhw = None
+        self._prev_obj = None
 
         self._build_problem()
 
@@ -322,44 +331,39 @@ class ThermalMPC:
         return float(t_air + (self.ident.R_im * q_loss))
 
     def update_and_get_initial_state(
-        self,
-        state: dict,
-        recent_df: pd.DataFrame,
-        forecast_df: pd.DataFrame,
-        current_solar_gain: float,
+            self,
+            state: dict,
+            recent_df: pd.DataFrame,
+            forecast_df: pd.DataFrame,
+            current_solar_gain: float,
     ) -> float:
-        """
-        De 'State Observer'. Bepaalt de start-temperatuur van de vloer.
-        """
         t_air_meas = float(state["room_temp"])
         t_out_now = float(forecast_df.temp.iloc[0])
 
-        # 1. Bepaal of we een koude start hebben of een observer-update
-        if self._last_t_air_pred is None or self._last_t_mass_model is None:
-            # KOUDE START: Gebruik Fysische Inversie
+        if self.ekf.x is None:
+            # Koude start: fysische inversie als initialisatie
             dT_dt = self._robust_trend(recent_df)
-
-            # Q_mass = C_air * (dT/dt - solar) + Q_loss
-            q_mass = (self.ident.C_air * (dT_dt - current_solar_gain)) + (
-                t_air_meas - t_out_now
-            ) / self.ident.R_oa
-            t_mass_init = t_air_meas + (self.ident.R_im * q_mass)
-
-            logger.info(
-                f"[MPC-Engine] Koude start inversie: T_mass={t_mass_init:.2f}°C"
-            )
+            q_mass = (self.ident.C_air * (dT_dt - current_solar_gain)) + \
+                     (t_air_meas - t_out_now) / self.ident.R_oa
+            t_mass_init = float(np.clip(
+                t_air_meas + self.ident.R_im * q_mass,
+                t_air_meas - 1.0,
+                t_air_meas + 5.0,
+            ))
+            self.ekf.reset(t_air_meas, t_mass_init)
+            logger.info(f"[EKF] Koude start: T_mass={t_mass_init:.2f}°C")
         else:
-            # RUNTIME: Luenberger Observer
-            error = t_air_meas - self._last_t_air_pred
-            K = np.clip(self.dt / (self.ident.R_im * self.ident.C_air), 0.05, 0.5)
+            # Runtime: EKF predict + update
+            p_heat_prev = 0.0
+            if not recent_df.empty:
+                last = recent_df.sort_values("timestamp").iloc[-1]
+                if last["hvac_mode"] == HvacMode.HEATING.value:
+                    dt = max(0, last["supply_temp"] - last["return_temp"])
+                    p_heat_prev = dt * 1.256
 
-            t_mass_init = self._last_t_mass_model + K * error
-            logger.info(
-                f"[MPC-Engine] Observer update: K={K:.3f}, Error={error:.3f}K -> T_mass={t_mass_init:.2f}°C"
-            )
+            self.ekf.predict_step(p_heat_prev, t_out_now, current_solar_gain)
+            _, t_mass_init = self.ekf.update(t_air_meas)
 
-        # Sanity check
-        t_mass_init = float(np.clip(t_mass_init, t_air_meas - 1.0, t_air_meas + 5.0))
         return t_mass_init
 
     def solve(
@@ -450,182 +454,94 @@ class ThermalMPC:
             f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K max: {dhw_demand[:T].max():.2f} K"
         )
 
-        # ── SLP-iteraties met convergentiecheck ──────────────────────────
-        linearizer = PhysicsLinearizer(
-            perf_map=self.perf_map,
-            hydraulic=self.hydraulic,
-            horizon=T,
-            max_iter=25,
-            relax_iter=0.70,
-            tol_ufh=0.15,
-            tol_dhw=0.1,
-        )
 
+       # ── PWA: één keer berekenen, geen iteraties ──────────────────────
+        # We gebruiken de huidige temperatuur als 'guess' voor de hele horizon
         t_out_arr = forecast_df.temp.values[:T].astype(float)
-        guessed_t_mass = np.full(T, t_room_init)
-        guessed_t_dhw = np.full(T, float(state["dhw_bottom"]))
 
-        # Sentinel: convergentiecheck slaat eerste iteratie altijd over
-        p_el_ufh_prev = np.full(T, -999.0)
-        p_el_dhw_prev = np.full(T, -999.0)
+        current_dhw = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
+        target_dhw = float(d_t[-1])  # Het einddoel van de boiler
 
-        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
+        # De verwachte gemiddelde temperatuur is altijd het midden tussen
+        # wat we nu hebben en het hoogste punt van de run.
+        # Als current_dhw al boven target zit, is het simpelweg (current + current) / 2.
+        expected_run_temp = (current_dhw + max(current_dhw, target_dhw)) / 2.0
+
+        guessed_t_mass = np.full(T, t_mass_init)
+        guessed_t_dhw = np.full(T, expected_run_temp)
+
+        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = self.pwa.compute(
             t_out_arr, guessed_t_mass, guessed_t_dhw
         )
 
-        # Terminal value updaten op basis van actuele COP-schatting
-        avg_cop_ufh_h = float(np.mean(cop_ufh))
-        avg_cop_dhw_h = float(np.mean(cop_dhw))
+        self.plan_t_sup_ufh = sup_ufh
+        self.plan_t_sup_dhw = sup_dhw
 
-        # Voor de fysieke waarde en boete telt de VOLLEDIGE op te warmen massa
+        # Vul de HP parameters
+        self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
+        self.P_fixed_pel_dhw.value = np.clip(p_el_dhw, 0.0, 5.0)
+        self.P_cop_ufh.value       = np.clip(cop_ufh,  1.5, 9.0)
+        self.P_cop_dhw.value       = np.clip(cop_dhw,  1.1, 5.0)
+
+        # ── Comfortboetes en Terminal Values (DIT ONTBAK NOG) ─────────────
+        # Voor de boete telt de totale thermische massa
         C_total_room = self.ident.C_air + self.ident.C_mass
 
-        # ── Comfortboetes en Terminal Values (dimensioneel correct) ──
-        # We voeden de maximale toekomstige prijs in, zodat comfort de hoogste economische prioriteit krijgt
         costs = ComfortCostCalculator(
             C_room=C_total_room,
             C_tank=self.ident.C_tank,
-            avg_cop_ufh=avg_cop_ufh_h,
-            avg_cop_dhw=avg_cop_dhw_h,
-            export_price=export_price,
-        ).compute(effective_max_price)
+            avg_cop_ufh=float(np.mean(cop_ufh)),
+            avg_cop_dhw=float(np.mean(cop_dhw)),
+            export_price=float(export_price),
+        ).compute(max_price=effective_max_price)
 
+        # Toewijzen aan de parameters die CVXPY verwacht
         self.P_cost_room_under.value = costs["room_under"]
-        self.P_cost_room_over.value = costs["room_over"]
-        self.P_cost_dhw_under.value = costs["tank_under"]
-        self.P_cost_dhw_over.value = costs["tank_over"]
-
+        self.P_cost_room_over.value  = costs["room_over"]
+        self.P_cost_dhw_under.value  = costs["tank_under"]
+        self.P_cost_dhw_over.value   = costs["tank_over"]
         self.P_val_terminal_room.value = costs["terminal_room"]
-        self.P_val_terminal_dhw.value = costs["terminal_tank"]
+        self.P_val_terminal_dhw.value  = costs["terminal_tank"]
 
+        # ── Terminal Targets (DIT ONTBAK OOK) ────────────────────────────
+        # Eind-target voor massa op basis van steady-state evenwicht
         t_out_end = float(t_out_arr[-1])
-        t_mass_ss = (
-            r_min[-1] + self.ident.R_im * (r_min[-1] - t_out_end) / self.ident.R_oa
-        )
+        target_room_end = r_t[-1] # r_t komt uit _get_targets
 
-        # Vul de parameters voor de CVXPY solver
-        self.P_term_target_mass.value = t_mass_ss
-        self.P_term_target_dhw.value = d_min[-1]
+        t_mass_ss = target_room_end + self.ident.R_im * (target_room_end - t_out_end) / self.ident.R_oa
 
-        logger.info(
-            f"[Terminal] Doel t_mass_ss={t_mass_ss:.2f}°C  "
-            f"(r_t={r_t[-1]:.1f}°C  t_out={t_out_end:.1f}°C)"
-        )
+        self.P_term_target_mass.value = float(t_mass_ss)
+        self.P_term_target_dhw.value  = float(d_t[-1]) # d_t komt uit _get_targets
 
-        logger.info(
-            f"[Terminal] val_room={costs['terminal_room']:.4f} €/K  "
-            f"val_dhw={costs['terminal_tank']:.4f} €/K  "
-            f"max_future_price={effective_max_price:.3f} €/kWh"
-        )
-
-        d_ufh_prev = 999.0
-        d_dhw_prev = 999.0
-
-        for iteration in range(linearizer.max_iter):
-            # 1. Bereken bevroren vermogen en COP op basis van huidige schatting
-            p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = linearizer.compute(
-                t_out_arr, guessed_t_mass, guessed_t_dhw
+        # ── Eén MILP solve ───────────────────────────────────────────────
+        try:
+            self.problem.solve(
+                solver=cp.HIGHS,
+                warm_start=(self._prev_ufh_on is not None),
+                verbose=False,
             )
+        except Exception as e:
+            logger.error(f"[MPC] Solver exception: {e}")
+            return
 
-            self.plan_t_sup_ufh = sup_ufh
-            self.plan_t_sup_dhw = sup_dhw
+        status = self.problem.status
+        logger.info(f"[MPC] Status={status}  obj={self.problem.value:.4f}")
 
-            # 3. CVXPY-parameters vullen
-            self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
-            self.P_fixed_pel_dhw.value = np.clip(p_el_dhw, 0.0, 5.0)
-            self.P_cop_ufh.value = np.clip(cop_ufh, 1.5, 9.0)
-            self.P_cop_dhw.value = np.clip(cop_dhw, 1.1, 5.0)
+        if status not in ("optimal", "optimal_inaccurate"):
+            logger.warning(f"[MPC] Niet-optimale status: {status}")
+            return
 
-            has_converged, delta_ufh, delta_dhw = linearizer.has_converged(
-                p_el_ufh_prev,
-                p_el_dhw_prev,
-                p_el_ufh,
-                p_el_dhw,
-                ufh_on=self.ufh_on.value,
-                dhw_on=self.dhw_on.value,
-                iteration=iteration,
-            )
+        # ── Warm-start opslaan voor volgende cyclus ───────────────────────
+        if self.t_air.value is not None:
+            self._prev_ufh_on = self.ufh_on.value.copy()
+            self._prev_dhw_on = self.dhw_on.value.copy()
+            self._prev_t_mass = self.t_mass.value[:-1].copy()
+            self._prev_t_dhw = self.t_dhw.value[:-1].copy()
+            self._prev_obj = self.problem.value
 
-            # 4. Convergentiecheck vóór oplossen
-            if iteration > 0 and has_converged:
-                logger.info(f"[SLP] Geconvergeerd na {iteration} iteraties.")
-                break
-
-            p_el_ufh_prev = p_el_ufh.copy()
-            p_el_dhw_prev = p_el_dhw.copy()
-
-            # 5. Oplossen
-            try:
-                self.problem.solve(solver=cp.HIGHS, warm_start=True)
-            except Exception as e:
-                logger.error(f"[SLP] Solver exception in iteratie {iteration}: {e}")
-                break
-
-            status = self.problem.status
-            logger.info(
-                f"[SLP] Iteratie {iteration}: status={status}  "
-                f"P_el UFH[0]={p_el_ufh[0]:.3f} kW  DHW[0]={p_el_dhw[0]:.3f} kW"
-            )
-
-            if status not in ("optimal", "optimal_inaccurate"):
-                logger.warning(
-                    f"[SLP] Niet-optimale status ({status}) in iteratie {iteration}"
-                )
-                break
-
-            # 6. Toestandstrajectorie bijwerken voor volgende iteratie
-            if self.t_air.value is not None:
-                self._last_t_air_pred = float(self.t_air.value[1])
-                self._last_t_mass_model = float(self.t_mass.value[1])
-
-                new_t_mass = self.t_mass.value[:-1].copy()
-                new_t_dhw = self.t_dhw.value[:-1].copy()
-
-                if iteration == 0:
-                    guessed_t_mass = new_t_mass
-                    guessed_t_dhw = new_t_dhw
-                else:
-                    # Basis leersnelheid
-                    alpha_mass = 0.3
-                    alpha_dhw  = 0.3
-
-                    # --- A. OSCILLATIE DETECTIE ---
-                    # Als de afwijking deze stap groter is dan de vorige,
-                    # betekent dit dat we over het optimum heen schieten (klapperen).
-                    # We halveren dan de alpha om de beweging te dempen.
-                    if delta_ufh >= d_ufh_prev:
-                        alpha_mass *= 0.4
-                    if delta_dhw >= d_dhw_prev:
-                        alpha_dhw *= 0.4
-
-                    # --- B. SELECTIEVE DEGRADATIE (Soft Landing) ---
-                    start_relax = int(linearizer.max_iter * linearizer.relax_iter)
-
-                    if iteration > start_relax:
-                        over_steps = iteration - start_relax
-                        # Gebruik 0.8 voor een snellere landing bij 144 stappen
-                        decay = (0.85 ** over_steps)
-
-                        # Alleen degradatie toepassen als het specifieke deel nog niet stabiel is
-                        if delta_ufh > linearizer.tol_ufh:
-                            alpha_mass *= decay
-
-                        if delta_dhw > linearizer.tol_dhw:
-                            alpha_dhw *= decay
-
-                    # --- C. VEILIGHEIDSBODEM ---
-                    # Nooit helemaal naar 0, anders leert de solver niets meer.
-                    # 0.02 is klein genoeg om elke oscillatie te stoppen.
-                    alpha_mass = max(alpha_mass, 0.01)
-                    alpha_dhw  = max(alpha_dhw, 0.01)
-
-                    # --- D. DE UPDATE (Under-relaxation) ---
-                    guessed_t_mass = (alpha_mass * new_t_mass + (1 - alpha_mass) * guessed_t_mass)
-                    guessed_t_dhw  = (alpha_dhw * new_t_dhw + (1 - alpha_dhw) * guessed_t_dhw)
-
-                    # Onthoud deltas voor de volgende iteratie-check
-                    d_ufh_prev = delta_ufh
-                    d_dhw_prev = delta_dhw
+            # EKF: sla voorspelde T_air[1] op voor volgende cyclus
+            self.ekf.x[0] = float(self.t_air.value[1])
+            self.ekf.x[1] = float(self.t_mass.value[1])
 
         if self.t_air.value is not None:
             ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]
@@ -679,8 +595,10 @@ class Optimizer:
         self.res_dhw.train(df)
         self.shutter.train(df)
 
-        # Herbouw MPC zodat R, C en lag correct zijn na training
+        # Herbouw MPC én herbereken PWA-grid na training
         self.mpc._build_problem()
+        self.mpc.ekf = ThermalEKF(self.ident)  # reset EKF met nieuwe R/C
+        self.mpc.pwa.rebuild()  # herbereken grid met nieuwe modellen
 
     def resolve(self, context: Context, avg_price: float, export_price: float):
         # 1. Data verzamelen
