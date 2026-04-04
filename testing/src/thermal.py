@@ -1,17 +1,3 @@
-"""
-thermal.py
-
-Bevat:
-  - clean_thermal_data()        — filtert fysisch corrupte rijen
-  - HPPerformanceMap            — leert P_el en COP direct uit data
-  - SystemIdentificator         — leert R, C, K_emit, K_tank, lag
-  - HydraulicPredictor          — leert supply-temp en hydraulische parameters
-  - UfhResidualPredictor        — leert zonopwarming en overige residuen
-  - DhwResidualPredictor        — leert warm-water vraagpatroon
-  - PhysicsLinearizer           — SLP-linearisatie met convergentiecheck
-  - ComfortCostCalculator       — dimensioneel correcte comfortboetes
-"""
-
 import logging
 import numpy as np
 import pandas as pd
@@ -1163,7 +1149,6 @@ class DhwResidualPredictor:
         return np.where(predictions < 0.8, 0.0, predictions)
 
 
-
 # =========================================================
 # COMFORT COST CALCULATOR
 # =========================================================
@@ -1225,6 +1210,7 @@ class ComfortCostCalculator:
             "terminal_tank": terminal_tank,
         }
 
+
 class PWATable:
     """
     Vervangt PhysicsLinearizer.compute() volledig.
@@ -1234,9 +1220,9 @@ class PWATable:
     def __init__(self, perf_map: HPPerformanceMap, hydraulic: HydraulicPredictor):
         self.perf_map = perf_map
         self.hydraulic = hydraulic
-        self.t_out_grid  = np.arange(-10.0, 18.0, 2.0)
-        self.t_sink_ufh  = np.arange(16.0,  24.0, 1.0)
-        self.t_sink_dhw  = np.arange(20.0,  65.0, 5.0)
+        self.t_out_grid = np.arange(-10.0, 18.0, 2.0)
+        self.t_sink_ufh = np.arange(16.0, 24.0, 1.0)
+        self.t_sink_dhw = np.arange(20.0, 65.0, 5.0)
         self._build()
 
     def _build(self):
@@ -1251,34 +1237,51 @@ class PWATable:
         for i, t_out in enumerate(T_o):
             for j, t_sink in enumerate(self.t_sink_ufh):
                 p_th = self.perf_map.predict_p_th(HvacMode.HEATING.value, t_out, t_sink)
-                sup  = self.hydraulic.predict_supply("UFH", p_th, t_out, t_sink)
-                d    = float(np.clip(self.perf_map._setpoint_ufh - sup, 0.5, 8.0))
-                self.G_ufh[i,j] = self.perf_map.predict_pel(HvacMode.HEATING.value, t_out, t_sink, sup, d)
-                self.C_ufh[i,j] = self.perf_map.predict_cop(HvacMode.HEATING.value, t_out, t_sink, sup, d)
-                self.S_ufh[i,j] = sup
+                sup = self.hydraulic.predict_supply("UFH", p_th, t_out, t_sink)
+                d = float(np.clip(self.perf_map._setpoint_ufh - sup, 0.5, 8.0))
+                self.G_ufh[i, j] = self.perf_map.predict_pel(
+                    HvacMode.HEATING.value, t_out, t_sink, sup, d
+                )
+                self.C_ufh[i, j] = self.perf_map.predict_cop(
+                    HvacMode.HEATING.value, t_out, t_sink, sup, d
+                )
+                self.S_ufh[i, j] = sup
 
             for j, t_sink in enumerate(self.t_sink_dhw):
                 p_th = self.perf_map.predict_p_th(HvacMode.DHW.value, t_out, t_sink)
-                sup  = self.hydraulic.predict_supply("DHW", p_th, t_out, t_sink)
-                d    = float(np.clip(self.perf_map._setpoint_dhw - sup, 0.5, 25.0))
-                self.G_dhw[i,j] = self.perf_map.predict_pel(HvacMode.DHW.value, t_out, t_sink, sup, d)
-                self.C_dhw[i,j] = self.perf_map.predict_cop(HvacMode.DHW.value, t_out, t_sink, sup, d)
-                self.S_dhw[i,j] = sup
+                sup = self.hydraulic.predict_supply("DHW", p_th, t_out, t_sink)
+                d = float(np.clip(self.perf_map._setpoint_dhw - sup, 0.5, 25.0))
+                self.G_dhw[i, j] = self.perf_map.predict_pel(
+                    HvacMode.DHW.value, t_out, t_sink, sup, d
+                )
+                self.C_dhw[i, j] = self.perf_map.predict_cop(
+                    HvacMode.DHW.value, t_out, t_sink, sup, d
+                )
+                self.S_dhw[i, j] = sup
 
         logger.info(
             f"[PWA] Grid gebouwd: UFH {self.G_ufh.shape}  DHW {self.G_dhw.shape}"
         )
 
     def _interp2d(self, t_out, t_sink, t_sink_grid, G, C, S):
-        t_o = np.clip(t_out,  self.t_out_grid[0], self.t_out_grid[-1])
-        t_s = np.clip(t_sink, t_sink_grid[0],     t_sink_grid[-1])
-        n   = len(t_sink_grid)
-        pel = np.interp(t_s, t_sink_grid,
-              [float(np.interp(t_o, self.t_out_grid, G[:, j])) for j in range(n)])
-        cop = np.interp(t_s, t_sink_grid,
-              [float(np.interp(t_o, self.t_out_grid, C[:, j])) for j in range(n)])
-        sup = np.interp(t_s, t_sink_grid,
-              [float(np.interp(t_o, self.t_out_grid, S[:, j])) for j in range(n)])
+        t_o = np.clip(t_out, self.t_out_grid[0], self.t_out_grid[-1])
+        t_s = np.clip(t_sink, t_sink_grid[0], t_sink_grid[-1])
+        n = len(t_sink_grid)
+        pel = np.interp(
+            t_s,
+            t_sink_grid,
+            [float(np.interp(t_o, self.t_out_grid, G[:, j])) for j in range(n)],
+        )
+        cop = np.interp(
+            t_s,
+            t_sink_grid,
+            [float(np.interp(t_o, self.t_out_grid, C[:, j])) for j in range(n)],
+        )
+        sup = np.interp(
+            t_s,
+            t_sink_grid,
+            [float(np.interp(t_o, self.t_out_grid, S[:, j])) for j in range(n)],
+        )
         return float(pel), float(cop), float(sup)
 
     def compute(
@@ -1289,20 +1292,37 @@ class PWATable:
     ) -> tuple:
         """Drop-in vervanging voor PhysicsLinearizer.compute()."""
         T = len(t_out_arr)
-        p_el_ufh = np.zeros(T); cop_ufh = np.zeros(T); sup_ufh = np.zeros(T)
-        p_el_dhw = np.zeros(T); cop_dhw = np.zeros(T); sup_dhw = np.zeros(T)
+        p_el_ufh = np.zeros(T)
+        cop_ufh = np.zeros(T)
+        sup_ufh = np.zeros(T)
+        p_el_dhw = np.zeros(T)
+        cop_dhw = np.zeros(T)
+        sup_dhw = np.zeros(T)
 
         for t in range(T):
             p_el_ufh[t], cop_ufh[t], sup_ufh[t] = self._interp2d(
-                t_out_arr[t], t_room_arr[t], self.t_sink_ufh, self.G_ufh, self.C_ufh, self.S_ufh)
+                t_out_arr[t],
+                t_room_arr[t],
+                self.t_sink_ufh,
+                self.G_ufh,
+                self.C_ufh,
+                self.S_ufh,
+            )
             p_el_dhw[t], cop_dhw[t], sup_dhw[t] = self._interp2d(
-                t_out_arr[t], t_dhw_arr[t],  self.t_sink_dhw, self.G_dhw, self.C_dhw, self.S_dhw)
+                t_out_arr[t],
+                t_dhw_arr[t],
+                self.t_sink_dhw,
+                self.G_dhw,
+                self.C_dhw,
+                self.S_dhw,
+            )
 
         return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw
 
     def rebuild(self):
         """Aanroepen na elke train()-cyclus."""
         self._build()
+
 
 class ThermalEKF:
     """
@@ -1312,15 +1332,15 @@ class ThermalEKF:
 
     def __init__(self, ident):
         dt = 0.25
-        a11 = 1 - dt/(ident.R_im*ident.C_air) - dt/(ident.R_oa*ident.C_air)
+        a11 = 1 - dt / (ident.R_im * ident.C_air) - dt / (ident.R_oa * ident.C_air)
         a12 = dt / (ident.R_im * ident.C_air)
         a21 = dt / (ident.R_im * ident.C_mass)
         a22 = 1 - dt / (ident.R_im * ident.C_mass)
 
         self.A = np.array([[a11, a12], [a21, a22]])
         self.H = np.array([[1.0, 0.0]])
-        self.Q = np.diag([0.01, 0.05])    # procesruis [K²]
-        self.R_n = np.array([[0.04]])      # meetruis thermostaat ±0.2K
+        self.Q = np.diag([0.01, 0.05])  # procesruis [K²]
+        self.R_n = np.array([[0.04]])  # meetruis thermostaat ±0.2K
         self.P = np.eye(2) * 2.0
         self.ident = ident
         self.x = None
@@ -1334,10 +1354,12 @@ class ThermalEKF:
             return
         dt = 0.25
         B = np.array([dt / self.ident.C_air, dt / self.ident.C_mass])
-        f_ext = np.array([
-            (t_out / (self.ident.R_oa * self.ident.C_air)) * dt + solar_gain * dt,
-            0.0,
-        ])
+        f_ext = np.array(
+            [
+                (t_out / (self.ident.R_oa * self.ident.C_air)) * dt + solar_gain * dt,
+                0.0,
+            ]
+        )
         self.x = self.A @ self.x + B * p_heat + f_ext
         self.P = self.A @ self.P @ self.A.T + self.Q
 

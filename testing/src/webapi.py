@@ -140,9 +140,17 @@ def index(
             df_past = df_hist[mask].copy()
 
             if not df_past.empty:
-                for col in ["pv_actual", "grid_import", "grid_export", "wp_actual", "hvac_mode"]:
+                for col in [
+                    "pv_actual",
+                    "grid_import",
+                    "grid_export",
+                    "wp_actual",
+                    "hvac_mode",
+                ]:
                     if col in df_past.columns:
-                        df_past[col] = pd.to_numeric(df_past[col], errors="coerce").fillna(0.0)
+                        df_past[col] = pd.to_numeric(
+                            df_past[col], errors="coerce"
+                        ).fillna(0.0)
 
                 realized_pv = df_past["pv_actual"].sum() * 0.25
                 realized_import = df_past["grid_import"].sum() * 0.25
@@ -152,10 +160,14 @@ def index(
                 ufh_mask = df_past["hvac_mode"] == HvacMode.HEATING.value
                 realized_ufh = df_past.loc[ufh_mask, "wp_actual"].sum() * 0.25
 
-                dhw_mask = df_past["hvac_mode"].isin([HvacMode.DHW.value, HvacMode.LEGIONELLA_PREVENTION.value])
+                dhw_mask = df_past["hvac_mode"].isin(
+                    [HvacMode.DHW.value, HvacMode.LEGIONELLA_PREVENTION.value]
+                )
                 realized_dhw = df_past.loc[dhw_mask, "wp_actual"].sum() * 0.25
 
-                self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(lower=0.0)
+                self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(
+                    lower=0.0
+                )
                 realized_self = self_kw.sum() * 0.25
 
         # --- TOEKOMSTIG VERBRUIK (Rest van vandaag uit het plan) ---

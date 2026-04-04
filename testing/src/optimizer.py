@@ -21,7 +21,10 @@ from thermal import (
     HydraulicPredictor,
     UfhResidualPredictor,
     DhwResidualPredictor,
-    ComfortCostCalculator, ThermalEKF, PWATable,
+    ComfortCostCalculator,
+    ThermalEKF,
+    PWATable,
+    FACTOR_UFH,
 )
 from shutter import ShutterPredictor
 
@@ -331,11 +334,11 @@ class ThermalMPC:
         return float(t_air + (self.ident.R_im * q_loss))
 
     def update_and_get_initial_state(
-            self,
-            state: dict,
-            recent_df: pd.DataFrame,
-            forecast_df: pd.DataFrame,
-            current_solar_gain: float,
+        self,
+        state: dict,
+        recent_df: pd.DataFrame,
+        forecast_df: pd.DataFrame,
+        current_solar_gain: float,
     ) -> float:
         t_air_meas = float(state["room_temp"])
         t_out_now = float(forecast_df.temp.iloc[0])
@@ -343,13 +346,16 @@ class ThermalMPC:
         if self.ekf.x is None:
             # Koude start: fysische inversie als initialisatie
             dT_dt = self._robust_trend(recent_df)
-            q_mass = (self.ident.C_air * (dT_dt - current_solar_gain)) + \
-                     (t_air_meas - t_out_now) / self.ident.R_oa
-            t_mass_init = float(np.clip(
-                t_air_meas + self.ident.R_im * q_mass,
-                t_air_meas - 1.0,
-                t_air_meas + 5.0,
-            ))
+            q_mass = (self.ident.C_air * (dT_dt - current_solar_gain)) + (
+                t_air_meas - t_out_now
+            ) / self.ident.R_oa
+            t_mass_init = float(
+                np.clip(
+                    t_air_meas + self.ident.R_im * q_mass,
+                    t_air_meas - 1.0,
+                    t_air_meas + 5.0,
+                )
+            )
             self.ekf.reset(t_air_meas, t_mass_init)
             logger.info(f"[EKF] Koude start: T_mass={t_mass_init:.2f}°C")
         else:
@@ -359,7 +365,7 @@ class ThermalMPC:
                 last = recent_df.sort_values("timestamp").iloc[-1]
                 if last["hvac_mode"] == HvacMode.HEATING.value:
                     dt = max(0, last["supply_temp"] - last["return_temp"])
-                    p_heat_prev = dt * 1.256
+                    p_heat_prev = dt * FACTOR_UFH
 
             self.ekf.predict_step(p_heat_prev, t_out_now, current_solar_gain)
             _, t_mass_init = self.ekf.update(t_air_meas)
@@ -444,7 +450,7 @@ class ThermalMPC:
                         # Gebruik supply/return als die er zijn, anders schatting uit perf_map
                         dt = max(0, row["supply_temp"] - row["return_temp"])
                         # Gebruik de factor uit thermal.py (bijv. 1.256)
-                        hist_p_th[i] = dt * 1.256
+                        hist_p_th[i] = dt * FACTOR_UFH
                     else:
                         hist_p_th[i] = 0.0
 
@@ -454,8 +460,7 @@ class ThermalMPC:
             f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K max: {dhw_demand[:T].max():.2f} K"
         )
 
-
-       # ── PWA: één keer berekenen, geen iteraties ──────────────────────
+        # ── PWA: één keer berekenen, geen iteraties ──────────────────────
         # We gebruiken de huidige temperatuur als 'guess' voor de hele horizon
         t_out_arr = forecast_df.temp.values[:T].astype(float)
 
@@ -480,8 +485,8 @@ class ThermalMPC:
         # Vul de HP parameters
         self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
         self.P_fixed_pel_dhw.value = np.clip(p_el_dhw, 0.0, 5.0)
-        self.P_cop_ufh.value       = np.clip(cop_ufh,  1.5, 9.0)
-        self.P_cop_dhw.value       = np.clip(cop_dhw,  1.1, 5.0)
+        self.P_cop_ufh.value = np.clip(cop_ufh, 1.5, 9.0)
+        self.P_cop_dhw.value = np.clip(cop_dhw, 1.1, 5.0)
 
         # ── Comfortboetes en Terminal Values (DIT ONTBAK NOG) ─────────────
         # Voor de boete telt de totale thermische massa
@@ -497,21 +502,24 @@ class ThermalMPC:
 
         # Toewijzen aan de parameters die CVXPY verwacht
         self.P_cost_room_under.value = costs["room_under"]
-        self.P_cost_room_over.value  = costs["room_over"]
-        self.P_cost_dhw_under.value  = costs["tank_under"]
-        self.P_cost_dhw_over.value   = costs["tank_over"]
+        self.P_cost_room_over.value = costs["room_over"]
+        self.P_cost_dhw_under.value = costs["tank_under"]
+        self.P_cost_dhw_over.value = costs["tank_over"]
         self.P_val_terminal_room.value = costs["terminal_room"]
-        self.P_val_terminal_dhw.value  = costs["terminal_tank"]
+        self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
         # ── Terminal Targets (DIT ONTBAK OOK) ────────────────────────────
         # Eind-target voor massa op basis van steady-state evenwicht
         t_out_end = float(t_out_arr[-1])
-        target_room_end = r_t[-1] # r_t komt uit _get_targets
+        target_room_end = r_t[-1]  # r_t komt uit _get_targets
 
-        t_mass_ss = target_room_end + self.ident.R_im * (target_room_end - t_out_end) / self.ident.R_oa
+        t_mass_ss = (
+            target_room_end
+            + self.ident.R_im * (target_room_end - t_out_end) / self.ident.R_oa
+        )
 
         self.P_term_target_mass.value = float(t_mass_ss)
-        self.P_term_target_dhw.value  = float(d_t[-1]) # d_t komt uit _get_targets
+        self.P_term_target_dhw.value = float(d_t[-1])  # d_t komt uit _get_targets
 
         # ── Eén MILP solve ───────────────────────────────────────────────
         try:
