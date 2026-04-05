@@ -990,9 +990,9 @@ def _get_accuracy_plots(request, target_date) -> tuple:
         df_snap["ts_local"] = df_snap["ts_local"].dt.tz_localize(None)
 
     # 3. Targets ophalen (Unpack 6 waarden: min, max en ideaal target)
-    T = coordinator.optimizer.mpc.horizon + 1
+    T = 97  # 15 + 1 minuten intervallen in een dag
     r_min, r_max, d_min, d_max, r_target, d_target = (
-        coordinator.optimizer.mpc._get_targets(start_of_day, T)
+        coordinator.optimizer.mpc._get_targets(start_of_day, T, use_15min=True)
     )
     ts_targets = [
         start_of_day.replace(tzinfo=None) + timedelta(minutes=15 * t) for t in range(T)

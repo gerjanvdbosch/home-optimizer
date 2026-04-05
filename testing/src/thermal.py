@@ -380,7 +380,7 @@ class HPPerformanceMap:
             is_physically_sane = (0.25 < eta < 0.60) and (2.0 < dT_lift < 25.0)
 
             if r2 > 0.35 and is_physically_sane:
-                logger.info(f"[PerfMap] {label} Carnot fit geaccepteerd)")
+                logger.info(f"[PerfMap] {label} Carnot fit geaccepteerd")
             else:
                 logger.warning(f"[PerfMap] {label} Carnot fit afgekeurd")
                 popt = None
