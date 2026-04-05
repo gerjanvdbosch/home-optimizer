@@ -242,7 +242,7 @@ class HPPerformanceMap:
                 & df["wp_actual"].notna()
                 & (df["wp_actual"] > 0.5)  # actief vermogen
                 & df["delta_t"].notna()
-                & (df["delta_t"] > 0.5)  # duidelijke delta_t
+                & (df["delta_t"] > 2.0)  # duidelijke delta_t
                 & df[sink_col].notna()
                 & df["temp"].notna()
                 # geen full_quarter eis
