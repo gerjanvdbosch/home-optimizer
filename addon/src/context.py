@@ -35,7 +35,7 @@ class Context:
 
     solar_bias: float = 1.0
     load_bias: float = 1.0
-    temp_bias: float = 1.0
+    temp_bias: float = 0.0
 
     shutter_room: int = 0
 
