@@ -46,9 +46,9 @@ class ThermalMPC:
 
         # Multi-resolutie
         self.dt_steps = np.array(
-            [0.25] * 96 +  # Eerste 24 uur: 15 min nauwkeurigheid
-            [0.5] * 12 +  # Volgende 6 uur: 30 min stappen
-            [1.00] * 6  # Volgende 6 uur: 1 uur stappen
+            [0.25] * 96  # Eerste 24 uur: 15 min nauwkeurigheid
+            + [0.5] * 12  # Volgende 6 uur: 30 min stappen
+            + [1.00] * 6  # Volgende 6 uur: 1 uur stappen
         )
         self.horizon = len(self.dt_steps)
         self.B_ZONE = 96  # De eerste 12 uur zijn binair
@@ -171,7 +171,6 @@ class ThermalMPC:
         constraints = [
             self.ufh_on_cont <= 1,
             self.dhw_on_cont <= 1,
-
             self.t_air[0] == self.P_t_air_init,
             self.t_mass[0] == self.P_t_mass_init,
             self.t_dhw[0] == self.P_t_dhw_init,
@@ -225,18 +224,25 @@ class ThermalMPC:
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
                 # ── Thermische dynamica — p_th via affiene COP ──────────────
                 # t_air: zon is al een totaal-pakket, verlies-termen gaan per uur (* dt)
-                self.t_air[t + 1] == self.t_air[t] + (
-                        (self.t_mass[t] - self.t_air[t]) / R_im
-                        - (self.t_air[t] - self.P_temp_out[t]) / R_oa
-                ) * (dt_t / C_air) + self.P_solar_gain[t],
-
-                self.t_mass[t + 1] == self.t_mass[t] + (
-                        p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im
-                ) * (dt_t / C_mass),
-                self.t_dhw[t + 1] == self.t_dhw[t] + (
-                        p_th_dhw_now * (dt_t / self.ident.C_tank)
-                        - (self.t_dhw[t] - self.t_air[t]) * (self.ident.K_loss_dhw * dt_t)
-                ) - self.P_dhw_demand[t],
+                self.t_air[t + 1]
+                == self.t_air[t]
+                + (
+                    (self.t_mass[t] - self.t_air[t]) / R_im
+                    - (self.t_air[t] - self.P_temp_out[t]) / R_oa
+                )
+                * (dt_t / C_air)
+                + self.P_solar_gain[t],
+                self.t_mass[t + 1]
+                == self.t_mass[t]
+                + (p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im)
+                * (dt_t / C_mass),
+                self.t_dhw[t + 1]
+                == self.t_dhw[t]
+                + (
+                    p_th_dhw_now * (dt_t / self.ident.C_tank)
+                    - (self.t_dhw[t] - self.t_air[t]) * (self.ident.K_loss_dhw * dt_t)
+                )
+                - self.P_dhw_demand[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
                 self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
@@ -284,12 +290,18 @@ class ThermalMPC:
             + self.s_term_dhw_under * self.P_val_terminal_dhw
         )
 
-        smooth_cont = cp.sum(cp.abs(
-            self.ufh_on_cont[1:] - self.ufh_on_cont[:-1]) + cp.abs(
-            self.dhw_on_cont[1:] - self.dhw_on_cont[:-1])) * 0.05
+        smooth_cont = (
+            cp.sum(
+                cp.abs(self.ufh_on_cont[1:] - self.ufh_on_cont[:-1])
+                + cp.abs(self.dhw_on_cont[1:] - self.dhw_on_cont[:-1])
+            )
+            * 0.05
+        )
 
         self.problem = cp.Problem(
-            cp.Minimize(net_cost + comfort + switching + smooth_cont + terminal_penalty),
+            cp.Minimize(
+                net_cost + comfort + switching + smooth_cont + terminal_penalty
+            ),
             constraints,
         )
 
@@ -327,7 +339,6 @@ class ThermalMPC:
         local_tz = ZoneInfo(tzlocal.get_localzone_name())
         now_local = now.astimezone(local_tz)
 
-
         if use_15min:
             # Raster voor de grafiek: altijd 15 minuten
             offsets = np.arange(T) * 0.25
@@ -335,10 +346,7 @@ class ThermalMPC:
             # Raster voor de solver: elastisch (15m, 1u, 2u)
             offsets = np.concatenate(([0], np.cumsum(self.dt_steps[:-1])))
 
-        future_times = [
-            now_local + timedelta(hours=float(h))
-            for h in offsets
-        ]
+        future_times = [now_local + timedelta(hours=float(h)) for h in offsets]
 
         # Kamer targets ophalen via interpolatie
         r_t, r_l, r_h = self._get_interpolated_values(
@@ -860,7 +868,8 @@ class Optimizer:
 
         elapsed = np.concatenate(([0.0], np.cumsum(self.mpc.dt_steps)))
         steps_remaining = sum(
-            1 for t in range(self.mpc.horizon)
+            1
+            for t in range(self.mpc.horizon)
             if (now_local + timedelta(hours=float(elapsed[t]))).date() == today
         )
 
@@ -869,9 +878,15 @@ class Optimizer:
             sl = steps_remaining
             # We vermenigvuldigen de arrays element-wise met de tijdstappen
             pv_rem = float(np.sum(self.mpc.P_solar.value[:sl] * self.mpc.dt_steps[:sl]))
-            solar_self_rem = float(np.sum(self.mpc.p_solar_self.value[:sl] * self.mpc.dt_steps[:sl]))
-            export_rem = float(np.sum(self.mpc.p_export.value[:sl] * self.mpc.dt_steps[:sl]))
-            grid_rem = float(np.sum(self.mpc.p_grid.value[:sl] * self.mpc.dt_steps[:sl]))
+            solar_self_rem = float(
+                np.sum(self.mpc.p_solar_self.value[:sl] * self.mpc.dt_steps[:sl])
+            )
+            export_rem = float(
+                np.sum(self.mpc.p_export.value[:sl] * self.mpc.dt_steps[:sl])
+            )
+            grid_rem = float(
+                np.sum(self.mpc.p_grid.value[:sl] * self.mpc.dt_steps[:sl])
+            )
 
         # Beslissing voor tijdstap 0
         p_el_ufh_now = float(self.mpc.p_el_ufh.value[0])
@@ -902,9 +917,13 @@ class Optimizer:
         total_cost_gross = sum(
             float(r["cost_gross"]) for r in plan if r["time"].date() == today
         )
-        total_export_revenue = float(np.sum(
-            self.mpc.p_export.value[:steps_remaining] * export_price * self.mpc.dt_steps[:steps_remaining]
-        ))
+        total_export_revenue = float(
+            np.sum(
+                self.mpc.p_export.value[:steps_remaining]
+                * export_price
+                * self.mpc.dt_steps[:steps_remaining]
+            )
+        )
 
         return {
             "status": self.mpc.problem.status,
@@ -990,7 +1009,9 @@ class Optimizer:
             cost_ufh_val = p_u[t] * prices[t] * step_dt
             cost_dhw_val = p_d[t] * prices[t] * step_dt
             cost_gross_val = total_load * prices[t] * step_dt
-            cost_net_val = (grid[t] * prices[t] - export[t] * export_prices[t]) * step_dt
+            cost_net_val = (
+                grid[t] * prices[t] - export[t] * export_prices[t]
+            ) * step_dt
             cost_saving_val = max(0.0, solar_self * prices[t] * step_dt)
 
             plan.append(
