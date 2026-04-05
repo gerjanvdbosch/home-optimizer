@@ -147,8 +147,8 @@ class HPPerformanceMap:
         self._cop_model_ufh = None
         self._cop_model_dhw = None
 
-        self._delta_setpoint_ufh = 2.0  # fallback
-        self._delta_setpoint_dhw = 3.0
+        self._setpoint_ufh = 2.0  # fallback
+        self._setpoint_dhw = 3.0
 
         self._pel_min_ufh = 0.4
         self._pel_max_ufh = 2.5
@@ -340,7 +340,7 @@ class HPPerformanceMap:
         logger.info(
             f"[PerfMap] {label} P_el R2={scores_pel.mean():.3f}+-{scores_pel.std():.3f}  "
             f"COP R2={scores_cop.mean():.3f}+-{scores_cop.std():.3f}  "
-            f"COP mediaan={y_cop.median():.2f}"
+            f"P_el mediaan={y_pel.median():.2f} COP mediaan={y_cop.median():.2f}"
         )
 
         if label == "UFH":

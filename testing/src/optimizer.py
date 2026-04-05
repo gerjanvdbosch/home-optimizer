@@ -429,15 +429,23 @@ class ThermalMPC:
         # ── Toestand initialiseren ────────────────────────────────────────
         r_min, r_max, d_min, d_max, r_t, d_t = self._get_targets(state["now"], T)
 
-        t_room_init = float(state["room_temp"])
-        self.P_t_air_init.value = t_room_init
+        t_out_arr = forecast_df.temp.values[:T].astype(float)
 
-        t_mass_init = self.update_and_get_initial_state(
-            state, recent_df, forecast_df, solar_gains[0]
-        )
+        t_air_meas = float(state["room_temp"])
+        t_top_measured = float(state["dhw_top"])
+        t_bot_measured = float(state["dhw_bottom"])
 
+        t_avg_measured = (t_top_measured + t_bot_measured) / 2.0
+        # Stratification Gap: Hoeveel kouder is de onderkant t.o.v. het gemiddelde?
+        strat_gap_measured = max(0.0, t_avg_measured - t_bot_measured)
+
+        # 2. INITIALISEER DE START-TOESTAND (Parameters)
+        t_mass_init = self.update_and_get_initial_state(state, recent_df, forecast_df, solar_gains[0])
+
+        self.P_t_air_init.value = t_air_meas
         self.P_t_mass_init.value = t_mass_init
-        self.P_t_dhw_init.value = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
+        self.P_t_dhw_init.value = t_avg_measured  # De solver rekent energie-balans op Average
+
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
         )
@@ -491,38 +499,26 @@ class ThermalMPC:
             f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K max: {dhw_demand[:T].max():.2f} K"
         )
 
-        t_out_arr = forecast_df.temp.values[:T].astype(float)
-        current_dhw = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
-
-        # --- Slimme Initialisatie (Error-Corrected Receding Horizon) ---
+        # 3. INITIALISEER DE 'GUESSED' CURVES (Error-Corrected Receding Horizon)
         if self._prev_t_mass is not None and len(self._prev_t_mass) == T:
-            # 1. Wat verwachtten we een kwartier geleden dat de temperatuur NU zou zijn?
-            expected_mass_now = self._prev_t_mass[1]
-            expected_dhw_now = self._prev_t_dhw[1]
+            # Bereken de fouten op de vorige voorspelling
+            error_mass = t_mass_init - self._prev_t_mass[1]
+            error_dhw = t_avg_measured - self._prev_t_dhw[1]
 
-            # 2. Bereken de "State Error" (Verschil tussen theorie en meting)
-            error_mass = t_mass_init - expected_mass_now
-            error_dhw = current_dhw - expected_dhw_now
-
-            # 3. Schuif de voorspelde horizon 1 stap door
-            shifted_mass = np.append(self._prev_t_mass[1:], self._prev_t_mass[-1])
-            shifted_dhw = np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1])
-
-            # 4. PAS DE FOUT TOE OP DE GEHELE CURVE
-            # Hiermee behoud je de voorspelde stijgingen/dalingen, maar zonder "knik" aan de start.
-            # De solver ziet direct realistische COP's over de hele linie.
-            guessed_t_mass = shifted_mass + error_mass
-            guessed_t_dhw = shifted_dhw + error_dhw
+            # Schuif de horizon door en pas de fout-correctie toe
+            guessed_t_mass = np.append(self._prev_t_mass[1:], self._prev_t_mass[-1]) + error_mass
+            guessed_t_dhw = np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1]) + error_dhw
 
             logger.info(
-                f"[MPC] Error-Corrected Receding Horizon. "
-                f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K"
+                f"[MPC] Error-Corrected Horizon. "
+                f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K | "
+                f"Stratification Gap: {strat_gap_measured:.1f}K"
             )
         else:
-            # Fallback
+            # Fallback bij koude start
             guessed_t_mass = np.full(T, t_mass_init)
-            guessed_t_dhw = np.full(T, current_dhw)
-            logger.info("[MPC] Start outer-loop met platte fallback-state.")
+            guessed_t_dhw = np.full(T, t_avg_measured)
+            logger.info("[MPC] Start met platte fallback-state.")
 
         costs_set = False
         prev_obj = None
@@ -532,10 +528,16 @@ class ThermalMPC:
         best_state = {}
 
         for outer in range(MAX_OUTER):
+            if state["hvac_mode"] == HvacMode.DHW.value:
+                # Als de pomp draait, is de tank gemengd (Gap = 0)
+                guessed_t_sink = guessed_t_dhw
+            else:
+                # Bij stilstand behouden we de gemeten gelaagdheid (Gap)
+                guessed_t_sink = guessed_t_dhw - strat_gap_measured
 
             # 1. PWA op huidige schatting
             pwa_data = self.pwa.compute(
-                t_out_arr, guessed_t_mass, guessed_t_dhw
+                t_out_arr, guessed_t_mass, guessed_t_sink
             )
             self.plan_t_sup_ufh = pwa_data["sup_ufh"]
             self.plan_t_sup_dhw = pwa_data["sup_dhw"]
@@ -582,8 +584,8 @@ class ThermalMPC:
                     warm_start=(outer > 0 or self._prev_ufh_on is not None),
                     verbose=False,
                     highs_options={
-                        "mip_rel_gap": 0.005,  # stop bij 0.5% van optimum
-                        "mip_abs_gap": 0.001,  # absolute gap in euro
+                        "mip_rel_gap": 0.01,  # stop bij % van optimum
+                        "mip_abs_gap": 0.01,  # absolute gap in euro
                         "time_limit": 300.0,  # maximaal 300 seconden per solve
                         "presolve": "on",
                         "parallel": "on",  # gebruik meerdere cores
