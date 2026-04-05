@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class WeatherClient:
     def __init__(self, client: HAClient, context: Context):
         self.client = client
+        self.context = context
 
     def get_forecast(self):
         minutely = self.client.get_weather()

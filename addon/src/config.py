@@ -25,6 +25,7 @@ class Config:
     sensor_target_setpoint: str = "sensor.warmtepomp_setpoint_waarde"
     sensor_supply_temp: str = "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
     sensor_return_temp: str = "sensor.ecodan_heatpump_ca09ec_retour_temp"
+    sensor_outside_temp: str = "sensor.ecodan_heatpump_ca09ec_buiten_temp"
     sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
 
     sensor_shutter_room: str = "sensor.woonkamer_rolluik"
@@ -43,6 +44,7 @@ class Config:
     hp_model_path: str = "/config/models/hp_model.joblib"
     hydraulic_model_path: str = "/config/models/hydraulic_model.joblib"
     shutter_model_path: str = "/config/models/shutter_model.joblib"
+    temp_model_path: str = "/config/models/temp_model.joblib"
 
     solar_model_ratio: float = 0.7
 
@@ -50,7 +52,7 @@ class Config:
         default_factory=lambda: [
             ("00:00", 19.0, 0.5, 1.5),
             ("08:00", 19.0, 0.5, 1.5),
-            ("14:00", 19.5, 0.5, 1.5),
+            ("14:00", 19.0, 0.5, 1.5),
             ("18:00", 20.0, 0.5, 1.5),
             ("22:00", 19.0, 0.5, 1.5),
         ]
@@ -59,6 +61,7 @@ class Config:
     dhw_target: list = field(
         default_factory=lambda: [
             ("00:00", 20.0, 5.0, 30.0),
+            ("10:00", 20.0, 5.0, 35.0),
             ("19:59", 20.0, 5.0, 35.0),
             ("20:00", 50.0, 2.0, 5.0),
             ("21:00", 50.0, 2.0, 5.0),

@@ -124,8 +124,10 @@ class Collector:
         raw_dhw_top = self.client.get_dhw_top()
         raw_dhw_bottom = self.client.get_dhw_bottom()
         raw_mode = self.client.get_hvac_mode()
+        raw_outside = self.client.get_outside_temp()
 
         self.context.room_temp = raw_room
+        self.context.outside_temp = raw_outside
         self.context.dhw_top = raw_dhw_top
         self.context.dhw_bottom = raw_dhw_bottom
         self.context.hvac_mode = raw_mode
@@ -213,13 +215,14 @@ class Collector:
                 return_temp=avg_return,
                 hvac_mode=hvac_mode,
                 shutter_room=shutter_room,
+                outside_temp=self.context.outside_temp,
             )
 
             self.current_slot_start = slot_start
 
             logger.info(
                 f"[Collector] Mode={hvac_mode} PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW "
-                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C "
+                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Outside={self.context.outside_temp:.2f}°C "
                 f"Target={avg_setpoint:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C "
                 f"Shutter={shutter_room:.0f}%"
             )

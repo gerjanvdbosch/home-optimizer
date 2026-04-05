@@ -83,13 +83,34 @@ def index(
     ) / 2.0
 
     # Actuele COP bepalen uit het plan (rij 0 is 'nu')
-    current_cop = "-"
+    # current_cop = "-"
+    avg_ufh_cop_str = "-"
+    avg_dhw_cop_str = "-"
+
     if plan and len(plan) > 0:
-        current_mode = result.get("mode", "OFF")
-        if current_mode == "UFH":
-            current_cop = plan[0].get("cop_ufh", "-")
-        elif current_mode == "DHW":
-            current_cop = plan[0].get("cop_dhw", "-")
+        # current_mode = result.get("mode", "OFF")
+        # if current_mode == "UFH":
+        #     current_cop = plan[0].get("cop_ufh", "-")
+        # elif current_mode == "DHW":
+        #     current_cop = plan[0].get("cop_dhw", "-")
+
+        ufh_cops_today = []
+        dhw_cops_today = []
+
+        for p in plan:
+            # Controleer of de stap in het plan binnen 'vandaag' valt
+            p_date = p["time"].astimezone(local_tz).date()
+            if p_date == today:
+                mode = int(p["hvac_mode"])
+                if mode == HvacMode.HEATING.value:
+                    ufh_cops_today.append(float(p["cop_ufh"]))
+                elif mode == HvacMode.DHW.value:
+                    dhw_cops_today.append(float(p["cop_dhw"]))
+
+        if ufh_cops_today:
+            avg_ufh_cop_str = f"{sum(ufh_cops_today) / len(ufh_cops_today):.2f}"
+        if dhw_cops_today:
+            avg_dhw_cop_str = f"{sum(dhw_cops_today) / len(dhw_cops_today):.2f}"
 
     # Gestructureerde lijst maken
     details = []
@@ -98,6 +119,8 @@ def index(
         realized_self = 0.0
         realized_export = 0.0
         realized_import = 0.0
+        realized_ufh = 0.0
+        realized_dhw = 0.0
 
         # Haal historische data op vanaf het begin van de geselecteerde dag (UTC)
         start_of_day = datetime.combine(target_date, datetime.min.time()).replace(
@@ -108,8 +131,6 @@ def index(
 
         if not df_hist.empty:
             df_hist["timestamp_local"] = df_hist["timestamp"].dt.tz_convert(local_tz)
-
-            # Filter de historie: vanaf middernacht tot 'nu' (voorkomt dubbel tellen met de toekomst)
             local_now = context.now.astimezone(local_tz)
             cutoff = local_now if is_today else start_of_day + timedelta(days=1)
 
@@ -119,31 +140,45 @@ def index(
             df_past = df_hist[mask].copy()
 
             if not df_past.empty:
-                # Veilige omzetting naar numeriek (voorkom lege of corrupte strings)
-                for col in ["pv_actual", "grid_import", "grid_export"]:
+                for col in [
+                    "pv_actual",
+                    "grid_import",
+                    "grid_export",
+                    "wp_actual",
+                    "hvac_mode",
+                ]:
                     if col in df_past.columns:
-                        df_past[col] = (
-                            pd.to_numeric(df_past[col], errors="coerce")
-                            .fillna(0.0)
-                            .clip(lower=0.0)
-                        )
+                        df_past[col] = pd.to_numeric(
+                            df_past[col], errors="coerce"
+                        ).fillna(0.0)
 
-                # Bereken gerealiseerde kWh (kwartierwaarden = kW * 0.25)
-                if "pv_actual" in df_past.columns:
-                    realized_pv = df_past["pv_actual"].sum() * 0.25
-                if "grid_import" in df_past.columns:
-                    realized_import = df_past["grid_import"].sum() * 0.25
-                if "grid_export" in df_past.columns:
-                    realized_export = df_past["grid_export"].sum() * 0.25
+                realized_pv = df_past["pv_actual"].sum() * 0.25
+                realized_import = df_past["grid_import"].sum() * 0.25
+                realized_export = df_past["grid_export"].sum() * 0.25
 
-                # Gerealiseerd eigen verbruik = Zonne-energie - Teruglevering (per 15 min kwartier bekeken)
-                if "pv_actual" in df_past.columns and "grid_export" in df_past.columns:
-                    self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(
-                        lower=0.0
-                    )
-                    realized_self = self_kw.sum() * 0.25
+                # Bereken specifiek verbruik per modus uit historie
+                ufh_mask = df_past["hvac_mode"] == HvacMode.HEATING.value
+                realized_ufh = df_past.loc[ufh_mask, "wp_actual"].sum() * 0.25
 
-        # Haal de verwachte rest-van-de-dag (toekomst) op uit je optimizer resultaat
+                dhw_mask = df_past["hvac_mode"].isin(
+                    [HvacMode.DHW.value, HvacMode.LEGIONELLA_PREVENTION.value]
+                )
+                realized_dhw = df_past.loc[dhw_mask, "wp_actual"].sum() * 0.25
+
+                self_kw = (df_past["pv_actual"] - df_past["grid_export"]).clip(
+                    lower=0.0
+                )
+                realized_self = self_kw.sum() * 0.25
+
+        # --- TOEKOMSTIG VERBRUIK (Rest van vandaag uit het plan) ---
+        future_ufh = 0.0
+        future_dhw = 0.0
+        if plan and is_today:
+            for p in plan:
+                if p["time"].astimezone(local_tz).date() == today:
+                    future_ufh += float(p.get("p_el_ufh", 0)) * 0.25
+                    future_dhw += float(p.get("p_el_dhw", 0)) * 0.25
+
         future_pv = result.get("pv_remaining", 0.0) if is_today else 0.0
         future_self = result.get("solar_self_remaining", 0.0) if is_today else 0.0
         future_export = result.get("export_remaining", 0.0) if is_today else 0.0
@@ -215,6 +250,18 @@ def index(
                     "total": f"{total_export:.2f}",
                     "unit": "kWh",
                 },
+                {
+                    "label": "Verbruik UFH",
+                    "value": f"{future_ufh:.2f}",
+                    "total": f"{realized_ufh + future_ufh:.2f}",
+                    "unit": "kWh",
+                },
+                {
+                    "label": "Verbruik DHW",
+                    "value": f"{future_dhw:.2f}",
+                    "total": f"{realized_dhw + future_dhw:.2f}",
+                    "unit": "kWh",
+                },
             ]
         )
 
@@ -252,16 +299,28 @@ def index(
                     "unit": "kW",
                 },
                 {
-                    "label": "Doel Aanvoer",
-                    "value": f"{result.get('target_supply_temp', 0):.1f}",
+                    "label": "Buiten Temp",
+                    "value": f"{getattr(context, 'outside_temp', 0.0):.1f}",
                     "unit": "°C",
                 },
                 {
-                    "label": "Doel Vermogen",
-                    "value": f"{result.get('target_pel_kw', 0):.2f}",
-                    "unit": "kW",
+                    "label": "Buiten Bias",
+                    "value": f"{getattr(context, 'temp_bias', 0.0):+.2f}",
+                    "unit": "°C",
                 },
-                {"label": "Verwachte COP", "value": current_cop, "unit": ""},
+                # {
+                #     "label": "Doel Aanvoer",
+                #     "value": f"{result.get('target_supply_temp', 0):.1f}",
+                #     "unit": "°C",
+                # },
+                # {
+                #     "label": "Doel Vermogen",
+                #     "value": f"{result.get('target_pel_kw', 0):.2f}",
+                #     "unit": "kW",
+                # },
+                # {"label": "Verwachte COP", "value": current_cop, "unit": ""},
+                {"label": "Gem. COP UFH", "value": avg_ufh_cop_str, "unit": ""},
+                {"label": "Gem. COP DHW", "value": avg_dhw_cop_str, "unit": ""},
             ]
         )
 
@@ -908,6 +967,7 @@ def _get_day_data(database, target_date: date, local_tz):
 def _get_accuracy_plots(request, target_date) -> tuple:
     """
     Genereert vloeiende temperatuurgrafieken voor Kamer en Boiler met Setpoint en Marge.
+    Gebruikt uitsluitend Spline Interpolatie voor vloeiende lijnen.
     """
     coordinator = request.app.state.coordinator
     database = coordinator.collector.database
@@ -930,9 +990,9 @@ def _get_accuracy_plots(request, target_date) -> tuple:
         df_snap["ts_local"] = df_snap["ts_local"].dt.tz_localize(None)
 
     # 3. Targets ophalen (Unpack 6 waarden: min, max en ideaal target)
-    T = coordinator.optimizer.mpc.horizon + 1
+    T = 97  # 15 + 1 minuten intervallen in een dag
     r_min, r_max, d_min, d_max, r_target, d_target = (
-        coordinator.optimizer.mpc._get_targets(start_of_day, T)
+        coordinator.optimizer.mpc._get_targets(start_of_day, T, use_15min=True)
     )
     ts_targets = [
         start_of_day.replace(tzinfo=None) + timedelta(minutes=15 * t) for t in range(T)
@@ -941,7 +1001,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
     start_ts = start_of_day.replace(tzinfo=None)
     end_ts = start_ts + timedelta(days=1)
 
-    # 4. Gemeenschappelijke layout instellingen (ZONDER yaxis)
+    # 4. Gemeenschappelijke layout instellingen
     common_layout = dict(
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
@@ -960,9 +1020,9 @@ def _get_accuracy_plots(request, target_date) -> tuple:
         ),
     )
 
-    # 5. Helper voor Bandbreedte styling
+    # 5. Helper voor Bandbreedte styling met Spline
     def apply_band_style(fig, x, y_min, y_max, y_target, color):
-        # Marge (vlak) - Gebruik spline voor vloeiende overgangen
+        # Marge (vlak)
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -1017,7 +1077,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_hist["ts_local"],
                 y=df_hist["room_temp"],
                 name="Actueel",
-                line=dict(color="#d05ce3", width=2.5),
+                line=dict(color="#d05ce3", width=2.5, shape="spline", smoothing=1.3),
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
@@ -1027,7 +1087,13 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_snap["ts_local"],
                 y=df_snap["t_room_pred"],
                 name="Voorspelling",
-                line=dict(color="#d05ce3", width=1.5, dash="dash"),
+                line=dict(
+                    color="#d05ce3",
+                    width=1.5,
+                    dash="dash",
+                    shape="spline",
+                    smoothing=1.3,
+                ),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
@@ -1042,8 +1108,6 @@ def _get_accuracy_plots(request, target_date) -> tuple:
 
     # --- 7. Boiler Grafiek ---
     fig_dhw = go.Figure()
-
-    # Gebruik nu direct de ruwe arrays zonder clipping
     apply_band_style(
         fig_dhw, ts_targets, d_min, d_max, d_target, "rgba(2, 207, 231, 0.1)"
     )
@@ -1055,7 +1119,7 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_hist["ts_local"],
                 y=dhw_act,
                 name="Actueel",
-                line=dict(color="#02cfe7", width=2.5),
+                line=dict(color="#02cfe7", width=2.5, shape="spline", smoothing=1.3),
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
@@ -1065,13 +1129,18 @@ def _get_accuracy_plots(request, target_date) -> tuple:
                 x=df_snap["ts_local"],
                 y=df_snap["t_dhw_pred"],
                 name="Voorspelling",
-                line=dict(color="#02cfe7", width=1.5, dash="dash"),
+                line=dict(
+                    color="#02cfe7",
+                    width=1.5,
+                    dash="dash",
+                    shape="spline",
+                    smoothing=1.3,
+                ),
                 opacity=0.7,
                 hovertemplate="%{y:.1f} °C<extra></extra>",
             )
         )
     fig_dhw.update_layout(**common_layout)
-    # Range is verwijderd zodat de as automatisch schaalt (bijv. van 10 naar 55)
     fig_dhw.update_yaxes(
         title="Boiler Temp (°C)",
         showgrid=True,

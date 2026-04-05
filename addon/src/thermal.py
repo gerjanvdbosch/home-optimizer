@@ -1,17 +1,3 @@
-"""
-thermal.py
-
-Bevat:
-  - clean_thermal_data()        — filtert fysisch corrupte rijen
-  - HPPerformanceMap            — leert P_el en COP direct uit data
-  - SystemIdentificator         — leert R, C, K_emit, K_tank, lag
-  - HydraulicPredictor          — leert supply-temp en hydraulische parameters
-  - UfhResidualPredictor        — leert zonopwarming en overige residuen
-  - DhwResidualPredictor        — leert warm-water vraagpatroon
-  - PhysicsLinearizer           — SLP-linearisatie met convergentiecheck
-  - ComfortCostCalculator       — dimensioneel correcte comfortboetes
-"""
-
 import logging
 import numpy as np
 import pandas as pd
@@ -20,9 +6,7 @@ import joblib
 from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import cross_val_score
-
-from model import ModelSelector
+from scipy.optimize import curve_fit
 from utils import add_cyclic_time_features
 from context import HvacMode
 
@@ -156,18 +140,19 @@ class HPPerformanceMap:
         self.path = Path(path)
         self.is_fitted = False
 
-        self._pel_model_ufh = None
-        self._pel_model_dhw = None
-        self._cop_model_ufh = None
-        self._cop_model_dhw = None
-
-        self._delta_setpoint_ufh = 2.0  # fallback
-        self._delta_setpoint_dhw = 3.0
+        self._setpoint_ufh = 2.0  # fallback
+        self._setpoint_dhw = 3.0
 
         self._pel_min_ufh = 0.4
         self._pel_max_ufh = 2.5
         self._pel_min_dhw = 0.6
         self._pel_max_dhw = 3.0
+
+        self._carnot_ufh = None  # tuple: (eta, dT_lift)
+        self._carnot_dhw = None
+
+        self._pel_ufh = None  # tuple: (a, b, c) voor p_el = a + b*t_sink + c*t_out
+        self._pel_dhw = None
 
         self._load()
 
@@ -176,12 +161,12 @@ class HPPerformanceMap:
             return
         try:
             d = joblib.load(self.path)
-            self._pel_model_ufh = d.get("pel_ufh")
-            self._pel_model_dhw = d.get("pel_dhw")
-            self._cop_model_ufh = d.get("cop_ufh")
-            self._cop_model_dhw = d.get("cop_dhw")
-            self._setpoint_ufh = d.get("setpoint_ufh", 2.0)
-            self._setpoint_dhw = d.get("setpoint_dhw", 3.0)
+            self._carnot_ufh = d.get("carnot_ufh")
+            self._carnot_dhw = d.get("carnot_dhw")
+            self._pel_ufh = d.get("pel_ufh")
+            self._pel_dhw = d.get("pel_dhw")
+            self._setpoint_ufh = d.get("setpoint_ufh", 25.0)
+            self._setpoint_dhw = d.get("setpoint_dhw", 55.0)
             self._pel_min_ufh = d.get("pel_min_ufh", 0.4)
             self._pel_max_ufh = d.get("pel_max_ufh", 2.5)
             self._pel_min_dhw = d.get("pel_min_dhw", 0.6)
@@ -189,8 +174,10 @@ class HPPerformanceMap:
             self.is_fitted = True
             logger.info(
                 f"[PerfMap] Geladen. "
-                f"UFH [{self._pel_min_ufh:.2f}-{self._pel_max_ufh:.2f}] kW  "
-                f"DHW [{self._pel_min_dhw:.2f}-{self._pel_max_dhw:.2f}] kW"
+                f"UFH η={self._carnot_ufh[0]:.3f} lift={self._carnot_ufh[1]:.1f}K  "
+                f"DHW η={self._carnot_dhw[0]:.3f} lift={self._carnot_dhw[1]:.1f}K"
+                if self._carnot_ufh and self._carnot_dhw
+                else "[PerfMap] Geladen (defaults)."
             )
         except Exception as e:
             logger.warning(f"[PerfMap] Laden mislukt: {e}")
@@ -198,10 +185,10 @@ class HPPerformanceMap:
     def _save(self):
         joblib.dump(
             {
-                "pel_ufh": self._pel_model_ufh,
-                "pel_dhw": self._pel_model_dhw,
-                "cop_ufh": self._cop_model_ufh,
-                "cop_dhw": self._cop_model_dhw,
+                "carnot_ufh": self._carnot_ufh,
+                "carnot_dhw": self._carnot_dhw,
+                "pel_ufh": self._pel_ufh,
+                "pel_dhw": self._pel_dhw,
                 "setpoint_ufh": self._setpoint_ufh,
                 "setpoint_dhw": self._setpoint_dhw,
                 "pel_min_ufh": self._pel_min_ufh,
@@ -265,10 +252,11 @@ class HPPerformanceMap:
                 (df["hvac_mode"] == mode_val)
                 & df["full_quarter"]
                 & df["wp_actual"].notna()
-                & (df["wp_actual"] > 0.15)
+                & (df["wp_actual"] > 0.5)
                 & df["delta_t"].notna()
-                & (df["delta_t"] > 0.5)
+                & (df["delta_t"] > 1.0)
                 & df[sink_col].notna()
+                & (df["temp"] < 15.0)
                 & df["temp"].notna()
             )
 
@@ -334,116 +322,172 @@ class HPPerformanceMap:
             self._pel_min_dhw = float(np.clip(pel_min, 0.4, 1.5))
             self._pel_max_dhw = float(np.clip(pel_max, 1.5, 5.0))
 
-        X = d[self.FEATURES]
-        y_pel = d["wp_actual"]
-        y_cop = d["cop"]
+        t_out = d["t_out"].values.astype(float)
+        t_sink = d["t_sink"].values.astype(float)
+        cop = d["cop"].dropna()
+        mask = cop.notna()
+        t_out_c = t_out[mask]
+        t_sink_c = t_sink[mask]
+        cop_c = cop.values[mask] if hasattr(cop, "values") else cop[mask]
 
-        # pel_model = RandomForestRegressor(
-        #     n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
-        # ).fit(X, y_pel)
-        #
-        # cop_model = RandomForestRegressor(
-        #     n_estimators=150, max_depth=7, min_samples_leaf=8, random_state=42
-        # ).fit(X, y_cop)
+        # ── 1. Carnot-fit COP ─────────────────────────────────────────────
+        # COP = eta * (t_sink + 273) / (t_sink - t_out + dT_lift)
+        # Geleerde parameters: eta (efficiëntie 0-1), dT_lift (hydraulische lift K)
+        # Fysische garanties:
+        #   - COP daalt altijd bij hogere t_sink (want noemer groeit)
+        #   - COP stijgt altijd bij hogere t_out  (want noemer krimpt)
+        #   - COP > 0 altijd (bounds op dT_lift voorkomen deling door nul)
 
-        pel_model, _, _ = ModelSelector.select(X, y_pel, f"{label} P_el")
-        cop_model, _, _ = ModelSelector.select(X, y_cop, f"{label} COP")
+        def carnot_cop(X, eta, dT_lift):
+            t_o, t_s = X
+            denom = np.maximum(t_s - t_o + dT_lift, 1.0)  # nooit delen door 0
+            return eta * (t_s + 273.15) / denom
 
-        scores_pel = cross_val_score(pel_model, X, y_pel, cv=5, scoring="r2")
-        scores_cop = cross_val_score(cop_model, X, y_cop, cv=5, scoring="r2")
-        logger.info(
-            f"[PerfMap] {label} P_el R2={scores_pel.mean():.3f}+-{scores_pel.std():.3f}  "
-            f"COP R2={scores_cop.mean():.3f}+-{scores_cop.std():.3f}  "
-            f"COP mediaan={y_cop.median():.2f}"
-        )
+        try:
+            if label == "UFH":
+                start_values = [
+                    0.45,
+                    15.0,
+                ]  # Lift is vaak hoger bij UFH door interne wisselaar
+            else:
+                start_values = [0.40, 18.0]
+
+            popt, pcov = curve_fit(
+                carnot_cop,
+                (t_out_c, t_sink_c),
+                cop_c,
+                p0=start_values,
+                bounds=([0.2, 2.0], [0.8, 30.0]),
+                maxfev=10000,
+            )
+
+            eta, dT_lift = popt
+            perr = np.sqrt(np.diag(pcov))
+
+            # Kwaliteitscheck: als de fit slecht is, val terug op defaults
+            cop_pred = carnot_cop((t_out_c, t_sink_c), eta, dT_lift)
+            r2 = 1 - np.sum((cop_c - cop_pred) ** 2) / np.sum(
+                (cop_c - cop_c.mean()) ** 2
+            )
+
+            logger.info(
+                f"[PerfMap] {label} Carnot: η={eta:.3f}±{perr[0]:.3f}  "
+                f"dT_lift={dT_lift:.1f}±{perr[1]:.1f}K  R²={r2:.3f}"
+            )
+
+            # We accepteren de fit als R2 > 0.35 (voor thermische data acceptabel)
+            # EN als de waarden binnen fysische grenzen liggen.
+            is_physically_sane = (0.25 < eta < 0.60) and (2.0 < dT_lift < 25.0)
+
+            if r2 > 0.35 and is_physically_sane:
+                logger.info(f"[PerfMap] {label} Carnot fit geaccepteerd")
+            else:
+                logger.warning(f"[PerfMap] {label} Carnot fit afgekeurd")
+                popt = None
+
+        except Exception as e:
+            logger.warning(f"[PerfMap] {label} Carnot fit mislukt: {e}")
+            popt = None
+
+        # Fallback: typische waarden voor lucht-water WP
+        if popt is None:
+            if label == "UFH":
+                popt = (0.45, 8.0)
+            else:
+                popt = (0.40, 12.0)
+            logger.info(
+                f"[PerfMap] {label} Carnot fallback: η={popt[0]} dT_lift={popt[1]}"
+            )
 
         if label == "UFH":
-            self._pel_model_ufh = pel_model
-            self._cop_model_ufh = cop_model
+            self._carnot_ufh = tuple(popt)
         else:
-            self._pel_model_dhw = pel_model
-            self._cop_model_dhw = cop_model
+            self._carnot_dhw = tuple(popt)
 
-    def predict_pel(
-        self,
-        mode: int,
-        t_out: float,
-        t_sink: float,
-        supply_temp: float = None,
-        delta_setpoint: float = None,
-    ) -> float:
+        # ── 2. Lineaire P_el fit ──────────────────────────────────────────
+        # p_el = a + b * t_sink + c * t_out
+        # b >= 0: meer stroom bij hogere sinktemp (compressor harder)
+        # c <= 0: minder stroom bij hogere buitentemp (vrijwel geen lift nodig)
+        # Data-gedreven maar fysisch begrensd via bounds
 
-        if supply_temp is None:
-            supply_temp = t_sink + 5.0
-        if delta_setpoint is None:
-            delta_setpoint = 2.0
+        y_pel = d["wp_actual"].values.astype(float)
 
+        def pel_fn(X, a, b, c):
+            t_o, t_s = X
+            return a + b * t_s + c * t_o
+
+        try:
+            popt_pel, _ = curve_fit(
+                pel_fn,
+                (t_out, t_sink),
+                y_pel,
+                p0=[1.0, 0.01, -0.01],
+                bounds=([0.2, 0.0, -0.1], [4.0, 0.05, 0.0]),
+                maxfev=10000,
+            )
+            pel_pred = pel_fn((t_out, t_sink), *popt_pel)
+            r2_pel = 1 - np.sum((y_pel - pel_pred) ** 2) / np.sum(
+                (y_pel - y_pel.mean()) ** 2
+            )
+            logger.info(
+                f"[PerfMap] {label} P_el: a={popt_pel[0]:.3f} "
+                f"b={popt_pel[1]:.4f} c={popt_pel[2]:.4f}  R²={r2_pel:.3f}"
+            )
+        except Exception as e:
+            logger.warning(f"[PerfMap] {label} P_el fit mislukt: {e}, fallback")
+            if label == "UFH":
+                popt_pel = (0.8, 0.005, -0.01)
+            else:
+                popt_pel = (1.2, 0.008, -0.01)
+
+        if label == "UFH":
+            self._pel_ufh = tuple(popt_pel)
+        else:
+            self._pel_dhw = tuple(popt_pel)
+
+        # Operationele grenzen
+        pel_min = float(d["wp_actual"].quantile(0.05))
+        pel_max = float(d["wp_actual"].quantile(0.95))
+        if label == "UFH":
+            self._pel_min_ufh = float(np.clip(pel_min, 0.3, 1.0))
+            self._pel_max_ufh = float(np.clip(pel_max, 1.0, 4.0))
+        else:
+            self._pel_min_dhw = float(np.clip(pel_min, 0.4, 1.5))
+            self._pel_max_dhw = float(np.clip(pel_max, 1.5, 5.0))
+
+    def predict_cop(self, mode, t_out, t_sink) -> float:
         if mode == HvacMode.HEATING.value:
-            model, lo, hi = self._pel_model_ufh, self._pel_min_ufh, self._pel_max_ufh
+            params, default = self._carnot_ufh, 3.5
+        else:
+            params, default = self._carnot_dhw, 2.5
+
+        if params is None:
+            return default
+
+        eta, dT_lift = params
+        denom = max(t_sink - t_out + dT_lift, 1.0)
+        return float(np.clip(eta * (t_sink + 273.15) / denom, 1.2, 8.0))
+
+    def predict_pel(self, mode, t_out, t_sink) -> float:
+        if mode == HvacMode.HEATING.value:
+            params = self._pel_ufh
+            lo, hi = self._pel_min_ufh, self._pel_max_ufh
             default = float(np.clip(1.2 - 0.02 * t_out, lo, hi))
         else:
-            model, lo, hi = self._pel_model_dhw, self._pel_min_dhw, self._pel_max_dhw
+            params = self._pel_dhw
+            lo, hi = self._pel_min_dhw, self._pel_max_dhw
             default = float(np.clip(1.8 - 0.02 * t_out, lo, hi))
 
-        if model is None:
+        if params is None:
             return default
 
-        X = pd.DataFrame(
-            [
-                [
-                    t_out,
-                    t_sink,
-                    float(supply_temp),
-                    float(np.clip(delta_setpoint, -5, 20)),
-                ]
-            ],
-            columns=self.FEATURES,
-        )
-        return float(np.clip(model.predict(X)[0], lo, hi))
-
-    def predict_cop(
-        self,
-        mode: int,
-        t_out: float,
-        t_sink: float,
-        supply_temp: float = None,
-        delta_setpoint: float = None,
-    ) -> float:
-
-        if supply_temp is None:
-            supply_temp = t_sink + 5.0
-        if delta_setpoint is None:
-            delta_setpoint = 2.0
-
-        if mode == HvacMode.HEATING.value:
-            model, default = self._cop_model_ufh, 3.5
-        else:
-            model, default = self._cop_model_dhw, 2.5
-
-        if model is None:
-            return default
-
-        X = pd.DataFrame(
-            [
-                [
-                    t_out,
-                    t_sink,
-                    float(supply_temp),
-                    float(np.clip(delta_setpoint, -10, 45)),
-                ]
-            ],
-            columns=self.FEATURES,
-        )
-        return float(np.clip(model.predict(X)[0], 1.2, 8.0))
+        a, b, c = params
+        return float(np.clip(a + b * t_sink + c * t_out, lo, hi))
 
     def predict_p_th(self, mode: int, t_out: float, t_sink: float) -> float:
         return self.predict_pel(mode, t_out, t_sink) * self.predict_cop(
             mode, t_out, t_sink
         )
-
-    # Backwards-compat
-    def get_pel_limits(self, t_out: float):
-        return self._pel_min_ufh, self._pel_max_ufh
 
 
 # =========================================================
@@ -1164,121 +1208,6 @@ class DhwResidualPredictor:
 
 
 # =========================================================
-# PHYSICS LINEARIZER  (SLP-hulpklasse voor ThermalMPC)
-# =========================================================
-
-
-class PhysicsLinearizer:
-    """
-    Berekent per tijdstap de bevroren P_el en COP voor de MILP.
-    Convergeert via een verschilcheck op P_el (tol kW).
-    """
-
-    def __init__(
-        self,
-        perf_map: HPPerformanceMap,
-        hydraulic: HydraulicPredictor,
-        horizon: int = 96,
-        max_iter: int = 6,
-        tol: float = 0.05,
-    ):
-        self.perf_map = perf_map
-        self.hydraulic = hydraulic
-        self.horizon = horizon
-        self.max_iter = max_iter
-        self.tol = tol
-
-    def compute(
-        self,
-        t_out_arr: np.ndarray,
-        t_room_arr: np.ndarray,
-        t_dhw_arr: np.ndarray,
-    ) -> tuple:
-        T = self.horizon
-        p_el_ufh = np.zeros(T)
-        cop_ufh = np.zeros(T)
-        p_el_dhw = np.zeros(T)
-        cop_dhw = np.zeros(T)
-        sup_ufh_arr = np.zeros(T)
-        sup_dhw_arr = np.zeros(T)
-
-        for t in range(T):
-            t_out = float(t_out_arr[t])
-            t_room = float(t_room_arr[t])
-            t_dhw = float(t_dhw_arr[t])
-
-            # Supply projecteren via hydraulic curve
-            p_th_ufh_est = self.perf_map.predict_p_th(
-                HvacMode.HEATING.value, t_out, t_room
-            )
-            p_th_dhw_est = self.perf_map.predict_p_th(HvacMode.DHW.value, t_out, t_dhw)
-
-            sup_ufh = self.hydraulic.predict_supply("UFH", p_th_ufh_est, t_out, t_room)
-            sup_dhw = self.hydraulic.predict_supply("DHW", p_th_dhw_est, t_out, t_dhw)
-
-            sup_ufh_arr[t] = sup_ufh
-            sup_dhw_arr[t] = sup_dhw
-
-            # wp_setpoint is vast (bijv. 55°C), supply loopt op met t_dhw
-            # delta_setpoint = wp_setpoint - supply_temp
-            # supply_temp ≈ t_dhw + hydraulische lift (loopt op met t_dhw)
-            # delta neemt automatisch af naarmate t_dhw stijgt
-            delta_dhw = float(np.clip(self.perf_map._setpoint_dhw - sup_dhw, 0.5, 25.0))
-
-            # Zelfde voor UFH (minder dramatisch want t_room varieert weinig):
-            delta_ufh = float(np.clip(self.perf_map._setpoint_ufh - sup_ufh, 0.5, 8.0))
-
-            p_el_ufh[t] = self.perf_map.predict_pel(
-                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh
-            )
-            cop_ufh[t] = self.perf_map.predict_cop(
-                HvacMode.HEATING.value, t_out, t_room, sup_ufh, delta_ufh
-            )
-            p_el_dhw[t] = self.perf_map.predict_pel(
-                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw
-            )
-            cop_dhw[t] = self.perf_map.predict_cop(
-                HvacMode.DHW.value, t_out, t_dhw, sup_dhw, delta_dhw
-            )
-
-        return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh_arr, sup_dhw_arr
-
-    def has_converged(
-        self,
-        p_el_ufh_prev,
-        p_el_dhw_prev,
-        p_el_ufh_new,
-        p_el_dhw_new,
-        ufh_on=None,
-        dhw_on=None,
-    ) -> bool:
-
-        if ufh_on is not None and np.any(ufh_on > 0.5):
-            delta_ufh = float(
-                np.max(np.abs((p_el_ufh_new - p_el_ufh_prev)[ufh_on > 0.5]))
-            )
-        else:
-            delta_ufh = float(np.max(np.abs(p_el_ufh_new - p_el_ufh_prev)))
-
-        if dhw_on is not None and np.any(dhw_on > 0.5):
-            delta_dhw = float(
-                np.max(np.abs((p_el_dhw_new - p_el_dhw_prev)[dhw_on > 0.5]))
-            )
-        else:
-            delta_dhw = float(np.max(np.abs(p_el_dhw_new - p_el_dhw_prev)))
-
-        tol_ufh = self.tol  # 0.05 kW
-        tol_dhw = self.tol  # * 3.0  # 0.15 kW — DHW mag ruimer
-
-        converged = (delta_ufh < tol_ufh) and (delta_dhw < tol_dhw)
-        logger.info(
-            f"[SLP] delta UFH={delta_ufh:.4f}/{tol_ufh}  "
-            f"DHW={delta_dhw:.4f}/{tol_dhw}  converged={converged}"
-        )
-        return converged
-
-
-# =========================================================
 # COMFORT COST CALCULATOR
 # =========================================================
 
@@ -1297,44 +1226,30 @@ class ComfortCostCalculator:
         C_tank: float,
         avg_cop_ufh: float,
         avg_cop_dhw: float,
-        K_loss_dhw: float,
         export_price: float,
-        horizon_h: float = 24.0,
     ):
         self.C_room = C_room
         self.C_tank = C_tank
         self.avg_cop_ufh = avg_cop_ufh
         self.avg_cop_dhw = avg_cop_dhw
-
-        # Fractie van de overtollige warmte die verloren gaat binnen de horizon
-        # τ_tank = 1/K_loss_dhw (uren)
-        # frac = 1 - exp(-horizon / τ) = gedeelte dat als standby-verlies wegloopt
-        tau_tank_h = 1.0 / max(K_loss_dhw, 0.001)
-        self.frac_tank_lost = 1.0 - np.exp(-horizon_h / tau_tank_h)
         self.export_price = export_price
-
-        logger.info(
-            f"[ComfortCost] τ_tank={tau_tank_h:.0f}h  "
-            f"frac_lost_24h={self.frac_tank_lost:.3f}"
-        )
 
     def compute(self, max_price: float) -> dict:
         # Kosten om 1K te herstellen op het duurste moment
+        # Kosten om 1K te herstellen (voor ondergrenzen)
         cost_to_heat_1k_room = (self.C_room / self.avg_cop_ufh) * max_price
         cost_to_heat_1k_tank = (self.C_tank / self.avg_cop_dhw) * max_price
 
-        # Te koud: je MOET energie kopen om te herstellen, tegen max_price
-        # Epsilon zodat optimizer altijd herstelt i.p.v. boete accepteert
+        # ONDER: Gebruik max_price (comfort is prioriteit)
         room_under = cost_to_heat_1k_room * 1.01
         tank_under = cost_to_heat_1k_tank * 1.01
 
-        # Te warm: energie die je had kunnen exporteren, gewaardeerd tegen export_price
-        # Geen magic number: dit IS de economische waarde van overtollige warmte
+        # OVER: De waarde van de energie is wat het oplevert bij export!
+        # Dit is de 'opportunity cost'.
         room_over = (self.C_room / self.avg_cop_ufh) * self.export_price
-        tank_over = cost_to_heat_1k_tank * self.frac_tank_lost
+        tank_over = (self.C_tank / self.avg_cop_dhw) * self.export_price
 
-        # Terminal: zelfde logica als under, maar zonder epsilon
-        # (terminal is een zachte grens, geen harde boete per tijdstap)
+        # Terminal waarden
         terminal_room = cost_to_heat_1k_room
         terminal_tank = cost_to_heat_1k_tank
 
@@ -1352,3 +1267,230 @@ class ComfortCostCalculator:
             "terminal_room": terminal_room,
             "terminal_tank": terminal_tank,
         }
+
+
+class PWATable:
+    def __init__(self, perf_map: HPPerformanceMap, hydraulic: HydraulicPredictor):
+        self.perf_map = perf_map
+        self.hydraulic = hydraulic
+        self.t_out_grid = np.arange(-10.0, 18.0, 2.0)
+        self.t_sink_ufh = np.arange(16.0, 24.0, 1.0)
+        self.t_sink_dhw = np.arange(20.0, 65.0, 5.0)
+        self._build()
+
+    def _build(self):
+        T_o = self.t_out_grid
+        self.G_ufh = np.zeros((len(T_o), len(self.t_sink_ufh)))
+        self.C_ufh = np.zeros_like(self.G_ufh)
+        self.G_dhw = np.zeros((len(T_o), len(self.t_sink_dhw)))
+        self.C_dhw = np.zeros_like(self.G_dhw)
+        self.S_ufh = np.zeros_like(self.G_ufh)
+        self.S_dhw = np.zeros_like(self.G_dhw)
+
+        for i, t_out in enumerate(T_o):
+            for j, t_sink in enumerate(self.t_sink_ufh):
+                p_th = self.perf_map.predict_p_th(HvacMode.HEATING.value, t_out, t_sink)
+                sup = self.hydraulic.predict_supply("UFH", p_th, t_out, t_sink)
+                self.G_ufh[i, j] = self.perf_map.predict_pel(
+                    HvacMode.HEATING.value, t_out, t_sink
+                )
+                self.C_ufh[i, j] = self.perf_map.predict_cop(
+                    HvacMode.HEATING.value, t_out, t_sink
+                )
+                self.S_ufh[i, j] = sup
+
+            for j, t_sink in enumerate(self.t_sink_dhw):
+                p_th = self.perf_map.predict_p_th(HvacMode.DHW.value, t_out, t_sink)
+                sup = self.hydraulic.predict_supply("DHW", p_th, t_out, t_sink)
+                self.G_dhw[i, j] = self.perf_map.predict_pel(
+                    HvacMode.DHW.value, t_out, t_sink
+                )
+                self.C_dhw[i, j] = self.perf_map.predict_cop(
+                    HvacMode.DHW.value, t_out, t_sink
+                )
+                self.S_dhw[i, j] = sup
+
+        logger.info(
+            f"[PWA] Grid gebouwd: UFH {self.G_ufh.shape}  DHW {self.G_dhw.shape}"
+        )
+
+    def _interp2d(self, t_out, t_sink, t_sink_grid, G, C, S):
+        t_o = np.clip(t_out, self.t_out_grid[0], self.t_out_grid[-1])
+        t_s = np.clip(t_sink, t_sink_grid[0], t_sink_grid[-1])
+        n = len(t_sink_grid)
+        pel = np.interp(
+            t_s,
+            t_sink_grid,
+            [float(np.interp(t_o, self.t_out_grid, G[:, j])) for j in range(n)],
+        )
+        cop = np.interp(
+            t_s,
+            t_sink_grid,
+            [float(np.interp(t_o, self.t_out_grid, C[:, j])) for j in range(n)],
+        )
+        sup = np.interp(
+            t_s,
+            t_sink_grid,
+            [float(np.interp(t_o, self.t_out_grid, S[:, j])) for j in range(n)],
+        )
+        return float(pel), float(cop), float(sup)
+
+    def compute(
+        self,
+        t_out_arr: np.ndarray,
+        t_room_arr: np.ndarray,
+        t_dhw_arr: np.ndarray,
+    ) -> dict:
+        T = len(t_out_arr)
+
+        # Arrays voor de lineaire (Taylor) coëfficiënten
+        pel_const_ufh = np.zeros(T)
+        pel_slope_ufh = np.zeros(T)
+        pth_const_ufh = np.zeros(T)
+        pth_slope_ufh = np.zeros(T)
+
+        pel_const_dhw = np.zeros(T)
+        pel_slope_dhw = np.zeros(T)
+        pth_const_dhw = np.zeros(T)
+        pth_slope_dhw = np.zeros(T)
+
+        sup_ufh = np.zeros(T)
+        sup_dhw = np.zeros(T)
+        avg_cop_ufh = np.zeros(T)
+        avg_cop_dhw = np.zeros(T)
+
+        for t in range(T):
+            # --- UFH Berekening ---
+            t_out = t_out_arr[t]
+            t_room = t_room_arr[t]
+
+            # Base operating point
+            pel_u, cop_u, sup_u = self._interp2d(
+                t_out, t_room, self.t_sink_ufh, self.G_ufh, self.C_ufh, self.S_ufh
+            )
+            pth_u = pel_u * cop_u
+
+            # Perturbatie (+1K) om numerieke afgeleide (slope) te bepalen
+            pel_u_plus, cop_u_plus, _ = self._interp2d(
+                t_out, t_room + 1.0, self.t_sink_ufh, self.G_ufh, self.C_ufh, self.S_ufh
+            )
+            pth_u_plus = pel_u_plus * cop_u_plus
+
+            # Hellingen (d/dT)
+            dpel_dt_u = pel_u_plus - pel_u
+            dpth_dt_u = pth_u_plus - pth_u
+
+            # Taylor intercept: y - m*x
+            pel_const_ufh[t] = pel_u - dpel_dt_u * t_room
+            pth_const_ufh[t] = pth_u - dpth_dt_u * t_room
+            pel_slope_ufh[t] = dpel_dt_u
+            pth_slope_ufh[t] = dpth_dt_u
+
+            sup_ufh[t] = sup_u
+            avg_cop_ufh[t] = cop_u
+
+            # --- DHW Berekening ---
+            t_dhw = t_dhw_arr[t]
+            pel_d, cop_d, sup_d = self._interp2d(
+                t_out, t_dhw, self.t_sink_dhw, self.G_dhw, self.C_dhw, self.S_dhw
+            )
+            pth_d = pel_d * cop_d
+
+            pel_d_plus, cop_d_plus, _ = self._interp2d(
+                t_out, t_dhw + 1.0, self.t_sink_dhw, self.G_dhw, self.C_dhw, self.S_dhw
+            )
+            pth_d_plus = pel_d_plus * cop_d_plus
+
+            dpel_dt_d = pel_d_plus - pel_d
+            dpth_dt_d = pth_d_plus - pth_d
+
+            pel_const_dhw[t] = pel_d - dpel_dt_d * t_dhw
+            pth_const_dhw[t] = pth_d - dpth_dt_d * t_dhw
+            pel_slope_dhw[t] = dpel_dt_d
+            pth_slope_dhw[t] = dpth_dt_d
+
+            sup_dhw[t] = sup_d
+            avg_cop_dhw[t] = cop_d
+
+        return {
+            "pel_const_ufh": pel_const_ufh,
+            "pel_slope_ufh": pel_slope_ufh,
+            "pth_const_ufh": pth_const_ufh,
+            "pth_slope_ufh": pth_slope_ufh,
+            "pel_const_dhw": pel_const_dhw,
+            "pel_slope_dhw": pel_slope_dhw,
+            "pth_const_dhw": pth_const_dhw,
+            "pth_slope_dhw": pth_slope_dhw,
+            "sup_ufh": sup_ufh,
+            "sup_dhw": sup_dhw,
+            "avg_cop_ufh": avg_cop_ufh,
+            "avg_cop_dhw": avg_cop_dhw,
+        }
+
+    def rebuild(self):
+        """Aanroepen na elke train()-cyclus."""
+        self._build()
+
+
+class ThermalEKF:
+    """
+    2-state Kalman Filter: [T_air, T_mass].
+    Vervangt de Luenberger observer in ThermalMPC.
+    """
+
+    def __init__(self, ident):
+        dt = 0.25
+        a11 = 1 - dt / (ident.R_im * ident.C_air) - dt / (ident.R_oa * ident.C_air)
+        a12 = dt / (ident.R_im * ident.C_air)
+        a21 = dt / (ident.R_im * ident.C_mass)
+        a22 = 1 - dt / (ident.R_im * ident.C_mass)
+
+        self.A = np.array([[a11, a12], [a21, a22]])
+        self.H = np.array([[1.0, 0.0]])
+        self.Q = np.diag([0.01, 0.05])  # procesruis [K²]
+        self.R_n = np.array([[0.04]])  # meetruis thermostaat ±0.2K
+        self.P = np.eye(2) * 2.0
+        self.ident = ident
+        self.x = None
+
+    def reset(self, t_air: float, t_mass: float):
+        self.x = np.array([t_air, t_mass])
+        self.P = np.eye(2) * 2.0
+
+    def predict_step(self, p_heat: float, t_out: float, solar_gain: float):
+        if self.x is None:
+            return
+        dt = 0.25
+        B = np.array([dt / self.ident.C_air, dt / self.ident.C_mass])
+        f_ext = np.array(
+            [
+                (t_out / (self.ident.R_oa * self.ident.C_air)) * dt + solar_gain * dt,
+                0.0,
+            ]
+        )
+        self.x = self.A @ self.x + B * p_heat + f_ext
+        self.P = self.A @ self.P @ self.A.T + self.Q
+
+    def update(self, t_air_meas: float) -> tuple[float, float]:
+        if self.x is None:
+            return t_air_meas, t_air_meas
+
+        # S is de onzekerheid van de meting (1x1 matrix)
+        S = self.H @ self.P @ self.H.T + self.R_n
+
+        # K is de Kalman Gain (2x1 matrix)
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+
+        # .item() haalt veilig de scalar uit de 1D resultaat-array van H @ x
+        expected_meas = (self.H @ self.x).item()
+        innov = t_air_meas - expected_meas
+
+        # Update de state en variantie matrix
+        self.x += K.flatten() * innov
+        self.P = (np.eye(2) - K @ self.H) @ self.P
+
+        logger.info(
+            f"[EKF] K={K.flatten().round(3)}  innov={innov:.3f}K  "
+            f"T_air={self.x[0]:.2f}  T_mass={self.x[1]:.2f}"
+        )
+        return float(self.x[0]), float(self.x[1])
