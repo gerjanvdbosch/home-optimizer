@@ -618,7 +618,7 @@ class ThermalMPC:
                 break
 
             # Sla de beste oplossing op
-            if outer > 0 and obj < best_obj and self.t_air.value is not None:
+            if obj < best_obj and self.t_air.value is not None:
                 best_obj = obj
                 best_state = {
                     "ufh_on": self.ufh_on.value.copy(),
