@@ -170,8 +170,8 @@ class ThermalMPC:
             p_el_wp = self.p_el_ufh[t] + self.p_el_dhw[t]
 
             p_th_dhw_now = (
-                    self.P_pth_const_dhw[t] * self.dhw_on[t]
-                    + self.P_pth_slope_dhw[t] * self.z_dhw[t]
+                self.P_pth_const_dhw[t] * self.dhw_on[t]
+                + self.P_pth_slope_dhw[t] * self.z_dhw[t]
             )
 
             if t < self.L:
@@ -179,8 +179,8 @@ class ThermalMPC:
             else:
                 t_lag = t - self.L
                 p_th_delayed = (
-                        self.P_pth_const_ufh[t_lag] * self.ufh_on[t_lag]
-                        + self.P_pth_slope_ufh[t_lag] * self.z_ufh[t_lag]
+                    self.P_pth_const_ufh[t_lag] * self.ufh_on[t_lag]
+                    + self.P_pth_slope_ufh[t_lag] * self.z_ufh[t_lag]
                 )
 
             constraints += [
@@ -189,36 +189,43 @@ class ThermalMPC:
                 self.z_ufh[t] <= T_MASS_MAX * self.ufh_on[t],
                 self.z_ufh[t] >= self.t_mass[t] - T_MASS_MAX * (1 - self.ufh_on[t]),
                 self.z_ufh[t] <= self.t_mass[t] - T_MASS_MIN * (1 - self.ufh_on[t]),
-
                 self.z_dhw[t] >= T_DHW_MIN * self.dhw_on[t],
                 self.z_dhw[t] <= T_DHW_MAX * self.dhw_on[t],
                 self.z_dhw[t] >= self.t_dhw[t] - T_DHW_MAX * (1 - self.dhw_on[t]),
                 self.z_dhw[t] <= self.t_dhw[t] - T_DHW_MIN * (1 - self.dhw_on[t]),
-
                 # ── NIEUW: P_el is nu een continue, berekende variabele gebaseerd op state!
                 # P_el = Constante * on + Helling * (on * T_sink)
-                self.p_el_ufh[t] >= self.P_pel_const_ufh[t] * self.ufh_on[t] + self.P_pel_slope_ufh[t] * self.z_ufh[t],
-                self.p_el_dhw[t] >= self.P_pel_const_dhw[t] * self.dhw_on[t] + self.P_pel_slope_dhw[t] * self.z_dhw[t],
-
+                self.p_el_ufh[t]
+                >= self.P_pel_const_ufh[t] * self.ufh_on[t]
+                + self.P_pel_slope_ufh[t] * self.z_ufh[t],
+                self.p_el_dhw[t]
+                >= self.P_pel_const_dhw[t] * self.dhw_on[t]
+                + self.P_pel_slope_dhw[t] * self.z_dhw[t],
                 # ── Stroombalans ────────────────────────────────────────────
                 p_el_wp + self.P_base_load[t] == self.p_grid[t] + self.p_solar_self[t],
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
-
                 # ── Thermische dynamica — p_th via affiene COP ──────────────
-                self.t_air[t + 1] == self.t_air[t] + (
-                        (self.t_mass[t] - self.t_air[t]) / R_im
-                        - (self.t_air[t] - self.P_temp_out[t]) / R_oa
-                ) * self.dt / C_air + self.P_solar_gain[t] * self.dt,
-
-                self.t_mass[t + 1] == self.t_mass[t] + (
-                        p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im
-                ) * self.dt / C_mass,
-
-                self.t_dhw[t + 1] == self.t_dhw[t] + (
-                        p_th_dhw_now * self.dt / self.ident.C_tank
-                        - (self.t_dhw[t] - self.t_air[t]) * self.ident.K_loss_dhw * self.dt
-                ) - self.P_dhw_demand[t],
-
+                self.t_air[t + 1]
+                == self.t_air[t]
+                + (
+                    (self.t_mass[t] - self.t_air[t]) / R_im
+                    - (self.t_air[t] - self.P_temp_out[t]) / R_oa
+                )
+                * self.dt
+                / C_air
+                + self.P_solar_gain[t] * self.dt,
+                self.t_mass[t + 1]
+                == self.t_mass[t]
+                + (p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im)
+                * self.dt
+                / C_mass,
+                self.t_dhw[t + 1]
+                == self.t_dhw[t]
+                + (
+                    p_th_dhw_now * self.dt / self.ident.C_tank
+                    - (self.t_dhw[t] - self.t_air[t]) * self.ident.K_loss_dhw * self.dt
+                )
+                - self.P_dhw_demand[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
                 self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
@@ -255,12 +262,13 @@ class ThermalMPC:
         # NIEUW: Tie-breaker. Maak elke actie héél iets goedkoper naarmate het later in de tijd valt.
         # Penalty gaat van 0.0 (nu) naar -0.01 (einde horizon).
         # Voorkomt willekeurig thread-gedrag bij platte prijzen.
-        time_preference = cp.sum(cp.multiply(
-            self.ufh_on + self.dhw_on,
-            np.linspace(0.0, -0.01, T)
-        ))
+        time_preference = cp.sum(
+            cp.multiply(self.ufh_on + self.dhw_on, np.linspace(0.0, -0.01, T))
+        )
 
-        switching = (cp.sum(self.comp_start) * 0.1) + (valve_switches * 0.1) + time_preference
+        switching = (
+            (cp.sum(self.comp_start) * 0.1) + (valve_switches * 0.1) + time_preference
+        )
 
         terminal_penalty = (
             self.s_term_room_under * self.P_val_terminal_room
@@ -440,11 +448,15 @@ class ThermalMPC:
         strat_gap_measured = max(0.0, t_avg_measured - t_bot_measured)
 
         # 2. INITIALISEER DE START-TOESTAND (Parameters)
-        t_mass_init = self.update_and_get_initial_state(state, recent_df, forecast_df, solar_gains[0])
+        t_mass_init = self.update_and_get_initial_state(
+            state, recent_df, forecast_df, solar_gains[0]
+        )
 
         self.P_t_air_init.value = t_air_meas
         self.P_t_mass_init.value = t_mass_init
-        self.P_t_dhw_init.value = t_avg_measured  # De solver rekent energie-balans op Average
+        self.P_t_dhw_init.value = (
+            t_avg_measured  # De solver rekent energie-balans op Average
+        )
 
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
@@ -506,8 +518,12 @@ class ThermalMPC:
             error_dhw = t_avg_measured - self._prev_t_dhw[1]
 
             # Schuif de horizon door en pas de fout-correctie toe
-            guessed_t_mass = np.append(self._prev_t_mass[1:], self._prev_t_mass[-1]) + error_mass
-            guessed_t_dhw = np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1]) + error_dhw
+            guessed_t_mass = (
+                np.append(self._prev_t_mass[1:], self._prev_t_mass[-1]) + error_mass
+            )
+            guessed_t_dhw = (
+                np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1]) + error_dhw
+            )
 
             logger.info(
                 f"[MPC] Error-Corrected Horizon. "
@@ -536,9 +552,7 @@ class ThermalMPC:
                 guessed_t_sink = guessed_t_dhw - strat_gap_measured
 
             # 1. PWA op huidige schatting
-            pwa_data = self.pwa.compute(
-                t_out_arr, guessed_t_mass, guessed_t_sink
-            )
+            pwa_data = self.pwa.compute(t_out_arr, guessed_t_mass, guessed_t_sink)
             self.plan_t_sup_ufh = pwa_data["sup_ufh"]
             self.plan_t_sup_dhw = pwa_data["sup_dhw"]
 
@@ -589,7 +603,7 @@ class ThermalMPC:
                         "time_limit": 300.0,  # maximaal 300 seconden per solve
                         "presolve": "on",
                         "parallel": "on",  # gebruik meerdere cores
-                    }
+                    },
                 )
             except Exception as e:
                 logger.error(f"[MPC] Solver exception in outer={outer}: {e}")
@@ -597,16 +611,14 @@ class ThermalMPC:
 
             status = self.problem.status
             obj = self.problem.value if self.problem.value is not None else np.inf
-            logger.info(
-                f"[MPC] Outer={outer} status={status} obj={obj:.4f}"
-            )
+            logger.info(f"[MPC] Outer={outer} status={status} obj={obj:.4f}")
 
             if status not in ("optimal", "optimal_inaccurate"):
                 logger.warning(f"[MPC] Niet-optimale status: {status}")
                 break
 
             # Sla de beste oplossing op
-            if obj < best_obj and self.t_air.value is not None:
+            if outer > 0 and obj < best_obj and self.t_air.value is not None:
                 best_obj = obj
                 best_state = {
                     "ufh_on": self.ufh_on.value.copy(),
@@ -631,7 +643,10 @@ class ThermalMPC:
                 logger.info(f"[MPC] Beste oplossing bijgewerkt: obj={best_obj:.4f}")
 
             # Convergentiecheck
-            if prev_obj is not None and abs(obj - prev_obj) / (abs(prev_obj) + 1e-6) < 1e-3:
+            if (
+                prev_obj is not None
+                and abs(obj - prev_obj) / (abs(prev_obj) + 1e-6) < 1e-3
+            ):
                 logger.info(f"[MPC] Geconvergeerd na {outer + 1} iteraties")
                 break
             prev_obj = obj
@@ -873,15 +888,25 @@ class Optimizer:
         u_sup = self.mpc.plan_t_sup_ufh
         d_sup = self.mpc.plan_t_sup_dhw
 
-        u_cop = np.where(p_u > 0.01,
-                         (self.mpc.P_pth_const_ufh.value * self.mpc.ufh_on.value
-                          + self.mpc.P_pth_slope_ufh.value * self.mpc.z_ufh.value) / np.maximum(p_u, 1e-6),
-                         0.0)
+        u_cop = np.where(
+            p_u > 0.01,
+            (
+                self.mpc.P_pth_const_ufh.value * self.mpc.ufh_on.value
+                + self.mpc.P_pth_slope_ufh.value * self.mpc.z_ufh.value
+            )
+            / np.maximum(p_u, 1e-6),
+            0.0,
+        )
 
-        d_cop = np.where(p_d > 0.01,
-                         (self.mpc.P_pth_const_dhw.value * self.mpc.dhw_on.value
-                          + self.mpc.P_pth_slope_dhw.value * self.mpc.z_dhw.value) / np.maximum(p_d, 1e-6),
-                         0.0)
+        d_cop = np.where(
+            p_d > 0.01,
+            (
+                self.mpc.P_pth_const_dhw.value * self.mpc.dhw_on.value
+                + self.mpc.P_pth_slope_dhw.value * self.mpc.z_dhw.value
+            )
+            / np.maximum(p_d, 1e-6),
+            0.0,
+        )
 
         prices = self.mpc.P_prices.value  # importprijs per kwartier
         export_prices = self.mpc.P_export_prices.value  # exportprijs per kwartier
