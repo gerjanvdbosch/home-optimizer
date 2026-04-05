@@ -1280,38 +1280,84 @@ class PWATable:
         return float(pel), float(cop), float(sup)
 
     def compute(
-        self,
-        t_out_arr: np.ndarray,
-        t_room_arr: np.ndarray,
-        t_dhw_arr: np.ndarray,
-    ) -> tuple:
+            self,
+            t_out_arr: np.ndarray,
+            t_room_arr: np.ndarray,
+            t_dhw_arr: np.ndarray,
+    ) -> dict:
         T = len(t_out_arr)
-        p_el_ufh = np.zeros(T)
-        cop_ufh = np.zeros(T)
-        sup_ufh = np.zeros(T)
-        p_el_dhw = np.zeros(T)
-        cop_dhw = np.zeros(T)
+
+        # Arrays voor de lineaire (Taylor) coëfficiënten
+        pel_const_ufh = np.zeros(T);
+        pel_slope_ufh = np.zeros(T)
+        pth_const_ufh = np.zeros(T);
+        pth_slope_ufh = np.zeros(T)
+
+        pel_const_dhw = np.zeros(T);
+        pel_slope_dhw = np.zeros(T)
+        pth_const_dhw = np.zeros(T);
+        pth_slope_dhw = np.zeros(T)
+
+        sup_ufh = np.zeros(T);
         sup_dhw = np.zeros(T)
+        avg_cop_ufh = np.zeros(T);
+        avg_cop_dhw = np.zeros(T)
 
         for t in range(T):
-            p_el_ufh[t], cop_ufh[t], sup_ufh[t] = self._interp2d(
-                t_out_arr[t],
-                t_room_arr[t],
-                self.t_sink_ufh,
-                self.G_ufh,
-                self.C_ufh,
-                self.S_ufh,
-            )
-            p_el_dhw[t], cop_dhw[t], sup_dhw[t] = self._interp2d(
-                t_out_arr[t],
-                t_dhw_arr[t],
-                self.t_sink_dhw,
-                self.G_dhw,
-                self.C_dhw,
-                self.S_dhw,
-            )
+            # --- UFH Berekening ---
+            t_out = t_out_arr[t]
+            t_room = t_room_arr[t]
 
-        return p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw
+            # Base operating point
+            pel_u, cop_u, sup_u = self._interp2d(t_out, t_room, self.t_sink_ufh, self.G_ufh, self.C_ufh, self.S_ufh)
+            pth_u = pel_u * cop_u
+
+            # Perturbatie (+1K) om numerieke afgeleide (slope) te bepalen
+            pel_u_plus, cop_u_plus, _ = self._interp2d(t_out, t_room + 1.0, self.t_sink_ufh, self.G_ufh, self.C_ufh,
+                                                       self.S_ufh)
+            pth_u_plus = pel_u_plus * cop_u_plus
+
+            # Hellingen (d/dT)
+            dpel_dt_u = pel_u_plus - pel_u
+            dpth_dt_u = pth_u_plus - pth_u
+
+            # Taylor intercept: y - m*x
+            pel_const_ufh[t] = pel_u - dpel_dt_u * t_room
+            pth_const_ufh[t] = pth_u - dpth_dt_u * t_room
+            pel_slope_ufh[t] = dpel_dt_u
+            pth_slope_ufh[t] = dpth_dt_u
+
+            sup_ufh[t] = sup_u
+            avg_cop_ufh[t] = cop_u
+
+            # --- DHW Berekening ---
+            t_dhw = t_dhw_arr[t]
+            pel_d, cop_d, sup_d = self._interp2d(t_out, t_dhw, self.t_sink_dhw, self.G_dhw, self.C_dhw, self.S_dhw)
+            pth_d = pel_d * cop_d
+
+            pel_d_plus, cop_d_plus, _ = self._interp2d(t_out, t_dhw + 1.0, self.t_sink_dhw, self.G_dhw, self.C_dhw,
+                                                       self.S_dhw)
+            pth_d_plus = pel_d_plus * cop_d_plus
+
+            dpel_dt_d = pel_d_plus - pel_d
+            dpth_dt_d = pth_d_plus - pth_d
+
+            pel_const_dhw[t] = pel_d - dpel_dt_d * t_dhw
+            pth_const_dhw[t] = pth_d - dpth_dt_d * t_dhw
+            pel_slope_dhw[t] = dpel_dt_d
+            pth_slope_dhw[t] = dpth_dt_d
+
+            sup_dhw[t] = sup_d
+            avg_cop_dhw[t] = cop_d
+
+        return {
+            "pel_const_ufh": pel_const_ufh, "pel_slope_ufh": pel_slope_ufh,
+            "pth_const_ufh": pth_const_ufh, "pth_slope_ufh": pth_slope_ufh,
+            "pel_const_dhw": pel_const_dhw, "pel_slope_dhw": pel_slope_dhw,
+            "pth_const_dhw": pth_const_dhw, "pth_slope_dhw": pth_slope_dhw,
+            "sup_ufh": sup_ufh, "sup_dhw": sup_dhw,
+            "avg_cop_ufh": avg_cop_ufh, "avg_cop_dhw": avg_cop_dhw
+        }
 
     def rebuild(self):
         """Aanroepen na elke train()-cyclus."""

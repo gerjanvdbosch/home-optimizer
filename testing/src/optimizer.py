@@ -43,7 +43,7 @@ class ThermalMPC:
         self.perf_map = perf_map
         self.hydraulic = hydraulic
         self.res_dhw = res_dhw
-        self.horizon = 144
+        self.horizon = 96
         self.dt = 0.25
 
         # EKF vervangt Luenberger observer
@@ -99,14 +99,28 @@ class ThermalMPC:
         self.P_val_terminal_room = cp.Parameter(nonneg=True)
         self.P_val_terminal_dhw = cp.Parameter(nonneg=True)
 
-        # Bevroren vermogen en COP per tijdstap (gevuld door SLP-iteraties)
-        self.P_cop_ufh = cp.Parameter(T, nonneg=True)
-        self.P_cop_dhw = cp.Parameter(T, nonneg=True)
         self.P_fixed_pel_ufh = cp.Parameter(T, nonneg=True)
         self.P_fixed_pel_dhw = cp.Parameter(T, nonneg=True)
+        self.P_cop_ufh = cp.Parameter(T, nonneg=True)
+        self.P_cop_dhw = cp.Parameter(T, nonneg=True)
+
+        # Taylor parameters (Constante + Helling) voor P_el en P_th
+        self.P_pel_const_ufh = cp.Parameter(T)
+        self.P_pel_slope_ufh = cp.Parameter(T)
+        self.P_pth_const_ufh = cp.Parameter(T)
+        self.P_pth_slope_ufh = cp.Parameter(T)
+
+        self.P_pel_const_dhw = cp.Parameter(T)
+        self.P_pel_slope_dhw = cp.Parameter(T)
+        self.P_pth_const_dhw = cp.Parameter(T)
+        self.P_pth_slope_dhw = cp.Parameter(T)
+
         self.P_ufh_p_th_hist = cp.Parameter(self.L, nonneg=True)
 
         self.P_dhw_demand = cp.Parameter(T, nonneg=True)
+
+        self.P_term_target_mass = cp.Parameter()
+        self.P_term_target_dhw = cp.Parameter()
 
         # ── Variabelen ────────────────────────────────────────────────────
         self.ufh_on = cp.Variable(T, boolean=True)
@@ -132,8 +146,12 @@ class ThermalMPC:
         self.s_term_room_under = cp.Variable(nonneg=True)  # Voor de terminal value
         self.s_term_dhw_under = cp.Variable(nonneg=True)  # Voor de terminal value
 
-        self.P_term_target_mass = cp.Parameter()
-        self.P_term_target_dhw = cp.Parameter()
+        # Binaire McCormick: z = on × t_sink
+        # Binair × continu geeft exacte (niet-relaxte) envelopen
+        T_MASS_MIN, T_MASS_MAX = 15.0, 35.0
+        T_DHW_MIN, T_DHW_MAX = 20.0, 65.0
+        self.z_ufh = cp.Variable(T)  # = ufh_on[t] × t_mass[t]
+        self.z_dhw = cp.Variable(T)  # = dhw_on[t] × t_dhw[t]
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
@@ -150,58 +168,62 @@ class ThermalMPC:
 
         for t in range(T):
             p_el_wp = self.p_el_ufh[t] + self.p_el_dhw[t]
-            p_th_dhw_now = self.p_el_dhw[t] * self.P_cop_dhw[t]
+
+            p_th_dhw_now = (
+                    self.P_pth_const_dhw[t] * self.dhw_on[t]
+                    + self.P_pth_slope_dhw[t] * self.z_dhw[t]
+            )
 
             if t < self.L:
-                # Pak waarde uit historie
-                # We mappen t=0 op hist[L-1], t=1 op hist[L-2], etc.
                 p_th_delayed = self.P_ufh_p_th_hist[self.L - 1 - t]
             else:
-                # Pak de beslissing van (t - lag) geleden
-                p_th_delayed = self.p_el_ufh[t - self.L] * self.P_cop_ufh[t - self.L]
+                t_lag = t - self.L
+                p_th_delayed = (
+                        self.P_pth_const_ufh[t_lag] * self.ufh_on[t_lag]
+                        + self.P_pth_slope_ufh[t_lag] * self.z_ufh[t_lag]
+                )
 
             constraints += [
-                # Stroombalans
+                # McCormick envelopen blijven behouden...
+                self.z_ufh[t] >= T_MASS_MIN * self.ufh_on[t],
+                self.z_ufh[t] <= T_MASS_MAX * self.ufh_on[t],
+                self.z_ufh[t] >= self.t_mass[t] - T_MASS_MAX * (1 - self.ufh_on[t]),
+                self.z_ufh[t] <= self.t_mass[t] - T_MASS_MIN * (1 - self.ufh_on[t]),
+
+                self.z_dhw[t] >= T_DHW_MIN * self.dhw_on[t],
+                self.z_dhw[t] <= T_DHW_MAX * self.dhw_on[t],
+                self.z_dhw[t] >= self.t_dhw[t] - T_DHW_MAX * (1 - self.dhw_on[t]),
+                self.z_dhw[t] <= self.t_dhw[t] - T_DHW_MIN * (1 - self.dhw_on[t]),
+
+                # ── NIEUW: P_el is nu een continue, berekende variabele gebaseerd op state!
+                # P_el = Constante * on + Helling * (on * T_sink)
+                self.p_el_ufh[t] >= self.P_pel_const_ufh[t] * self.ufh_on[t] + self.P_pel_slope_ufh[t] * self.z_ufh[t],
+                self.p_el_dhw[t] >= self.P_pel_const_dhw[t] * self.dhw_on[t] + self.P_pel_slope_dhw[t] * self.z_dhw[t],
+
+                # ── Stroombalans ────────────────────────────────────────────
                 p_el_wp + self.P_base_load[t] == self.p_grid[t] + self.p_solar_self[t],
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
-                # Luchttemperatuur
-                self.t_air[t + 1]
-                == self.t_air[t]
-                + (
-                    (self.t_mass[t] - self.t_air[t]) / R_im  # warmte van vloer
-                    - (self.t_air[t] - self.P_temp_out[t]) / R_oa  # verlies naar buiten
-                )
-                * self.dt
-                / C_air
-                + self.P_solar_gain[t] * self.dt,  # zon treft ALLEEN lucht
-                # Vloermassa
-                self.t_mass[t + 1]
-                == self.t_mass[t]
-                + (p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im)
-                * self.dt
-                / C_mass,
-                # Thermische balans boiler
-                self.t_dhw[t + 1]
-                == self.t_dhw[t]
-                + (
-                    (p_th_dhw_now * self.dt) / self.ident.C_tank
-                    - (self.t_dhw[t] - self.t_air[t])
-                    * (self.ident.K_loss_dhw * self.dt)
-                )
-                - self.P_dhw_demand[t],
-                # Niet tegelijk vloer en boiler
+
+                # ── Thermische dynamica — p_th via affiene COP ──────────────
+                self.t_air[t + 1] == self.t_air[t] + (
+                        (self.t_mass[t] - self.t_air[t]) / R_im
+                        - (self.t_air[t] - self.P_temp_out[t]) / R_oa
+                ) * self.dt / C_air + self.P_solar_gain[t] * self.dt,
+
+                self.t_mass[t + 1] == self.t_mass[t] + (
+                        p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im
+                ) * self.dt / C_mass,
+
+                self.t_dhw[t + 1] == self.t_dhw[t] + (
+                        p_th_dhw_now * self.dt / self.ident.C_tank
+                        - (self.t_dhw[t] - self.t_air[t]) * self.ident.K_loss_dhw * self.dt
+                ) - self.P_dhw_demand[t],
+
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
-                # Vermogen is exact het geleerde profiel als hij aan staat
-                self.p_el_ufh[t] == self.ufh_on[t] * self.P_fixed_pel_ufh[t],
-                self.p_el_dhw[t] == self.dhw_on[t] * self.P_fixed_pel_dhw[t],
-                # Comfort wordt gemeten in de lucht (thermostaat)
                 self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
-                # Comfortlimieten met slack
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
                 self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
-                # Dwingt af dat we aan het eind minimaal op target eindigen,
-                # of anders de slack-variabele (en dus een boete) incasseren
                 self.t_mass[T] + self.s_term_room_under >= self.P_term_target_mass,
                 self.t_dhw[T] + self.s_term_dhw_under >= self.P_term_target_dhw,
             ]
@@ -229,7 +251,16 @@ class ThermalMPC:
             + cp.pos(self.dhw_on[0] - self.P_init_dhw)
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
-        switching = (cp.sum(self.comp_start) * 0.1) + (valve_switches * 0.1)
+
+        # NIEUW: Tie-breaker. Maak elke actie héél iets goedkoper naarmate het later in de tijd valt.
+        # Penalty gaat van 0.0 (nu) naar -0.01 (einde horizon).
+        # Voorkomt willekeurig thread-gedrag bij platte prijzen.
+        time_preference = cp.sum(cp.multiply(
+            self.ufh_on + self.dhw_on,
+            np.linspace(0.0, -0.01, T)
+        ))
+
+        switching = (cp.sum(self.comp_start) * 0.1) + (valve_switches * 0.1) + time_preference
 
         terminal_penalty = (
             self.s_term_room_under * self.P_val_terminal_room
@@ -460,94 +491,187 @@ class ThermalMPC:
             f"[Debug] DHW demand totaal: {dhw_demand[:T].sum():.2f} K max: {dhw_demand[:T].max():.2f} K"
         )
 
-        # ── PWA: één keer berekenen, geen iteraties ──────────────────────
-        # We gebruiken de huidige temperatuur als 'guess' voor de hele horizon
         t_out_arr = forecast_df.temp.values[:T].astype(float)
-
         current_dhw = float((state["dhw_top"] + state["dhw_bottom"]) / 2.0)
-        target_dhw = float(d_t[-1])  # Het einddoel van de boiler
 
-        # De verwachte gemiddelde temperatuur is altijd het midden tussen
-        # wat we nu hebben en het hoogste punt van de run.
-        # Als current_dhw al boven target zit, is het simpelweg (current + current) / 2.
-        expected_run_temp = (current_dhw + max(current_dhw, target_dhw)) / 2.0
+        # --- Slimme Initialisatie (Error-Corrected Receding Horizon) ---
+        if self._prev_t_mass is not None and len(self._prev_t_mass) == T:
+            # 1. Wat verwachtten we een kwartier geleden dat de temperatuur NU zou zijn?
+            expected_mass_now = self._prev_t_mass[1]
+            expected_dhw_now = self._prev_t_dhw[1]
 
-        guessed_t_mass = np.full(T, t_mass_init)
-        guessed_t_dhw = np.full(T, expected_run_temp)
+            # 2. Bereken de "State Error" (Verschil tussen theorie en meting)
+            error_mass = t_mass_init - expected_mass_now
+            error_dhw = current_dhw - expected_dhw_now
 
-        p_el_ufh, cop_ufh, p_el_dhw, cop_dhw, sup_ufh, sup_dhw = self.pwa.compute(
-            t_out_arr, guessed_t_mass, guessed_t_dhw
-        )
+            # 3. Schuif de voorspelde horizon 1 stap door
+            shifted_mass = np.append(self._prev_t_mass[1:], self._prev_t_mass[-1])
+            shifted_dhw = np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1])
 
-        self.plan_t_sup_ufh = sup_ufh
-        self.plan_t_sup_dhw = sup_dhw
+            # 4. PAS DE FOUT TOE OP DE GEHELE CURVE
+            # Hiermee behoud je de voorspelde stijgingen/dalingen, maar zonder "knik" aan de start.
+            # De solver ziet direct realistische COP's over de hele linie.
+            guessed_t_mass = shifted_mass + error_mass
+            guessed_t_dhw = shifted_dhw + error_dhw
 
-        # Vul de HP parameters
-        self.P_fixed_pel_ufh.value = np.clip(p_el_ufh, 0.0, 5.0)
-        self.P_fixed_pel_dhw.value = np.clip(p_el_dhw, 0.0, 5.0)
-        self.P_cop_ufh.value = np.clip(cop_ufh, 1.5, 9.0)
-        self.P_cop_dhw.value = np.clip(cop_dhw, 1.1, 5.0)
-
-        # ── Comfortboetes en Terminal Values (DIT ONTBAK NOG) ─────────────
-        # Voor de boete telt de totale thermische massa
-        C_total_room = self.ident.C_air + self.ident.C_mass
-
-        costs = ComfortCostCalculator(
-            C_room=C_total_room,
-            C_tank=self.ident.C_tank,
-            avg_cop_ufh=float(np.mean(cop_ufh)),
-            avg_cop_dhw=float(np.mean(cop_dhw)),
-            export_price=float(export_price),
-        ).compute(max_price=effective_max_price)
-
-        # Toewijzen aan de parameters die CVXPY verwacht
-        self.P_cost_room_under.value = costs["room_under"]
-        self.P_cost_room_over.value = costs["room_over"]
-        self.P_cost_dhw_under.value = costs["tank_under"]
-        self.P_cost_dhw_over.value = costs["tank_over"]
-        self.P_val_terminal_room.value = costs["terminal_room"]
-        self.P_val_terminal_dhw.value = costs["terminal_tank"]
-
-        # ── Terminal Targets (DIT ONTBAK OOK) ────────────────────────────
-        # Eind-target voor massa op basis van steady-state evenwicht
-        t_out_end = float(t_out_arr[-1])
-        target_room_end = r_t[-1]  # r_t komt uit _get_targets
-
-        t_mass_ss = (
-            target_room_end
-            + self.ident.R_im * (target_room_end - t_out_end) / self.ident.R_oa
-        )
-
-        self.P_term_target_mass.value = float(t_mass_ss)
-        self.P_term_target_dhw.value = float(d_t[-1])  # d_t komt uit _get_targets
-
-        # ── Eén MILP solve ───────────────────────────────────────────────
-        try:
-            self.problem.solve(
-                solver=cp.HIGHS,
-                warm_start=(self._prev_ufh_on is not None),
-                verbose=False,
+            logger.info(
+                f"[MPC] Error-Corrected Receding Horizon. "
+                f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K"
             )
-        except Exception as e:
-            logger.error(f"[MPC] Solver exception: {e}")
+        else:
+            # Fallback
+            guessed_t_mass = np.full(T, t_mass_init)
+            guessed_t_dhw = np.full(T, current_dhw)
+            logger.info("[MPC] Start outer-loop met platte fallback-state.")
+
+        costs_set = False
+        prev_obj = None
+        MAX_OUTER = 5
+
+        best_obj = np.inf
+        best_state = {}
+
+        for outer in range(MAX_OUTER):
+
+            # 1. PWA op huidige schatting
+            pwa_data = self.pwa.compute(
+                t_out_arr, guessed_t_mass, guessed_t_dhw
+            )
+            self.plan_t_sup_ufh = pwa_data["sup_ufh"]
+            self.plan_t_sup_dhw = pwa_data["sup_dhw"]
+
+            # 2. MILP parameters invullen (Taylor Coëfficiënten)
+            self.P_pel_const_ufh.value = pwa_data["pel_const_ufh"]
+            self.P_pel_slope_ufh.value = pwa_data["pel_slope_ufh"]
+            self.P_pth_const_ufh.value = pwa_data["pth_const_ufh"]
+            self.P_pth_slope_ufh.value = pwa_data["pth_slope_ufh"]
+
+            self.P_pel_const_dhw.value = pwa_data["pel_const_dhw"]
+            self.P_pel_slope_dhw.value = pwa_data["pel_slope_dhw"]
+            self.P_pth_const_dhw.value = pwa_data["pth_const_dhw"]
+            self.P_pth_slope_dhw.value = pwa_data["pth_slope_dhw"]
+
+            # 3. Comfortboetes (gebruik gemiddelde COP van deze iteratie)
+            if not costs_set:
+                C_total_room = self.ident.C_air + self.ident.C_mass
+                costs = ComfortCostCalculator(
+                    C_room=C_total_room,
+                    C_tank=self.ident.C_tank,
+                    avg_cop_ufh=float(np.mean(pwa_data["avg_cop_ufh"])),
+                    avg_cop_dhw=float(np.mean(pwa_data["avg_cop_dhw"])),
+                    export_price=float(export_price),
+                ).compute(max_price=effective_max_price)
+
+                self.P_cost_room_under.value = costs["room_under"]
+                self.P_cost_room_over.value = costs["room_over"]
+                self.P_cost_dhw_under.value = costs["tank_under"]
+                self.P_cost_dhw_over.value = costs["tank_over"]
+                self.P_val_terminal_room.value = costs["terminal_room"]
+                self.P_val_terminal_dhw.value = costs["terminal_tank"]
+                t_out_end = float(t_out_arr[-1])
+                self.P_term_target_mass.value = float(
+                    r_t[-1] + self.ident.R_im * (r_t[-1] - t_out_end) / self.ident.R_oa
+                )
+                self.P_term_target_dhw.value = float(d_t[-1])
+                costs_set = True
+
+            # 4. Oplossen
+            try:
+                self.problem.solve(
+                    solver=cp.HIGHS,
+                    warm_start=(outer > 0 or self._prev_ufh_on is not None),
+                    verbose=False,
+                    highs_options={
+                        "mip_rel_gap": 0.005,  # stop bij 0.5% van optimum
+                        "mip_abs_gap": 0.001,  # absolute gap in euro
+                        "time_limit": 300.0,  # maximaal 300 seconden per solve
+                        "presolve": "on",
+                        "parallel": "on",  # gebruik meerdere cores
+                    }
+                )
+            except Exception as e:
+                logger.error(f"[MPC] Solver exception in outer={outer}: {e}")
+                break
+
+            status = self.problem.status
+            obj = self.problem.value if self.problem.value is not None else np.inf
+            logger.info(
+                f"[MPC] Outer={outer} status={status} obj={obj:.4f}"
+            )
+
+            if status not in ("optimal", "optimal_inaccurate"):
+                logger.warning(f"[MPC] Niet-optimale status: {status}")
+                break
+
+            # Sla de beste oplossing op
+            if obj < best_obj and self.t_air.value is not None:
+                best_obj = obj
+                best_state = {
+                    "ufh_on": self.ufh_on.value.copy(),
+                    "dhw_on": self.dhw_on.value.copy(),
+                    "p_el_ufh": self.p_el_ufh.value.copy(),
+                    "p_el_dhw": self.p_el_dhw.value.copy(),
+                    "t_air": self.t_air.value.copy(),
+                    "t_mass": self.t_mass.value.copy(),
+                    "t_dhw": self.t_dhw.value.copy(),
+                    "p_grid": self.p_grid.value.copy(),
+                    "p_export": self.p_export.value.copy(),
+                    "p_solar_self": self.p_solar_self.value.copy(),
+                    "z_ufh": self.z_ufh.value.copy(),
+                    "z_dhw": self.z_dhw.value.copy(),
+                    "s_room_low": self.s_room_low.value.copy(),
+                    "s_room_high": self.s_room_high.value.copy(),
+                    "s_dhw_low": self.s_dhw_low.value.copy(),
+                    "s_dhw_high": self.s_dhw_high.value.copy(),
+                    "sup_ufh": pwa_data["sup_ufh"].copy(),
+                    "sup_dhw": pwa_data["sup_dhw"].copy(),
+                }
+                logger.info(f"[MPC] Beste oplossing bijgewerkt: obj={best_obj:.4f}")
+
+            # Convergentiecheck
+            if prev_obj is not None and abs(obj - prev_obj) / (abs(prev_obj) + 1e-6) < 1e-3:
+                logger.info(f"[MPC] Geconvergeerd na {outer + 1} iteraties")
+                break
+            prev_obj = obj
+
+            # 6. Update schatting: solver heeft nu de echte trajectorie gezien
+            if self.t_mass.value is not None:
+                guessed_t_mass = self.t_mass.value[:-1].copy()
+                guessed_t_dhw = self.t_dhw.value[:-1].copy()
+
+        # ── Herstel de beste oplossing ────────────────────────────────────
+        if not best_state:
+            logger.warning("[MPC] Geen geldige oplossing gevonden")
             return
 
-        status = self.problem.status
-        logger.info(f"[MPC] Status={status}  obj={self.problem.value:.4f}")
+        self.ufh_on.value = best_state["ufh_on"]
+        self.dhw_on.value = best_state["dhw_on"]
+        self.p_el_ufh.value = best_state["p_el_ufh"]
+        self.p_el_dhw.value = best_state["p_el_dhw"]
+        self.t_air.value = best_state["t_air"]
+        self.t_mass.value = best_state["t_mass"]
+        self.t_dhw.value = best_state["t_dhw"]
+        self.p_grid.value = best_state["p_grid"]
+        self.p_export.value = best_state["p_export"]
+        self.p_solar_self.value = best_state["p_solar_self"]
+        self.z_ufh.value = best_state["z_ufh"]
+        self.z_dhw.value = best_state["z_dhw"]
+        self.s_room_low.value = best_state["s_room_low"]
+        self.s_room_high.value = best_state["s_room_high"]
+        self.s_dhw_low.value = best_state["s_dhw_low"]
+        self.s_dhw_high.value = best_state["s_dhw_high"]
+        self.plan_t_sup_ufh = best_state["sup_ufh"]
+        self.plan_t_sup_dhw = best_state["sup_dhw"]
 
-        if status not in ("optimal", "optimal_inaccurate"):
-            logger.warning(f"[MPC] Niet-optimale status: {status}")
-            return
+        logger.info(f"[MPC] Beste oplossing hersteld: obj={best_obj:.4f}")
 
-        # ── Warm-start opslaan voor volgende cyclus ───────────────────────
+        # ── Warm-start opslaan ────────────────────────────────────────────
         if self.t_air.value is not None:
             self._prev_ufh_on = self.ufh_on.value.copy()
             self._prev_dhw_on = self.dhw_on.value.copy()
             self._prev_t_mass = self.t_mass.value[:-1].copy()
             self._prev_t_dhw = self.t_dhw.value[:-1].copy()
             self._prev_obj = self.problem.value
-
-            # EKF: sla voorspelde T_air[1] op voor volgende cyclus
             self.ekf.x[0] = float(self.t_air.value[1])
             self.ekf.x[1] = float(self.t_mass.value[1])
 
@@ -744,10 +868,18 @@ class Optimizer:
         p_d = self.mpc.p_el_dhw.value
         t_r = self.mpc.t_air.value
         t_d = self.mpc.t_dhw.value
-        u_cop = self.mpc.P_cop_ufh.value
-        d_cop = self.mpc.P_cop_dhw.value
         u_sup = self.mpc.plan_t_sup_ufh
         d_sup = self.mpc.plan_t_sup_dhw
+
+        u_cop = np.where(p_u > 0.01,
+                         (self.mpc.P_pth_const_ufh.value * self.mpc.ufh_on.value
+                          + self.mpc.P_pth_slope_ufh.value * self.mpc.z_ufh.value) / np.maximum(p_u, 1e-6),
+                         0.0)
+
+        d_cop = np.where(p_d > 0.01,
+                         (self.mpc.P_pth_const_dhw.value * self.mpc.dhw_on.value
+                          + self.mpc.P_pth_slope_dhw.value * self.mpc.z_dhw.value) / np.maximum(p_d, 1e-6),
+                         0.0)
 
         prices = self.mpc.P_prices.value  # importprijs per kwartier
         export_prices = self.mpc.P_export_prices.value  # exportprijs per kwartier
