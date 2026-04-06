@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Config:
-    avg_price: float = 0.22
+    avg_price: float = 0.22  # verwijderen
+
+    price_strategy: str = "fixed"
+    price_fixed: float = 0.22
     export_price: float = 0.077
 
     pv_azimuth: float = 148.0

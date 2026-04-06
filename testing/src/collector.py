@@ -7,6 +7,8 @@ from context import Context
 from client import HAClient
 from config import Config
 from collections import deque, Counter
+
+from price import PriceClient
 from weather import WeatherClient
 from database import Database
 from context import HvacMode
@@ -20,6 +22,7 @@ class Collector:
         self, client: HAClient, database: Database, context: Context, config: Config
     ):
         self.weather = WeatherClient(client, context)
+        self.price = PriceClient()
         self.client = client
         self.database = database
         self.context = context
@@ -233,6 +236,12 @@ class Collector:
                 f"Target={avg_setpoint:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C "
                 f"Shutter={shutter_room:.0f}%"
             )
+
+    def update_price(self):
+        if self.config.price_strategy == "dynamic":
+            self.price.get_forecast(self.context.now)
+        else:
+            pass
 
     def _update_buffer(self, buffer: deque, value: float):
         if value is not None:
