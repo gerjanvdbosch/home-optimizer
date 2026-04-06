@@ -242,7 +242,7 @@ class ThermalMPC:
                 self.p_el_dhw[t] >= self.perf_map._pel_min_dhw * self.dhw_on[t],
                 # Bovengrens (fysiek maximum van de pomp)
                 self.p_el_ufh[t] <= self.perf_map._pel_max_ufh * self.ufh_on[t],
-                self.p_el_dhw[t] <= self.perf_map._pel_max_dhw * self.dhw_on[t]
+                self.p_el_dhw[t] <= self.perf_map._pel_max_dhw * self.dhw_on[t],
             ]
 
         # ── Doelfunctie ───────────────────────────────────────────────────

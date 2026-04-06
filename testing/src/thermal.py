@@ -1308,9 +1308,7 @@ class PWATable:
         # Zoek de index die het dichtst bij 7 graden buiten ligt
         idx_7deg = np.abs(self.t_out_grid - 7.0).argmin()
 
-        logger.debug(
-            f"[PWA] DHW Inspectie bij {self.t_out_grid[idx_7deg]}°C buiten"
-        )
+        logger.debug(f"[PWA] DHW Inspectie bij {self.t_out_grid[idx_7deg]}°C buiten")
         for j, t_s in enumerate(self.t_sink_dhw):
             pel = self.G_dhw[idx_7deg, j]
             cop = self.C_dhw[idx_7deg, j]
