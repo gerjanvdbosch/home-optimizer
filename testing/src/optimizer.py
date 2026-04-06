@@ -47,7 +47,7 @@ class ThermalMPC:
         # Multi-resolutie
         self.dt_steps = np.array(
             [0.25] * 96  # Eerste: 15 min nauwkeurigheid
-            + [1.00] * 6  # Volgende: 1 uur stappen
+            + [1.00] * 8  # Volgende: 1 uur stappen
         )
         self.horizon = len(self.dt_steps)
 
