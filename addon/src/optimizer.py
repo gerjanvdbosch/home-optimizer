@@ -483,31 +483,37 @@ class ThermalMPC:
             else 0.0
         )
 
-        # 1. Bouw tijdas indices
+        # 1. Bouw tijdas indices (Kwartier-mapping naar Solver-stappen)
         quarters_per_step = np.maximum(1, np.round(self.dt_steps / 0.25).astype(int))
         cum_q = np.concatenate(([0], np.cumsum(quarters_per_step)))
         src_len = len(forecast_df)
 
         def resample_mean(data):
+            """Voor intensieve variabelen: Temperatuur, Prijs per kWh, Vermogen in kW"""
             out = np.zeros(T)
             for i in range(T):
-                lo = min(cum_q[i], src_len - 1)
-                hi = min(cum_q[i + 1], src_len)
-                out[i] = np.mean(data[lo:hi]) if hi > lo else data[min(lo, src_len - 1)]
+                lo, hi = cum_q[i], cum_q[i + 1]
+                # Pak de beschikbare data, maar blijf binnen de grenzen van de forecast
+                chunk = data[min(lo, src_len - 1) : min(hi, src_len)]
+                out[i] = (
+                    np.mean(chunk) if len(chunk) > 0 else data[min(lo, src_len - 1)]
+                )
             return out
 
         def resample_sum(data):
+            """Voor extensieve variabelen: Zon-opwarming (Kelvin), Waterverbruik (Liters)"""
             out = np.zeros(T)
             for i in range(T):
-                lo = min(cum_q[i], src_len - 1)
-                hi = min(cum_q[i + 1], src_len)
-                out[i] = np.sum(data[lo:hi]) if hi > lo else 0.0
+                lo, hi = cum_q[i], cum_q[i + 1]
+                chunk = data[min(lo, src_len - 1) : min(hi, src_len)]
+                out[i] = np.sum(chunk) if len(chunk) > 0 else 0.0
             return out
 
         t_out_arr = resample_mean(forecast_df.temp.values)
+        dhw_demand_raw = self.res_dhw.predict(forecast_df)
 
         # 2. Resample alle inputs
-        self.P_temp_out.value = resample_mean(forecast_df.temp.values)
+        self.P_temp_out.value = t_out_arr
         self.P_solar.value = resample_mean(forecast_df.power_corrected.values)
         self.P_base_load.value = resample_mean(forecast_df.load_corrected.values)
         self.P_prices.value = np.full(T, float(avg_price)) * DT
@@ -515,7 +521,6 @@ class ThermalMPC:
 
         # Energie-pakketten (Sommeren!)
         self.P_solar_gain.value = resample_sum(solar_gains)
-        dhw_demand_raw = self.res_dhw.predict(forecast_df)
         self.P_dhw_demand.value = resample_sum(dhw_demand_raw)
 
         self.P_room_min.value = r_min
@@ -930,6 +935,7 @@ class Optimizer:
         minute = (context.now.minute // 15) * 15
         start = context.now.replace(minute=minute, second=0, microsecond=0)
 
+        # 1. Grondstoffen uit de solver (allemaal arrays van lengte T of T+1)
         u_on = self.mpc.ufh_on.value
         d_on = self.mpc.dhw_on.value
         p_u = self.mpc.p_el_ufh.value
@@ -938,89 +944,106 @@ class Optimizer:
         t_d = self.mpc.t_dhw.value
         u_sup = self.mpc.plan_t_sup_ufh
         d_sup = self.mpc.plan_t_sup_dhw
+        grid = self.mpc.p_grid.value
+        export = self.mpc.p_export.value
+        solar_self = self.mpc.p_solar_self.value
 
+        # COP berekeningen (Power/Power = Dimensieloos, dus geen dt nodig)
         u_cop = np.where(
             p_u > 0.01,
             (
-                self.mpc.P_pth_const_ufh.value * self.mpc.ufh_on.value
+                self.mpc.P_pth_const_ufh.value * u_on
                 + self.mpc.P_pth_slope_ufh.value * self.mpc.z_ufh.value
             )
             / np.maximum(p_u, 1e-6),
             0.0,
         )
-
         d_cop = np.where(
             p_d > 0.01,
             (
-                self.mpc.P_pth_const_dhw.value * self.mpc.dhw_on.value
+                self.mpc.P_pth_const_dhw.value * d_on
                 + self.mpc.P_pth_slope_dhw.value * self.mpc.z_dhw.value
             )
             / np.maximum(p_d, 1e-6),
             0.0,
         )
 
+        # Prijzen zijn per kWh
         prices = self.mpc.P_prices.value / self.mpc.dt_steps
         export_prices = self.mpc.P_export_prices.value / self.mpc.dt_steps
 
-        grid = self.mpc.p_grid.value
-        export = self.mpc.p_export.value
+        # 2. Bouw de kwartier-tijdas
+        quarters_per_step = np.maximum(
+            1, np.round(self.mpc.dt_steps / 0.25).astype(int)
+        )
+        total_quarters = int(np.sum(quarters_per_step))
+        s = np.repeat(
+            np.arange(T), quarters_per_step
+        )  # Index mapping: kwartier -> mpc_stap
+
+        # 3. Interpolatie van temperaturen (voor een vloeiende lijn)
+        solver_times = np.concatenate(([0.0], np.cumsum(self.mpc.dt_steps)))
+        quarter_times = np.arange(total_quarters) * 0.25
+
+        t_air_q = np.interp(quarter_times, solver_times[:-1], t_r[:-1])
+        t_dhw_q = np.interp(quarter_times, solver_times[:-1], t_d[:-1])
+        t_out_q = np.interp(quarter_times, solver_times[:-1], self.mpc.P_temp_out.value)
+
+        # 4. Shutters (herhalen)
+        shutter_src = (
+            shutters[:T]
+            if len(shutters) >= T
+            else np.pad(shutters, (0, T - len(shutters)), constant_values=shutters[-1])
+        )
 
         plan = []
-        current_time = start
-        for t in range(T):
-            step_dt = float(self.mpc.dt_steps[t])
+        for q in range(total_quarters):
+            idx = s[q]  # De index in de solver resultaten
+            ts = start + timedelta(minutes=q * 15)
 
-            if d_on[t] > 0.5 and d_on[t] >= u_on[t]:
-                mode_str = "DHW"
-                hvac_mode = HvacMode.DHW
-            elif u_on[t] > 0.5 and u_on[t] > d_on[t]:
-                mode_str = "UFH"
-                hvac_mode = HvacMode.HEATING
+            # Modus bepaling
+            if d_on[idx] > 0.5:
+                mode_str, hvac_mode = "DHW", HvacMode.DHW
+            elif u_on[idx] > 0.5:
+                mode_str, hvac_mode = "UFH", HvacMode.HEATING
             else:
-                mode_str = "-"
-                hvac_mode = HvacMode.OFF
+                mode_str, hvac_mode = "-", HvacMode.OFF
 
-            shutter_val = float(shutters[t]) if t < len(shutters) else float("nan")
-
-            # Bruto kosten zonder zon = alles tegen importprijs
-            solar_self = float(self.mpc.p_solar_self.value[t])
-            total_load = p_u[t] + p_d[t] + float(self.mpc.P_base_load.value[t])
-
-            cost_ufh_val = p_u[t] * prices[t] * step_dt
-            cost_dhw_val = p_d[t] * prices[t] * step_dt
-            cost_gross_val = total_load * prices[t] * step_dt
-            cost_net_val = (
-                grid[t] * prices[t] - export[t] * export_prices[t]
-            ) * step_dt
-            cost_saving_val = max(0.0, solar_self * prices[t] * step_dt)
+            # --- BELANGRIJK: kW blijft kW, Euro = kW * Prijs * 0.25 uur ---
+            p_u_val = float(p_u[idx])
+            p_d_val = float(p_d[idx])
+            p_solar_val = float(self.mpc.P_solar.value[idx])
+            p_load_val = float(self.mpc.P_base_load.value[idx])
+            p_grid_val = float(grid[idx])
+            p_export_val = float(export[idx])
+            p_self_val = float(solar_self[idx])
+            price_val = float(prices[idx])
+            ex_price_val = float(export_prices[idx])
 
             plan.append(
                 {
-                    "time": current_time,
+                    "time": ts,
                     "mode": mode_str,
                     "hvac_mode": hvac_mode.value,
-                    "t_out": f"{self.mpc.P_temp_out.value[t]:.1f}",
-                    "p_solar": f"{self.mpc.P_solar.value[t]:.2f}",
-                    "p_load": f"{self.mpc.P_base_load.value[t]:.2f}",
-                    "t_room": f"{t_r[t]:.2f}",
-                    "t_dhw": f"{t_d[t]:.2f}",
-                    "p_el_ufh": f"{p_u[t]:.2f}",
-                    "p_el_dhw": f"{p_d[t]:.2f}",
-                    "cop_ufh": f"{u_cop[t]:.2f}",
-                    "cop_dhw": f"{d_cop[t]:.2f}",
-                    "supply_ufh": f"{u_sup[t]:.2f}",
-                    "supply_dhw": f"{d_sup[t]:.2f}",
-                    "shutter": f"{shutter_val:.0f}",
-                    "price": f"{prices[t]:.2f}",
-                    "cost_ufh": f"{cost_ufh_val:.3f}",
-                    "cost_dhw": f"{cost_dhw_val:.3f}",
-                    "cost_gross": f"{cost_gross_val:.3f}",
-                    "cost_net": f"{cost_net_val:.3f}",
-                    "cost_saving": f"{cost_saving_val:.3f}",
+                    "t_out": f"{t_out_q[q]:.1f}",
+                    "p_solar": f"{p_solar_val:.2f}",
+                    "p_load": f"{p_load_val:.2f}",
+                    "t_room": f"{t_air_q[q]:.2f}",
+                    "t_dhw": f"{t_dhw_q[q]:.2f}",
+                    "p_el_ufh": f"{p_u_val:.2f}",
+                    "p_el_dhw": f"{p_d_val:.2f}",
+                    "cop_ufh": f"{float(u_cop[idx]):.2f}",
+                    "cop_dhw": f"{float(d_cop[idx]):.2f}",
+                    "supply_ufh": f"{float(u_sup[idx]):.2f}",
+                    "supply_dhw": f"{float(d_sup[idx]):.2f}",
+                    "shutter": f"{float(shutter_src[idx]):.0f}",
+                    "price": f"{price_val:.2f}",
+                    "cost_ufh": f"{p_u_val * price_val * 0.25:.3f}",
+                    "cost_dhw": f"{p_d_val * price_val * 0.25:.3f}",
+                    "cost_gross": f"{(p_u_val + p_d_val + p_load_val) * price_val * 0.25:.3f}",
+                    "cost_net": f"{(p_grid_val * price_val - p_export_val * ex_price_val) * 0.25:.3f}",
+                    "cost_saving": f"{p_self_val * price_val * 0.25:.3f}",
                 }
             )
-
-            # Increment de tijd met de lengte van de huidige stap
-            current_time += timedelta(hours=step_dt)
 
         return plan

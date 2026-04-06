@@ -134,6 +134,7 @@ class Collector:
         self.context.shutter_room = self.client.get_shutter_room()
 
         self._update_slot(self.room_slots, raw_room)
+        self._update_slot(self.outside_slots, raw_outside)
         self._update_slot(self.dhw_top_slots, raw_dhw_top)
         self._update_slot(self.dhw_bottom_slots, raw_dhw_bottom)
         self._update_slot(self.mode_slots, raw_mode.value)
@@ -185,6 +186,7 @@ class Collector:
 
             avg_pv = self._mean(self.pv_slots)
             avg_room = self._mean(self.room_slots)
+            avg_outside = self._mean(self.outside_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
 
@@ -215,7 +217,7 @@ class Collector:
                 return_temp=avg_return,
                 hvac_mode=hvac_mode,
                 shutter_room=shutter_room,
-                outside_temp=self.context.outside_temp,
+                outside_temp=avg_outside,
             )
 
             self.current_slot_start = slot_start
@@ -277,6 +279,7 @@ class Collector:
         self.pv_slots = []
         self.grid_slots = []
         self.room_slots = []
+        self.outside_slots = []
         self.dhw_top_slots = []
         self.dhw_bottom_slots = []
         self.mode_slots = []
