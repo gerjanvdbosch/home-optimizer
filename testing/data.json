@@ -1,8 +1,8 @@
 {
   "hvac_mode": 0,
   "room_temp": 20.1,
-  "dhw_top": 19.6,
-  "dhw_bottom": 15.1,
+  "dhw_top": 15.6,
+  "dhw_bottom": 12.1,
   "target_setpoint": 25.0,
   "supply_temp": 25.0,
   "return_temp": 20.0,

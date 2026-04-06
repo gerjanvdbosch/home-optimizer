@@ -316,10 +316,10 @@ class HPPerformanceMap:
         pel_max = float(d["wp_actual"].quantile(0.95))
 
         if label == "UFH":
-            self._pel_min_ufh = float(np.clip(pel_min, 0.3, 1.0))
+            self._pel_min_ufh = float(np.clip(pel_min, 0.1, 1.0))
             self._pel_max_ufh = float(np.clip(pel_max, 1.0, 4.0))
         else:
-            self._pel_min_dhw = float(np.clip(pel_min, 0.4, 1.5))
+            self._pel_min_dhw = float(np.clip(pel_min, 0.1, 1.5))
             self._pel_max_dhw = float(np.clip(pel_max, 1.5, 5.0))
 
         t_out = d["t_out"].values.astype(float)
@@ -444,16 +444,6 @@ class HPPerformanceMap:
             self._pel_ufh = tuple(popt_pel)
         else:
             self._pel_dhw = tuple(popt_pel)
-
-        # Operationele grenzen
-        pel_min = float(d["wp_actual"].quantile(0.05))
-        pel_max = float(d["wp_actual"].quantile(0.95))
-        if label == "UFH":
-            self._pel_min_ufh = float(np.clip(pel_min, 0.3, 1.0))
-            self._pel_max_ufh = float(np.clip(pel_max, 1.0, 4.0))
-        else:
-            self._pel_min_dhw = float(np.clip(pel_min, 0.4, 1.5))
-            self._pel_max_dhw = float(np.clip(pel_max, 1.5, 5.0))
 
     def predict_cop(self, mode, t_out, t_sink) -> float:
         if mode == HvacMode.HEATING.value:
@@ -1275,7 +1265,7 @@ class PWATable:
         self.hydraulic = hydraulic
         self.t_out_grid = np.arange(-10.0, 18.0, 2.0)
         self.t_sink_ufh = np.arange(16.0, 24.0, 1.0)
-        self.t_sink_dhw = np.arange(20.0, 65.0, 5.0)
+        self.t_sink_dhw = np.arange(10.0, 70.0, 5.0)
         self._build()
 
     def _build(self):
