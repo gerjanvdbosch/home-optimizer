@@ -638,6 +638,7 @@ class ThermalMPC:
                         "time_limit": 300.0,  # maximaal 300 seconden per solve
                         "presolve": "on",
                         "parallel": "on",  # gebruik meerdere cores
+                        "threads": 3,  # aantal threads
                     },
                 )
             except Exception as e:
