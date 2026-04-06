@@ -456,22 +456,23 @@ class HPPerformanceMap:
 
         eta, dT_lift = params
         denom = max(t_sink - t_out + dT_lift, 1.0)
-        return float(np.clip(eta * (t_sink + 273.15) / denom, 1.2, 8.0))
+        return float(np.clip(eta * (t_sink + 273.15) / denom, 1.0, 8.0))
 
     def predict_pel(self, mode, t_out, t_sink) -> float:
         if mode == HvacMode.HEATING.value:
             params = self._pel_ufh
-            lo, hi = self._pel_min_ufh, self._pel_max_ufh
+            lo, hi = 0.1, 5.0
             default = float(np.clip(1.2 - 0.02 * t_out, lo, hi))
         else:
             params = self._pel_dhw
-            lo, hi = self._pel_min_dhw, self._pel_max_dhw
+            lo, hi = 0.1, 5.0
             default = float(np.clip(1.8 - 0.02 * t_out, lo, hi))
 
         if params is None:
             return default
 
         a, b, c = params
+        # Clip ruim, zodat de helling (b) altijd zichtbaar blijft voor de PWA-tabel
         return float(np.clip(a + b * t_sink + c * t_out, lo, hi))
 
     def predict_p_th(self, mode: int, t_out: float, t_sink: float) -> float:
@@ -1304,6 +1305,17 @@ class PWATable:
             f"[PWA] Grid gebouwd: UFH {self.G_ufh.shape}  DHW {self.G_dhw.shape}"
         )
 
+        # Zoek de index die het dichtst bij 7 graden buiten ligt
+        idx_7deg = np.abs(self.t_out_grid - 7.0).argmin()
+
+        logger.debug(
+            f"[PWA] DHW Inspectie bij {self.t_out_grid[idx_7deg]}°C buiten"
+        )
+        for j, t_s in enumerate(self.t_sink_dhw):
+            pel = self.G_dhw[idx_7deg, j]
+            cop = self.C_dhw[idx_7deg, j]
+            logger.info(f"Tank={t_s:4.1f}°C | P_el={pel:.3f}kW | COP={cop:.2f}")
+
     def _interp2d(self, t_out, t_sink, t_sink_grid, G, C, S):
         t_o = np.clip(t_out, self.t_out_grid[0], self.t_out_grid[-1])
         t_s = np.clip(t_sink, t_sink_grid[0], t_sink_grid[-1])
@@ -1401,6 +1413,13 @@ class PWATable:
 
             sup_dhw[t] = sup_d
             avg_cop_dhw[t] = cop_d
+
+            if t == 0:
+                logger.debug(
+                    f"[PWA] T_dhw={t_dhw:.1f} | "
+                    f"Pel_base={pel_d:.3f} | Pel_plus={pel_d_plus:.3f} | "
+                    f"SLOPE={dpel_dt_d:.4f}"
+                )
 
         return {
             "pel_const_ufh": pel_const_ufh,

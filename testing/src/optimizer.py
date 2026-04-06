@@ -237,6 +237,12 @@ class ThermalMPC:
                 self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
                 self.t_mass[T] + self.s_term_room_under >= self.P_term_target_mass,
                 self.t_dhw[T] + self.s_term_dhw_under >= self.P_term_target_dhw,
+                # Ondergrens (modulatie-bodem)
+                self.p_el_ufh[t] >= self.perf_map._pel_min_ufh * self.ufh_on[t],
+                self.p_el_dhw[t] >= self.perf_map._pel_min_dhw * self.dhw_on[t],
+                # Bovengrens (fysiek maximum van de pomp)
+                self.p_el_ufh[t] <= self.perf_map._pel_max_ufh * self.ufh_on[t],
+                self.p_el_dhw[t] <= self.perf_map._pel_max_dhw * self.dhw_on[t]
             ]
 
         # ── Doelfunctie ───────────────────────────────────────────────────
