@@ -47,11 +47,9 @@ class ThermalMPC:
         # Multi-resolutie
         self.dt_steps = np.array(
             [0.25] * 96  # Eerste 24 uur: 15 min nauwkeurigheid
-            + [0.5] * 12  # Volgende 6 uur: 30 min stappen
-            + [1.00] * 6  # Volgende 6 uur: 1 uur stappen
+            + [1.00] * 12  # Volgende 6 uur: 1 uur stappen
         )
         self.horizon = len(self.dt_steps)
-        self.B_ZONE = 96  # De eerste 12 uur zijn binair
 
         # EKF vervangt Luenberger observer
         self.ekf = ThermalEKF(ident)
@@ -74,8 +72,6 @@ class ThermalMPC:
     def _build_problem(self):
         T = self.horizon
         DT = self.dt_steps
-        BZ = self.B_ZONE
-
         C_air = self.ident.C_air  # snelle massa [kWh/K]
         C_mass = self.ident.C_mass  # trage massa  [kWh/K]
         R_im = self.ident.R_im  # massa ↔ lucht [K/kW]
@@ -150,27 +146,18 @@ class ThermalMPC:
         self.s_term_dhw_under = cp.Variable(nonneg=True)  # Voor de terminal value
 
         # ── Variabelen ────────────────────────────────────────────────────
-        # We splitsen de variabelen in twee delen
-        self.ufh_on_bin = cp.Variable(BZ, boolean=True)
-        self.ufh_on_cont = cp.Variable(T - BZ, nonneg=True)
-        self.ufh_on = cp.hstack([self.ufh_on_bin, self.ufh_on_cont])
-
-        self.dhw_on_bin = cp.Variable(BZ, boolean=True)
-        self.dhw_on_cont = cp.Variable(T - BZ, nonneg=True)
-
-        self.dhw_on = cp.hstack([self.dhw_on_bin, self.dhw_on_cont])
+        self.ufh_on = cp.Variable(T, boolean=True)
+        self.dhw_on = cp.Variable(T, boolean=True)
+        self.z_ufh = cp.Variable(T)  # = ufh_on[t] × t_mass[t]
+        self.z_dhw = cp.Variable(T)  # = dhw_on[t] × t_dhw[t]
 
         # Binaire McCormick: z = on × t_sink
         # Binair × continu geeft exacte (niet-relaxte) envelopen
         T_MASS_MIN, T_MASS_MAX = 15.0, 35.0
         T_DHW_MIN, T_DHW_MAX = 20.0, 65.0
-        self.z_ufh = cp.Variable(T)  # = ufh_on[t] × t_mass[t]
-        self.z_dhw = cp.Variable(T)  # = dhw_on[t] × t_dhw[t]
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
-            self.ufh_on_cont <= 1,
-            self.dhw_on_cont <= 1,
             self.t_air[0] == self.P_t_air_init,
             self.t_mass[0] == self.P_t_mass_init,
             self.t_dhw[0] == self.P_t_dhw_init,
@@ -290,18 +277,8 @@ class ThermalMPC:
             + self.s_term_dhw_under * self.P_val_terminal_dhw
         )
 
-        smooth_cont = (
-            cp.sum(
-                cp.abs(self.ufh_on_cont[1:] - self.ufh_on_cont[:-1])
-                + cp.abs(self.dhw_on_cont[1:] - self.dhw_on_cont[:-1])
-            )
-            * 0.05
-        )
-
         self.problem = cp.Problem(
-            cp.Minimize(
-                net_cost + comfort + switching + smooth_cont + terminal_penalty
-            ),
+            cp.Minimize(net_cost + comfort + switching + terminal_penalty),
             constraints,
         )
 
@@ -719,12 +696,8 @@ class ThermalMPC:
             logger.warning("[MPC] Geen geldige oplossing gevonden")
             return
 
-        BZ = self.B_ZONE
-        self.ufh_on_bin.value = best_state["ufh_on"][:BZ]
-        self.ufh_on_cont.value = best_state["ufh_on"][BZ:]
-        self.dhw_on_bin.value = best_state["dhw_on"][:BZ]
-        self.dhw_on_cont.value = best_state["dhw_on"][BZ:]
-
+        self.ufh_on.value = best_state["ufh_on"]
+        self.dhw_on.value = best_state["dhw_on"]
         self.p_el_ufh.value = best_state["p_el_ufh"]
         self.p_el_dhw.value = best_state["p_el_dhw"]
         self.t_air.value = best_state["t_air"]
