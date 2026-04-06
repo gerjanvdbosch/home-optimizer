@@ -47,7 +47,7 @@ class ThermalMPC:
         # Multi-resolutie
         self.dt_steps = np.array(
             [0.25] * 96  # Eerste 24 uur: 15 min nauwkeurigheid
-            + [1.00] * 12  # Volgende 6 uur: 1 uur stappen
+            + [1.00] * 12  # Volgende 12 uur: 1 uur stappen
         )
         self.horizon = len(self.dt_steps)
 
@@ -573,7 +573,7 @@ class ThermalMPC:
 
         costs_set = False
         prev_obj = None
-        MAX_OUTER = 1
+        MAX_OUTER = 5
 
         best_obj = np.inf
         best_state = {}
