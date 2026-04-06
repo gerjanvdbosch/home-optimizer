@@ -638,6 +638,7 @@ class ThermalMPC:
                         "time_limit": 300.0,  # maximaal 300 seconden per solve
                         "presolve": "on",
                         "parallel": "on",  # gebruik meerdere cores
+                        "threads": 3,  # aantal threads
                     },
                 )
             except Exception as e:
@@ -683,8 +684,8 @@ class ThermalMPC:
                 and abs(obj - prev_obj) / (abs(prev_obj) + 1e-6) < 1e-3
             ):
                 logger.info(f"[MPC] Geconvergeerd na {outer + 1} iteraties")
-                break
-            prev_obj = obj
+                # break
+            # prev_obj = obj
 
             # 6. Update schatting: solver heeft nu de echte trajectorie gezien
             if self.t_mass.value is not None:
@@ -696,24 +697,24 @@ class ThermalMPC:
             logger.warning("[MPC] Geen geldige oplossing gevonden")
             return
 
-        self.ufh_on.value = best_state["ufh_on"]
-        self.dhw_on.value = best_state["dhw_on"]
-        self.p_el_ufh.value = best_state["p_el_ufh"]
-        self.p_el_dhw.value = best_state["p_el_dhw"]
-        self.t_air.value = best_state["t_air"]
-        self.t_mass.value = best_state["t_mass"]
-        self.t_dhw.value = best_state["t_dhw"]
-        self.p_grid.value = best_state["p_grid"]
-        self.p_export.value = best_state["p_export"]
-        self.p_solar_self.value = best_state["p_solar_self"]
-        self.z_ufh.value = best_state["z_ufh"]
-        self.z_dhw.value = best_state["z_dhw"]
-        self.s_room_low.value = best_state["s_room_low"]
-        self.s_room_high.value = best_state["s_room_high"]
-        self.s_dhw_low.value = best_state["s_dhw_low"]
-        self.s_dhw_high.value = best_state["s_dhw_high"]
-        self.plan_t_sup_ufh = best_state["sup_ufh"]
-        self.plan_t_sup_dhw = best_state["sup_dhw"]
+        # self.ufh_on.value = best_state["ufh_on"]
+        # self.dhw_on.value = best_state["dhw_on"]
+        # self.p_el_ufh.value = best_state["p_el_ufh"]
+        # self.p_el_dhw.value = best_state["p_el_dhw"]
+        # self.t_air.value = best_state["t_air"]
+        # self.t_mass.value = best_state["t_mass"]
+        # self.t_dhw.value = best_state["t_dhw"]
+        # self.p_grid.value = best_state["p_grid"]
+        # self.p_export.value = best_state["p_export"]
+        # self.p_solar_self.value = best_state["p_solar_self"]
+        # self.z_ufh.value = best_state["z_ufh"]
+        # self.z_dhw.value = best_state["z_dhw"]
+        # self.s_room_low.value = best_state["s_room_low"]
+        # self.s_room_high.value = best_state["s_room_high"]
+        # self.s_dhw_low.value = best_state["s_dhw_low"]
+        # self.s_dhw_high.value = best_state["s_dhw_high"]
+        # self.plan_t_sup_ufh = best_state["sup_ufh"]
+        # self.plan_t_sup_dhw = best_state["sup_dhw"]
 
         logger.info(f"[MPC] Beste oplossing hersteld: obj={best_obj:.4f}")
 
