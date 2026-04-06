@@ -244,6 +244,7 @@ class ThermalMPC:
                 )
                 - self.P_dhw_demand[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
+                self.ufh_on_cont + self.dhw_on_cont <= 1,
                 self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
@@ -990,10 +991,10 @@ class Optimizer:
         for t in range(T):
             step_dt = float(self.mpc.dt_steps[t])
 
-            if d_on[t] > 0.5:
+            if d_on[t] > 0.5 and d_on[t] >= u_on[t]:
                 mode_str = "DHW"
                 hvac_mode = HvacMode.DHW
-            elif u_on[t] > 0.5:
+            elif u_on[t] > 0.5 and u_on[t] > d_on[t]:
                 mode_str = "UFH"
                 hvac_mode = HvacMode.HEATING
             else:
