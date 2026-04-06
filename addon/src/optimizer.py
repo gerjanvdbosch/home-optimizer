@@ -244,7 +244,6 @@ class ThermalMPC:
                 )
                 - self.P_dhw_demand[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
-                self.ufh_on_cont + self.dhw_on_cont <= 1,
                 self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
@@ -597,7 +596,7 @@ class ThermalMPC:
 
         costs_set = False
         prev_obj = None
-        MAX_OUTER = 5
+        MAX_OUTER = 1
 
         best_obj = np.inf
         best_state = {}
