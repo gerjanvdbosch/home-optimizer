@@ -153,8 +153,8 @@ class ThermalMPC:
 
         # Binaire McCormick: z = on × t_sink
         # Binair × continu geeft exacte (niet-relaxte) envelopen
-        T_MASS_MIN, T_MASS_MAX = 15.0, 35.0
-        T_DHW_MIN, T_DHW_MAX = 20.0, 65.0
+        T_MASS_MIN, T_MASS_MAX = 10.0, 35.0
+        T_DHW_MIN, T_DHW_MAX = 10.0, 75.0
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
