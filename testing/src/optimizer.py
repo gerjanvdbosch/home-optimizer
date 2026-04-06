@@ -46,8 +46,8 @@ class ThermalMPC:
 
         # Multi-resolutie
         self.dt_steps = np.array(
-            [0.25] * 96  # Eerste 24 uur: 15 min nauwkeurigheid
-            + [1.00] * 12  # Volgende 12 uur: 1 uur stappen
+            [0.25] * 96  # Eerste: 15 min nauwkeurigheid
+            + [1.00] * 6  # Volgende: 1 uur stappen
         )
         self.horizon = len(self.dt_steps)
 
@@ -631,7 +631,7 @@ class ThermalMPC:
                 self.problem.solve(
                     solver=cp.HIGHS,
                     warm_start=(outer > 0 or self._prev_ufh_on is not None),
-                    verbose=True,
+                    verbose=False,
                     highs_options={
                         "mip_rel_gap": 0.01,  # stop bij % van optimum
                         "mip_abs_gap": 0.01,  # absolute gap in euro
@@ -653,7 +653,7 @@ class ThermalMPC:
                 break
 
             # Sla de beste oplossing op
-            if outer > 0 and obj < best_obj and self.t_air.value is not None:
+            if obj < best_obj and self.t_air.value is not None:
                 best_obj = obj
                 best_state = {
                     "ufh_on": self.ufh_on.value.copy(),
