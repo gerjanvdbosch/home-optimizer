@@ -177,7 +177,11 @@ if __name__ == "__main__":
 
         logger.info("[System] Engine running")
 
-        coordinator.update_forecast()
+        try:
+            coordinator.update_forecast()
+        except Exception as e:
+            logger.error(f"[System] Fout bij initiële forecast update: {e}")
+
         collector.update_history()
         coordinator.tick()
 
