@@ -38,6 +38,17 @@ class Coordinator:
         self.config = config
         self.database = database
         self.collector = collector
+        self._load()
+
+    def _load(self):
+        # self.context.forecast_df_raw = self.database.get_history(
+        #     cutoff_date=datetime.now(timezone.utc)
+        # )
+
+        self.update_forecast()
+
+        self.collector.update_history()
+        self.collector.update_sensors()
 
     def tick(self):
         self.context.now = datetime.now(timezone.utc).replace(
@@ -182,9 +193,6 @@ if __name__ == "__main__":
             id="optimize",
         )
 
-        coordinator.update_forecast()
-        collector.update_history()
-        coordinator.tick()
         coordinator.train()
 
         scheduler.start()

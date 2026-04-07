@@ -38,6 +38,17 @@ class Coordinator:
         self.config = config
         self.database = database
         self.collector = collector
+        self._load()
+
+    def _load(self):
+        # self.context.forecast_df_raw = self.database.get_history(
+        #     cutoff_date=datetime.now(timezone.utc)
+        # )
+
+        self.update_forecast()
+
+        self.collector.update_history()
+        self.collector.update_sensors()
 
     def tick(self):
         self.context.now = datetime.now(timezone.utc)
@@ -166,6 +177,7 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_history, "interval", minutes=1, id="history")
 
         scheduler.add_job(coordinator.tick, "interval", minutes=1, id="tick")
+        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
         scheduler.add_job(
             coordinator.optimize,
             "interval",
@@ -173,17 +185,6 @@ if __name__ == "__main__":
             next_run_time=next_run,
             id="optimize",
         )
-        scheduler.add_job(coordinator.train, "cron", hour=2, minute=5, id="train")
-
-        logger.info("[System] Engine running")
-
-        try:
-            coordinator.update_forecast()
-        except Exception as e:
-            logger.error(f"[System] Fout bij initiële forecast update: {e}")
-
-        collector.update_history()
-        coordinator.tick()
 
         scheduler.start()
 

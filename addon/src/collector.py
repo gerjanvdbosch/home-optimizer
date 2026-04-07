@@ -39,7 +39,12 @@ class Collector:
         else:
             logger.warning("[Collector] Locatie niet gevonden")
 
-        solcast = self.client.get_forecast()
+        try:
+            solcast = self.client.get_forecast()
+            df_om = self.weather.get_forecast()
+        except Exception as e:
+            logger.error(f"[Collector] Fout bij ophalen forecast: {e}")
+            return
 
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
@@ -63,7 +68,6 @@ class Collector:
             .reset_index()
         )
 
-        df_om = self.weather.get_forecast()
         df_merged = pd.merge(df_sol, df_om, on="timestamp", how="left")
 
         df_today = (
