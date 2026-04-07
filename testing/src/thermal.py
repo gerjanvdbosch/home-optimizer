@@ -1110,6 +1110,9 @@ class UfhResidualPredictor:
             logger.info("[UFH Residual] Getraind.")
 
     def predict(self, forecast_df, shutters):
+        if forecast_df is None:
+            return np.array([])
+
         if self.model is None or not self.is_fitted:
             return np.zeros(len(forecast_df))
 
@@ -1190,6 +1193,9 @@ class DhwResidualPredictor:
             logger.warning("[DHW Residual] Te weinig data.")
 
     def predict(self, forecast_df):
+        if forecast_df is None:
+            return np.array([])
+
         if self.model is None or not self.is_fitted:
             return np.zeros(len(forecast_df))
 

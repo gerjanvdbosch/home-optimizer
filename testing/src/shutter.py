@@ -61,6 +61,9 @@ class ShutterPredictor:
 
     def predict(self, forecast_df, current_shutter_open):
         """Voorspelt wat het rolluik de komende 24 uur gaat doen."""
+        if forecast_df is None:
+            return np.array([current_shutter_open])
+
         if not self.is_fitted or self.model is None:
             # Fallback: als we niks weten, gokken we dat hij z'n huidige stand behoudt
             return np.full(len(forecast_df), current_shutter_open)

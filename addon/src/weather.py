@@ -191,7 +191,7 @@ class TemperatureForecaster:
         df = self.database.get_history(cutoff_date=cutoff)
 
         df_train = df.copy().dropna(subset=["temp", "outside_temp", "pv_actual"])
-        if len(df_train) < 50:
+        if len(df_train) < 1000:
             logger.info("[Temperature] Te weinig data om te trainen.")
             return
 

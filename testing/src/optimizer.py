@@ -797,6 +797,9 @@ class Optimizer:
         self.mpc.pwa.rebuild()  # herbereken grid met nieuwe modellen
 
     def resolve(self, context: Context, avg_price: float, export_price: float):
+        if context.forecast_df is None or context.forecast_df.empty:
+            return self._emergency_fallback("missing_forecast")
+
         # 1. Data verzamelen
         recent_df = self.db.get_history(cutoff_date=context.now - timedelta(hours=2))
 
@@ -833,18 +836,7 @@ class Optimizer:
 
         # Lege uitvoer bij solver-fout
         if self.mpc.p_el_ufh.value is None:
-            return {
-                "mode": "OFF",
-                "status": self.mpc.problem.status,
-                "target_pel_kw": 0.0,
-                "target_supply_temp": 0.0,
-                "steps_remaining": 0,
-                "pv_remaining": 0.0,
-                "solar_self_remaining": 0.0,
-                "export_remaining": 0.0,
-                "grid_remaining": 0.0,
-                "plan": [],
-            }
+            return self._emergency_fallback(self.mpc.problem.status)
 
         # Dagstatistieken
         tz = ZoneInfo(tzlocal.get_localzone_name())
@@ -925,6 +917,20 @@ class Optimizer:
             "total_cost_gross": round(total_cost_gross, 2),
             "total_export_revenue": round(total_export_revenue, 2),
             "plan": plan,
+        }
+
+    def _emergency_fallback(self, status_msg):
+        return {
+            "mode": "OFF",
+            "status": status_msg,
+            "target_pel_kw": 0.0,
+            "target_supply_temp": 0.0,
+            "steps_remaining": 0,
+            "pv_remaining": 0.0,
+            "solar_self_remaining": 0.0,
+            "export_remaining": 0.0,
+            "grid_remaining": 0.0,
+            "plan": [],
         }
 
     def get_plan(self, context: Context, shutters: np.ndarray) -> list:
