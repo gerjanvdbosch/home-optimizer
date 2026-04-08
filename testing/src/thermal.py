@@ -1061,7 +1061,7 @@ class UfhResidualPredictor:
 
         is_heating = df_proc["hvac_mode"] == HvacMode.HEATING.value
         just_stopped = is_heating.shift(1, fill_value=False) & ~is_heating
-        just_started = ~is_heating.shift(1, fill_value=False) & is_heating
+        just_started = ~is_heating.shift(1, fill_value=True) & is_heating
 
         df_proc["post_heat_cooldown"] = (
             just_stopped.rolling(window=4, min_periods=1).max().fillna(0).astype(bool)
