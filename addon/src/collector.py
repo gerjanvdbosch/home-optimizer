@@ -95,9 +95,7 @@ class Collector:
 
         self._update_slot(self.pv_slots, raw_pv)
         self._update_slot(self.grid_slots, raw_grid)
-
-        if self.context.hvac_mode != HvacMode.OFF:
-            self._update_slot(self.wp_slots[self.context.hvac_mode.value], raw_wp)
+        self._update_slot(self.wp_slots, raw_wp)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -172,9 +170,6 @@ class Collector:
         if slot_start > self.current_slot_start:
             hvac_mode = self._hvac_mode(self.mode_slots)
 
-            avg_wp = self._mean(
-                self.wp_slots.get(hvac_mode, []), skip_zeros=True, default=0
-            )
             avg_setpoint = self._mean(
                 self.setpoint_slots.get(hvac_mode, []), skip_zeros=True
             )
@@ -186,6 +181,7 @@ class Collector:
             )
 
             avg_pv = self._mean(self.pv_slots)
+            avg_wp = self._mean(self.wp_slots)
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
@@ -276,6 +272,7 @@ class Collector:
 
     def _reset_slots(self):
         self.pv_slots = []
+        self.wp_slots = []
         self.grid_slots = []
         self.room_slots = []
         self.dhw_top_slots = []
@@ -288,7 +285,6 @@ class Collector:
             if m not in (HvacMode.OFF, HvacMode.FROST_PROTECTION)
         ]
 
-        self.wp_slots = {m: [] for m in active_modes}
         self.setpoint_slots = {m: [] for m in active_modes}
         self.supply_slots = {m: [] for m in active_modes}
         self.return_slots = {m: [] for m in active_modes}
