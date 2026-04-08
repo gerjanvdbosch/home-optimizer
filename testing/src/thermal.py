@@ -5,7 +5,7 @@ import joblib
 
 from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge
 from scipy.optimize import curve_fit
 from utils import add_cyclic_time_features
 from context import HvacMode
@@ -1024,8 +1024,6 @@ class UfhResidualPredictor:
             "shutter_room",
             "internal_load",
             "wind",
-            "hour_sin",
-            "hour_cos",
             "day_sin",
             "day_cos",
             "doy_sin",
@@ -1084,7 +1082,7 @@ class UfhResidualPredictor:
         p_heat = df_feat["wp_output"]
         t_out = df_feat["temp"]
         t_model_next = t_curr + ((p_heat - (t_curr - t_out) / self.R) * dt / self.C)
-        target = (t_next - t_model_next) / dt
+        target = (t_next - t_model_next) * self.C / dt
 
         df_feat = add_cyclic_time_features(df_feat, "timestamp")
         df_feat["solar"] = df_feat["pv_actual"]
@@ -1102,9 +1100,9 @@ class UfhResidualPredictor:
         train_set = train_set[train_set["target"].between(q_low, q_high)]
 
         if len(train_set) > 10:
-            self.model = RandomForestRegressor(
-                n_estimators=100, max_depth=5, min_samples_leaf=15
-            ).fit(train_set[self.features], train_set["target"])
+            self.model = Ridge(alpha=1.0).fit(
+                train_set[self.features], train_set["target"]
+            )
             self.is_fitted = True
             joblib.dump(self.model, self.path)
             logger.info("[UFH Residual] Getraind.")
@@ -1477,7 +1475,8 @@ class ThermalEKF:
         B = np.array([dt / self.ident.C_air, dt / self.ident.C_mass])
         f_ext = np.array(
             [
-                (t_out / (self.ident.R_oa * self.ident.C_air)) * dt + solar_gain * dt,
+                (t_out / (self.ident.R_oa * self.ident.C_air)) * dt
+                + (solar_gain / self.ident.C_air) * dt,
                 0.0,
             ]
         )
