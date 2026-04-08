@@ -98,10 +98,10 @@ class ThermalMPC:
         self.P_dhw_max = cp.Parameter(T, nonneg=True)
         self.P_solar_gain = cp.Parameter(T)
 
-        self.P_cost_room_under = cp.Parameter(nonneg=True)
-        self.P_cost_room_over = cp.Parameter(nonneg=True)
-        self.P_cost_dhw_under = cp.Parameter(nonneg=True)
-        self.P_cost_dhw_over = cp.Parameter(nonneg=True)
+        self.P_cost_room_under = cp.Parameter(T, nonneg=True)
+        self.P_cost_room_over = cp.Parameter(T, nonneg=True)
+        self.P_cost_dhw_under = cp.Parameter(T, nonneg=True)
+        self.P_cost_dhw_over = cp.Parameter(T, nonneg=True)
         self.P_val_terminal_room = cp.Parameter(nonneg=True)
         self.P_val_terminal_dhw = cp.Parameter(nonneg=True)
 
@@ -209,25 +209,25 @@ class ThermalMPC:
                 # ── Stroombalans ────────────────────────────────────────────
                 p_el_wp + self.P_base_load[t] == self.p_grid[t] + self.p_solar_self[t],
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
-                # ── Thermische dynamica — p_th via affiene COP ──────────────
-                # t_air: zon is al een totaal-pakket, verlies-termen gaan per uur (* dt)
+                # ── Thermische dynamica — IMPLICIT EULER (Stabiel voor grote dt) ──────────────
                 self.t_air[t + 1]
                 == self.t_air[t]
                 + (
-                    (self.t_mass[t] - self.t_air[t]) / R_im
-                    - (self.t_air[t] - self.P_temp_out[t]) / R_oa
+                    (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im
+                    - (self.t_air[t + 1] - self.P_temp_out[t]) / R_oa
+                    + self.P_solar_gain[t]
                 )
-                * (dt_t / C_air)
-                + self.P_solar_gain[t],
+                * (dt_t / C_air),
                 self.t_mass[t + 1]
                 == self.t_mass[t]
-                + (p_th_delayed - (self.t_mass[t] - self.t_air[t]) / R_im)
+                + (p_th_delayed - (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im)
                 * (dt_t / C_mass),
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
                 + (
                     p_th_dhw_now * (dt_t / self.ident.C_tank)
-                    - (self.t_dhw[t] - self.t_air[t]) * (self.ident.K_loss_dhw * dt_t)
+                    - (self.t_dhw[t + 1] - self.t_air[t + 1])
+                    * (self.ident.K_loss_dhw * dt_t)
                 )
                 - self.P_dhw_demand[t],
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
@@ -253,10 +253,10 @@ class ThermalMPC:
         )
 
         comfort = cp.sum(
-            self.s_room_low * self.P_cost_room_under
-            + self.s_room_high * self.P_cost_room_over
-            + self.s_dhw_low * self.P_cost_dhw_under
-            + self.s_dhw_high * self.P_cost_dhw_over
+            cp.multiply(self.s_room_low, self.P_cost_room_under)
+            + cp.multiply(self.s_room_high, self.P_cost_room_over)
+            + cp.multiply(self.s_dhw_low, self.P_cost_dhw_under)
+            + cp.multiply(self.s_dhw_high, self.P_cost_dhw_over)
         )
 
         # Hoge straf op compressorstart, lage straf op klep-wissel
@@ -401,9 +401,11 @@ class ThermalMPC:
         if self.ekf.x is None:
             # Koude start: fysische inversie als initialisatie
             dT_dt = self._robust_trend(recent_df)
-            q_mass = (self.ident.C_air * (dT_dt - current_solar_gain)) + (
-                t_air_meas - t_out_now
-            ) / self.ident.R_oa
+            q_mass = (
+                (self.ident.C_air * dT_dt)
+                - current_solar_gain
+                + (t_air_meas - t_out_now) / self.ident.R_oa
+            )
             t_mass_init = float(
                 np.clip(
                     t_air_meas + self.ident.R_im * q_mass,
@@ -509,18 +511,23 @@ class ThermalMPC:
                 out[i] = np.sum(chunk) if len(chunk) > 0 else 0.0
             return out
 
-        t_out_arr = resample_mean(forecast_df.temp.values)
+        t_out = resample_mean(forecast_df.temp.values)
         dhw_demand_raw = self.res_dhw.predict(forecast_df)
 
+        prices = np.asarray(
+            forecast_df.get("price", np.full(src_len, float(avg_price)))
+        )
+        export_prices = np.asarray(
+            forecast_df.get("export_price", np.full(src_len, float(export_price)))
+        )
+
         # 2. Resample alle inputs
-        self.P_temp_out.value = t_out_arr
+        self.P_temp_out.value = t_out
         self.P_solar.value = resample_mean(forecast_df.power_corrected.values)
         self.P_base_load.value = resample_mean(forecast_df.load_corrected.values)
-        self.P_prices.value = np.full(T, float(avg_price)) * DT
-        self.P_export_prices.value = np.full(T, float(export_price)) * DT
-
-        # Energie-pakketten (Sommeren!)
-        self.P_solar_gain.value = resample_sum(solar_gains)
+        self.P_prices.value = resample_mean(prices) * DT
+        self.P_export_prices.value = resample_mean(export_prices) * DT
+        self.P_solar_gain.value = resample_mean(solar_gains)
         self.P_dhw_demand.value = resample_sum(dhw_demand_raw)
 
         self.P_room_min.value = r_min
@@ -598,7 +605,7 @@ class ThermalMPC:
                 guessed_t_sink = guessed_t_dhw - strat_gap_measured
 
             # 1. PWA op huidige schatting
-            pwa_data = self.pwa.compute(t_out_arr, guessed_t_mass, guessed_t_sink)
+            pwa_data = self.pwa.compute(t_out, guessed_t_mass, guessed_t_sink)
             self.plan_t_sup_ufh = pwa_data["sup_ufh"]
             self.plan_t_sup_dhw = pwa_data["sup_dhw"]
 
@@ -624,13 +631,14 @@ class ThermalMPC:
                     export_price=float(export_price),
                 ).compute(max_price=effective_max_price)
 
-                self.P_cost_room_under.value = costs["room_under"] * np.mean(DT)
-                self.P_cost_room_over.value = costs["room_over"] * np.mean(DT)
-                self.P_cost_dhw_under.value = costs["tank_under"] * np.mean(DT)
-                self.P_cost_dhw_over.value = costs["tank_over"] * np.mean(DT)
+                self.P_cost_room_under.value = costs["room_under"] * DT
+                self.P_cost_room_over.value = costs["room_over"] * DT
+                self.P_cost_dhw_under.value = costs["tank_under"] * DT
+                self.P_cost_dhw_over.value = costs["tank_over"] * DT
                 self.P_val_terminal_room.value = costs["terminal_room"]
                 self.P_val_terminal_dhw.value = costs["terminal_tank"]
-                t_out_end = float(t_out_arr[-1])
+
+                t_out_end = float(t_out[-1])
                 self.P_term_target_mass.value = float(
                     r_t[-1] + self.ident.R_im * (r_t[-1] - t_out_end) / self.ident.R_oa
                 )
@@ -817,8 +825,8 @@ class Optimizer:
         solar_gains = self.res_ufh.predict(context.forecast_df, shutters)
 
         logger.info(
-            f"[Optimizer] Solar gain: max={np.max(solar_gains):.3f}  "
-            f"gem={np.mean(solar_gains):.3f} K/uur"
+            f"[Optimizer] Solar gain: max={np.max(solar_gains):.3f}, gem={np.mean(solar_gains):.3f} kW "
+            f"Shutter: {shutter_room:.1f}%"
         )
 
         # Oplossen
@@ -991,8 +999,8 @@ class Optimizer:
         solver_times = np.concatenate(([0.0], np.cumsum(self.mpc.dt_steps)))
         quarter_times = np.arange(total_quarters) * 0.25
 
-        t_air_q = np.interp(quarter_times, solver_times[:-1], t_r[:-1])
-        t_dhw_q = np.interp(quarter_times, solver_times[:-1], t_d[:-1])
+        t_air_q = np.interp(quarter_times, solver_times, t_r)
+        t_dhw_q = np.interp(quarter_times, solver_times, t_d)
         t_out_q = np.interp(quarter_times, solver_times[:-1], self.mpc.P_temp_out.value)
 
         # 4. Shutters (herhalen)

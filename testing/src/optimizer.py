@@ -825,8 +825,7 @@ class Optimizer:
         solar_gains = self.res_ufh.predict(context.forecast_df, shutters)
 
         logger.info(
-            f"[Optimizer] Solar gain: max={np.max(solar_gains):.3f} "
-            f"gem={np.mean(solar_gains):.3f} kW "
+            f"[Optimizer] Solar gain: max={np.max(solar_gains):.3f}, gem={np.mean(solar_gains):.3f} kW "
             f"Shutter: {shutter_room:.1f}%"
         )
 
