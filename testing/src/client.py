@@ -45,9 +45,6 @@ class HAClient:
     def get_return_temp(self):
         return self.data.get("return_temp", 0.0)
 
-    def get_outside_temp(self):
-        return self.data.get("outside_temp", 0.0)
-
     def get_shutter_room(self):
         return int(self.data.get("shutter_room", 100))
 

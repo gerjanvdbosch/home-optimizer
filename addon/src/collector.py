@@ -128,17 +128,14 @@ class Collector:
         raw_dhw_top = self.client.get_dhw_top()
         raw_dhw_bottom = self.client.get_dhw_bottom()
         raw_mode = self.client.get_hvac_mode()
-        raw_outside = self.client.get_outside_temp()
 
         self.context.room_temp = raw_room
-        self.context.outside_temp = raw_outside
         self.context.dhw_top = raw_dhw_top
         self.context.dhw_bottom = raw_dhw_bottom
         self.context.hvac_mode = raw_mode
         self.context.shutter_room = self.client.get_shutter_room()
 
         self._update_slot(self.room_slots, raw_room)
-        self._update_slot(self.outside_slots, raw_outside)
         self._update_slot(self.dhw_top_slots, raw_dhw_top)
         self._update_slot(self.dhw_bottom_slots, raw_dhw_bottom)
         self._update_slot(self.mode_slots, raw_mode.value)
@@ -190,7 +187,6 @@ class Collector:
 
             avg_pv = self._mean(self.pv_slots)
             avg_room = self._mean(self.room_slots)
-            avg_outside = self._mean(self.outside_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
 
@@ -221,14 +217,13 @@ class Collector:
                 return_temp=avg_return,
                 hvac_mode=hvac_mode,
                 shutter_room=shutter_room,
-                outside_temp=avg_outside,
             )
 
             self.current_slot_start = slot_start
 
             logger.info(
                 f"[Collector] Mode={hvac_mode} PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW "
-                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C Outside={self.context.outside_temp:.2f}°C "
+                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C "
                 f"Target={avg_setpoint:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C "
                 f"Shutter={shutter_room:.0f}%"
             )
@@ -283,7 +278,6 @@ class Collector:
         self.pv_slots = []
         self.grid_slots = []
         self.room_slots = []
-        self.outside_slots = []
         self.dhw_top_slots = []
         self.dhw_bottom_slots = []
         self.mode_slots = []

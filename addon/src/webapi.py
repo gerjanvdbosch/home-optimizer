@@ -298,16 +298,6 @@ def index(
                     "value": f"{context.load_bias:.2f}",
                     "unit": "kW",
                 },
-                {
-                    "label": "Buiten Temp",
-                    "value": f"{getattr(context, 'outside_temp', 0.0):.1f}",
-                    "unit": "°C",
-                },
-                {
-                    "label": "Buiten Bias",
-                    "value": f"{getattr(context, 'temp_bias', 0.0):+.2f}",
-                    "unit": "°C",
-                },
                 # {
                 #     "label": "Doel Aanvoer",
                 #     "value": f"{result.get('target_supply_temp', 0):.1f}",

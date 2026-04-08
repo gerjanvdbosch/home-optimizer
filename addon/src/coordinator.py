@@ -13,7 +13,6 @@ from client import HAClient
 from database import Database
 from solar import SolarForecaster
 from load import LoadForecaster
-from weather import TemperatureForecaster
 from optimizer import Optimizer
 from webapi import api
 
@@ -32,7 +31,6 @@ class Coordinator:
     ):
         self.solar = SolarForecaster(config, context, database)
         self.load = LoadForecaster(config, context, database)
-        self.temp = TemperatureForecaster(config, context, database)
         self.optimizer = Optimizer(config, database)
         self.context = context
         self.config = config
@@ -59,7 +57,6 @@ class Coordinator:
             df = self.context.forecast_df.copy()
             df = self.solar.update_nowcast(df)
             df = self.load.update_nowcast(df)
-            df = self.temp.update_nowcast(df)
 
             self.context.forecast_df = df
 
@@ -69,7 +66,6 @@ class Coordinator:
         df = self.context.forecast_df_raw.copy()
         df = self.solar.update_forecast(df)
         df = self.load.update_forecast(df)
-        df = self.temp.update_forecast(df)
 
         self.context.forecast_df = df
 
@@ -149,7 +145,6 @@ class Coordinator:
     def train(self):
         self.solar.train()
         self.load.train()
-        self.temp.train()
         self.optimizer.train()
 
 

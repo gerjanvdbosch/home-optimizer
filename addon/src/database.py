@@ -46,7 +46,6 @@ class Measurement(Base):
     target_setpoint = Column(Float)
     supply_temp = Column(Float)
     return_temp = Column(Float)
-    outside_temp = Column(Float)
     hvac_mode = Column(Integer)
 
     shutter_room = Column(Integer)
