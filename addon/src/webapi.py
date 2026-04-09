@@ -25,6 +25,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def index(
     request: Request,
     train: str = None,
+    optimize: str = None,
     view: str = "hour",
     date_str: str = None,
 ):
@@ -73,6 +74,8 @@ def index(
     dhw_plot = _get_dhw_consumption_plot(request, target_date)
     solar_plot = _get_solar_plot(request, target_date)
     base_load_plot = _get_base_load_plot(request, target_date)
+    price_plot = _get_price_plot(request, target_date)
+
     view_mode = "15min" if view == "15min" else "hour"
     measurements_data = _get_energy_table(request, view_mode, target_date)
 
@@ -320,6 +323,12 @@ def index(
         except Exception as e:
             logger.error(f"Fout bij trainen van modellen: {e}")
 
+    if optimize == "1":
+        try:
+            coordinator.optimize()
+        except Exception as e:
+            logger.error(f"Fout bij handmatig optimaliseren: {e}")
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -331,6 +340,7 @@ def index(
             "dhw_plot": dhw_plot,
             "solar_plot": solar_plot,
             "base_load_plot": base_load_plot,
+            "price_plot": price_plot,
             "details": details,
             "measurements": measurements_data,
             "plan": plan_display,
@@ -1607,6 +1617,90 @@ def _get_base_load_plot(request, target_date) -> str:
         ),
         bargap=0.5,
         bargroupgap=0.05,
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+    )
+
+
+def _get_price_plot(request, target_date) -> str:
+    """Grafiek voor Energieprijzen als een rustige trapgrafiek."""
+    coordinator = request.app.state.coordinator
+    context = coordinator.context
+    local_tz = ZoneInfo(tzlocal.get_localzone_name())
+
+    if not hasattr(context, "forecast_df") or context.forecast_df is None:
+        return ""
+
+    df = context.forecast_df.copy()
+
+    # Fallback voor vaste prijzen
+    if "price" not in df.columns:
+        df["price"] = coordinator.config.avg_price
+    if "export_price" not in df.columns:
+        df["export_price"] = coordinator.config.export_price
+
+    df["ts_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+
+    start_of_day = datetime.combine(target_date, datetime.min.time())
+    end_of_day = start_of_day + timedelta(days=1)
+    df = df[(df["ts_local"] >= start_of_day) & (df["ts_local"] < end_of_day)]
+
+    if df.empty:
+        return ""
+
+    fig = go.Figure()
+
+    # Import Prijs
+    fig.add_trace(
+        go.Scatter(
+            x=df["ts_local"],
+            y=df["price"],
+            name="Import",
+            mode="lines",
+            line=dict(
+                color="#448aff", width=2, shape="hv"
+            ),  # 'hv' maakt het trappetjes
+            hovertemplate="%{y:.3f} €/kWh<extra></extra>",
+        )
+    )
+
+    # Export Prijs
+    # fig.add_trace(
+    #     go.Scatter(
+    #         x=df["ts_local"],
+    #         y=df["export_price"],
+    #         name="Export",
+    #         mode="lines",
+    #         line=dict(color="rgba(68, 138, 255, 0.5)", width=1.5, shape="hv", dash="dot"),
+    #         hovertemplate="%{y:.3f} €/kWh<extra></extra>",
+    #     )
+    # )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        height=320,
+        margin=dict(l=40, r=20, t=30, b=40),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            tickformat="%H:%M",
+            dtick=7200000,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.05)",
+            fixedrange=True,
+        ),
+        yaxis=dict(
+            title="€ / kWh",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.05)",
+            zeroline=True,
+            zerolinecolor="rgba(255,255,255,0.2)",
+            fixedrange=True,
+        ),
     )
 
     return pio.to_html(

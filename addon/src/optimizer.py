@@ -409,7 +409,7 @@ class ThermalMPC:
             t_mass_init = float(
                 np.clip(
                     t_air_meas + self.ident.R_im * q_mass,
-                    t_air_meas - 1.0,
+                    t_air_meas - 3.0,
                     t_air_meas + 5.0,
                 )
             )
@@ -569,6 +569,7 @@ class ThermalMPC:
             # Bereken de fouten op de vorige voorspelling
             error_mass = t_mass_init - self._prev_t_mass[1]
             error_dhw = t_avg_measured - self._prev_t_dhw[1]
+            error_air = t_air_meas - self._prev_t_air[1]
 
             # Schuif de horizon door en pas de fout-correctie toe
             guessed_t_mass = (
@@ -580,7 +581,7 @@ class ThermalMPC:
 
             logger.info(
                 f"[MPC] Error-Corrected Horizon. "
-                f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K | "
+                f"Afwijking: Mass {error_mass:+.2f}K, Air {error_air:+.2f}K, DHW {error_dhw:+.2f}K | "
                 f"Stratification Gap: {strat_gap_measured:.1f}K"
             )
         else:
@@ -744,8 +745,6 @@ class ThermalMPC:
             self._prev_t_mass = self.t_mass.value[:-1].copy()
             self._prev_t_dhw = self.t_dhw.value[:-1].copy()
             self._prev_obj = self.problem.value
-            self.ekf.x[0] = float(self.t_air.value[1])
-            self.ekf.x[1] = float(self.t_mass.value[1])
 
         if self.t_air.value is not None:
             ufh_steps = [t for t in range(T) if self.ufh_on.value[t] > 0.5]
