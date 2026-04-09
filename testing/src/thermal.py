@@ -73,15 +73,15 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
         )
     ]
 
-    # 2. Herbereken wp_actual voor 100% consistentie
-    df["wp_actual"] = df["wp_ufh"] + df["wp_dhw"] + df["wp_leg"]
-
     # 3. Verwijder ruis (pompjes/standby) PER KOLOM
     # Alles onder 150W is geen compressorwerk. Door dit op 0 te zetten,
     # worden de ratio-berekeningen hieronder veel zuiverder.
     for col in ["wp_ufh", "wp_dhw", "wp_leg"]:
         if col in df.columns:
             df.loc[df[col] < 0.15, col] = 0.0
+
+    # 2. Herbereken wp_actual voor 100% consistentie
+    df["wp_actual"] = df["wp_ufh"] + df["wp_dhw"] + df["wp_leg"]
 
     # 4. Dominantie en Purity (De "Mix" check)
     # We kijken welk aandeel de stroom heeft t.o.v. het totaal.
@@ -97,7 +97,7 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     # 5. VERWIJDEREN: Harde sensor- en systeemfouten
     # A. Negatieve Delta T terwijl de compressor draait (>300W)
     df["delta_t"] = df["supply_temp"] - df["return_temp"]
-    df = df[~((df["wp_actual"] > 0.3) & (df["delta_t"] < 0.0))]
+    df = df[~((df["wp_actual"] > 0.15) & (df["delta_t"] < 0.0))]
 
     # B. Onmogelijke tank-inversie (Top kouder dan bodem)
     if "dhw_top" in df.columns and "dhw_bottom" in df.columns:
@@ -232,7 +232,8 @@ class HPPerformanceMap:
         df = clean_thermal_data(df)
 
         for col in [
-            "wp_actual",
+            "wp_ufh",
+            "wp_dhw",
             "supply_temp",
             "return_temp",
             "room_temp",
@@ -243,15 +244,15 @@ class HPPerformanceMap:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        self._train_mode(df, HvacMode.HEATING.value, "room_temp", "UFH")
-        self._train_mode(df, HvacMode.DHW.value, "dhw_bottom", "DHW")
+        self._train_mode(df, HvacMode.HEATING.value, "room_temp", "UFH", "wp_ufh")
+        self._train_mode(df, HvacMode.DHW.value, "dhw_bottom", "DHW", "wp_dhw")
 
         self.is_fitted = True
         self._save()
         logger.info("[PerfMap] Training compleet.")
 
-    def _train_mode(self, df, mode_val, sink_col, label):
-        base = df[df["hvac_mode"] == mode_val]
+    def _train_mode(self, df, mode_val, sink_col, label, p_el_col):
+        base = df[df["hvac_mode"] == mode_val].copy()
         logger.info(f"[PerfMap] {label}: {len(base)} rijen totaal in modus")
         logger.info(
             f"[PerfMap] {label}: {base['full_quarter'].sum()} full_quarter rijen"
@@ -265,29 +266,15 @@ class HPPerformanceMap:
             f"[PerfMap] {label}: {(base['target_setpoint'] > 0).sum()} met target_setpoint"
         )
 
-        if label == "DHW":
-            mask = (
-                (df["hvac_mode"] == mode_val)
-                & df["wp_actual"].notna()
-                & (df["wp_actual"] > 0.5)  # actief vermogen
-                & df["delta_t"].notna()
-                & (df["delta_t"] > 2.0)  # duidelijke delta_t
-                & df[sink_col].notna()
-                & df["temp"].notna()
-                # geen full_quarter eis
-            )
-        else:
-            mask = (
-                (df["hvac_mode"] == mode_val)
-                & df["full_quarter"]
-                & df["wp_actual"].notna()
-                & (df["wp_actual"] > 0.5)
-                & df["delta_t"].notna()
-                & (df["delta_t"] > 1.0)
-                & df[sink_col].notna()
-                & (df["temp"] < 15.0)
-                & df["temp"].notna()
-            )
+        mask = (
+            df["steady_state"]
+            & df[p_el_col].notna()
+            & (df[p_el_col] > 0.15)
+            & df["delta_t"].notna()
+            & (df["delta_t"] > 1.0)
+            & df[sink_col].notna()
+            & df["temp"].notna()
+        )
 
         d = df[mask].copy()
         d["t_out"] = d["temp"]
@@ -304,7 +291,7 @@ class HPPerformanceMap:
 
         # Leer ook de typische setpoint per modus
         wp_setpoint_median = float(d["target_setpoint"].median())
-        if label == "UFH":
+        if mode_val == HvacMode.HEATING.value:
             self._setpoint_ufh = float(np.clip(wp_setpoint_median, 20.0, 35.0))
         else:
             self._setpoint_dhw = float(np.clip(wp_setpoint_median, 45.0, 65.0))
@@ -313,7 +300,7 @@ class HPPerformanceMap:
             f"[PerfMap] {label}: target_setpoint mediaan={wp_setpoint_median:.1f}°C"
         )
         logger.info(
-            f"[PerfMap] {label}: wp_actual mediaan={d['wp_actual'].median():.3f} kW"
+            f"[PerfMap] {label}: wp_actual mediaan={d[p_el_col].median():.3f} kW"
         )
         logger.info(f"[PerfMap] {label}: delta_t mediaan={d['delta_t'].median():.3f} K")
         logger.info(
@@ -329,7 +316,7 @@ class HPPerformanceMap:
         factor_physical = FACTOR_UFH if label == "UFH" else FACTOR_DHW
 
         d["p_th"] = d["delta_t"] * factor_physical
-        d["cop"] = (d["p_th"] / d["wp_actual"]).replace([np.inf, -np.inf], np.nan)
+        d["cop"] = (d["p_th"] / d[p_el_col]).replace([np.inf, -np.inf], np.nan)
 
         logger.info(f"[PerfMap] {label}: p_th mediaan={d['p_th'].median():.3f} kW")
         logger.info(
@@ -341,10 +328,10 @@ class HPPerformanceMap:
             return
 
         # Operationele grenzen leren
-        pel_min = float(d["wp_actual"].quantile(0.05))
-        pel_max = float(d["wp_actual"].quantile(0.95))
+        pel_min = float(d[p_el_col].quantile(0.05))
+        pel_max = float(d[p_el_col].quantile(0.95))
 
-        if label == "UFH":
+        if mode_val == HvacMode.HEATING.value:
             self._pel_min_ufh = float(np.clip(pel_min, 0.1, 1.0))
             self._pel_max_ufh = float(np.clip(pel_max, 1.0, 4.0))
         else:
@@ -353,11 +340,10 @@ class HPPerformanceMap:
 
         t_out = d["t_out"].values.astype(float)
         t_sink = d["t_sink"].values.astype(float)
-        cop = d["cop"].dropna()
-        mask = cop.notna()
+        mask = d["cop"].notna()
         t_out_c = t_out[mask]
         t_sink_c = t_sink[mask]
-        cop_c = cop.values[mask] if hasattr(cop, "values") else cop[mask]
+        cop_c = d["cop"].values[mask]
 
         # ── 1. Carnot-fit COP ─────────────────────────────────────────────
         # COP = eta * (t_sink + 273) / (t_sink - t_out + dT_lift)
@@ -373,7 +359,7 @@ class HPPerformanceMap:
             return eta * (t_s + 273.15) / denom
 
         try:
-            if label == "UFH":
+            if mode_val == HvacMode.HEATING.value:
                 start_values = [
                     0.45,
                     15.0,
@@ -420,7 +406,7 @@ class HPPerformanceMap:
 
         # Fallback: typische waarden voor lucht-water WP
         if popt is None:
-            if label == "UFH":
+            if mode_val == HvacMode.HEATING.value:
                 popt = (0.45, 8.0)
             else:
                 popt = (0.40, 12.0)
@@ -428,7 +414,7 @@ class HPPerformanceMap:
                 f"[PerfMap] {label} Carnot fallback: η={popt[0]} dT_lift={popt[1]}"
             )
 
-        if label == "UFH":
+        if mode_val == HvacMode.HEATING.value:
             self._carnot_ufh = tuple(popt)
         else:
             self._carnot_dhw = tuple(popt)
@@ -439,7 +425,7 @@ class HPPerformanceMap:
         # c <= 0: minder stroom bij hogere buitentemp (vrijwel geen lift nodig)
         # Data-gedreven maar fysisch begrensd via bounds
 
-        y_pel = d["wp_actual"].values.astype(float)
+        y_pel = d[p_el_col].values.astype(float)
 
         def pel_fn(X, a, b, c):
             t_o, t_s = X
@@ -464,12 +450,12 @@ class HPPerformanceMap:
             )
         except Exception as e:
             logger.warning(f"[PerfMap] {label} P_el fit mislukt: {e}, fallback")
-            if label == "UFH":
+            if mode_val == HvacMode.HEATING.value:
                 popt_pel = (0.8, 0.005, -0.01)
             else:
                 popt_pel = (1.2, 0.008, -0.01)
 
-        if label == "UFH":
+        if mode_val == HvacMode.HEATING.value:
             self._pel_ufh = tuple(popt_pel)
         else:
             self._pel_dhw = tuple(popt_pel)
@@ -722,7 +708,7 @@ class SystemIdentificator:
     def _fit_k_emit(self, df_proc: pd.DataFrame):
         mask = (
             (df_proc["hvac_mode"] == HvacMode.HEATING.value)
-            & df_proc["full_quarter"]
+            & df_proc["pure_ufh"]
             & (df_proc["wp_output"] > 0.5)
             & (df_proc["supply_temp"] < 30)
             & (df_proc["supply_temp"] > df_proc["room_temp"] + 1)
@@ -740,7 +726,7 @@ class SystemIdentificator:
     def _fit_k_tank(self, df_proc: pd.DataFrame):
         mask = (
             (df_proc["hvac_mode"] == HvacMode.DHW.value)
-            & df_proc["full_quarter"]
+            & df_proc["pure_dhw"]
             & (df_proc["wp_output"] > 0.8)
             & (df_proc["supply_temp"] > df_proc["dhw_bottom"] + 1)
             & df_proc["return_temp"].notna()
@@ -908,6 +894,7 @@ class HydraulicPredictor:
         # UFH
         mask_ufh = (
             (df["hvac_mode"] == HvacMode.HEATING.value)
+            & df["steady_state"]
             & (df["p_th_raw"] > 0.5)
             & (df["supply_temp"] > df["room_temp"] + 1.0)
         )
@@ -942,7 +929,7 @@ class HydraulicPredictor:
         # DHW
         mask_dhw = (
             (df["hvac_mode"] == HvacMode.DHW.value)
-            & df["full_quarter"]
+            & df["steady_state"]
             & (df["p_th_raw"] > 1.5)
             & (df["delta_t"] > 2.0)
             & (df["supply_temp"] > df["dhw_bottom"] + 3.0)
