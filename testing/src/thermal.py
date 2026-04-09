@@ -31,22 +31,15 @@ FACTOR_DHW = (_FLOW_DHW / 60.0) * _CP_WATER  # ~1.326 kW/K
 
 def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Verwijdert fysisch corrupte rijen. Gooit alleen weg wat aantoonbaar
-    fout is — geen schattingen, geen imputatie.
+    Verwijdert fysiek corrupte rijen en labelt kwalitatieve data voor training.
 
-    Regels:
-      1.  Onbekende HVAC-modes worden gefilterd.
-      2.  wp_actual < 0 is fysisch onmogelijk.
-      3.  Negatieve delta_t bij actieve modus is fysisch onmogelijk.
-      4.  DHW-opstarttransienten: supply kouder dan tank.
-      5.  UFH-transienten na DHW: supply > 30 C in UFH-mode.
-      6.  dhw_top < dhw_bottom: inversie wijst op sensor- of logfout.
-      7.  wp_actual < 0.15 kW terwijl HVAC actief: compressor draait niet.
-      8.  Deelkwartieren onder 70% van de modusspecifieke mediaan.
-      9.  Annotatie full_quarter: vorige en volgende rij hebben zelfde mode.
+    Strategie:
+    - Verwijder (drop): Sensorfouten, onmogelijke inversies, puur sluipverbruik.
+    - Label (vlag): Mix-metingen en transienten (niet verwijderen t.b.v. RC-tijdlijn).
     """
     df = df.copy()
 
+    # 0. Kolomnamen standaardiseren (match met Database)
     numeric_cols = [
         "supply_temp",
         "return_temp",
@@ -56,39 +49,57 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
         "wp_actual",
         "hvac_mode",
         "pv_actual",
+        "grid_import",
+        "grid_export",
+        "wp_ufh",
+        "wp_dhw",
+        "wp_leg",
     ]
+
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # 1. Onbekende modes
+    # 1. Geldige modi
     df = df[
         df["hvac_mode"].isin(
             [
                 HvacMode.OFF.value,
                 HvacMode.HEATING.value,
                 HvacMode.DHW.value,
+                HvacMode.COOLING.value,
+                HvacMode.LEGIONELLA_PREVENTION.value,
             ]
         )
     ]
 
-    # 2. Negatief elektrisch vermogen
-    df = df[df["wp_actual"].isna() | (df["wp_actual"] >= 0.0)]
+    # 2. Herbereken wp_actual voor 100% consistentie
+    df["wp_actual"] = df["wp_ufh"] + df["wp_dhw"] + df["wp_leg"]
 
-    # 3. Delta_t berekenen; negatieve delta_t bij actieve modus verwijderen
+    # 3. Verwijder ruis (pompjes/standby) PER KOLOM
+    # Alles onder 150W is geen compressorwerk. Door dit op 0 te zetten,
+    # worden de ratio-berekeningen hieronder veel zuiverder.
+    for col in ["wp_ufh", "wp_dhw", "wp_leg"]:
+        if col in df.columns:
+            df.loc[df[col] < 0.15, col] = 0.0
+
+    # 4. Dominantie en Purity (De "Mix" check)
+    # We kijken welk aandeel de stroom heeft t.o.v. het totaal.
+    # Dit lost het probleem op van de "7 min DHW / 8 min UFH" kwartieren.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        df["ufh_ratio"] = df["wp_ufh"] / df["wp_actual"]
+        df["dhw_ratio"] = df["wp_dhw"] / df["wp_actual"]
+
+    # Een meting is 'Pure' als >90% van de stroom naar één doel ging.
+    df["pure_ufh"] = (df["ufh_ratio"] > 0.9) & (df["wp_ufh"] > 0.4)
+    df["pure_dhw"] = (df["dhw_ratio"] > 0.9) & (df["wp_dhw"] > 0.6)
+
+    # 5. VERWIJDEREN: Harde sensor- en systeemfouten
+    # A. Negatieve Delta T terwijl de compressor draait (>300W)
     df["delta_t"] = df["supply_temp"] - df["return_temp"]
-    active = df["hvac_mode"].isin([HvacMode.HEATING.value, HvacMode.DHW.value])
-    df = df[~(active & df["delta_t"].notna() & (df["delta_t"] < 0.0))]
+    df = df[~((df["wp_actual"] > 0.3) & (df["delta_t"] < 0.0))]
 
-    # 4. DHW-opstarttransienten
-    mask_dhw = df["hvac_mode"] == HvacMode.DHW.value
-    df = df[~(mask_dhw & (df["supply_temp"] < df["dhw_bottom"] + 1.0))]
-
-    # 5. UFH-transienten na DHW-run
-    mask_ufh = df["hvac_mode"] == HvacMode.HEATING.value
-    df = df[~(mask_ufh & (df["supply_temp"] > 30.0))]
-
-    # 6. Onmogelijke tank-inversie
+    # B. Onmogelijke tank-inversie (Top kouder dan bodem)
     if "dhw_top" in df.columns and "dhw_bottom" in df.columns:
         corrupt_dhw = (
             df["dhw_top"].notna()
@@ -97,19 +108,37 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
         )
         df = df[~corrupt_dhw]
 
-    # 7. Sluipverbruik: actief maar compressor draait niet echt
-    active = df["hvac_mode"].isin([HvacMode.HEATING.value, HvacMode.DHW.value])
-    df = df[~(active & df["wp_actual"].notna() & (df["wp_actual"] < 0.15))]
+    # C. Sluipverbruik / Standby filter
+    # Als de modus actief is, maar het TOTAAL verbruik is < 150W,
+    # dan draait alleen een circulatiepompje. Onbruikbaar voor elke training.
+    standby = (df["hvac_mode"] != HvacMode.OFF.value) & (df["wp_actual"] < 0.15)
+    df.loc[standby, ["wp_actual", "wp_ufh", "wp_dhw", "wp_leg"]] = 0.0
 
-    mask_dhw = df["hvac_mode"] == HvacMode.DHW.value
-    df = df[~(mask_dhw & (df["wp_actual"] < 0.5))]
+    # 6. LABELEN: Transienten en Steady State
+    # Deze rijen worden NIET verwijderd (belangrijk voor RC-tijdlijn),
+    # maar we labelen ze zodat de Performance Map ze kan negeren.
 
-    # 9. Annotatie: volledig kwartier (vorige en volgende rij zelfde mode)
+    # DHW opstart: supply is nog kouder dan de tank
+    mask_dhw_start = (df["hvac_mode"] == HvacMode.DHW.value) & (
+        df["supply_temp"] <= df["dhw_bottom"]
+    )
+
+    # UFH na DHW: supply is nog veel te heet van de boiler-run
+    mask_ufh_after_dhw = (df["hvac_mode"] == HvacMode.HEATING.value) & (
+        df["supply_temp"] > 30.0
+    )
+
+    # De heilige graal voor de Performance Map:
+    df["steady_state"] = (
+        (df["pure_ufh"] | df["pure_dhw"]) & ~mask_dhw_start & ~mask_ufh_after_dhw
+    )
+
+    # 7. Annotatie: volledig kwartier (voor hydraulische traagheid)
     df["full_quarter"] = (df["hvac_mode"] == df["hvac_mode"].shift(1)) & (
         df["hvac_mode"] == df["hvac_mode"].shift(-1)
     )
 
-    # 10. Base load
+    # 8. Base load (voor RC-model/sluipverbruik in huis)
     df["base_load"] = (
         df["grid_import"].fillna(0)
         - df["grid_export"].fillna(0)

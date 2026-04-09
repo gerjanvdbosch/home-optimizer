@@ -38,7 +38,10 @@ class Measurement(Base):
     grid_import = Column(Float)
     grid_export = Column(Float)
     pv_actual = Column(Float)
-    wp_actual = Column(Float)
+
+    wp_ufh = Column(Float)
+    wp_dhw = Column(Float)
+    wp_leg = Column(Float)
 
     room_temp = Column(Float)
     dhw_top = Column(Float)
@@ -238,6 +241,10 @@ class Database:
                 - df_combined["grid_export"]
                 + df_combined["pv_actual"]
             ).clip(lower=0.0)
+
+            df_meas["wp_actual"] = (
+                df_meas["wp_ufh"] + df_meas["wp_dhw"] + df_meas["wp_leg"]
+            )
 
             return df_combined
 

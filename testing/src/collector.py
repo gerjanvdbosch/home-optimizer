@@ -103,7 +103,9 @@ class Collector:
 
         self._update_slot(self.pv_slots, raw_pv)
         self._update_slot(self.grid_slots, raw_grid)
-        self._update_slot(self.wp_slots, raw_wp)
+
+        if self.context.hvac_mode != HvacMode.OFF:
+            self._update_slot(self.wp_slots[self.context.hvac_mode.value], raw_wp)
 
         # 2. Update de buffers en haal de mediaan op (filtert uitschieters/timing fouten)
         # We slaan de 'stable' waarden ook op in context voor debugging/UI
@@ -189,7 +191,6 @@ class Collector:
             )
 
             avg_pv = self._mean(self.pv_slots)
-            avg_wp = self._mean(self.wp_slots)
             avg_room = self._mean(self.room_slots)
             avg_dhw_top = self._mean(self.dhw_top_slots)
             avg_dhw_bottom = self._mean(self.dhw_bottom_slots)
@@ -202,6 +203,14 @@ class Collector:
                 avg_import = 0.0
                 avg_export = 0.0
 
+            n_samples = len(self.mode_slots)
+            avg_wp_ufh = sum(self.wp_slots.get(HvacMode.HEATING.value, [])) / n_samples
+            avg_wp_dhw = sum(self.wp_slots.get(HvacMode.DHW.value, [])) / n_samples
+            avg_wp_leg = (
+                sum(self.wp_slots.get(HvacMode.LEGIONELLA_PREVENTION.value, []))
+                / n_samples
+            )
+
             self._reset_slots()
 
             shutter_room = self.client.get_shutter_room()
@@ -212,7 +221,9 @@ class Collector:
                 grid_import=avg_import,
                 grid_export=avg_export,
                 pv_actual=avg_pv,
-                wp_actual=avg_wp,
+                wp_ufh=avg_wp_ufh,
+                wp_dhw=avg_wp_dhw,
+                wp_leg=avg_wp_leg,
                 room_temp=avg_room,
                 dhw_top=avg_dhw_top,
                 dhw_bottom=avg_dhw_bottom,
@@ -226,9 +237,10 @@ class Collector:
             self.current_slot_start = slot_start
 
             logger.info(
-                f"[Collector] Mode={hvac_mode} PV={avg_pv:.2f}kW WP={avg_wp:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW "
-                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C "
-                f"Target={avg_setpoint:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C "
+                f"[Collector] Mode={hvac_mode} PV={avg_pv:.2f}kW Grid={avg_import:.2f}/{avg_export:.2f}kW | "
+                f"UFH={avg_wp_ufh:.2f}kW DHW={avg_wp_dhw:.2f}kW LEG={avg_wp_leg:.2f}kW | "
+                f"Room={avg_room:.2f}°C DHW={avg_dhw_top:.2f}/{avg_dhw_bottom:.2f}°C | "
+                f"Target={avg_setpoint:.2f}°C Supply={avg_supply:.2f}°C Return={avg_return:.2f}°C | "
                 f"Shutter={shutter_room:.0f}%"
             )
 
@@ -286,7 +298,6 @@ class Collector:
 
     def _reset_slots(self):
         self.pv_slots = []
-        self.wp_slots = []
         self.grid_slots = []
         self.room_slots = []
         self.dhw_top_slots = []
@@ -299,6 +310,7 @@ class Collector:
             if m not in (HvacMode.OFF, HvacMode.FROST_PROTECTION)
         ]
 
+        self.wp_slots = {m: [] for m in active_modes}
         self.setpoint_slots = {m: [] for m in active_modes}
         self.supply_slots = {m: [] for m in active_modes}
         self.return_slots = {m: [] for m in active_modes}
