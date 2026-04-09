@@ -25,6 +25,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def index(
     request: Request,
     train: str = None,
+    optimize: str = None,
     view: str = "hour",
     date_str: str = None,
 ):
@@ -319,6 +320,12 @@ def index(
             coordinator.train()
         except Exception as e:
             logger.error(f"Fout bij trainen van modellen: {e}")
+
+    if optimize == "1":
+        try:
+            coordinator.optimize()
+        except Exception as e:
+            logger.error(f"Fout bij handmatig optimaliseren: {e}")
 
     return templates.TemplateResponse(
         "index.html",
