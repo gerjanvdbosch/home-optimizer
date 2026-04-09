@@ -569,7 +569,6 @@ class ThermalMPC:
             # Bereken de fouten op de vorige voorspelling
             error_mass = t_mass_init - self._prev_t_mass[1]
             error_dhw = t_avg_measured - self._prev_t_dhw[1]
-            error_air = t_air_meas - self._prev_t_air[1]
 
             # Schuif de horizon door en pas de fout-correctie toe
             guessed_t_mass = (
@@ -581,7 +580,7 @@ class ThermalMPC:
 
             logger.info(
                 f"[MPC] Error-Corrected Horizon. "
-                f"Afwijking: Mass {error_mass:+.2f}K, Air {error_air:+.2f}K, DHW {error_dhw:+.2f}K | "
+                f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K | "
                 f"Stratification Gap: {strat_gap_measured:.1f}K"
             )
         else:
