@@ -647,7 +647,6 @@ class SystemIdentificator:
                             f"[SysID] R={self.R:.2f} C={self.C:.2f} (gesplitst)"
                         )
                         return
-            tau_inv = None
 
         # Multivariate fallback
         df_m = df_1h.dropna(subset=["dT_next", "wp_output", "delta_T_env"])
@@ -707,7 +706,7 @@ class SystemIdentificator:
 
     def _fit_k_emit(self, df_proc: pd.DataFrame):
         mask = (
-            (df_proc["hvac_mode"] == HvacMode.HEATING.value)
+            (df_proc["wp_ufh"] > 0.15)
             & df_proc["pure_ufh"]
             & (df_proc["wp_output"] > 0.5)
             & (df_proc["supply_temp"] < 30)
@@ -725,7 +724,7 @@ class SystemIdentificator:
 
     def _fit_k_tank(self, df_proc: pd.DataFrame):
         mask = (
-            (df_proc["hvac_mode"] == HvacMode.DHW.value)
+            (df_proc["wp_dhw"] > 0.15)
             & df_proc["pure_dhw"]
             & (df_proc["wp_output"] > 0.8)
             & (df_proc["supply_temp"] > df_proc["dhw_bottom"] + 1)
@@ -748,7 +747,7 @@ class SystemIdentificator:
         df_loss["dT_tank"] = df_loss["t_tank"].diff()
 
         mask = (
-            (df_loss["hvac_mode"] != HvacMode.DHW.value)
+            (df_loss["wp_dhw"] == 0)
             & (df_loss["wp_output"] < 0.1)
             & (df_loss["dT_tank"] < 0)
             & (df_loss["dt_hours"] > 0.1)
@@ -893,7 +892,7 @@ class HydraulicPredictor:
 
         # UFH
         mask_ufh = (
-            (df["hvac_mode"] == HvacMode.HEATING.value)
+            (df["wp_ufh"] > 0.15)
             & df["steady_state"]
             & (df["p_th_raw"] > 0.5)
             & (df["supply_temp"] > df["room_temp"] + 1.0)
@@ -928,7 +927,7 @@ class HydraulicPredictor:
 
         # DHW
         mask_dhw = (
-            (df["hvac_mode"] == HvacMode.DHW.value)
+            (df["wp_dhw"] > 0.15)
             & df["steady_state"]
             & (df["p_th_raw"] > 1.5)
             & (df["delta_t"] > 2.0)
@@ -1073,7 +1072,7 @@ class UfhResidualPredictor:
             ),
         )
 
-        is_heating = df_proc["hvac_mode"] == HvacMode.HEATING.value
+        is_heating = df_proc["pure_ufh"] & (df_proc["wp_ufh"] > 0.15)
         just_stopped = is_heating.shift(1, fill_value=False) & ~is_heating
         just_started = ~is_heating.shift(1, fill_value=True) & is_heating
 
@@ -1177,7 +1176,7 @@ class DhwResidualPredictor:
         df["dhw_diff_avg"] = df["dhw_avg"].diff()
 
         # Markeer post-DHW stratificatieperiode
-        is_dhw = df["hvac_mode"] == HvacMode.DHW.value
+        is_dhw = df["pure_dhw"] & (df["wp_dhw"] > 0.15)
         just_stopped_dhw = is_dhw.shift(1, fill_value=False) & ~is_dhw
         df["post_dhw_stratification"] = (
             just_stopped_dhw.rolling(window=4, min_periods=1)
@@ -1187,7 +1186,7 @@ class DhwResidualPredictor:
         )
 
         mask_shower = (
-            (df["hvac_mode"] != HvacMode.DHW.value)
+            (df["wp_dhw"] == 0)
             & (df["dhw_diff_top"] < -0.5)
             & (df["dhw_diff_avg"] < 0.0)
             & ~df["post_dhw_stratification"]

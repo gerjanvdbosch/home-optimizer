@@ -118,10 +118,11 @@ class LoadModel:
         Wordt eenmalig bij training berekend en opgeslagen naast het model.
         """
         df = history_df.copy()
+        df["base_load"] = (df["load_actual"] - df["wp_actual"].fillna(0)).clip(lower=0.05)
         df["_hour"] = df["timestamp"].dt.hour
         df["_dow"] = df["timestamp"].dt.dayofweek
         profile = (
-            df.groupby(["_dow", "_hour"])["load_actual"]
+            df.groupby(["_dow", "_hour"])["base_load"]
             .agg(profile_mean="mean", profile_std="std")
             .reset_index()
             .rename(columns={"_dow": "dow", "_hour": "hour"})
@@ -276,9 +277,13 @@ class LoadForecaster:
                 lag_lookup[lag_name] = pd.Series(dtype=float)
             return lag_lookup
 
+        df_history["base_load"] = (
+            df_history["load_actual"] - df_history["wp_actual"].fillna(0)
+        ).clip(lower=0.05)
+
         history_sorted = (
-            df_history[["timestamp", "load_actual"]]
-            .dropna(subset=["load_actual"])
+            df_history[["timestamp", "base_load"]]
+            .dropna(subset=["base_load"])
             .sort_values("timestamp")
         )
 
@@ -294,11 +299,11 @@ class LoadForecaster:
                 lookup_df,
                 history_sorted,
                 on="timestamp",
-                tolerance=pd.Timedelta(minutes=10),
+                tolerance=pd.Timedelta(minutes=15),
                 direction="nearest",
             )
 
-            series = merged.set_index("forecast_ts")["load_actual"]
+            series = merged.set_index("forecast_ts")["base_load"]
             lag_lookup[lag_name] = series
 
         return lag_lookup

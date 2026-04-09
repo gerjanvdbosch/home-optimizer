@@ -227,6 +227,12 @@ class Database:
 
             df_meas["dhw_temp"] = (df_meas["dhw_top"] + df_meas["dhw_bottom"]) / 2
 
+            df_meas["wp_actual"] = (
+                df_meas["wp_ufh"].fillna(0) +
+                df_meas["wp_dhw"].fillna(0) +
+                df_meas["wp_leg"].fillna(0)
+            )
+
             # 3. Merge (Inner Join)
             # We willen alleen rijen waar we zowel de meting als het weer van hebben
             df_combined = pd.merge(
@@ -241,10 +247,6 @@ class Database:
                 - df_combined["grid_export"]
                 + df_combined["pv_actual"]
             ).clip(lower=0.0)
-
-            df_meas["wp_actual"] = (
-                df_meas["wp_ufh"] + df_meas["wp_dhw"] + df_meas["wp_leg"]
-            )
 
             return df_combined
 
