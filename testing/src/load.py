@@ -208,7 +208,7 @@ class LoadModel:
 
         self.model = HistGradientBoostingRegressor(
             loss="quantile",
-            quantile=0.9,
+            quantile=0.75,
             learning_rate=0.05,
             max_iter=500,
             max_leaf_nodes=31,
