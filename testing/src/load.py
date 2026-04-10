@@ -184,24 +184,23 @@ class LoadModel:
 
     def train(self, df_history: pd.DataFrame):
         df_train = df_history.copy()
-        df_train = df_train.dropna(subset=["pv_actual", "wp_actual"])
+        df_train = df_train.dropna(subset=["wp_actual"])
 
         if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
             return
 
         # Base Load berekening
-        df_train["target_load"] = df_train["load_actual"] - df_train["wp_actual"]
-        df_train["target_load"] = df_train["target_load"].clip(lower=0.05)
+        df_train["base_load"] = (df_train["load_actual"] - df_train["wp_actual"].fillna(0)).clip(lower=0.05)
 
-        df_train = df_train.dropna(subset=["target_load"]).reset_index(drop=True)
+        df_train = df_train.dropna(subset=["base_load"]).reset_index(drop=True)
 
         # Profiel bouwen uit volledige history en opslaan in geheugen + op disk
         self.profile = self._build_profile(df_history)
 
         # Lags direct uit de traindata zelf berekenen (geen aparte DB-call nodig)
         lag_lookup = {}
-        load_series = df_history.set_index("timestamp")["load_actual"]
+        load_series = df_train.set_index("timestamp")["base_load"]
         for lag_name, delta in LAG_DEFINITIONS.items():
             shifted = load_series.copy()
             shifted.index = shifted.index + delta
@@ -209,7 +208,7 @@ class LoadModel:
 
         self.model = HistGradientBoostingRegressor(
             loss="quantile",
-            quantile=0.75,
+            quantile=0.9,
             learning_rate=0.05,
             max_iter=500,
             max_leaf_nodes=31,
@@ -219,7 +218,7 @@ class LoadModel:
         )
 
         X = self._prepare_features(df_train, lag_lookup=lag_lookup)
-        y = df_train["target_load"]
+        y = df_train["base_load"]
 
         self.model.fit(X, y)
         self.mae = mean_absolute_error(y, self.model.predict(X))

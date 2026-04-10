@@ -9,8 +9,8 @@
   "outside_temp": 2.0,
   "pv_power": 0.76,
   "wp_power": 0.0,
-  "grid_power": 1.83,
-  "shutter_room": 100,
+  "grid_power": 0.12,
+  "shutter_room": 18,
   "solcast": [
     {
       "period_start": "2026-01-14T00:00:00+00:00",

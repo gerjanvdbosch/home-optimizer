@@ -571,15 +571,11 @@ class ThermalMPC:
             error_dhw = t_avg_measured - self._prev_t_dhw[1]
 
             # Schuif de horizon door en pas de fout-correctie toe
-            guessed_t_mass = (
-                np.append(self._prev_t_mass[1:], self._prev_t_mass[-1]) + error_mass
-            )
-            guessed_t_dhw = (
-                np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1]) + error_dhw
-            )
+            guessed_t_mass = np.append(self._prev_t_mass[1:], self._prev_t_mass[-1])
+            guessed_t_dhw = np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1])
 
             logger.info(
-                f"[MPC] Error-Corrected Horizon. "
+                f"[MPC] Receding Horizon geladen (EKF). "
                 f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K | "
                 f"Stratification Gap: {strat_gap_measured:.1f}K"
             )
@@ -601,8 +597,11 @@ class ThermalMPC:
                 # Als de pomp draait, is de tank gemengd (Gap = 0)
                 guessed_t_sink = guessed_t_dhw
             else:
-                # Bij stilstand behouden we de gemeten gelaagdheid (Gap)
-                guessed_t_sink = guessed_t_dhw - strat_gap_measured
+                # Bij stilstand gebruiken we de gemeten gap,
+                # maar we laten deze langzaam 'vergeten' in de toekomst (decay)
+                # zodat de solver niet denkt dat de COP over 10 uur nog steeds laag is.
+                gap_decay = strat_gap_measured * np.exp(-np.arange(T) / 8)  # 2 uur tau
+                guessed_t_sink = guessed_t_dhw - gap_decay
 
             # 1. PWA op huidige schatting
             pwa_data = self.pwa.compute(t_out, guessed_t_mass, guessed_t_sink)

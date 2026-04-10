@@ -38,6 +38,7 @@ class Measurement(Base):
     grid_import = Column(Float)
     grid_export = Column(Float)
     pv_actual = Column(Float)
+    wp_actual = Column(Float)
 
     wp_ufh = Column(Float)
     wp_dhw = Column(Float)
@@ -227,11 +228,11 @@ class Database:
 
             df_meas["dhw_temp"] = (df_meas["dhw_top"] + df_meas["dhw_bottom"]) / 2
 
-            df_meas["wp_actual"] = (
-                df_meas["wp_ufh"].fillna(0) +
-                df_meas["wp_dhw"].fillna(0) +
-                df_meas["wp_leg"].fillna(0)
-            )
+            # df_meas["wp_actual"] = (
+            #     df_meas["wp_ufh"].fillna(0) +
+            #     df_meas["wp_dhw"].fillna(0) +
+            #     df_meas["wp_leg"].fillna(0)
+            # )
 
             # 3. Merge (Inner Join)
             # We willen alleen rijen waar we zowel de meting als het weer van hebben

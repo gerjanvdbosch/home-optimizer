@@ -1039,6 +1039,8 @@ class UfhResidualPredictor:
             "shutter_room",
             "internal_load",
             "wind",
+            "hour_sin",
+            "hour_cos",
             "day_sin",
             "day_cos",
             "doy_sin",
