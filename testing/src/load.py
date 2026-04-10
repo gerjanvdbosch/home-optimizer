@@ -222,7 +222,7 @@ class LoadModel:
 
         self.model.fit(X, y)
         self.mae = mean_absolute_error(y, self.model.predict(X))
-        joblib.dump({"model": self.model, "mae": self.mae}, self.path)
+        joblib.dump({"model": self.model, "mae": self.mae, "profile": self.profile}, self.path)
         self.is_fitted = True
 
         logger.info(
@@ -298,7 +298,7 @@ class LoadForecaster:
                 lookup_df,
                 history_sorted,
                 on="timestamp",
-                tolerance=pd.Timedelta(minutes=15),
+                tolerance=pd.Timedelta(minutes=10),
                 direction="nearest",
             )
 
