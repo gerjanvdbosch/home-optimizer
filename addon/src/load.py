@@ -117,11 +117,12 @@ class LoadModel:
         Berekent gemiddeld verbruiksprofiel per (weekdag, uur) uit de history.
         Wordt eenmalig bij training berekend en opgeslagen naast het model.
         """
-        df = history_df.copy()
+        df = self._clean_data(history_df)
+        df["base_load"] = (df["load_actual"] - df["wp_actual"]).clip(lower=0.05)
         df["_hour"] = df["timestamp"].dt.hour
         df["_dow"] = df["timestamp"].dt.dayofweek
         profile = (
-            df.groupby(["_dow", "_hour"])["load_actual"]
+            df.groupby(["_dow", "_hour"])["base_load"]
             .agg(profile_mean="mean", profile_std="std")
             .reset_index()
             .rename(columns={"_dow": "dow", "_hour": "hour"})
@@ -162,6 +163,14 @@ class LoadModel:
                 df[lag_name] = np.nan
         return df
 
+    def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        wp_cols = ["wp_ufh", "wp_dhw", "wp_leg"]
+        # We checken eerst of de kolommen wel in de dataframe zitten om errors te voorkomen
+        # existing_cols = [c for c in wp_cols if c in df_train.columns]
+        df = df.dropna(subset=wp_cols)
+        return df
+
     def _prepare_features(
         self,
         df: pd.DataFrame,
@@ -182,25 +191,26 @@ class LoadModel:
         return X.apply(pd.to_numeric, errors="coerce")
 
     def train(self, df_history: pd.DataFrame):
-        df_train = df_history.copy()
-        df_train = df_train.dropna(subset=["pv_actual", "wp_actual"])
+        df_train = self._clean_data(df_history)
+        df_train = df_train.dropna(subset=["wp_actual"])
 
         if len(df_train) < 10:
             logger.warning("[Load] Niet genoeg data om model te trainen.")
             return
 
         # Base Load berekening
-        df_train["target_load"] = df_train["load_actual"] - df_train["wp_actual"]
-        df_train["target_load"] = df_train["target_load"].clip(lower=0.05)
+        df_train["base_load"] = (df_train["load_actual"] - df_train["wp_actual"]).clip(
+            lower=0.05
+        )
 
-        df_train = df_train.dropna(subset=["target_load"]).reset_index(drop=True)
+        df_train = df_train.dropna(subset=["base_load"]).reset_index(drop=True)
 
         # Profiel bouwen uit volledige history en opslaan in geheugen + op disk
         self.profile = self._build_profile(df_history)
 
         # Lags direct uit de traindata zelf berekenen (geen aparte DB-call nodig)
         lag_lookup = {}
-        load_series = df_history.set_index("timestamp")["load_actual"]
+        load_series = df_train.set_index("timestamp")["base_load"]
         for lag_name, delta in LAG_DEFINITIONS.items():
             shifted = load_series.copy()
             shifted.index = shifted.index + delta
@@ -218,11 +228,13 @@ class LoadModel:
         )
 
         X = self._prepare_features(df_train, lag_lookup=lag_lookup)
-        y = df_train["target_load"]
+        y = df_train["base_load"]
 
         self.model.fit(X, y)
         self.mae = mean_absolute_error(y, self.model.predict(X))
-        joblib.dump({"model": self.model, "mae": self.mae}, self.path)
+        joblib.dump(
+            {"model": self.model, "mae": self.mae, "profile": self.profile}, self.path
+        )
         self.is_fitted = True
 
         logger.info(
@@ -276,9 +288,15 @@ class LoadForecaster:
                 lag_lookup[lag_name] = pd.Series(dtype=float)
             return lag_lookup
 
+        df_history = self.model._clean_data(df_history)
+
+        df_history["base_load"] = (
+            df_history["load_actual"] - df_history["wp_actual"]
+        ).clip(lower=0.05)
+
         history_sorted = (
-            df_history[["timestamp", "load_actual"]]
-            .dropna(subset=["load_actual"])
+            df_history[["timestamp", "base_load"]]
+            .dropna(subset=["base_load"])
             .sort_values("timestamp")
         )
 
@@ -298,7 +316,7 @@ class LoadForecaster:
                 direction="nearest",
             )
 
-            series = merged.set_index("forecast_ts")["load_actual"]
+            series = merged.set_index("forecast_ts")["base_load"]
             lag_lookup[lag_name] = series
 
         return lag_lookup

@@ -117,8 +117,8 @@ class LoadModel:
         Berekent gemiddeld verbruiksprofiel per (weekdag, uur) uit de history.
         Wordt eenmalig bij training berekend en opgeslagen naast het model.
         """
-        df = history_df.copy()
-        df["base_load"] = (df["load_actual"] - df["wp_actual"].fillna(0)).clip(lower=0.05)
+        df = self._clean_data(history_df)
+        df["base_load"] = (df["load_actual"] - df["wp_actual"]).clip(lower=0.05)
         df["_hour"] = df["timestamp"].dt.hour
         df["_dow"] = df["timestamp"].dt.dayofweek
         profile = (
@@ -163,6 +163,14 @@ class LoadModel:
                 df[lag_name] = np.nan
         return df
 
+    def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        wp_cols = ["wp_ufh", "wp_dhw", "wp_leg"]
+        # We checken eerst of de kolommen wel in de dataframe zitten om errors te voorkomen
+        # existing_cols = [c for c in wp_cols if c in df_train.columns]
+        df = df.dropna(subset=wp_cols)
+        return df
+
     def _prepare_features(
         self,
         df: pd.DataFrame,
@@ -183,7 +191,7 @@ class LoadModel:
         return X.apply(pd.to_numeric, errors="coerce")
 
     def train(self, df_history: pd.DataFrame):
-        df_train = df_history.copy()
+        df_train = self._clean_data(df_history)
         df_train = df_train.dropna(subset=["wp_actual"])
 
         if len(df_train) < 10:
@@ -191,7 +199,9 @@ class LoadModel:
             return
 
         # Base Load berekening
-        df_train["base_load"] = (df_train["load_actual"] - df_train["wp_actual"].fillna(0)).clip(lower=0.05)
+        df_train["base_load"] = (df_train["load_actual"] - df_train["wp_actual"]).clip(
+            lower=0.05
+        )
 
         df_train = df_train.dropna(subset=["base_load"]).reset_index(drop=True)
 
@@ -222,7 +232,9 @@ class LoadModel:
 
         self.model.fit(X, y)
         self.mae = mean_absolute_error(y, self.model.predict(X))
-        joblib.dump({"model": self.model, "mae": self.mae, "profile": self.profile}, self.path)
+        joblib.dump(
+            {"model": self.model, "mae": self.mae, "profile": self.profile}, self.path
+        )
         self.is_fitted = True
 
         logger.info(
@@ -276,8 +288,10 @@ class LoadForecaster:
                 lag_lookup[lag_name] = pd.Series(dtype=float)
             return lag_lookup
 
+        df_history = self.model._clean_data(df_history)
+
         df_history["base_load"] = (
-            df_history["load_actual"] - df_history["wp_actual"].fillna(0)
+            df_history["load_actual"] - df_history["wp_actual"]
         ).clip(lower=0.05)
 
         history_sorted = (
