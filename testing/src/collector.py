@@ -203,12 +203,11 @@ class Collector:
                 avg_import = 0.0
                 avg_export = 0.0
 
-            n_samples = len(self.mode_slots)
-            avg_wp_ufh = sum(self.wp_slots.get(HvacMode.HEATING.value, [])) / n_samples
-            avg_wp_dhw = sum(self.wp_slots.get(HvacMode.DHW.value, [])) / n_samples
+            avg_wp_ufh = sum(self.wp_slots.get(HvacMode.HEATING.value, [])) / n_grid
+            avg_wp_dhw = sum(self.wp_slots.get(HvacMode.DHW.value, [])) / n_grid
             avg_wp_leg = (
                 sum(self.wp_slots.get(HvacMode.LEGIONELLA_PREVENTION.value, []))
-                / n_samples
+                / n_grid
             )
 
             self._reset_slots()
