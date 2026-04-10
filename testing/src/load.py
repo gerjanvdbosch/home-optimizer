@@ -165,11 +165,9 @@ class LoadModel:
 
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        wp_cols = ["wp_ufh", "wp_dhw", "wp_leg"]
-        # We checken eerst of de kolommen wel in de dataframe zitten om errors te voorkomen
-        # existing_cols = [c for c in wp_cols if c in df_train.columns]
-        df = df.dropna(subset=wp_cols)
-        return df
+        return df.dropna(
+            subset=["pv_actual", "wp_actual", "wp_ufh", "wp_dhw", "wp_leg"]
+        )
 
     def _prepare_features(
         self,
