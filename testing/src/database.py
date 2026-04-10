@@ -231,7 +231,7 @@ class Database:
                 df_meas["wp_ufh"].fillna(0)
                 + df_meas["wp_dhw"].fillna(0)
                 + df_meas["wp_leg"].fillna(0)
-            )
+            ).infer_objects(copy=False)
 
             # 3. Merge (Inner Join)
             # We willen alleen rijen waar we zowel de meting als het weer van hebben

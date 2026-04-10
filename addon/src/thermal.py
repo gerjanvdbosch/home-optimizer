@@ -83,7 +83,7 @@ def clean_thermal_data(df: pd.DataFrame) -> pd.DataFrame:
     # 2. Herbereken wp_actual voor 100% consistentie
     df["wp_actual"] = (
         df["wp_ufh"].fillna(0) + df["wp_dhw"].fillna(0) + df["wp_leg"].fillna(0)
-    )
+    ).infer_objects(copy=False)
 
     # 4. Dominantie en Purity (De "Mix" check)
     # We kijken welk aandeel de stroom heeft t.o.v. het totaal.
