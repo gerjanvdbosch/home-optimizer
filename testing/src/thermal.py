@@ -1668,7 +1668,7 @@ class ThermalEKF:
 
         self.A = np.array([[a11, a12], [a21, a22]])
         self.H = np.array([[1.0, 0.0]])
-        self.Q = np.diag([0.01, 0.05])  # procesruis [K²]
+        self.Q = np.diag([0.01, 0.002])  # T_mass verandert zeer langzaam
         self.R_n = np.array([[0.04]])  # meetruis thermostaat ±0.2K
         self.P = np.eye(2) * 2.0
         self.ident = ident
@@ -1679,17 +1679,19 @@ class ThermalEKF:
         self.P = np.eye(2) * 2.0
 
     def predict_step(
-        self, p_heat: float, t_out: float, solar_gain_air: float, solar_gain_mass: float
+        self, p_heat: float, t_out: float, gain_air: float, gain_mass: float
     ):
         if self.x is None:
             return
         dt = 0.25
         B = np.array([dt / self.ident.C_air, dt / self.ident.C_mass])
+
+        # De inkomende warmte wordt eerlijk verdeeld over lucht en massa
         f_ext = np.array(
             [
                 (t_out / (self.ident.R_oa * self.ident.C_air)) * dt
-                + (solar_gain_air / self.ident.C_air) * dt,  # alleen luchtdeel
-                (solar_gain_mass / self.ident.C_mass) * dt,  # massadeel naar C_mass
+                + (gain_air / self.ident.C_air) * dt,  # Convectief deel
+                (gain_mass / self.ident.C_mass) * dt,  # Radiatief deel (zon/massa)
             ]
         )
         self.x = self.A @ self.x + B * p_heat + f_ext

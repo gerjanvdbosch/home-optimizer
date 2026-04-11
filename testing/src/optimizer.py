@@ -409,7 +409,7 @@ class ThermalMPC:
             dT_dt = self._robust_trend(recent_df)
             q_mass = (
                 (self.ident.C_air * dT_dt)
-                - (current_solar_gain_air + current_solar_gain_mass)
+                - current_solar_gain_air
                 + (t_air_meas - t_out_now) / self.ident.R_oa
             )
             t_mass_init = float(
