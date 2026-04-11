@@ -480,9 +480,16 @@ class ThermalMPC:
 
         self.P_t_air_init.value = t_air_meas
         self.P_t_mass_init.value = t_mass_init
-        self.P_t_dhw_init.value = (
-            t_avg_measured  # De solver rekent energie-balans op Average
-        )
+
+        if state["hvac_mode"] == HvacMode.DHW.value:
+            # DHW draait al: tank mengt, gebruik gemiddelde
+            t_dhw_init = t_avg_measured
+        else:
+            # DHW staat stil: stratificatie aanwezig, bottom is de relevante sink
+            # De pomp ziet bij opstart de bodemtemperatuur als eerste
+            t_dhw_init = t_bot_measured  # ← was t_avg_measured
+
+        self.P_t_dhw_init.value = t_dhw_init
 
         self.P_init_ufh.value = (
             1.0 if state["hvac_mode"] == HvacMode.HEATING.value else 0.0
@@ -607,10 +614,8 @@ class ThermalMPC:
                 # Als de pomp draait, is de tank gemengd (Gap = 0)
                 guessed_t_sink = guessed_t_dhw
             else:
-                # Bij stilstand gebruiken we de gemeten gap,
-                # maar we laten deze langzaam 'vergeten' in de toekomst (decay)
-                # zodat de solver niet denkt dat de COP over 10 uur nog steeds laag is.
-                gap_decay = strat_gap_measured * np.exp(-np.arange(T) / 8)  # 2 uur tau
+                # Gebruik een kortere tau voor de eerste paar stappen
+                gap_decay = strat_gap_measured * np.exp(-np.arange(T) / 3)  # 45 min tau
                 guessed_t_sink = guessed_t_dhw - gap_decay
 
             # 1. PWA op huidige schatting
