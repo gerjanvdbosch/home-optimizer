@@ -513,10 +513,13 @@ class SystemIdentificator:
         self.K_tank = 0.25
         self.K_loss_dhw = 0.01
         self.ufh_lag_steps = 4
+        self.tau_internal_gain = 1.0  # uren
+        self.alpha_conv_internal = 0.5
         self.C_air = 3.0  # kWh/K  — lucht + lichte oppervlakken (snelle massa)
         self.C_mass = 27.0  # kWh/K  — vloer + beton (trage massa)
         self.R_im = 1.2  # K/kW   — koppeling massa ↔ lucht
         self.R_oa = 15.0  # K/kW   — verlies lucht → buiten (= R initieel)
+        self._last_internal_gain_corr = 0.0
         self._load()
 
     def _load(self):
@@ -530,6 +533,8 @@ class SystemIdentificator:
             self.K_tank = d.get("K_tank", 0.25)
             self.K_loss_dhw = d.get("K_loss_dhw", 0.01)
             self.ufh_lag_steps = d.get("ufh_lag_steps", 4)
+            self.tau_internal_gain = d.get("tau_internal_gain", 1.0)
+            self.alpha_conv_internal = d.get("alpha_conv_internal", 0.5)
             self.C_air = d.get("C_air", 3.0)
             self.C_mass = d.get("C_mass", 27.0)
             self.R_im = d.get("R_im", 1.2)
@@ -539,7 +544,8 @@ class SystemIdentificator:
                 f"K_emit={self.K_emit:.3f} K_tank={self.K_tank:.3f} "
                 f"Lag={self.ufh_lag_steps * 15}m K_loss={self.K_loss_dhw:.4f} "
                 f"C_air={self.C_air:.2f} C_mass={self.C_mass:.2f} "
-                f"R_im={self.R_im:.3f} R_oa={self.R_oa:.2f}"
+                f"R_im={self.R_im:.3f} R_oa={self.R_oa:.2f} "
+                f"Tau_internal={self.tau_internal_gain:.2f} Alpha_conv={self.alpha_conv_internal:.2f} "
             )
         except Exception as e:
             logger.error(f"[SysID] Laden mislukt: {e}")
@@ -585,6 +591,8 @@ class SystemIdentificator:
         self._fit_k_emit(df_proc)
         self._fit_k_tank(df_proc)
         self._fit_dhw_loss(df_proc)
+        self._fit_internal_gain_tau(df_proc)
+        self._fit_internal_gain_split(df_proc)
         self._fit_two_state()
 
         logger.info(
@@ -600,6 +608,8 @@ class SystemIdentificator:
                 "K_tank": self.K_tank,
                 "K_loss_dhw": self.K_loss_dhw,
                 "ufh_lag_steps": self.ufh_lag_steps,
+                "tau_internal_gain": self.tau_internal_gain,
+                "alpha_conv_internal": self.alpha_conv_internal,
                 "C_air": self.C_air,
                 "C_mass": self.C_mass,
                 "R_im": self.R_im,
@@ -762,6 +772,150 @@ class SystemIdentificator:
             loss = -(d["dT_tank"] / d["dt_hours"]) / t_diff
             self.K_loss_dhw = float(np.clip(loss.quantile(0.25), 0.001, 0.05))
             logger.info(f"[SysID] K_loss_dhw={self.K_loss_dhw:.4f}")
+
+    def _fit_internal_gain_tau(self, df_proc: pd.DataFrame):
+        """
+        Leert de thermische koppelingstijdconstante voor interne warmtebronnen.
+
+        Fysica: Q_int(t) bereikt de kamerlucht via convectie (snel) én
+        via stralingswisseling met oppervlakken (langzaam). De effectieve
+        tijdconstante hangt af van de zonekoppeling, niet van het apparaat.
+
+        Methode: cross-correlatie tussen EWM-gefilterde base_load en de
+        temperatuurresidu — identiek aan _fit_floor_lag voor de vloer.
+        """
+        df_15 = (
+            df_proc[["timestamp", "room_temp", "base_load", "wp_output", "temp"]]
+            .set_index("timestamp")
+            .resample("15min")
+            .mean()
+            .dropna(subset=["room_temp", "base_load"])
+            .reset_index()
+        )
+
+        # Verwijder periodes met actieve verwarming (domineert het signaal)
+        df_15 = df_15[df_15["wp_output"] < 0.1].copy()
+
+        # RC-model residu: wat is NIET verklaard door buiten↔binnen?
+        dt = 0.25  # uur
+        df_15["dT_rc"] = (
+            (df_15["room_temp"] - df_15["temp"]) / self.R_oa * (dt / self.C)
+        )
+        df_15["dT_actual"] = df_15["room_temp"].diff()
+        df_15["residual"] = df_15["dT_actual"] + df_15["dT_rc"]  # wat overblijft
+
+        # Zoek τ die de correlatie met EWM(base_load, τ) maximaliseert
+        best_tau, best_corr = 1.0, -1.0
+        tau_candidates = np.arange(0.25, 8.0, 0.25)  # 15 min tot 8 uur
+
+        for tau_h in tau_candidates:
+            span = max(1, int(tau_h / 0.25))
+            smoothed = df_15["base_load"].ewm(span=span).mean()
+            corr = df_15["residual"].corr(smoothed)
+            if pd.notna(corr) and corr > best_corr:
+                best_corr, best_tau = corr, tau_h
+
+        if best_corr < 0.05:
+            logger.warning(
+                f"[SysID] Geen duidelijke interne gains tijdconstante "
+                f"(corr={best_corr:.3f}). Fallback τ=1.0h"
+            )
+            self.tau_internal_gain = 1.0
+        else:
+            self.tau_internal_gain = float(np.clip(best_tau, 0.25, 6.0))
+            logger.info(
+                f"[SysID] τ_internal_gain={self.tau_internal_gain:.2f}h "
+                f"(corr={best_corr:.3f})"
+            )
+
+        self._last_internal_gain_corr = best_corr
+
+    def _fit_internal_gain_split(self, df_proc: pd.DataFrame):
+        """
+        Leert welk deel van de interne gains direct naar C_air gaat (α_conv)
+        versus naar C_mass via stralingsuitwisseling (1 - α_conv).
+
+        Methode: vergelijk de impuls-response van t_room op korte pieken
+        (convectief dominant, α_conv hoog) versus lange pieken (steady-state,
+        split zichtbaar). Dit is de standaard-aanpak in gebouwidentificatie
+        (zie: Bacher & Madsen 2011 RC-identificatie).
+        """
+        df = df_proc.copy()
+        df = df[df["wp_output"] < 0.1].copy()  # geen verwarming actief
+
+        df_15 = (
+            df[["timestamp", "room_temp", "base_load", "temp"]]
+            .set_index("timestamp")
+            .resample("15min")
+            .mean()
+            .dropna()
+            .reset_index()
+        )
+
+        dt = 0.25
+        # RC-residu: werkelijke dT minus wat het RC-model verwacht
+        df_15["dT_actual"] = df_15["room_temp"].diff()
+        df_15["dT_loss"] = (
+            -(df_15["room_temp"] - df_15["temp"]) / self.R_oa * (dt / self.C)
+        )
+        df_15["residual"] = df_15["dT_actual"] - df_15["dT_loss"]
+
+        # Piek-detector: korte pieken vs. aanhoudende load
+        load = df_15["base_load"]
+        df_15["load_instant"] = load  # directe convectie → C_air
+        df_15["load_slow"] = load.ewm(span=8).mean()  # geïntegreerde load → C_mass
+
+        df_fit = df_15.dropna(subset=["residual", "load_instant", "load_slow"])
+
+        if len(df_fit) < 50:
+            logger.warning(
+                "[SysID] Te weinig data voor gain-split, fallback α_conv=0.5"
+            )
+            self.alpha_conv_internal = 0.5
+            return
+
+        # Regressie: residu = α_conv * instant/C_air + (1-α_conv) * slow/C_mass
+        # Herschreven als lineair probleem:
+        X = (
+            np.column_stack(
+                [
+                    df_fit["load_instant"].values / self.C_air,
+                    df_fit["load_slow"].values / self.C_mass,
+                ]
+            )
+            * dt
+        )
+        y = df_fit["residual"].values
+
+        from sklearn.linear_model import Ridge
+
+        reg = Ridge(alpha=0.1, fit_intercept=False, positive=True).fit(X, y)
+        a, b = reg.coef_
+
+        # Normaliseer: α_conv = aandeel naar C_air
+        total = a + b
+        CORR_THRESHOLD_RELIABLE = 0.25
+        best_corr = self._last_internal_gain_corr
+
+        if total > 0.01 and best_corr > CORR_THRESHOLD_RELIABLE:
+            alpha = float(np.clip(a / total, 0.2, 0.8))
+            logger.info(
+                f"[SysID] α_conv_internal={alpha:.2f} geleerd uit data "
+                f"(convectief={alpha * 100:.0f}% → C_air, "
+                f"radiatief={(1 - alpha) * 100:.0f}% → C_mass, corr={best_corr:.3f})"
+            )
+        else:
+            # Fallback: ISO 13790 prior voor zwaar gebouw met UFH
+            # base_load is een slechte proxy voor ruimtelijke gains (wasmachine boven etc.)
+            # Prior van 0.40 is eerlijker dan een slecht gefitte waarde
+            alpha = 0.40
+            logger.warning(
+                f"[SysID] α_conv_internal fallback=0.40 "
+                f"(corr={best_corr:.3f} < drempel {CORR_THRESHOLD_RELIABLE}, "
+                f"proxy te onzuiver voor betrouwbare fit)"
+            )
+
+        self.alpha_conv_internal = alpha
 
     def _fit_two_state(self):
         """
@@ -1028,10 +1182,12 @@ class HydraulicPredictor:
 
 
 class UfhResidualPredictor:
-    def __init__(self, path, R, C):
+    def __init__(self, path, R, C, tau_internal: float = 1.0, alpha_conv: float = 0.5):
         self.path = Path(path)
         self.R = R
         self.C = C
+        self.tau_internal = tau_internal
+        self.alpha_conv = alpha_conv
         self.model = None
         self.is_fitted = False
         self.features = [
@@ -1059,6 +1215,11 @@ class UfhResidualPredictor:
             logger.info("[UFH Residual] Geladen.")
         except Exception as e:
             logger.warning(f"[UFH Residual] Laden mislukt: {e}")
+
+    def _get_smoothed_load(self, base_load_series: pd.Series) -> pd.Series:
+        # Gebruik de geleerde tau voor het laagdoorlaatfilter
+        span = max(1, int(self.tau_internal / 0.125))
+        return base_load_series.ewm(span=span).mean()
 
     def train(self, df):
         df_proc = clean_thermal_data(df).sort_values("timestamp")
@@ -1110,7 +1271,7 @@ class UfhResidualPredictor:
             df_feat.get("shutter_room", 100) / 100.0
         )
         # internal_load: basisverbruik als proxy voor bezetting/interne warmte
-        df_feat["internal_load"] = df_feat.get("base_load", 0.0)
+        df_feat["internal_load"] = self._get_smoothed_load(df_feat["base_load"])
 
         train_set = df_feat[self.features + ["target"]].dropna()
 
@@ -1119,7 +1280,7 @@ class UfhResidualPredictor:
         train_set = train_set[train_set["target"].between(q_low, q_high)]
 
         if len(train_set) > 10:
-            self.model = Ridge(alpha=1.0).fit(
+            self.model = Ridge(alpha=0.1).fit(
                 train_set[self.features], train_set["target"]
             )
             self.is_fitted = True
@@ -1128,22 +1289,52 @@ class UfhResidualPredictor:
 
     def predict(self, forecast_df, shutters):
         if forecast_df is None:
-            return np.array([])
+            return np.array([]), np.array([])
 
         if self.model is None or not self.is_fitted:
-            return np.zeros(len(forecast_df))
+            n = len(forecast_df)
+            return np.zeros(n), np.zeros(n)
 
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
         df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
         df["shutter_room"] = shutters
         df["effective_solar"] = df["solar"] * (df["shutter_room"] / 100.0)
-        df["internal_load"] = df.get("load_corrected", 0.0)
+        df["internal_load"] = self._get_smoothed_load(df["load_corrected"])
 
         for col in self.features:
             if col not in df.columns:
                 df[col] = 0.0
 
-        return self.model.predict(df[self.features])
+        X = df[self.features].values
+        coef = self.model.coef_  # Ridge coëfficiënten, shape (n_features,)
+
+        # Indices van de relevante features
+        idx_solar = self.features.index("effective_solar")
+        idx_internal = self.features.index("internal_load")
+
+        # Bijdrage per feature = X[:, i] * coef[i]
+        gain_solar = np.maximum(X[:, idx_solar] * coef[idx_solar], 0.0)
+        gain_internal = np.maximum(X[:, idx_internal] * coef[idx_internal], 0.0)
+
+        # Fysische split (ASHRAE/ISO 13790):
+        #   Zoninstraling:    ~85% radiatief → massa, ~15% convectief → lucht
+        #   Interne gains:    geleerde alpha_conv (apparaten/mensen)
+        #   Overig (tijd):    volledig convectief (lucht)
+        ALPHA_SOLAR = (
+            0.15  # dit is een materiaaleigenschap van glas+ruimte, geen tuning
+        )
+
+        # Directe, fysisch verantwoorde opwarming (Zon + Apparatuur/Stroom)
+        gain_air = gain_solar * ALPHA_SOLAR + gain_internal * self.alpha_conv
+
+        gain_mass = gain_solar * (1.0 - ALPHA_SOLAR) + gain_internal * (
+            1.0 - self.alpha_conv
+        )
+
+        # gain_other wordt bewust genegeerd. Het voorspellen van statistische residuen
+        # vertroebelt de fysische horizon van de MPC. Afwijkingen van het RC-model
+        # worden real-time opgevangen door de EKF innovatie.
+        return gain_air, gain_mass
 
 
 # =========================================================
@@ -1487,7 +1678,9 @@ class ThermalEKF:
         self.x = np.array([t_air, t_mass])
         self.P = np.eye(2) * 2.0
 
-    def predict_step(self, p_heat: float, t_out: float, solar_gain: float):
+    def predict_step(
+        self, p_heat: float, t_out: float, solar_gain_air: float, solar_gain_mass: float
+    ):
         if self.x is None:
             return
         dt = 0.25
@@ -1495,8 +1688,8 @@ class ThermalEKF:
         f_ext = np.array(
             [
                 (t_out / (self.ident.R_oa * self.ident.C_air)) * dt
-                + (solar_gain / self.ident.C_air) * dt,
-                0.0,
+                + (solar_gain_air / self.ident.C_air) * dt,  # alleen luchtdeel
+                (solar_gain_mass / self.ident.C_mass) * dt,  # massadeel naar C_mass
             ]
         )
         self.x = self.A @ self.x + B * p_heat + f_ext

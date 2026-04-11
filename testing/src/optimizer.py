@@ -47,7 +47,7 @@ class ThermalMPC:
         # Multi-resolutie
         self.dt_steps = np.array(
             [0.25] * 96  # Eerste: 15 min nauwkeurigheid
-            + [1.00] * 12  # Volgende: 1 uur stappen
+            + [1.00] * 8  # Volgende: 1 uur stappen
         )
         self.horizon = len(self.dt_steps)
 
@@ -96,7 +96,8 @@ class ThermalMPC:
         self.P_room_max = cp.Parameter(T, nonneg=True)
         self.P_dhw_min = cp.Parameter(T, nonneg=True)
         self.P_dhw_max = cp.Parameter(T, nonneg=True)
-        self.P_solar_gain = cp.Parameter(T)
+        self.P_solar_gain_air = cp.Parameter(T)  # convectief deel → C_air
+        self.P_solar_gain_mass = cp.Parameter(T)  # radiatief deel  → C_mass
 
         self.P_cost_room_under = cp.Parameter(T, nonneg=True)
         self.P_cost_room_over = cp.Parameter(T, nonneg=True)
@@ -215,12 +216,16 @@ class ThermalMPC:
                 + (
                     (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im
                     - (self.t_air[t + 1] - self.P_temp_out[t]) / R_oa
-                    + self.P_solar_gain[t]
+                    + self.P_solar_gain_air[t]
                 )
                 * (dt_t / C_air),
                 self.t_mass[t + 1]
                 == self.t_mass[t]
-                + (p_th_delayed - (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im)
+                + (
+                    p_th_delayed
+                    - (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im
+                    + self.P_solar_gain_mass[t]
+                )
                 * (dt_t / C_mass),
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
@@ -393,7 +398,8 @@ class ThermalMPC:
         state: dict,
         recent_df: pd.DataFrame,
         forecast_df: pd.DataFrame,
-        current_solar_gain: float,
+        current_solar_gain_air: float,
+        current_solar_gain_mass: float,
     ) -> float:
         t_air_meas = float(state["room_temp"])
         t_out_now = float(forecast_df.temp.iloc[0])
@@ -403,7 +409,7 @@ class ThermalMPC:
             dT_dt = self._robust_trend(recent_df)
             q_mass = (
                 (self.ident.C_air * dT_dt)
-                - current_solar_gain
+                - (current_solar_gain_air + current_solar_gain_mass)
                 + (t_air_meas - t_out_now) / self.ident.R_oa
             )
             t_mass_init = float(
@@ -424,7 +430,9 @@ class ThermalMPC:
                     dt = max(0, last["supply_temp"] - last["return_temp"])
                     p_heat_prev = dt * FACTOR_UFH
 
-            self.ekf.predict_step(p_heat_prev, t_out_now, current_solar_gain)
+            self.ekf.predict_step(
+                p_heat_prev, t_out_now, current_solar_gain_air, current_solar_gain_mass
+            )
             _, t_mass_init = self.ekf.update(t_air_meas)
 
         return t_mass_init
@@ -433,7 +441,8 @@ class ThermalMPC:
         self,
         state: dict,
         forecast_df: pd.DataFrame,
-        solar_gains: np.ndarray,
+        solar_gains_air: np.ndarray,
+        solar_gains_mass: np.ndarray,
         avg_price: float,
         export_price: float,
         recent_df: pd.DataFrame,
@@ -466,7 +475,7 @@ class ThermalMPC:
 
         # 2. INITIALISEER DE START-TOESTAND (Parameters)
         t_mass_init = self.update_and_get_initial_state(
-            state, recent_df, forecast_df, solar_gains[0]
+            state, recent_df, forecast_df, solar_gains_air[0], solar_gains_mass[0]
         )
 
         self.P_t_air_init.value = t_air_meas
@@ -527,7 +536,8 @@ class ThermalMPC:
         self.P_base_load.value = resample_mean(forecast_df.load_corrected.values)
         self.P_prices.value = resample_mean(prices) * DT
         self.P_export_prices.value = resample_mean(export_prices) * DT
-        self.P_solar_gain.value = resample_mean(solar_gains)
+        self.P_solar_gain_air.value = resample_mean(solar_gains_air)
+        self.P_solar_gain_mass.value = resample_mean(solar_gains_mass)
         self.P_dhw_demand.value = resample_sum(dhw_demand_raw)
 
         self.P_room_min.value = r_min
@@ -774,7 +784,11 @@ class Optimizer:
         self.ident = SystemIdentificator(config.rc_model_path, config.tank_liters)
         self.hydraulic = HydraulicPredictor(config.hydraulic_model_path)
         self.res_ufh = UfhResidualPredictor(
-            config.ufh_model_path, self.ident.R, self.ident.C
+            config.ufh_model_path,
+            self.ident.R,
+            self.ident.C,
+            self.ident.tau_internal_gain,
+            self.ident.alpha_conv_internal,
         )
         self.res_dhw = DhwResidualPredictor(config.dhw_model_path)
         self.shutter = ShutterPredictor(config.shutter_model_path)
@@ -791,6 +805,10 @@ class Optimizer:
 
         self.perf_map.train(df)
         self.ident.train(df)
+
+        self.res_ufh.tau_internal = self.ident.tau_internal_gain
+        self.res_ufh.alpha_conv = self.ident.alpha_conv_internal
+
         self.hydraulic.train(df)
         self.res_ufh.train(df)
         self.res_dhw.train(df)
@@ -819,18 +837,23 @@ class Optimizer:
         # Zonopwarming voorspellen
         shutter_room = float(getattr(context, "shutter_room", 100.0))
         shutters = self.shutter.predict(context.forecast_df, shutter_room)
-        solar_gains = self.res_ufh.predict(context.forecast_df, shutters)
+        solar_gains_air, solar_gains_mass = self.res_ufh.predict(
+            context.forecast_df, shutters
+        )
+        solar_gains_total = solar_gains_air + solar_gains_mass
 
         logger.info(
-            f"[Optimizer] Solar gain: max={np.max(solar_gains):.3f}, gem={np.mean(solar_gains):.3f} kW "
-            f"Shutter: {shutter_room:.1f}%"
+            f"[Optimizer] Solar gain: max={np.max(solar_gains_total):.3f}, "
+            f"gem={np.mean(solar_gains_total):.3f} kW | "
+            f"air={np.mean(solar_gains_air):.3f} mass={np.mean(solar_gains_mass):.3f} kW"
         )
 
         # Oplossen
         self.mpc.solve(
             state=state,
             forecast_df=context.forecast_df,
-            solar_gains=solar_gains,
+            solar_gains_air=solar_gains_air,
+            solar_gains_mass=solar_gains_mass,
             avg_price=avg_price,
             export_price=export_price,
             recent_df=recent_df,
