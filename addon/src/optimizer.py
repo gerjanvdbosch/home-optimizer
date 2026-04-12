@@ -60,10 +60,11 @@ class ThermalMPC:
         self.plan_t_sup_ufh = np.zeros(self.horizon)
         self.plan_t_sup_dhw = np.zeros(self.horizon)
 
-        # Warm-start state
+        # Warm-start state (3-state)
         self._prev_ufh_on = None
         self._prev_dhw_on = None
-        self._prev_t_mass = None
+        self._prev_t_surf = None  # NEW (was _prev_t_mass)
+        self._prev_t_core = None  # NEW (was _prev_t_mass)
         self._prev_t_dhw = None
         self._prev_obj = None
 
@@ -72,15 +73,19 @@ class ThermalMPC:
     def _build_problem(self):
         T = self.horizon
         DT = self.dt_steps
-        C_air = self.ident.C_air  # snelle massa [kWh/K]
-        C_mass = self.ident.C_mass  # trage massa  [kWh/K]
-        R_im = self.ident.R_im  # massa ↔ lucht [K/kW]
-        R_oa = self.ident.R_oa  # lucht → buiten [K/kW]
+        # ── 3-state thermische parameters ─────────────────────────────────────
+        C_air = self.ident.C_air  # snelle massa: kamerlucht  [kWh/K]
+        C_surf = self.ident.C_surf  # middele massa: vloeroppervlak [kWh/K]
+        C_core = self.ident.C_core  # trage massa:  betonkern + UFH [kWh/K]
+        R_surf_air = self.ident.R_surf_air  # oppervlak ↔ lucht  [K/kW]
+        R_core_surf = self.ident.R_core_surf  # kern ↔ oppervlak [K/kW]
+        R_oa = self.ident.R_oa  # lucht → buiten (R_cond||R_vent) [K/kW]
 
         # ── Parameters ────────────────────────────────────────────────────
         self.L = self.ident.ufh_lag_steps
         self.P_t_air_init = cp.Parameter()
-        self.P_t_mass_init = cp.Parameter()
+        self.P_t_surf_init = cp.Parameter()  # NEW: oppervlaktetemperatuur init
+        self.P_t_core_init = cp.Parameter()  # (was P_t_mass_init)
         self.P_t_dhw_init = cp.Parameter()
         self.P_init_ufh = cp.Parameter(nonneg=True)
         self.P_init_dhw = cp.Parameter(nonneg=True)
@@ -96,8 +101,19 @@ class ThermalMPC:
         self.P_room_max = cp.Parameter(T, nonneg=True)
         self.P_dhw_min = cp.Parameter(T, nonneg=True)
         self.P_dhw_max = cp.Parameter(T, nonneg=True)
-        self.P_solar_gain_air = cp.Parameter(T)  # convectief deel → C_air
-        self.P_solar_gain_mass = cp.Parameter(T)  # radiatief deel  → C_mass
+
+        # ── Zoninstraling + interne gains (PARAMETER, geen beslissingsvariabele)
+        # P_solar_gain_air : convectieve interne gains [kW] → T_air
+        # P_solar_gain_surf: ZON + radiatieve interne gains [kW] → T_surf
+        #
+        # Berekend door UfhResidualPredictor.predict():
+        #   gain_solar = A_sol [kW/kW] × pv_proxy [kW] × shutter_frac [-]
+        #   gain_surf  = gain_solar + gain_internal_radiatief
+        #
+        # Shutter-effect zit dus volledig verwerkt in deze parameters.
+        # De MPC hoeft niets te weten over de rolluikpositie zelf.
+        self.P_solar_gain_air = cp.Parameter(T)
+        self.P_solar_gain_surf = cp.Parameter(T)
 
         self.P_cost_room_under = cp.Parameter(T, nonneg=True)
         self.P_cost_room_over = cp.Parameter(T, nonneg=True)
@@ -117,11 +133,13 @@ class ThermalMPC:
         self.P_pth_const_dhw = cp.Parameter(T)
         self.P_pth_slope_dhw = cp.Parameter(T)
 
-        self.P_ufh_p_th_hist = cp.Parameter(self.L, nonneg=True)
+        # Minimaal grootte 1: cp.Parameter(0) is ongeldig in CVXPY.
+        # Wanneer L=0 wordt deze parameter nooit geïndexeerd (t < 0 is altijd False).
+        self.P_ufh_p_th_hist = cp.Parameter(max(self.L, 1), nonneg=True)
 
         self.P_dhw_demand = cp.Parameter(T, nonneg=True)
 
-        self.P_term_target_mass = cp.Parameter()
+        self.P_term_target_core = cp.Parameter()  # (was P_term_target_mass)
         self.P_term_target_dhw = cp.Parameter()
 
         # ── Variabelen ────────────────────────────────────────────────────
@@ -135,7 +153,8 @@ class ThermalMPC:
         self.p_solar_self = cp.Variable(T, nonneg=True)
 
         self.t_air = cp.Variable(T + 1)  # luchttemperatuur (snel, comfort)
-        self.t_mass = cp.Variable(T + 1)  # vloeremperatuur  (traag, buffer)
+        self.t_surf = cp.Variable(T + 1)  # vloeroppervlak   (middel, ZON)
+        self.t_core = cp.Variable(T + 1)  # betonkern        (traag, WP)
         self.t_dhw = cp.Variable(T + 1, nonneg=True)
 
         self.s_room_low = cp.Variable(T, nonneg=True)
@@ -143,24 +162,24 @@ class ThermalMPC:
         self.s_dhw_low = cp.Variable(T, nonneg=True)
         self.s_dhw_high = cp.Variable(T, nonneg=True)
 
-        self.s_term_room_under = cp.Variable(nonneg=True)  # Voor de terminal value
-        self.s_term_dhw_under = cp.Variable(nonneg=True)  # Voor de terminal value
+        self.s_term_room_under = cp.Variable(nonneg=True)
+        self.s_term_dhw_under = cp.Variable(nonneg=True)
 
-        # ── Variabelen ────────────────────────────────────────────────────
+        # ── McCormick-bilinearisatie: z_ufh = ufh_on[t] × t_core[t] ──────
         self.ufh_on = cp.Variable(T, boolean=True)
         self.dhw_on = cp.Variable(T, boolean=True)
-        self.z_ufh = cp.Variable(T)  # = ufh_on[t] × t_mass[t]
+        self.z_ufh = cp.Variable(T)  # = ufh_on[t] × t_core[t]
         self.z_dhw = cp.Variable(T)  # = dhw_on[t] × t_dhw[t]
 
-        # Binaire McCormick: z = on × t_sink
-        # Binair × continu geeft exacte (niet-relaxte) envelopen
-        T_MASS_MIN, T_MASS_MAX = 10.0, 35.0
+        # Bounds voor McCormick envelopen
+        T_CORE_MIN, T_CORE_MAX = 10.0, 35.0  # kern (vloer) temperatuur °C
         T_DHW_MIN, T_DHW_MAX = 10.0, 75.0
 
         # ── Constraints ───────────────────────────────────────────────────
         constraints = [
             self.t_air[0] == self.P_t_air_init,
-            self.t_mass[0] == self.P_t_mass_init,
+            self.t_surf[0] == self.P_t_surf_init,  # NEW
+            self.t_core[0] == self.P_t_core_init,  # (was t_mass)
             self.t_dhw[0] == self.P_t_dhw_init,
         ]
 
@@ -171,7 +190,7 @@ class ThermalMPC:
             constraints += [self.comp_start[t] >= comp_on[t] - comp_on[t - 1]]
 
         for t in range(T):
-            dt_t = float(DT[t])  # Gebruik de constante waarde
+            dt_t = float(DT[t])
 
             p_el_wp = self.p_el_ufh[t] + self.p_el_dhw[t]
 
@@ -190,43 +209,61 @@ class ThermalMPC:
                 )
 
             constraints += [
-                # McCormick envelopen blijven behouden...
-                self.z_ufh[t] >= T_MASS_MIN * self.ufh_on[t],
-                self.z_ufh[t] <= T_MASS_MAX * self.ufh_on[t],
-                self.z_ufh[t] >= self.t_mass[t] - T_MASS_MAX * (1 - self.ufh_on[t]),
-                self.z_ufh[t] <= self.t_mass[t] - T_MASS_MIN * (1 - self.ufh_on[t]),
+                # ── McCormick envelopen (z_ufh = ufh_on × t_core) ────────
+                self.z_ufh[t] >= T_CORE_MIN * self.ufh_on[t],
+                self.z_ufh[t] <= T_CORE_MAX * self.ufh_on[t],
+                self.z_ufh[t] >= self.t_core[t] - T_CORE_MAX * (1 - self.ufh_on[t]),
+                self.z_ufh[t] <= self.t_core[t] - T_CORE_MIN * (1 - self.ufh_on[t]),
                 self.z_dhw[t] >= T_DHW_MIN * self.dhw_on[t],
                 self.z_dhw[t] <= T_DHW_MAX * self.dhw_on[t],
                 self.z_dhw[t] >= self.t_dhw[t] - T_DHW_MAX * (1 - self.dhw_on[t]),
                 self.z_dhw[t] <= self.t_dhw[t] - T_DHW_MIN * (1 - self.dhw_on[t]),
-                # ── NIEUW: P_el is nu een continue, berekende variabele gebaseerd op state!
-                # P_el = Constante * on + Helling * (on * T_sink)
+                # ── P_el (Taylor-linearisatie op t_core als sink) ─────────
                 self.p_el_ufh[t]
                 >= self.P_pel_const_ufh[t] * self.ufh_on[t]
                 + self.P_pel_slope_ufh[t] * self.z_ufh[t],
                 self.p_el_dhw[t]
                 >= self.P_pel_const_dhw[t] * self.dhw_on[t]
                 + self.P_pel_slope_dhw[t] * self.z_dhw[t],
-                # ── Stroombalans ────────────────────────────────────────────
+                # ── Stroombalans ──────────────────────────────────────────
                 p_el_wp + self.P_base_load[t] == self.p_grid[t] + self.p_solar_self[t],
                 self.P_solar[t] == self.p_solar_self[t] + self.p_export[t],
-                # ── Thermische dynamica — IMPLICIT EULER (Stabiel voor grote dt) ──────────────
+                # ── 3-STATE THERMISCHE DYNAMICA (Implicit Euler) ──────────
+                #
+                # Staat 1: T_air — verliest naar buiten + uitwisselt met T_surf
+                #          GEEN directe zon (zon → T_surf via ramen, dan convectie → T_air)
                 self.t_air[t + 1]
                 == self.t_air[t]
                 + (
-                    (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im
+                    (self.t_surf[t + 1] - self.t_air[t + 1]) / R_surf_air
                     - (self.t_air[t + 1] - self.P_temp_out[t]) / R_oa
-                    + self.P_solar_gain_air[t]
+                    + self.P_solar_gain_air[t]  # convectieve interne gains [kW]
                 )
                 * (dt_t / C_air),
-                self.t_mass[t + 1]
-                == self.t_mass[t]
+                #
+                # Staat 2: T_surf — ZON KOMT HIER BINNEN
+                #   P_solar_gain_surf = A_sol × pv_proxy × shutter_frac  [kW]
+                #                     + radiatieve interne gains          [kW]
+                #   Shutter-effect is al verrekend in de parameter.
+                self.t_surf[t + 1]
+                == self.t_surf[t]
+                + (
+                    self.P_solar_gain_surf[t]  # ← ZON×SHUTTER + interne gains
+                    + (self.t_core[t + 1] - self.t_surf[t + 1]) / R_core_surf
+                    - (self.t_surf[t + 1] - self.t_air[t + 1]) / R_surf_air
+                )
+                * (dt_t / C_surf),
+                #
+                # Staat 3: T_core — WARMTEPOMP KOMT HIER BINNEN via UFH-buizen
+                self.t_core[t + 1]
+                == self.t_core[t]
                 + (
                     p_th_delayed
-                    - (self.t_mass[t + 1] - self.t_air[t + 1]) / R_im
-                    + self.P_solar_gain_mass[t]
+                    - (self.t_core[t + 1] - self.t_surf[t + 1]) / R_core_surf
                 )
-                * (dt_t / C_mass),
+                * (dt_t / C_core),
+                #
+                # ── DHW dynamica ──────────────────────────────────────────
                 self.t_dhw[t + 1]
                 == self.t_dhw[t]
                 + (
@@ -235,23 +272,24 @@ class ThermalMPC:
                     * (self.ident.K_loss_dhw * dt_t)
                 )
                 - self.P_dhw_demand[t],
+                # ── Exclusiviteit: niet tegelijk UFH en DHW ───────────────
                 self.ufh_on[t] + self.dhw_on[t] <= 1,
+                # ── Comfortgrenzen (T_air bepaalt comfort) ────────────────
                 self.t_air[t + 1] + self.s_room_low[t] >= self.P_room_min[t],
                 self.t_air[t + 1] - self.s_room_high[t] <= self.P_room_max[t],
                 self.t_dhw[t + 1] + self.s_dhw_low[t] >= self.P_dhw_min[t],
                 self.t_dhw[t + 1] - self.s_dhw_high[t] <= self.P_dhw_max[t],
-                self.t_mass[T] + self.s_term_room_under >= self.P_term_target_mass,
+                # ── Terminale buffer ──────────────────────────────────────
+                self.t_core[T] + self.s_term_room_under >= self.P_term_target_core,
                 self.t_dhw[T] + self.s_term_dhw_under >= self.P_term_target_dhw,
-                # Ondergrens (modulatie-bodem)
+                # ── P_el grenzen (modulatie) ──────────────────────────────
                 self.p_el_ufh[t] >= self.perf_map._pel_min_ufh * self.ufh_on[t],
                 self.p_el_dhw[t] >= self.perf_map._pel_min_dhw * self.dhw_on[t],
-                # Bovengrens (fysiek maximum van de pomp)
                 self.p_el_ufh[t] <= self.perf_map._pel_max_ufh * self.ufh_on[t],
                 self.p_el_dhw[t] <= self.perf_map._pel_max_dhw * self.dhw_on[t],
             ]
 
         # ── Doelfunctie ───────────────────────────────────────────────────
-        # Kosten = Som ( (P_grid * Prijs - P_export * ExportPrijs) * dt_stap )
         net_cost = cp.sum(
             cp.multiply(self.p_grid, self.P_prices)
             - cp.multiply(self.p_export, self.P_export_prices)
@@ -264,7 +302,6 @@ class ThermalMPC:
             + cp.multiply(self.s_dhw_high, self.P_cost_dhw_over)
         )
 
-        # Hoge straf op compressorstart, lage straf op klep-wissel
         valve_switches = (
             cp.pos(self.ufh_on[0] - self.P_init_ufh)
             + cp.sum(cp.pos(self.ufh_on[1:] - self.ufh_on[:-1]))
@@ -272,9 +309,6 @@ class ThermalMPC:
             + cp.sum(cp.pos(self.dhw_on[1:] - self.dhw_on[:-1]))
         )
 
-        # NIEUW: Tie-breaker. Maak elke actie héél iets goedkoper naarmate het later in de tijd valt.
-        # Penalty gaat van 0.0 (nu) naar -0.01 (einde horizon).
-        # Voorkomt willekeurig thread-gedrag bij platte prijzen.
         time_preference = cp.sum(
             cp.multiply(self.ufh_on + self.dhw_on, np.linspace(0.0, -0.01, T))
         )
@@ -388,10 +422,19 @@ class ThermalMPC:
             logger.warning(f"[Optimizer] WLS trend failed: {e}")
             return 0.0
 
-    def _get_steady_state(self, t_air: float, t_out: float) -> float:
-        """Bereken T_mass op basis van thermisch evenwicht (geen dynamiek)."""
+    def _get_steady_state(self, t_air: float, t_out: float) -> tuple[float, float]:
+        """
+        Bereken T_surf en T_core op basis van thermisch evenwicht (geen WP, geen zon).
+
+        Steady-state (HP off):
+          T_core = T_surf  (geen warmtestroom door R_core_surf)
+          (T_surf - T_air) / R_surf_air = (T_air - T_out) / R_oa
+          → T_surf = T_air + R_surf_air × (T_air - T_out) / R_oa
+        """
         q_loss = (t_air - t_out) / self.ident.R_oa
-        return float(t_air + (self.ident.R_im * q_loss))
+        t_surf_ss = float(t_air + self.ident.R_surf_air * q_loss)
+        t_core_ss = t_surf_ss  # kern = oppervlak bij steady state
+        return t_surf_ss, t_core_ss
 
     def update_and_get_initial_state(
         self,
@@ -399,28 +442,39 @@ class ThermalMPC:
         recent_df: pd.DataFrame,
         forecast_df: pd.DataFrame,
         current_solar_gain_air: float,
-        current_solar_gain_mass: float,
-    ) -> float:
+        current_solar_gain_surf: float,  # ZON → T_surf  (was gain_mass)
+        current_solar_gain_core: float,  # altijd 0
+    ) -> tuple[float, float]:  # (t_surf_init, t_core_init)
         t_air_meas = float(state["room_temp"])
         t_out_now = float(forecast_df.temp.iloc[0])
 
         if self.ekf.x is None:
-            # Koude start: fysische inversie als initialisatie
+            # Koude start: inverteer de T_air-balans om T_surf te schatten
             dT_dt = self._robust_trend(recent_df)
-            q_mass = (
-                (self.ident.C_air * dT_dt)
+
+            # C_air × dT_air/dt = (T_surf - T_air)/R_sa - (T_air-T_out)/R_oa + gain_air
+            # → T_surf = T_air + R_sa × (C_air × dT_dt - gain_air + (T_air-T_out)/R_oa)
+            q_to_surf = (
+                self.ident.C_air * dT_dt
                 - current_solar_gain_air
                 + (t_air_meas - t_out_now) / self.ident.R_oa
             )
-            t_mass_init = float(
+            t_surf_init = float(
                 np.clip(
-                    t_air_meas + self.ident.R_im * q_mass,
-                    t_air_meas - 3.0,
-                    t_air_meas + 5.0,
+                    t_air_meas + self.ident.R_surf_air * q_to_surf,
+                    t_air_meas - 2.0,
+                    t_air_meas + 8.0,
                 )
             )
-            self.ekf.reset(t_air_meas, t_mass_init)
-            logger.info(f"[EKF] Koude start: T_mass={t_mass_init:.2f}°C")
+            # T_core start op steady-state niveau (= T_surf als geen WP draait)
+            t_core_init = float(
+                np.clip(t_surf_init, t_air_meas - 1.0, t_air_meas + 8.0)
+            )
+
+            self.ekf.reset(t_air_meas, t_surf_init, t_core_init)
+            logger.info(
+                f"[EKF] Koude start: T_surf={t_surf_init:.2f}°C  T_core={t_core_init:.2f}°C"
+            )
         else:
             # Runtime: EKF predict + update
             p_heat_prev = 0.0
@@ -431,18 +485,23 @@ class ThermalMPC:
                     p_heat_prev = dt * FACTOR_UFH
 
             self.ekf.predict_step(
-                p_heat_prev, t_out_now, current_solar_gain_air, current_solar_gain_mass
+                p_heat_prev,
+                t_out_now,
+                current_solar_gain_air,
+                current_solar_gain_surf,
+                current_solar_gain_core,
             )
-            _, t_mass_init = self.ekf.update(t_air_meas)
+            _, t_surf_init, t_core_init = self.ekf.update(t_air_meas)
 
-        return t_mass_init
+        return t_surf_init, t_core_init
 
     def solve(
         self,
         state: dict,
         forecast_df: pd.DataFrame,
         solar_gains_air: np.ndarray,
-        solar_gains_mass: np.ndarray,
+        solar_gains_surf: np.ndarray,  # ZON → T_surf  (was solar_gains_mass)
+        solar_gains_core: np.ndarray,  # altijd ≈ 0
         avg_price: float,
         export_price: float,
         recent_df: pd.DataFrame,
@@ -474,12 +533,18 @@ class ThermalMPC:
         strat_gap_measured = max(0.0, t_avg_measured - t_bot_measured)
 
         # 2. INITIALISEER DE START-TOESTAND (Parameters)
-        t_mass_init = self.update_and_get_initial_state(
-            state, recent_df, forecast_df, solar_gains_air[0], solar_gains_mass[0]
+        t_surf_init, t_core_init = self.update_and_get_initial_state(
+            state,
+            recent_df,
+            forecast_df,
+            solar_gains_air[0],
+            solar_gains_surf[0],
+            solar_gains_core[0],
         )
 
         self.P_t_air_init.value = t_air_meas
-        self.P_t_mass_init.value = t_mass_init
+        self.P_t_surf_init.value = t_surf_init
+        self.P_t_core_init.value = t_core_init
 
         if state["hvac_mode"] == HvacMode.DHW.value:
             # DHW draait al: tank mengt, gebruik gemiddelde
@@ -544,7 +609,11 @@ class ThermalMPC:
         self.P_prices.value = resample_mean(prices) * DT
         self.P_export_prices.value = resample_mean(export_prices) * DT
         self.P_solar_gain_air.value = resample_mean(solar_gains_air)
-        self.P_solar_gain_mass.value = resample_mean(solar_gains_mass)
+        # P_solar_gain_surf bevat al het shutter-effect:
+        #   gain_surf = A_sol [kW/kW] × pv_proxy [kW] × shutter_frac [-]  +  interne gains
+        # Berekend door UfhResidualPredictor.predict(forecast_df, shutters).
+        # De MPC gebruikt dit direct als parameter — geen verdere bewerking nodig.
+        self.P_solar_gain_surf.value = resample_mean(solar_gains_surf)
         self.P_dhw_demand.value = resample_sum(dhw_demand_raw)
 
         self.P_room_min.value = r_min
@@ -558,7 +627,7 @@ class ThermalMPC:
         # Gebruik effective_prices alleen voor switching, strictness en terminal value
         effective_max_price = float(np.max(effective_prices))
 
-        hist_p_th = np.zeros(self.L)
+        hist_p_th = np.zeros(max(self.L, 1))  # minimaal grootte 1 (zie _build_problem)
         if not recent_df.empty:
             # Sorteer op tijd aflopend (nieuwste eerst)
             df_sorted = recent_df.sort_values("timestamp", ascending=False)
@@ -582,23 +651,23 @@ class ThermalMPC:
         )
 
         # 3. INITIALISEER DE 'GUESSED' CURVES (Error-Corrected Receding Horizon)
-        if self._prev_t_mass is not None and len(self._prev_t_mass) == T:
+        if self._prev_t_core is not None and len(self._prev_t_core) == T:
             # Bereken de fouten op de vorige voorspelling
-            error_mass = t_mass_init - self._prev_t_mass[1]
+            error_core = t_core_init - self._prev_t_core[1]
             error_dhw = t_avg_measured - self._prev_t_dhw[1]
 
             # Schuif de horizon door en pas de fout-correctie toe
-            guessed_t_mass = np.append(self._prev_t_mass[1:], self._prev_t_mass[-1])
+            guessed_t_core = np.append(self._prev_t_core[1:], self._prev_t_core[-1])
             guessed_t_dhw = np.append(self._prev_t_dhw[1:], self._prev_t_dhw[-1])
 
             logger.info(
                 f"[MPC] Receding Horizon geladen (EKF). "
-                f"Afwijking: Mass {error_mass:+.2f}K, DHW {error_dhw:+.2f}K | "
+                f"Afwijking: Core {error_core:+.2f}K, DHW {error_dhw:+.2f}K | "
                 f"Stratification Gap: {strat_gap_measured:.1f}K"
             )
         else:
             # Fallback bij koude start
-            guessed_t_mass = np.full(T, t_mass_init)
+            guessed_t_core = np.full(T, t_core_init)
             guessed_t_dhw = np.full(T, t_avg_measured)
             logger.info("[MPC] Start met platte fallback-state.")
 
@@ -618,8 +687,8 @@ class ThermalMPC:
                 gap_decay = strat_gap_measured * np.exp(-np.arange(T) / 3)  # 45 min tau
                 guessed_t_sink = guessed_t_dhw - gap_decay
 
-            # 1. PWA op huidige schatting
-            pwa_data = self.pwa.compute(t_out, guessed_t_mass, guessed_t_sink)
+            # 1. PWA op huidige schatting (t_core als UFH-sink proxy)
+            pwa_data = self.pwa.compute(t_out, guessed_t_core, guessed_t_sink)
             self.plan_t_sup_ufh = pwa_data["sup_ufh"]
             self.plan_t_sup_dhw = pwa_data["sup_dhw"]
 
@@ -653,9 +722,12 @@ class ThermalMPC:
                 self.P_val_terminal_dhw.value = costs["terminal_tank"]
 
                 t_out_end = float(t_out[-1])
-                self.P_term_target_mass.value = float(
-                    r_t[-1] + self.ident.R_im * (r_t[-1] - t_out_end) / self.ident.R_oa
+                # Steady-state T_core doel: T_air + R_surf_air × (T_air - T_out) / R_oa
+                t_surf_target = (
+                    r_t[-1]
+                    + self.ident.R_surf_air * (r_t[-1] - t_out_end) / self.ident.R_oa
                 )
+                self.P_term_target_core.value = float(t_surf_target)
                 self.P_term_target_dhw.value = float(d_t[-1])
                 costs_set = True
 
@@ -695,7 +767,8 @@ class ThermalMPC:
                     "p_el_ufh": self.p_el_ufh.value.copy(),
                     "p_el_dhw": self.p_el_dhw.value.copy(),
                     "t_air": self.t_air.value.copy(),
-                    "t_mass": self.t_mass.value.copy(),
+                    "t_surf": self.t_surf.value.copy(),  # NEW
+                    "t_core": self.t_core.value.copy(),  # (was t_mass)
                     "t_dhw": self.t_dhw.value.copy(),
                     "p_grid": self.p_grid.value.copy(),
                     "p_export": self.p_export.value.copy(),
@@ -721,8 +794,9 @@ class ThermalMPC:
             prev_obj = obj
 
             # 6. Update schatting: solver heeft nu de echte trajectorie gezien
-            if self.t_mass.value is not None:
-                guessed_t_mass = self.t_mass.value[:-1].copy()
+            if self.t_core.value is not None:
+                guessed_t_core = self.t_core.value[:-1].copy()
+
                 guessed_t_dhw = self.t_dhw.value[:-1].copy()
 
         # ── Herstel de beste oplossing ────────────────────────────────────
@@ -735,7 +809,8 @@ class ThermalMPC:
         self.p_el_ufh.value = best_state["p_el_ufh"]
         self.p_el_dhw.value = best_state["p_el_dhw"]
         self.t_air.value = best_state["t_air"]
-        self.t_mass.value = best_state["t_mass"]
+        self.t_surf.value = best_state["t_surf"]  # NEW
+        self.t_core.value = best_state["t_core"]  # (was t_mass)
         self.t_dhw.value = best_state["t_dhw"]
         self.p_grid.value = best_state["p_grid"]
         self.p_export.value = best_state["p_export"]
@@ -755,7 +830,8 @@ class ThermalMPC:
         if self.t_air.value is not None:
             self._prev_ufh_on = self.ufh_on.value.copy()
             self._prev_dhw_on = self.dhw_on.value.copy()
-            self._prev_t_mass = self.t_mass.value[:-1].copy()
+            self._prev_t_surf = self.t_surf.value[:-1].copy()  # NEW
+            self._prev_t_core = self.t_core.value[:-1].copy()  # (was t_mass)
             self._prev_t_dhw = self.t_dhw.value[:-1].copy()
             self._prev_obj = self.problem.value
 
@@ -766,13 +842,14 @@ class ThermalMPC:
                     logger.info(
                         f"[Debug] t={t:3d} UFH_on  "
                         f"t_air={self.t_air.value[t + 1]:.2f}  "
-                        f"t_mass={self.t_mass.value[t + 1]:.2f}  "
+                        f"t_surf={self.t_surf.value[t + 1]:.2f}  "
+                        f"t_core={self.t_core.value[t + 1]:.2f}  "
                         f"s_low={self.s_room_low.value[t]:.4f}  "
                         f"r_min={self.P_room_min.value[t]:.1f}"
                     )
                 logger.info(
                     f"[Debug] UFH {len(ufh_steps)} stappen  "
-                    f"terminal t_mass={self.t_mass.value[T]:.2f}  "
+                    f"terminal t_core={self.t_core.value[T]:.2f}  "
                     f"t_air={self.t_air.value[T]:.2f}"
                 )
 
@@ -813,6 +890,12 @@ class Optimizer:
 
         self.res_ufh.tau_internal = self.ident.tau_internal_gain
         self.res_ufh.alpha_conv = self.ident.alpha_conv_internal
+        self.res_ufh.a_sol = self.ident.A_sol  # sync geleerde solar aperture
+
+        logger.info(
+            f"[Optimizer] Gesynchroniseerd: A_sol={self.ident.A_sol:.2f}  "
+            f"→  gain_solar = A_sol × pv_proxy × shutter/100"
+        )
 
         self.hydraulic.train(df)
         self.res_ufh.train(df)
@@ -839,18 +922,19 @@ class Optimizer:
             "dhw_bottom": context.dhw_bottom,
         }
 
-        # Zonopwarming voorspellen
+        # Zonopwarming voorspellen (3-state: air, surf, core)
         shutter_room = float(getattr(context, "shutter_room", 100.0))
         shutters = self.shutter.predict(context.forecast_df, shutter_room)
-        solar_gains_air, solar_gains_mass = self.res_ufh.predict(
+        solar_gains_air, solar_gains_surf, solar_gains_core = self.res_ufh.predict(
             context.forecast_df, shutters
         )
-        solar_gains_total = solar_gains_air + solar_gains_mass
+        solar_gains_total = solar_gains_air + solar_gains_surf + solar_gains_core
 
         logger.info(
             f"[Optimizer] Solar gain: max={np.max(solar_gains_total):.3f}, "
             f"gem={np.mean(solar_gains_total):.3f} kW | "
-            f"air={np.mean(solar_gains_air):.3f} mass={np.mean(solar_gains_mass):.3f} kW"
+            f"air={np.mean(solar_gains_air):.3f}  surf={np.mean(solar_gains_surf):.3f}  "
+            f"core={np.mean(solar_gains_core):.3f} kW"
         )
 
         # Oplossen
@@ -858,14 +942,15 @@ class Optimizer:
             state=state,
             forecast_df=context.forecast_df,
             solar_gains_air=solar_gains_air,
-            solar_gains_mass=solar_gains_mass,
+            solar_gains_surf=solar_gains_surf,
+            solar_gains_core=solar_gains_core,
             avg_price=avg_price,
             export_price=export_price,
             recent_df=recent_df,
         )
 
-        if self.mpc.t_mass.value is not None:
-            self._t_mass_estimate = float(self.mpc.t_mass.value[1])
+        if self.mpc.t_core.value is not None:
+            self._t_core_estimate = float(self.mpc.t_core.value[1])
 
         # Lege uitvoer bij solver-fout
         if self.mpc.p_el_ufh.value is None:
@@ -1028,7 +1113,8 @@ class Optimizer:
         t_dhw_q = np.interp(quarter_times, solver_times, t_d)
         t_out_q = np.interp(quarter_times, solver_times[:-1], self.mpc.P_temp_out.value)
 
-        # 4. Shutters (herhalen)
+        # 4. Shutters — de voorspelde stand (ShutterPredictor) die ook is gebruikt
+        # om solar_gains_surf te berekenen. Toont het effect dat de MPC heeft meegenomen.
         shutter_src = (
             shutters[:T]
             if len(shutters) >= T
