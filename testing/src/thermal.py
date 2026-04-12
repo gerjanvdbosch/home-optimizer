@@ -760,7 +760,8 @@ class SystemIdentificator:
         else:
             self.ufh_lag_steps = int(np.clip(best_lag, 2, 16))
             logger.info(
-                f"[SysID] Vloerlag={self.ufh_lag_steps * 15} min (corr={best_corr:.2f})"
+                f"[SysID] Vloerlag={self.ufh_lag_steps * 15} min (corr={best_corr:.2f}) "
+                f"— wordt overschreven door _fit_three_state (L=0, RC-dynamica doet het werk)"
             )
 
     def _fit_k_emit(self, df_proc: pd.DataFrame):
@@ -1033,25 +1034,28 @@ class SystemIdentificator:
         d = d.dropna(subset=["residual"])
         d = d[d["pv_actual"] > 0.1]  # veiligheidsdrempel (voorkom ÷0)
 
-        # A_sol calibratie voor de 3-state MPC (zelf-consistent, NIET /dt)
+        # A_sol kalibratie — fysisch correct [kW/kW]
         #
-        # residual = Q_sol × dt / C  [K per stap]   (onverklaarde T_air-stijging)
+        # Enkelvoudig RC-model: C × dT_air = [A_sol × pv - (T_air-T_out)/R_oa] × dt
+        # → residual = A_sol × pv × dt / C  [K per stap]
+        # → A_sol [kW/kW] = C × residual / (pv × dt)
         #
-        # De formule ratio = C × residual / pv geeft A_sol in [h], géén kW/kW.
-        # Dit is BEWUST: in predict() wordt gain_solar = A_sol × pv gebruikt als
-        # kW in de MPC, maar feitelijk is het kWh. Dit compenseert het feit dat A_sol
-        # gekalibreerd is op T_air via C_total (15 kWh/K), terwijl het in de MPC
-        # wordt toegepast op T_surf met C_surf (1.80 kWh/K). De impliciete factor dt
-        # zorgt voor een effectieve C_surf_eff = C_surf / dt ≈ 7 kWh/K — realistisch
-        # voor vloer + meubellaag die zonne-instraling absorbeert.
+        # A_sol is een fysische eigenschap van het gebouw (g-waarde × raamoppervlak
+        # gedeeld door PV-oppervlak × η_pv). Het is ONAFHANKELIJK van welke
+        # thermische node de warmte opneemt.
         #
-        # NOOIT /dt toevoegen: dat geeft A_sol 4× te groot → T_surf overheet.
-        ratio = self.C * d["residual"] / d["pv_actual"]
+        # In de MPC wordt A_sol gebruikt als:
+        #   gain_solar [kW] = A_sol [kW/kW] × pv [kW] × shutter_frac [-]
+        # Dit is vermogen [kW]. In T_surf-dynamica: dT_surf = gain_solar × dt / C_surf
+        # wat dimensioneel klopt: kW × h / (kWh/K) = K ✓
+        #
+        # Typische waarden voor een Nederlands woonhuis: 1–10 kW/kW
+        ratio = self.C * d["residual"] / (d["pv_actual"] * dt)
 
         # Gebruik 65e percentiel: robuuster dan gemiddelde, negeert bewolkte outliers
         a_sol_est = float(ratio.quantile(0.65))
 
-        self.A_sol = float(np.clip(a_sol_est, 0.5, 12.0))
+        self.A_sol = float(np.clip(a_sol_est, 1.0, 15.0))
         logger.info(
             f"[SysID] A_sol={self.A_sol:.2f} geleerd uit "
             f"{len(d)} zonne-events (65e percentiel)"
@@ -1134,7 +1138,20 @@ class SystemIdentificator:
         self.R_im = self.R_surf_air  # proxy: oppervlak↔lucht was massa↔lucht
         self.C_mass = self.C_surf + self.C_core  # totale trage massa
 
-        # ── 6. Consistentiecheck & logging ───────────────────────────────────
+        # ── 6. UFH-lag override voor 3-state model ────────────────────────────
+        # In het 2-state model was ufh_lag_steps nodig om de vloer-traagheid
+        # te compenseren die het model niet kende.
+        # In het 3-state model wordt die vertraging al VOLLEDIG gevangen door
+        # de RC-tijdconstanten:
+        #   τ_kern→opp  = R_core_surf × C_core ≈ 128 min
+        #   τ_lucht_volgt_opp = R_surf_air × C_air ≈ 127 min
+        # Een extra kunstmatige P_th-vertraging (L = ufh_lag_steps) telt de
+        # vertraging dubbel: de MPC denkt dat UFH nog later werkt dan de
+        # RC-dynamica al impliceert → optimizer start te vroeg/verkeerd.
+        # Oplossing: L = 0; de RC-structuur doet het werk.
+        self.ufh_lag_steps = 0
+
+        # ── 7. Consistentiecheck & logging ───────────────────────────────────
         tau_surf_air_min = self.R_surf_air * self.C_surf * 60  # minuten (C_surf-node)
         tau_air_track_min = (
             self.R_surf_air * self.C_air * 60
@@ -1148,11 +1165,11 @@ class SystemIdentificator:
             f"R_surf_air={self.R_surf_air:.3f}  R_core_surf={self.R_core_surf:.3f}  "
             f"R_cond={self.R_cond:.1f}  R_vent={self.R_vent:.1f}  "
             f"R_oa={self.R_oa:.2f} K/kW | "
-            f"A_sol={self.A_sol:.2f} m² | "
+            f"A_sol={self.A_sol:.2f} kW/kW | "
             f"τ_lucht_volgt_opp={tau_air_track_min:.0f} min  "
             f"τ_opp_node={tau_surf_air_min:.0f} min  "
             f"τ_kern→opp={tau_core_surf_min:.0f} min  "
-            f"(vloerlag={self.ufh_lag_steps * 15} min gemeten)"
+            f"(vloerlag=0 in 3-state MPC — RC-dynamica vangt dit al)"
         )
 
         if R_from_lag > 2.0:

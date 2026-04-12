@@ -133,7 +133,9 @@ class ThermalMPC:
         self.P_pth_const_dhw = cp.Parameter(T)
         self.P_pth_slope_dhw = cp.Parameter(T)
 
-        self.P_ufh_p_th_hist = cp.Parameter(self.L, nonneg=True)
+        # Minimaal grootte 1: cp.Parameter(0) is ongeldig in CVXPY.
+        # Wanneer L=0 wordt deze parameter nooit geïndexeerd (t < 0 is altijd False).
+        self.P_ufh_p_th_hist = cp.Parameter(max(self.L, 1), nonneg=True)
 
         self.P_dhw_demand = cp.Parameter(T, nonneg=True)
 
@@ -625,7 +627,7 @@ class ThermalMPC:
         # Gebruik effective_prices alleen voor switching, strictness en terminal value
         effective_max_price = float(np.max(effective_prices))
 
-        hist_p_th = np.zeros(self.L)
+        hist_p_th = np.zeros(max(self.L, 1))  # minimaal grootte 1 (zie _build_problem)
         if not recent_df.empty:
             # Sorteer op tijd aflopend (nieuwste eerst)
             df_sorted = recent_df.sort_values("timestamp", ascending=False)
