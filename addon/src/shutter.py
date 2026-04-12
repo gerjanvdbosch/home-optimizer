@@ -79,6 +79,19 @@ class ShutterPredictor:
 
         # Voorspel het percentage (0 tot 100)
         predicted_shutters = self.model.predict(df_feat[self.features])
+        predicted_shutters = np.clip(predicted_shutters, 0.0, 100.0)
 
-        # Zorg dat de waarden logisch blijven (tussen 0 en 100)
-        return np.clip(predicted_shutters, 0.0, 100.0)
+        # ── Anker korte-termijn voorspelling aan huidige gemeten rolluikstand ──
+        # Het ML-model is getraind op historisch gemiddeld gedrag. Bij de huidige
+        # meting weten we de werkelijke stand met zekerheid; gebruik die als
+        # startpunt en laat de voorspelling exponentieel vervagen naar het model.
+        # τ = 4 stappen ≈ 1 uur (typische reactietijd bij veranderende zon).
+        n = len(predicted_shutters)
+        tau = 4.0  # stappen
+        t = np.arange(n, dtype=float)
+        anchor_weight = np.exp(-t / tau)
+        blended = (
+            anchor_weight * float(current_shutter_open)
+            + (1.0 - anchor_weight) * predicted_shutters
+        )
+        return np.clip(blended, 0.0, 100.0)

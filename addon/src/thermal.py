@@ -994,10 +994,33 @@ class SystemIdentificator:
             .reset_index()
         )
 
+        # ── Bugfix 1: bereken dT op de volledige tijdlijn vóór het filteren ──────
+        # Na het filteren (mask) zijn rijen niet meer aaneengesloten. Een .diff()
+        # op de gefilterde subset overspant dan meerdere 15-min-stappen, wat leidt
+        # tot een overschatting van A_sol. We berekenen dT hier op df_15 (volledig)
+        # en zetten niet-aaneengesloten stappen op NaN.
+        df_15["dT_actual"] = df_15["room_temp"].diff()
+        dt_gap = df_15["timestamp"].diff().dt.total_seconds() / 3600.0
+        df_15.loc[(dt_gap - 0.25).abs() > 0.05, "dT_actual"] = np.nan
+
+        # ── Bugfix 2: sluit periode na actieve UFH-verwarming uit ────────────────
+        # Vlak nadat de warmtepomp stopt is T_core nog warm en geeft warmte af aan
+        # T_surf → T_air. Dit wordt anders foutief als zonwarmte ingeboekt, wat
+        # A_sol structureel overschat. We sluiten 2 uur (8 × 15 min) na het
+        # stoppen van verwarming uit.
+        df_15["_was_heating"] = df_15["wp_output"] >= 0.1
+        _just_stopped = (
+            df_15["_was_heating"].shift(1, fill_value=False) & ~df_15["_was_heating"]
+        )
+        df_15["_post_heat"] = (
+            _just_stopped.rolling(window=8, min_periods=1).max().fillna(0).astype(bool)
+        )
+
         mask = (
             (df_15["wp_output"] < 0.1)  # geen verwarming actief
             & (df_15["pv_actual"] > 0.30)  # duidelijke zonschijn (>300W)
             & (df_15["room_temp"] > 10.0)  # niet leeg/onbewoond
+            & ~df_15["_post_heat"]  # niet vlak na verwarming (vloerrestant)
         )
 
         # Filter op open rolluiken (100 = open, 0 = gesloten)
@@ -1027,7 +1050,7 @@ class SystemIdentificator:
         dt = 0.25  # uur
 
         # RC-gecorrigeerd residu: werkelijke dT minus verwacht RC-verlies
-        d["dT_actual"] = d["room_temp"].diff()
+        # dT_actual is al berekend op de volledige tijdlijn (bugfix 1 hierboven)
         d["dT_loss"] = -(d["room_temp"] - d["temp"]) / self.R_oa * (dt / self.C)
         d["residual"] = d["dT_actual"] - d["dT_loss"]  # dT veroorzaakt door zon
 
@@ -1533,17 +1556,28 @@ class UfhResidualPredictor:
 
         # ── 3-state gain split (fysisch correct, 3C2R model) ────────────────
         #
-        # ZON:       → volledig naar T_surf (ramen → vloeroppervlak absorptie)
-        #              T_surf → T_air via convectie (R_surf_air)
+        # ZON:       → 85% naar T_surf (directe absorptie vloer/wanden via ramen)
+        #              15% direct naar T_air (convectie nabij glas, meubels, stof)
         #              Effect van SHUTTER: expliciet via shutter_frac hierboven
+        #
+        #   Achtergrond: bij 100% naar T_surf (kleine C_surf = 1.80 kWh/K) schiet
+        #   T_surf bij hoge zonlast (>3 kW) sterk omhoog en geeft dit 's avonds
+        #   vertraagd terug aan T_air, waardoor T_kamer te hoog blijft 's nachts.
+        #   Een fractie direct naar T_air reduceert deze overshoot zonder de
+        #   steady-state thermodynamica aan te tasten.
         #
         # INTERN:    → alpha_conv-deel direct naar T_air (convectief: lampen, computers)
         #              (1-alpha_conv)-deel naar T_surf (radiatief: TV, vloer-warmte)
         #
         # KERN:      → geen directe externe bron, alleen WP via UFH-buizen
         # ─────────────────────────────────────────────────────────────────────
-        gain_air = gain_internal * self.alpha_conv
-        gain_surf = gain_solar + gain_internal * (1.0 - self.alpha_conv)
+        _SOLAR_SURF_FRAC = 0.85  # deel zongain naar vloeroppervlak
+        _SOLAR_AIR_FRAC = 1.0 - _SOLAR_SURF_FRAC  # deel direct naar kamerlucht
+
+        gain_air = gain_solar * _SOLAR_AIR_FRAC + gain_internal * self.alpha_conv
+        gain_surf = gain_solar * _SOLAR_SURF_FRAC + gain_internal * (
+            1.0 - self.alpha_conv
+        )
         gain_core = np.zeros_like(gain_air)
 
         return gain_air, gain_surf, gain_core
