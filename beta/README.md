@@ -1,185 +1,201 @@
 # 2-State Thermisch Model voor Vloerverwarming (UFH)
 
+---
+
 ## 1. Doel van het model
 
-Dit model beschrijft de thermische dynamica van een woning met vloerverwarming en wordt gebruikt als basis voor Model Predictive Control (MPC). Het model bevat thermische opslag, vertraging en externe verstoringen (weer en zon).
+Dit model beschrijft de thermische dynamica van een woning met vloerverwarming voor Model Predictive Control (MPC).
+
+Het model bevat:
+
+* thermische opslag (vloer + gebouwmassa)
+* warmteverlies naar buiten
+* zoninstraling (GTI)
+* regelbare warmteinvoer (UFH)
 
 ---
 
 ## 2. Modelstructuur
 
-Het systeem bestaat uit twee thermische states:
+### T_r (Room temperature)
 
-* **T_r (Room temperature)**
-  Gemeten kamertemperatuur
+Gemeten luchttemperatuur in de ruimte.
 
-* **T_b (Buffer temperature)**
-  Effectieve temperatuur van vloer + gebouwmassa (niet gemeten)
+### T_b (Buffer temperature)
+
+Niet gemeten thermische massa:
+
+* betonvloer
+* binnenmuren
+* constructieve massa
 
 ---
 
 ## 3. Continue fysische vergelijking
 
-### Buffer (vloer / massa)
+### Buffer
 
-C_b * dT_b/dt = P_UFH - (T_b - T_r) / R_br
+C_b · dT_b/dt =
+P_UFH − (T_b − T_r)/R_br + (1 − α) · Q_solar
 
-### Ruimte (lucht + directe omgeving)
+### Ruimte
 
-C_r * dT_r/dt = (T_b - T_r) / R_br - (T_r - T_out) / R_ro + α * Q_solar
-
----
-
-## 4. Discrete vorm (implementatie)
-
-Met tijdstap Δt:
-
-T_b[k+1] = T_b[k] + (Δt / C_b) * (P_UFH[k] - (T_b[k] - T_r[k]) / R_br)
-
-T_r[k+1] = T_r[k] + (Δt / C_r) * ((T_b[k] - T_r[k]) / R_br - (T_r[k] - T_out[k]) / R_ro + α * Q_solar[k])
+C_r · dT_r/dt =
+(T_b − T_r)/R_br − (T_r − T_out)/R_ro + α · Q_solar
 
 ---
 
-## 5. Zoninstraling (Open-Meteo GTI)
+## 4. Interpretatie van warmtestromen
 
-Gebruik **Global Tilted Irradiance (GTI)** van Open-Meteo.
+* P_UFH → actieve warmte-injectie via vloerverwarming
+* (T_b − T_r)/R_br → interne warmte-uitwisseling
+* (T_r − T_out)/R_ro → warmteverlies naar buiten
+* Q_solar → zoninstraling via glas
 
-### Fysisch model:
+Zon wordt verdeeld:
 
-Q_solar = A_glass * GTI(t) * η
-
-waar:
-
-* A_glass = effectief glasoppervlak [m²]
-* GTI(t) = zoninstraling [W/m²]
-* η = transmissiefactor (0.5–0.8)
+* α → directe luchtverwarming
+* (1 − α) → opslag in thermische massa
 
 ---
 
-### Invoer in model:
+## 5. Discrete vorm (implementatie)
 
-* Q_solar wordt toegevoegd aan T_r dynamica
-* Optioneel deels naar T_b voor thermische opslag
+T_b[k+1] =
+T_b[k] + (Δt / C_b) · (P_UFH[k] − (T_b[k] − T_r[k])/R_br + (1 − α) · Q_solar[k])
+
+T_r[k+1] =
+T_r[k] + (Δt / C_r) · ((T_b[k] − T_r[k])/R_br − (T_r[k] − T_out[k])/R_ro + α · Q_solar[k])
 
 ---
 
-## 6. Variabelen en betekenis
+## 6. Zoninstraling (Open-Meteo GTI)
+
+Q_solar [kW] = A_glass · GTI · η / 1000
+
+---
+
+## 7. Variabelen
 
 ### States
 
-* **T_r [°C]**: kamertemperatuur (gemeten)
-* **T_b [°C]**: thermische massa (vloer/constructie)
-
----
+* T_r [°C]
+* T_b [°C]
 
 ### Inputs
 
-* **P_UFH [kW]**
-  Warmtevermogen vloerverwarming
-
-  Berekening:
-  P_UFH = flow_kg_s * 4.18 * (T_supply - T_return)
-
-* **T_out [°C]**
-  Buitentemperatuur
-
-* **Q_solar [kW]**
-  Zoninstraling via GTI
+* P_UFH [kW]
+* T_out [°C]
+* Q_solar [kW]
 
 ---
 
-### Parameters
+## 8. Parameters
 
-* **C_r [Wh/K]**
-  Thermische capaciteit van de ruimte
-
-* **C_b [Wh/K]**
-  Thermische capaciteit van vloer/gebouwmassa
-
-* **R_br [K/kW]**
-  Warmteweerstand tussen vloer en ruimte
-
-* **R_ro [K/kW]**
-  Warmteweerstand tussen ruimte en buiten
-
-* **α [-]**
-  Fractie zonnewarmte direct naar ruimte (typisch 0.6–0.8)
-
-* **η [-]**
-  Glas transmissiefactor (0.5–0.8)
-
-* **A_glass [m²]**
-  Effectief glasoppervlak
+* C_r [kWh/K]
+* C_b [kWh/K]
+* R_br [K/kW]
+* R_ro [K/kW]
+* α [-]
+* η [-]
+* A_glass [m²]
 
 ---
 
-### Constante
+## 9. Constante
 
-* **Δt [uur]**
-  Tijdstap (bijv. 5 min = 1/12 uur)
-
----
-
-## 7. Eenhedenconsistentie
-
-Aanbevolen set voor Home Assistant:
-
-* Vermogen: kW
-* Tijd: uur
-* Capaciteit: Wh/K
-
-Dan geldt:
-
-T[k+1] = T[k] + (Δt / C) * P
+* Δt [uur]
 
 ---
 
-## 8. DHW model (apart systeem)
+## 10. Eenhedenconsistentie
 
-T_dhw[k+1] = T_dhw[k] + α_dhw * P_dhw - β_dhw * (T_dhw - T_out)
+kW, kWh/K, uur:
 
----
-
-## 9. Interpretatie van het model
-
-* T_b representeert thermische opslag (vloer + massa)
-* UFH verwarmt eerst de buffer, daarna de ruimte
-* Zoninstraling komt via fysiek gemeten GTI
-* Warmteverlies gebeurt via R_ro
+T[k+1] = T[k] + (Δt / C) · P
 
 ---
 
-## 10. Gebruik in MPC
+## 11. DHW model
 
-Het model wordt herschreven naar state-space:
+T_dhw[k+1] =
+T_dhw[k] + (Δt / C_dhw) · P_dhw − (Δt / (C_dhw · R_dhw)) · (T_dhw − T_room)
+
+---
+
+## 12. State-space vorm
 
 x[k+1] = A x[k] + B u[k] + E d[k]
 
-waar:
-
-* x = [T_r, T_b]
-* u = P_UFH
-* d = [T_out, Q_solar]
+x = [T_r, T_b]
+u = P_UFH
+d = [T_out, Q_solar]
 
 ---
 
-## 11. Doel van MPC
+### Matrices
 
-Optimalisatie van:
+a_br = Δt / (C_r · R_br)
+a_ro = Δt / (C_r · R_ro)
+b_br = Δt / (C_b · R_br)
 
-* energiegebruik (PV benutting)
-* grid import minimaliseren
-* COP optimalisatie warmtepomp
-* comfort (T_r binnen band)
+A =
+[ 1 − a_br − a_ro,   a_br ]
+[ b_br,              1 − b_br ]
+
+B =
+[ 0 ]
+[ Δt / C_b ]
+
+E =
+[ a_ro,                 α · Δt / C_r ]
+[ 0,        (1 − α) · Δt / C_b ]
 
 ---
 
-## 12. Belangrijkste eigenschap
+## 13. Stabiliteit (correcte formulering)
 
-Dit model maakt het mogelijk om:
+De stabiliteit van het systeem wordt formeel bepaald door:
 
-* thermische opslag van vloerverwarming te benutten
-* zoninstraling fysisch correct mee te nemen
-* voorspellend te sturen op basis van weerdata
+|λ(A)| < 1
 
-Zonder tweede state (T_b) en GTI-invoer is dit gedrag niet reproduceerbaar.
+waar λ(A) de eigenwaarden van de systeemmatrix A zijn.
+
+Equivalent:
+
+* alle dynamische modes moeten binnen de eenheidscirkel liggen
+
+In praktijk voor woningparameters:
+
+* koppelingstermen zijn klein
+* eigenwaarden liggen ruim binnen stabiel gebied
+
+---
+
+## 14. Interpretatie van het systeem
+
+* UFH laadt eerst de thermische buffer
+* buffer voedt ruimte vertraagd
+* zon is externe, voorspelbare verstoring
+* buitenlucht bepaalt continue warmteverlies
+
+---
+
+## 15. MPC geschiktheid
+
+Model is geschikt omdat:
+
+* lineair tijd-invariant
+* fysisch interpreteerbaar
+* stabiel onder realistische parameters
+* direct bruikbaar in cvxpy
+
+---
+
+## 16. Minimale systeemstructuur
+
+* 2 states: T_r, T_b
+* 1 input: P_UFH
+* 2 disturbances: T_out, Q_solar
+
+Minimale volledige woning-MPC representatie zonder overmodellering.
