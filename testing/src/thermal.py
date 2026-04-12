@@ -515,10 +515,28 @@ class SystemIdentificator:
         self.ufh_lag_steps = 4
         self.tau_internal_gain = 1.0  # uren
         self.alpha_conv_internal = 0.5
-        self.C_air = 3.0  # kWh/K  — lucht + lichte oppervlakken (snelle massa)
-        self.C_mass = 27.0  # kWh/K  — vloer + beton (trage massa)
-        self.R_im = 1.2  # K/kW   — koppeling massa ↔ lucht
-        self.R_oa = 15.0  # K/kW   — verlies lucht → buiten (= R initieel)
+
+        # ── 3-state parameters (Air – Surface – Core) ──────────────────────
+        # Staat 1 T_air  (C_air):  Kamerlucht + lichte meubels + drywall [snel]
+        # Staat 2 T_surf (C_surf): Vloeroppervlak ~2 cm                  [middel] ← ZON
+        # Staat 3 T_core (C_core): Betonkern + UFH-buizen                 [traag]  ← WP
+        self.C_air = (
+            3.0  # kWh/K  — lucht + meubels + lichte wand/plafond massa (~20% van C)
+        )
+        self.C_surf = 3.5  # kWh/K  — vloer/wand oppervlaktelaag (~12% van C)
+        self.C_core = 24.0  # kWh/K  — beton kern (rest)
+
+        self.R_surf_air = 1.5  # K/kW  — oppervlak ↔ lucht convectie
+        self.R_core_surf = 0.35  # K/kW  — kern ↔ oppervlak geleiding
+        self.R_cond = 23.0  # K/kW  — wandgeleiding (constant, isolatie)
+        self.R_vent = 43.0  # K/kW  — ventilatie (variabel, wind-afhankelijk)
+        self.A_sol = 5.0  # m²    — effectieve zonistralings-aperture (g × A_raam)
+
+        # ── Backward-compat afgeleide attribs (geen directe parameters meer) ─
+        self.R_oa = self.R  # K/kW — totale verliesweerstand (= R_cond||R_vent)
+        self.R_im = self.R_surf_air  # K/kW — proxy: massa↔lucht
+        self.C_mass = self.C_surf + self.C_core  # kWh/K — totale trage massa
+
         self._last_internal_gain_corr = 0.0
         self._load()
 
@@ -535,17 +553,36 @@ class SystemIdentificator:
             self.ufh_lag_steps = d.get("ufh_lag_steps", 4)
             self.tau_internal_gain = d.get("tau_internal_gain", 1.0)
             self.alpha_conv_internal = d.get("alpha_conv_internal", 0.5)
-            self.C_air = d.get("C_air", 3.0)
-            self.C_mass = d.get("C_mass", 27.0)
-            self.R_im = d.get("R_im", 1.2)
-            self.R_oa = d.get("R_oa", self.R)
+
+            # ── 3-state parameters ────────────────────────────────────────────
+            # Backward-compat: als oud model geen 3-state heeft, leid ze af
+            _C_air_legacy = d.get("C_air", 3.0)
+            _C_mass_legacy = d.get("C_mass", 27.0)
+            _R_im_legacy = d.get("R_im", 1.2)
+            _R_oa_legacy = d.get("R_oa", self.R)
+
+            self.C_air = d.get("C_air", _C_air_legacy)
+            self.C_surf = d.get("C_surf", round(0.12 * self.C, 2))
+            self.C_core = d.get("C_core", max(_C_mass_legacy - self.C_surf, 5.0))
+            self.R_surf_air = d.get("R_surf_air", _R_im_legacy)
+            self.R_core_surf = d.get("R_core_surf", 0.35)
+            self.R_cond = d.get("R_cond", _R_oa_legacy / 0.65)
+            self.R_vent = d.get("R_vent", _R_oa_legacy / 0.35)
+            self.A_sol = d.get("A_sol", 5.0)
+
+            # Backward-compat afgeleide attribs
+            self.R_oa = _R_oa_legacy
+            self.R_im = self.R_surf_air
+            self.C_mass = self.C_surf + self.C_core
+
             logger.info(
                 f"[SysID] Geladen: R={self.R:.1f} C={self.C:.1f} "
-                f"K_emit={self.K_emit:.3f} K_tank={self.K_tank:.3f} "
-                f"Lag={self.ufh_lag_steps * 15}m K_loss={self.K_loss_dhw:.4f} "
-                f"C_air={self.C_air:.2f} C_mass={self.C_mass:.2f} "
-                f"R_im={self.R_im:.3f} R_oa={self.R_oa:.2f} "
-                f"Tau_internal={self.tau_internal_gain:.2f} Alpha_conv={self.alpha_conv_internal:.2f} "
+                f"K_emit={self.K_emit:.3f} Lag={self.ufh_lag_steps * 15}m | "
+                f"3-state: C_air={self.C_air:.2f} C_surf={self.C_surf:.2f} "
+                f"C_core={self.C_core:.2f} kWh/K | "
+                f"R_surf_air={self.R_surf_air:.3f} R_core_surf={self.R_core_surf:.3f} "
+                f"R_cond={self.R_cond:.1f} R_vent={self.R_vent:.1f} K/kW | "
+                f"A_sol={self.A_sol:.2f} m²"
             )
         except Exception as e:
             logger.error(f"[SysID] Laden mislukt: {e}")
@@ -593,7 +630,8 @@ class SystemIdentificator:
         self._fit_dhw_loss(df_proc)
         self._fit_internal_gain_tau(df_proc)
         self._fit_internal_gain_split(df_proc)
-        self._fit_two_state()
+        self._fit_solar_aperture(df_proc)  # NEW: leert A_sol uit zonne-events
+        self._fit_three_state()  # UPGRADE: 2→3 state
 
         logger.info(
             f"[SysID] Klaar: R={self.R:.1f} C={self.C:.1f} "
@@ -610,7 +648,16 @@ class SystemIdentificator:
                 "ufh_lag_steps": self.ufh_lag_steps,
                 "tau_internal_gain": self.tau_internal_gain,
                 "alpha_conv_internal": self.alpha_conv_internal,
+                # ── 3-state params ──────────────────────────────────────────
                 "C_air": self.C_air,
+                "C_surf": self.C_surf,
+                "C_core": self.C_core,
+                "R_surf_air": self.R_surf_air,
+                "R_core_surf": self.R_core_surf,
+                "R_cond": self.R_cond,
+                "R_vent": self.R_vent,
+                "A_sol": self.A_sol,
+                # Backward-compat aliases
                 "C_mass": self.C_mass,
                 "R_im": self.R_im,
                 "R_oa": self.R_oa,
@@ -917,76 +964,201 @@ class SystemIdentificator:
 
         self.alpha_conv_internal = alpha
 
-    def _fit_two_state(self):
+    def _fit_solar_aperture(self, df_proc: pd.DataFrame):
         """
-        2-state parameterschatting.
+        Fit A_sol (effectieve zonistralings-aperture) uit gemeten data.
 
-        Wat zeker is (uit data):
-          R_oa = R            — verliespad lucht → buiten
-          C_air + C_mass = C  — massa-behoud
-          τ_lag = R_im × C_air — gemeten vertraging
+        Methode: tijdens HP-uit periodes met zonneschijn is de kamer-
+        temperatuurstijging nagenoeg volledig toe te schrijven aan solar gain.
+        We inverteer het RC-model en passen A_sol aan zodat:
 
-        Wat een gefundeerde prior is (niet meetbaar zonder vloersensor):
-          C_air ≈ 8% van C    — lucht + lichte oppervlakken, zware bouw
-          R_im afgeleid uit τ_lag en C_air
+            Q_sol = A_sol × pv_proxy  →  A_sol = C × residu / pv_proxy
 
-        De solar-event methode wordt NIET gebruikt: de meting (0.29 kWh/K)
-        valt consequent buiten het fysisch verdedigbare bereik, wat betekent
-        dat de proxy (PV × 0.15) niet representatief is voor dit huis.
+        A_sol heeft hier eenheden [kW / kW_pv]: het converteert PV-stroom
+        (proxy voor globale instraling) naar equivalente solar heat gain.
+        Fysisch: A_sol = (A_ramen × g-waarde × oriëntatie) / (A_pv × η_pv)
+        Typische waarden: 3 – 8 voor een Nederlands woonhuis.
         """
+        # Selecteer beschikbare kolommen (shutter_room is optioneel)
+        base_cols = ["timestamp", "room_temp", "temp", "pv_actual", "wp_output"]
+        if "shutter_room" in df_proc.columns:
+            base_cols.append("shutter_room")
 
-        # ── 1. R_oa: zeker, identiek aan totale verliesweerstand ─────────────
-        self.R_oa = self.R
-
-        # ── 2. C_air: prior op basis van bouwtype ────────────────────────────
-        # Zware bouw (beton/baksteen + UFH): lucht + meubels + lichte laag
-        # is typisch 5-12% van totale thermische massa.
-        # We gebruiken 8% als centraal anker voor zware bouw.
-        # Zonder vloersensor is dit de meest eerlijke schatting.
-        C_air_prior_frac = 0.08
-        C_air_prior = C_air_prior_frac * self.C
-
-        # Harde fysische grenzen:
-        #   Ondergrens: lucht alleen in ~100m² woning ≈ 0.35 kWh/K, met meubels ~0.6
-        #   Bovengrens: 15% van C (lichte bouw maximum)
-        c_air_lower = max(0.6, 0.04 * self.C)
-        c_air_upper = 0.15 * self.C
-        self.C_air = float(np.clip(C_air_prior, c_air_lower, c_air_upper))
-
-        # ── 3. R_im: afgeleid uit gemeten lag en C_air ────────────────────────
-        # τ_lag = R_im × C_air  →  R_im = τ_lag / C_air
-        # Dit is de enige vergelijking die R_im direct koppelt aan meetdata.
-        tau_lag_h = (self.ufh_lag_steps * 15) / 60.0  # uren
-        R_im_from_lag = tau_lag_h / max(self.C_air, 0.5)
-
-        # Sanity check: R_im moet kleiner zijn dan 1/K_emit (totale weerstand)
-        R_total = 1.0 / max(self.K_emit, 0.05)
-        R_im_max = 0.85 * R_total  # vloer→lucht is hooguit 85% van totaal
-
-        self.R_im = float(np.clip(R_im_from_lag, 0.3, R_im_max))
-
-        # ── 4. C_mass: rest ───────────────────────────────────────────────────
-        self.C_mass = float(max(self.C - self.C_air, 5.0))
-
-        # ── 5. Consistentiecheck ─────────────────────────────────────────────
-        tau_air_implied = self.R_im * self.C_air * 60  # minuten
-        tau_mass_implied = self.R_im * self.C_mass * 60
-
-        logger.info(
-            f"[SysID] 2-state: "
-            f"C_air={self.C_air:.2f} kWh/K ({self.C_air / self.C * 100:.1f}%), "
-            f"C_mass={self.C_mass:.2f} kWh/K, "
-            f"R_im={self.R_im:.3f} K/kW, R_oa={self.R_oa:.2f} K/kW | "
-            f"τ_lucht={tau_air_implied:.0f}min (input lag={self.ufh_lag_steps * 15}min), "
-            f"τ_massa={tau_mass_implied:.0f}min"
+        df_15 = (
+            df_proc[base_cols]
+            .set_index("timestamp")
+            .resample("15min")
+            .mean()
+            .dropna(subset=["room_temp", "temp", "pv_actual"])
+            .reset_index()
         )
 
-        # Waarschuw als R_im geclipt werd (prior en lag zijn inconsistent)
-        if R_im_from_lag > R_im_max:
+        mask = (
+            (df_15["wp_output"] < 0.1)  # geen verwarming actief
+            & (df_15["pv_actual"] > 0.30)  # duidelijke zonschijn (>300W)
+            & (df_15["room_temp"] > 10.0)  # niet leeg/onbewoond
+        )
+
+        # Filter op open rolluiken (100 = open, 0 = gesloten)
+        # Als rolluik gesloten is tijdens zon, wordt A_sol structureel onderschat.
+        # We gebruiken alleen metingen waarbij het rolluik minimaal 80% open was.
+        if "shutter_room" in df_15.columns:
+            shutter_open = df_15["shutter_room"].fillna(100.0)
+            mask = mask & (shutter_open >= 80.0)
+            logger.info(
+                f"[SysID] A_sol: {mask.sum()} zonne-events met open rolluiken (>=80%)"
+            )
+        else:
+            logger.info(
+                "[SysID] A_sol: geen shutter_room data — alle zonne-events gebruikt "
+                "(A_sol kan onderschat zijn als rolluiken soms gesloten waren)"
+            )
+
+        d = df_15[mask].copy()
+
+        if len(d) < 30:
             logger.warning(
-                f"[SysID] R_im uit lag ({R_im_from_lag:.3f}) > R_total ({R_total:.3f}). "
-                f"Lag-meting en K_emit zijn inconsistent. R_im geclipped naar {self.R_im:.3f}. "
-                f"Overweeg C_air_prior_frac te verhogen."
+                f"[SysID] A_sol: te weinig zonne-events ({len(d)}), fallback 5.0"
+            )
+            self.A_sol = 5.0
+            return
+
+        dt = 0.25  # uur
+
+        # RC-gecorrigeerd residu: werkelijke dT minus verwacht RC-verlies
+        d["dT_actual"] = d["room_temp"].diff()
+        d["dT_loss"] = -(d["room_temp"] - d["temp"]) / self.R_oa * (dt / self.C)
+        d["residual"] = d["dT_actual"] - d["dT_loss"]  # dT veroorzaakt door zon
+
+        d = d.dropna(subset=["residual"])
+        d = d[d["pv_actual"] > 0.1]  # veiligheidsdrempel (voorkom ÷0)
+
+        # A_sol calibratie voor de 3-state MPC (zelf-consistent, NIET /dt)
+        #
+        # residual = Q_sol × dt / C  [K per stap]   (onverklaarde T_air-stijging)
+        #
+        # De formule ratio = C × residual / pv geeft A_sol in [h], géén kW/kW.
+        # Dit is BEWUST: in predict() wordt gain_solar = A_sol × pv gebruikt als
+        # kW in de MPC, maar feitelijk is het kWh. Dit compenseert het feit dat A_sol
+        # gekalibreerd is op T_air via C_total (15 kWh/K), terwijl het in de MPC
+        # wordt toegepast op T_surf met C_surf (1.80 kWh/K). De impliciete factor dt
+        # zorgt voor een effectieve C_surf_eff = C_surf / dt ≈ 7 kWh/K — realistisch
+        # voor vloer + meubellaag die zonne-instraling absorbeert.
+        #
+        # NOOIT /dt toevoegen: dat geeft A_sol 4× te groot → T_surf overheet.
+        ratio = self.C * d["residual"] / d["pv_actual"]
+
+        # Gebruik 65e percentiel: robuuster dan gemiddelde, negeert bewolkte outliers
+        a_sol_est = float(ratio.quantile(0.65))
+
+        self.A_sol = float(np.clip(a_sol_est, 0.5, 12.0))
+        logger.info(
+            f"[SysID] A_sol={self.A_sol:.2f} geleerd uit "
+            f"{len(d)} zonne-events (65e percentiel)"
+        )
+
+    def _fit_three_state(self):
+        """
+        3-state parameterschatting (Air – Surface – Core) — Gold Standard.
+
+        Staat 1  T_air  (C_air):  Kamerlucht + lichte meubels         [snel]
+        Staat 2  T_surf (C_surf): Vloer/wand oppervlaktelaag ~2 cm    [middel] ← ZON
+        Staat 3  T_core (C_core): Betonkern met UFH-buizen             [traag]  ← WP
+
+        Thermische koppelingen:
+          R_surf_air  — convectie oppervlak → lucht   (snel)
+          R_core_surf — geleiding kern → oppervlak    (traag)
+          R_cond      — wandgeleiding lucht → buiten  (constant)
+          R_vent      — ventilatie lucht → buiten     (variabel met wind)
+
+        Fysica:
+          dT_air /dt = [(T_surf - T_air)/R_sa - (T_air - T_out)/R_oa] / C_air
+          dT_surf/dt = [Q_sol + (T_core - T_surf)/R_cs - (T_surf - T_air)/R_sa] / C_surf
+          dT_core/dt = [P_th  - (T_core - T_surf)/R_cs]                          / C_core
+
+        waarbij R_oa = R_cond || R_vent (parallel pad).
+        """
+
+        # ── 1. Totale verliesweerstand (geleerd via _fit_rc) ─────────────────
+        self.R_oa = self.R  # backward-compat
+
+        # Splits R_oa in parallel paden R_cond en R_vent
+        # 1/R_oa = 1/R_cond + 1/R_vent
+        # Aandeel ventilatie voor goed geïsoleerde woning: ~35 %
+        F_VENT = 0.35
+        self.R_cond = float(np.clip(self.R / (1.0 - F_VENT), 5.0, 150.0))
+        self.R_vent = float(np.clip(self.R / F_VENT, 5.0, 200.0))
+
+        # ── 2. Thermische massa opsplitsen ────────────────────────────────────
+        # Zware bouw (beton/UFH):
+        #   C_air  ≈ 20% van C — lucht + meubels + lichte drywall-laag die direct
+        #                         met de lucht uitwisselt. NIET alleen lucht!
+        #                         ISO 13790 voor zwaar gebouw: ~18-25%.
+        #                         Fysisch: met C_air te klein wordt T_air VEEL te
+        #                         gevoelig voor directe gains (interne lasten → T_air).
+        #   C_surf ≈ 12% van C — vloer/wand oppervlaktelaag ~2 cm beton
+        #   C_core ≈ 68% van C — diepe betonkern met UFH-buizen
+        C_AIR_FRAC = 0.20  # 20% → lucht + alle "lichte" massa (meubels, drywall)
+        C_SURF_FRAC = 0.12  # 12% → vloer/wand oppervlaktelaag
+
+        c_air_lower = max(1.0, 0.10 * self.C)
+        c_air_upper = 0.28 * self.C
+        self.C_air = float(np.clip(C_AIR_FRAC * self.C, c_air_lower, c_air_upper))
+
+        self.C_surf = float(np.clip(C_SURF_FRAC * self.C, 0.5, 0.18 * self.C))
+        self.C_core = float(max(self.C - self.C_air - self.C_surf, 5.0))
+
+        # ── 3. R_surf_air: oppervlak → lucht convectie ───────────────────────
+        # Fysisch: R = 1 / (h_eff × A_floor)
+        # h_eff ≈ 8 W/m²K (convectie + straling vloer), A_floor ≈ 80–100 m²
+        # → R ≈ 1000/(8×80) ≈ 1.56 K/kW
+        # Gerelateerd aan K_emit: R_emit = 1/K_emit is het totale UFH-pad.
+        # Oppervlak→lucht is ~60 % van dat totale weerstandsdeel.
+        R_emit = 1.0 / max(self.K_emit, 0.05)
+        self.R_surf_air = float(np.clip(0.6 * R_emit, 0.3, 6.0))
+
+        # ── 4. R_core_surf: kern → oppervlak geleiding ───────────────────────
+        # Fysisch: R = d / (λ × A_floor)
+        # d ≈ 50 mm, λ(beton) ≈ 1.7 W/m·K, A ≈ 80 m²
+        # → R_physical ≈ 0.05/(1.7×80) × 1000 = 0.368 K/kW
+        R_physical = 0.37
+
+        # Data-gestuurd: τ_lag ≈ R_core_surf × C_core
+        tau_lag_h = (self.ufh_lag_steps * 15) / 60.0  # uren
+        R_from_lag = tau_lag_h / max(self.C_core, 5.0)
+
+        # Blend: evengewicht tussen fysische prior en data-gestuurde schatting
+        self.R_core_surf = float(np.clip(0.5 * (R_from_lag + R_physical), 0.05, 2.0))
+
+        # ── 5. Backward-compat afgeleide attribs ─────────────────────────────
+        self.R_im = self.R_surf_air  # proxy: oppervlak↔lucht was massa↔lucht
+        self.C_mass = self.C_surf + self.C_core  # totale trage massa
+
+        # ── 6. Consistentiecheck & logging ───────────────────────────────────
+        tau_surf_air_min = self.R_surf_air * self.C_surf * 60  # minuten (C_surf-node)
+        tau_air_track_min = (
+            self.R_surf_air * self.C_air * 60
+        )  # minuten (T_air volgt T_surf)
+        tau_core_surf_min = self.R_core_surf * self.C_core * 60  # minuten
+
+        logger.info(
+            f"[SysID] 3-state: "
+            f"C_air={self.C_air:.2f}  C_surf={self.C_surf:.2f}  "
+            f"C_core={self.C_core:.2f} kWh/K | "
+            f"R_surf_air={self.R_surf_air:.3f}  R_core_surf={self.R_core_surf:.3f}  "
+            f"R_cond={self.R_cond:.1f}  R_vent={self.R_vent:.1f}  "
+            f"R_oa={self.R_oa:.2f} K/kW | "
+            f"A_sol={self.A_sol:.2f} m² | "
+            f"τ_lucht_volgt_opp={tau_air_track_min:.0f} min  "
+            f"τ_opp_node={tau_surf_air_min:.0f} min  "
+            f"τ_kern→opp={tau_core_surf_min:.0f} min  "
+            f"(vloerlag={self.ufh_lag_steps * 15} min gemeten)"
+        )
+
+        if R_from_lag > 2.0:
+            logger.warning(
+                f"[SysID] R_core_surf uit lag ({R_from_lag:.3f} K/kW) > 2.0. "
+                f"Vloer-lag en C_core zijn inconsistent → blend met fysische prior gebruikt."
             )
 
 
@@ -1188,6 +1360,10 @@ class UfhResidualPredictor:
         self.C = C
         self.tau_internal = tau_internal
         self.alpha_conv = alpha_conv
+        self.a_sol = (
+            5.0  # effectieve zonistralings-aperture [kW/kW_pv] — gesynchroniseerd
+        )
+        # vanuit SystemIdentificator.A_sol na training
         self.model = None
         self.is_fitted = False
         self.features = [
@@ -1289,16 +1465,42 @@ class UfhResidualPredictor:
 
     def predict(self, forecast_df, shutters):
         if forecast_df is None:
-            return np.array([]), np.array([])
-
-        if self.model is None or not self.is_fitted:
-            n = len(forecast_df)
-            return np.zeros(n), np.zeros(n)
+            return np.array([]), np.array([]), np.array([])
 
         df = add_cyclic_time_features(forecast_df.copy(), "timestamp")
-        df["solar"] = df.get("power_corrected", df.get("pv_estimate", 0.0))
+        solar_raw = np.asarray(
+            df.get("power_corrected", df.get("pv_estimate", 0.0))
+        ).astype(float)
+        shutter_frac = np.clip(np.asarray(shutters, dtype=float) / 100.0, 0.0, 1.0)
+
+        # ── Zonopwarming: ALTIJD via A_sol × G_rad_proxy × shutter ──────────
+        #
+        # Fysische formule: Q_sol = A_sol [kW/kW_pv] × pv_proxy [kW] × f_shutter [-]
+        #
+        # A_sol is geleerd door SystemIdentificator._fit_solar_aperture():
+        #   het converteert PV-stroom naar equivalente solar heat gain.
+        #
+        # shutter_frac:
+        #   0.0 = volledig gesloten  → Q_sol = 0   (geen instraling)
+        #   0.5 = half gesloten      → Q_sol halveert
+        #   1.0 = volledig open      → volledige instraling
+        #
+        # Dit is de ENIGE plek waar shutters de zongain beïnvloeden.
+        # Ridge-model wordt NIET meer gebruikt voor zon (was een proxy, nu fysica).
+        # ─────────────────────────────────────────────────────────────────────
+        gain_solar = np.maximum(self.a_sol * solar_raw * shutter_frac, 0.0)
+
+        if self.model is None or not self.is_fitted:
+            # Zonder Ridge-model: alleen solar-gains beschikbaar
+            n = len(df)
+            gain_air = np.zeros(n)
+            gain_surf = gain_solar
+            gain_core = np.zeros(n)
+            return gain_air, gain_surf, gain_core
+
+        df["solar"] = solar_raw
         df["shutter_room"] = shutters
-        df["effective_solar"] = df["solar"] * (df["shutter_room"] / 100.0)
+        df["effective_solar"] = solar_raw * shutter_frac  # bewaard voor Ridge (intern)
         df["internal_load"] = self._get_smoothed_load(df["load_corrected"])
 
         for col in self.features:
@@ -1308,33 +1510,26 @@ class UfhResidualPredictor:
         X = df[self.features].values
         coef = self.model.coef_  # Ridge coëfficiënten, shape (n_features,)
 
-        # Indices van de relevante features
-        idx_solar = self.features.index("effective_solar")
+        # Interne gains (apparaten, mensen) — uit Ridge model
         idx_internal = self.features.index("internal_load")
-
-        # Bijdrage per feature = X[:, i] * coef[i]
-        gain_solar = np.maximum(X[:, idx_solar] * coef[idx_solar], 0.0)
         gain_internal = np.maximum(X[:, idx_internal] * coef[idx_internal], 0.0)
 
-        # Fysische split (ASHRAE/ISO 13790):
-        #   Zoninstraling:    ~85% radiatief → massa, ~15% convectief → lucht
-        #   Interne gains:    geleerde alpha_conv (apparaten/mensen)
-        #   Overig (tijd):    volledig convectief (lucht)
-        ALPHA_SOLAR = (
-            0.15  # dit is een materiaaleigenschap van glas+ruimte, geen tuning
-        )
+        # ── 3-state gain split (fysisch correct, 3C2R model) ────────────────
+        #
+        # ZON:       → volledig naar T_surf (ramen → vloeroppervlak absorptie)
+        #              T_surf → T_air via convectie (R_surf_air)
+        #              Effect van SHUTTER: expliciet via shutter_frac hierboven
+        #
+        # INTERN:    → alpha_conv-deel direct naar T_air (convectief: lampen, computers)
+        #              (1-alpha_conv)-deel naar T_surf (radiatief: TV, vloer-warmte)
+        #
+        # KERN:      → geen directe externe bron, alleen WP via UFH-buizen
+        # ─────────────────────────────────────────────────────────────────────
+        gain_air = gain_internal * self.alpha_conv
+        gain_surf = gain_solar + gain_internal * (1.0 - self.alpha_conv)
+        gain_core = np.zeros_like(gain_air)
 
-        # Directe, fysisch verantwoorde opwarming (Zon + Apparatuur/Stroom)
-        gain_air = gain_solar * ALPHA_SOLAR + gain_internal * self.alpha_conv
-
-        gain_mass = gain_solar * (1.0 - ALPHA_SOLAR) + gain_internal * (
-            1.0 - self.alpha_conv
-        )
-
-        # gain_other wordt bewust genegeerd. Het voorspellen van statistische residuen
-        # vertroebelt de fysische horizon van de MPC. Afwijkingen van het RC-model
-        # worden real-time opgevangen door de EKF innovatie.
-        return gain_air, gain_mass
+        return gain_air, gain_surf, gain_core
 
 
 # =========================================================
@@ -1655,68 +1850,130 @@ class PWATable:
 
 class ThermalEKF:
     """
-    2-state Kalman Filter: [T_air, T_mass].
-    Vervangt de Luenberger observer in ThermalMPC.
+    3-state Kalman Filter: [T_air, T_surf, T_core].
+
+    Staat 1  T_air  (C_air):  Kamerlucht + lichte meubels          [snel, gemeten]
+    Staat 2  T_surf (C_surf): Vloer/wand oppervlaktelaag            [middel, ZON hier]
+    Staat 3  T_core (C_core): Betonkern + UFH-buizen                [traag, WP hier]
+
+    Thermisch model (voorwaartse Euler voor predict, Kalman update op T_air):
+
+        dT_air /dt = [(T_surf - T_air)/R_sa - (T_air - T_out)/R_oa + q_air ] / C_air
+        dT_surf/dt = [Q_sol + (T_core-T_surf)/R_cs - (T_surf-T_air)/R_sa + q_surf] / C_surf
+        dT_core/dt = [P_th  - (T_core - T_surf)/R_cs                + q_core] / C_core
+
+    R_oa = R_cond || R_vent (parallel verlies lucht → buiten)
     """
 
     def __init__(self, ident):
-        dt = 0.25
-        a11 = 1 - dt / (ident.R_im * ident.C_air) - dt / (ident.R_oa * ident.C_air)
-        a12 = dt / (ident.R_im * ident.C_air)
-        a21 = dt / (ident.R_im * ident.C_mass)
-        a22 = 1 - dt / (ident.R_im * ident.C_mass)
+        dt = 0.25  # uur (kwartier-stap)
 
-        self.A = np.array([[a11, a12], [a21, a22]])
-        self.H = np.array([[1.0, 0.0]])
-        self.Q = np.diag([0.01, 0.002])  # T_mass verandert zeer langzaam
-        self.R_n = np.array([[0.04]])  # meetruis thermostaat ±0.2K
-        self.P = np.eye(2) * 2.0
+        C_air = ident.C_air
+        C_surf = ident.C_surf
+        C_core = ident.C_core
+        R_sa = ident.R_surf_air  # surface ↔ air
+        R_cs = ident.R_core_surf  # core   ↔ surface
+        R_oa = ident.R_oa  # air    → outside (= R_cond || R_vent)
+
+        # ── State-transitiematrix A (3×3) ─────────────────────────────────
+        # Rij 0: T_air  verliest naar buiten (R_oa) en uitwisselt met T_surf (R_sa)
+        # Rij 1: T_surf uitwisselt met T_air (R_sa) en T_core (R_cs)
+        # Rij 2: T_core verliest naar T_surf (R_cs), krijgt van WP
+        a11 = 1.0 - dt / (R_sa * C_air) - dt / (R_oa * C_air)
+        a12 = dt / (R_sa * C_air)
+        a13 = 0.0
+
+        a21 = dt / (R_sa * C_surf)
+        a22 = 1.0 - dt / (R_cs * C_surf) - dt / (R_sa * C_surf)
+        a23 = dt / (R_cs * C_surf)
+
+        a31 = 0.0
+        a32 = dt / (R_cs * C_core)
+        a33 = 1.0 - dt / (R_cs * C_core)
+
+        self.A = np.array([[a11, a12, a13], [a21, a22, a23], [a31, a32, a33]])
+
+        # ── Meetmatrix: alleen T_air gemeten ──────────────────────────────
+        self.H = np.array([[1.0, 0.0, 0.0]])
+
+        # ── Procesruis (Q): T_core verandert het traagst ──────────────────
+        self.Q = np.diag([0.010, 0.005, 0.001])
+
+        # ── Meetruis (R): thermostaat ±0.2 K → var = 0.04 ────────────────
+        self.R_n = np.array([[0.04]])
+
+        self.P = np.eye(3) * 2.0
         self.ident = ident
         self.x = None
+        self._dt = dt
 
-    def reset(self, t_air: float, t_mass: float):
-        self.x = np.array([t_air, t_mass])
-        self.P = np.eye(2) * 2.0
+    def reset(self, t_air: float, t_surf: float, t_core: float):
+        self.x = np.array([t_air, t_surf, t_core])
+        self.P = np.eye(3) * 2.0
 
     def predict_step(
-        self, p_heat: float, t_out: float, gain_air: float, gain_mass: float
+        self,
+        p_heat: float,
+        t_out: float,
+        gain_air: float,
+        gain_surf: float,
+        gain_core: float,
     ):
+        """
+        Voorspel één stap vooruit.
+
+        p_heat    : thermisch vermogen WP naar T_core [kW]
+        t_out     : buitentemperatuur [°C]
+        gain_air  : convectieve interne gains → T_air [kW]
+        gain_surf : ZON + radiatieve interne gains → T_surf [kW]
+        gain_core : directe gains → T_core [kW] (normaal 0)
+        """
         if self.x is None:
             return
-        dt = 0.25
-        B = np.array([dt / self.ident.C_air, dt / self.ident.C_mass])
 
-        # De inkomende warmte wordt eerlijk verdeeld over lucht en massa
+        dt = self._dt
+        C_air = self.ident.C_air
+        C_surf = self.ident.C_surf
+        C_core = self.ident.C_core
+        R_oa = self.ident.R_oa
+
+        # Externe input-vector (niet in A):
+        # T_out drijft T_air via R_oa; gains en P_th gaan naar respectieve staten
         f_ext = np.array(
             [
-                (t_out / (self.ident.R_oa * self.ident.C_air)) * dt
-                + (gain_air / self.ident.C_air) * dt,  # Convectief deel
-                (gain_mass / self.ident.C_mass) * dt,  # Radiatief deel (zon/massa)
+                t_out * dt / (R_oa * C_air) + gain_air * dt / C_air,
+                gain_surf * dt / C_surf,
+                p_heat * dt / C_core + gain_core * dt / C_core,
             ]
         )
-        self.x = self.A @ self.x + B * p_heat + f_ext
+
+        self.x = self.A @ self.x + f_ext
         self.P = self.A @ self.P @ self.A.T + self.Q
 
-    def update(self, t_air_meas: float) -> tuple[float, float]:
+    def update(self, t_air_meas: float) -> tuple[float, float, float]:
+        """
+        Kalman-correctie op T_air meting.
+        Geeft gecorrigeerde (T_air, T_surf, T_core) terug.
+        """
         if self.x is None:
-            return t_air_meas, t_air_meas
+            return t_air_meas, t_air_meas, t_air_meas
 
-        # S is de onzekerheid van de meting (1x1 matrix)
+        # Innovatie-covariantie (1×1)
         S = self.H @ self.P @ self.H.T + self.R_n
 
-        # K is de Kalman Gain (2x1 matrix)
+        # Kalman gain (3×1)
         K = self.P @ self.H.T @ np.linalg.inv(S)
 
-        # .item() haalt veilig de scalar uit de 1D resultaat-array van H @ x
+        # Innovatie
         expected_meas = (self.H @ self.x).item()
         innov = t_air_meas - expected_meas
 
-        # Update de state en variantie matrix
+        # State en covariantie bijwerken
         self.x += K.flatten() * innov
-        self.P = (np.eye(2) - K @ self.H) @ self.P
+        self.P = (np.eye(3) - K @ self.H) @ self.P
 
         logger.info(
             f"[EKF] K={K.flatten().round(3)}  innov={innov:.3f}K  "
-            f"T_air={self.x[0]:.2f}  T_mass={self.x[1]:.2f}"
+            f"T_air={self.x[0]:.2f}  T_surf={self.x[1]:.2f}  T_core={self.x[2]:.2f}"
         )
-        return float(self.x[0]), float(self.x[1])
+        return float(self.x[0]), float(self.x[1]), float(self.x[2])
