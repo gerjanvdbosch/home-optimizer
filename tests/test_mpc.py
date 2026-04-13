@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from home_optimizer.mpc import UFHMPCController
 from home_optimizer.thermal_model import ThermalModel
@@ -52,11 +51,10 @@ def _feasible_forecast(n: int = 8) -> ForecastHorizon:
 
 
 def test_mpc_solution_respects_all_hard_constraints() -> None:
-    """Convex MPC must satisfy power, comfort, and ramp-rate constraints."""
+    """Convex MPC must satisfy power and ramp-rate constraints; no comfort violation expected."""
     model = ThermalModel(THERMAL_PARAMS)
     controller = UFHMPCController(model=model, params=MPC_PARAMS)
     prev_u = 0.5
-    # Warm slab ensures the first few steps stay above T_min = 19 °C
     sol = controller.solve(
         initial_state_c=np.array([20.8, 24.0]),
         forecast=_feasible_forecast(),
@@ -67,19 +65,16 @@ def test_mpc_solution_respects_all_hard_constraints() -> None:
     assert sol.control_sequence_kw.shape == (MPC_PARAMS.horizon_steps,)
     assert sol.predicted_states_c.shape == (MPC_PARAMS.horizon_steps + 1, 2)
 
-    # Power bounds
+    # Power bounds (hard)
     assert np.all(sol.control_sequence_kw >= -1e-5)
     assert np.all(sol.control_sequence_kw <= MPC_PARAMS.P_max + 1e-5)
 
-    # Ramp-rate  (generous tolerance for floating-point residuals from OSQP)
+    # Ramp-rate (hard, generous tolerance for OSQP floating-point residuals)
     deltas = np.diff(np.concatenate([[prev_u], sol.control_sequence_kw]))
     assert np.all(np.abs(deltas) <= MPC_PARAMS.delta_P_max + 1e-5)
 
-    # Comfort bounds on predicted room temperatures
-    assert np.all(sol.predicted_states_c[1:, 0] >= MPC_PARAMS.T_min - 1e-5)
-    assert np.all(sol.predicted_states_c[1:, 0] <= MPC_PARAMS.T_max + 1e-5)
-
-    # Controller must request some heating
+    # No comfort violation expected in the mild scenario
+    assert sol.max_comfort_violation_c < 0.01
     assert sol.first_control_kw > 0.0
 
 
@@ -87,7 +82,6 @@ def test_mpc_prefers_cheap_hours() -> None:
     """With equal comfort, the MPC should concentrate heating in the cheapest slot."""
     model = ThermalModel(THERMAL_PARAMS)
     controller = UFHMPCController(model=model, params=MPC_PARAMS)
-    # One cheap step (index 3) surrounded by expensive steps
     prices = np.array([0.40, 0.38, 0.35, 0.10, 0.35, 0.38, 0.40, 0.40])
     forecast = ForecastHorizon(
         outdoor_temperature_c=np.full(8, 10.0),
@@ -101,14 +95,13 @@ def test_mpc_prefers_cheap_hours() -> None:
         forecast=forecast,
         previous_power_kw=0.5,
     )
-    # The cheap slot should attract higher power than the peak-price slots
     cheap_idx = 3
     avg_expensive = np.mean(np.delete(sol.control_sequence_kw, cheap_idx))
     assert sol.control_sequence_kw[cheap_idx] >= avg_expensive - 1e-3
 
 
-def test_mpc_raises_for_infeasible_comfort_bounds() -> None:
-    """MPC must raise ValueError (not silently violate) when T_min is unreachable."""
+def test_mpc_always_returns_solution_when_physics_prevent_comfort() -> None:
+    """MPC must never raise; it should return best-effort with comfort violation reported."""
     model = ThermalModel(THERMAL_PARAMS)
     tight_params = MPCParameters(
         horizon_steps=4,
@@ -117,20 +110,29 @@ def test_mpc_raises_for_infeasible_comfort_bounds() -> None:
         Q_N=15.0,
         P_max=4.0,
         delta_P_max=1.0,
-        T_min=19.0,  # cold outdoor + small floor buffer → infeasible
+        T_min=19.0,  # physics prevent this when outdoor=2°C and slab is cold
         T_max=22.5,
     )
     controller = UFHMPCController(model=model, params=tight_params)
-    # Very cold outdoor, no solar, small slab buffer → T_r will drop below T_min
-    with pytest.raises(ValueError, match="infeasible"):
-        controller.solve(
-            initial_state_c=np.array([20.0, 21.0]),
-            forecast=ForecastHorizon(
-                outdoor_temperature_c=np.full(4, 2.0),
-                gti_w_per_m2=np.zeros(4),
-                internal_gains_kw=np.full(4, 0.25),
-                price_eur_per_kwh=np.full(4, 0.30),
-                room_temperature_ref_c=np.full(5, 21.0),
-            ),
-            previous_power_kw=0.5,
-        )
+    # Scenario that was previously infeasible
+    sol = controller.solve(
+        initial_state_c=np.array([20.0, 21.0]),
+        forecast=ForecastHorizon(
+            outdoor_temperature_c=np.full(4, 2.0),
+            gti_w_per_m2=np.zeros(4),
+            internal_gains_kw=np.full(4, 0.25),
+            price_eur_per_kwh=np.full(4, 0.30),
+            room_temperature_ref_c=np.full(5, 21.0),
+        ),
+        previous_power_kw=0.5,
+    )
+    # Must always return a valid control sequence
+    assert sol.control_sequence_kw.shape == (4,)
+    assert sol.predicted_states_c.shape == (5, 2)
+    # Power bounds still enforced as hard constraints
+    assert np.all(sol.control_sequence_kw >= -1e-6)
+    assert np.all(sol.control_sequence_kw <= tight_params.P_max + 1e-6)
+    # Physics forced a violation – controller must report it
+    assert sol.max_comfort_violation_c > 0.0
+    # Controller must respond by requesting maximum heating
+    assert sol.first_control_kw > 0.0

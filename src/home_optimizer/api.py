@@ -114,6 +114,7 @@ class OptimizeResponse(BaseModel):
     total_energy_kwh: float
     total_cost_eur: float
     first_power_kw: float
+    max_comfort_violation_c: float
     temperature_fig: str  # Plotly figure JSON
     power_fig: str  # Plotly figure JSON
 
@@ -339,6 +340,7 @@ header p{font-size:.8rem;opacity:.75;margin-top:.15rem}
 .chart-card h3{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
   color:#888;margin-bottom:.6rem}
 .error-banner{background:#fde;color:#a00;border-radius:6px;padding:.6rem .9rem;font-size:.82rem;display:none}
+.warn-banner{background:#fff3cd;color:#856404;border-radius:6px;padding:.6rem .9rem;font-size:.82rem;display:none}
 </style>
 </head>
 <body>
@@ -405,6 +407,7 @@ header p{font-size:.8rem;opacity:.75;margin-top:.15rem}
 
   <div class="main">
     <div class="error-banner" id="err"></div>
+    <div class="warn-banner" id="warn" style="display:none"></div>
     <div class="stats">
       <div class="stat-card"><div class="stat-label">Solver status</div>
         <div class="stat-value" id="s-status">–</div></div>
@@ -414,8 +417,8 @@ header p{font-size:.8rem;opacity:.75;margin-top:.15rem}
         <div class="stat-value" id="s-energy">–<span class="stat-unit">kWh</span></div></div>
       <div class="stat-card"><div class="stat-label">Energiekosten</div>
         <div class="stat-value" id="s-cost">–<span class="stat-unit">€</span></div></div>
-      <div class="stat-card"><div class="stat-label">Kostfunctie J</div>
-        <div class="stat-value" id="s-obj">–</div></div>
+      <div class="stat-card"><div class="stat-label">Comfortoverschrijding</div>
+        <div class="stat-value" id="s-viol">–<span class="stat-unit">K</span></div></div>
     </div>
     <div class="chart-card">
       <h3>Kamertemperatuur T_r &mdash; MPC horizon</h3>
@@ -472,7 +475,18 @@ async function runOptimize(){
     document.getElementById('s-power').innerHTML=d.first_power_kw.toFixed(2)+'<span class="stat-unit">kW</span>';
     document.getElementById('s-energy').innerHTML=d.total_energy_kwh.toFixed(2)+'<span class="stat-unit">kWh</span>';
     document.getElementById('s-cost').innerHTML=d.total_cost_eur.toFixed(3)+'<span class="stat-unit">€</span>';
-    document.getElementById('s-obj').textContent=d.objective.toFixed(3);
+    const viol=d.max_comfort_violation_c;
+    const violEl=document.getElementById('s-viol');
+    violEl.innerHTML=(viol>0.01?'⚠ '+viol.toFixed(2):'✓ 0.00')+'<span class="stat-unit">K</span>';
+    violEl.style.color=viol>0.01?'#c0392b':'#27ae60';
+    // Show warning banner if physics forced a comfort violation
+    const warn=document.getElementById('warn');
+    if(viol>0.01){
+      warn.textContent='⚠ Comfortgrens overschreden met '+viol.toFixed(2)+' K – de warmtepomp draait al op maximum gegeven de ramp-rate. Vergroot P_max, ΔP_max of verlaag T_min.';
+      warn.style.display='block';
+    } else {
+      warn.style.display='none';
+    }
 
     const tf=JSON.parse(d.temperature_fig);
     const pf=JSON.parse(d.power_fig);
@@ -545,11 +559,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
             previous_power_kw=req.previous_power_kw,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"MPC infeasible: {exc}. Probeer een warmere begintoestand, "
-            "mildere comfortgrenzen of grotere ramp-rate.",
-        ) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     N = req.horizon_hours
     dt = thermal_params.dt_hours
@@ -573,6 +583,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         total_energy_kwh=total_energy,
         total_cost_eur=total_cost,
         first_power_kw=sol.first_control_kw,
+        max_comfort_violation_c=sol.max_comfort_violation_c,
         temperature_fig=temp_fig,
         power_fig=power_fig,
     )

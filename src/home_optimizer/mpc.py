@@ -6,13 +6,19 @@ Objective (Section 7 of spec):
                       + R_c·P_UFH[k]² ]            (power regularisation)
     + Q_N·(T_r[N] − T_ref[N])²                     (terminal comfort)
 
-Hard constraints:
+Hard constraints (always feasible by construction):
   0 ≤ P_UFH[k] ≤ P_max
-  T_min ≤ T_r[k+1] ≤ T_max
   |P_UFH[k] − P_UFH[k-1]| ≤ ΔP_max              (ramp-rate)
 
-Solved with cvxpy + OSQP (convex QP).  No soft-constraint fallback is used:
-physical infeasibility raises a ValueError so that callers can adapt.
+Soft comfort constraints (never cause infeasibility):
+  T_r[k+1] ≥ T_min − s_min[k],  s_min[k] ≥ 0
+  T_r[k+1] ≤ T_max + s_max[k],  s_max[k] ≥ 0
+  Penalty: ρ · (s_min[k]² + s_max[k]²)  added to J
+
+The soft-constraint penalty ρ is set to 1000 × Q_c so that temperature-bound
+violations are strongly penalised while the QP always has a feasible solution,
+even when physics prevent the setpoint from being reached (e.g. very cold
+outdoor conditions with a limited heat-pump ramp-rate).
 """
 
 from __future__ import annotations
@@ -32,6 +38,9 @@ except ImportError:  # pragma: no cover
     cp = None  # type: ignore[assignment]
     _CVXPY_AVAILABLE = False
 
+# Soft-constraint penalty multiplier: ρ = _RHO_FACTOR × Q_c
+_RHO_FACTOR = 1_000.0
+
 
 # ---------------------------------------------------------------------------
 # Result container
@@ -44,22 +53,23 @@ class MPCSolution:
 
     Attributes
     ----------
-    control_sequence_kw:  Optimal P_UFH sequence [kW], length N.
-    predicted_states_c:   Predicted [T_r, T_b] trajectory, shape (N+1, 2).
-    objective_value:      Value of the cost function J [mixed units].
-    solver_status:        Status string from the convex solver.
-    used_fallback:        True when the greedy fallback was used instead.
+    control_sequence_kw:      Optimal P_UFH sequence [kW], length N.
+    predicted_states_c:       Predicted [T_r, T_b] trajectory, shape (N+1, 2).
+    objective_value:          Value of the cost function J.
+    solver_status:            Status string from the convex solver.
+    max_comfort_violation_c:  Largest soft-constraint violation in °C (0 = feasible).
+    used_fallback:            True when the greedy fallback was used.
     """
 
     control_sequence_kw: np.ndarray
     predicted_states_c: np.ndarray
     objective_value: float
     solver_status: str
+    max_comfort_violation_c: float = 0.0
     used_fallback: bool = False
 
     @property
     def first_control_kw(self) -> float:
-        """First element of the control sequence (applied at the current step)."""
         return float(self.control_sequence_kw[0]) if self.control_sequence_kw.size else 0.0
 
 
@@ -71,11 +81,9 @@ class MPCSolution:
 class UFHMPCController:
     """Receding-horizon MPC controller for UFH systems.
 
-    Parameters
-    ----------
-    model:   Discrete thermal model.
-    params:  MPC settings (horizon, weights, constraints).
-    solver:  cvxpy solver name (default: "OSQP").
+    Temperature comfort bounds are enforced as soft constraints so that the
+    optimisation always returns a valid solution regardless of the initial
+    state or forecast conditions.
     """
 
     def __init__(
@@ -96,20 +104,12 @@ class UFHMPCController:
     ) -> MPCSolution:
         """Compute the optimal control sequence for the coming horizon.
 
-        Parameters
-        ----------
-        initial_state_c:   Current state estimate [T_r, T_b] [°C].
-        forecast:          Disturbance and price forecast over N steps.
-        previous_power_kw: Power applied at the previous step (for ramp-rate).
-
-        Returns
-        -------
-        MPCSolution with the optimal (or fallback) control sequence.
+        Always returns a valid MPCSolution.  Comfort-bound violations are
+        reported in ``max_comfort_violation_c`` and visible in the charts.
 
         Raises
         ------
-        ValueError  if the problem is physically infeasible and no fallback
-                    can satisfy the hard constraints.
+        ValueError  only for invalid input dimensions.
         """
         x0 = np.asarray(initial_state_c, dtype=float)
         if x0.shape != (2,):
@@ -120,13 +120,13 @@ class UFHMPCController:
         if _CVXPY_AVAILABLE:
             try:
                 return self._solve_convex(x0, forecast, float(previous_power_kw))
-            except cp.SolverError:
-                pass  # backend unavailable – try greedy
+            except Exception:  # noqa: BLE001  solver backend crash → greedy
+                pass
 
         return self._solve_greedy(x0, forecast, float(previous_power_kw))
 
     # ------------------------------------------------------------------
-    # Convex QP via cvxpy
+    # Convex QP via cvxpy  (soft temperature constraints)
     # ------------------------------------------------------------------
 
     def _solve_convex(
@@ -140,37 +140,46 @@ class UFHMPCController:
         p = self.params
         A, B, E = self.model.state_matrices()
         B_vec = B[:, 0]
-        D = forecast.disturbance_matrix(self.model.parameters)  # (N, 3)
+        D = forecast.disturbance_matrix(self.model.parameters)
         dt = self.model.parameters.dt_hours
         N = p.horizon_steps
         refs = forecast.room_temperature_ref_c
         prices = forecast.price_eur_per_kwh
+        rho = _RHO_FACTOR * max(p.Q_c, 1.0)  # soft-constraint penalty
 
         # Decision variables
         x = cp.Variable((2, N + 1))
         u = cp.Variable(N)
+        # Slack variables for soft comfort constraints (≥ 0)
+        s_lo = cp.Variable(N, nonneg=True)  # T_r < T_min  violation [K]
+        s_hi = cp.Variable(N, nonneg=True)  # T_r > T_max  violation [K]
 
         constraints: list[cp.Constraint] = [x[:, 0] == x0]
         cost_terms = []
 
         for k in range(N):
-            # Dynamics
+            # Dynamics (hard)
             constraints.append(x[:, k + 1] == A @ x[:, k] + B_vec * u[k] + E @ D[k])
-            # Input bounds
+            # Power bounds (hard – always satisfiable)
             constraints.extend([u[k] >= 0.0, u[k] <= p.P_max])
-            # Comfort bounds (on the predicted next state)
-            constraints.extend([x[0, k + 1] >= p.T_min, x[0, k + 1] <= p.T_max])
-            # Ramp-rate
+            # Ramp-rate (hard – always satisfiable by construction)
             prev = prev_u if k == 0 else u[k - 1]
             constraints.append(cp.abs(u[k] - prev) <= p.delta_P_max)
-            # Stage cost
+            # Soft comfort bounds
+            constraints.extend(
+                [
+                    x[0, k + 1] >= p.T_min - s_lo[k],
+                    x[0, k + 1] <= p.T_max + s_hi[k],
+                ]
+            )
+            # Stage cost + soft penalty
             cost_terms.append(
                 p.Q_c * cp.square(x[0, k] - refs[k])
                 + prices[k] * u[k] * dt
                 + p.R_c * cp.square(u[k])
+                + rho * (cp.square(s_lo[k]) + cp.square(s_hi[k]))
             )
 
-        # Terminal cost
         obj = cp.Minimize(cp.sum(cost_terms) + p.Q_N * cp.square(x[0, N] - refs[N]))
         problem = cp.Problem(obj, constraints)
 
@@ -185,24 +194,30 @@ class UFHMPCController:
         problem.solve(**solve_kw)
 
         if problem.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
-            raise ValueError(
-                f"MPC solve failed with status '{problem.status}'.  "
-                "The problem may be physically infeasible given the current "
-                "comfort bounds, ramp-rate limits, and forecast."
-            )
+            raise RuntimeError(f"Solver returned status '{problem.status}'.")
         if u.value is None or x.value is None:
-            raise ValueError("Solver returned no solution.")
+            raise RuntimeError("Solver returned no variable values.")
+
+        # Compute largest comfort violation in °C
+        T_r_pred = np.asarray(x.value[0, 1:], dtype=float)
+        viol = float(
+            np.max(
+                np.maximum(p.T_min - T_r_pred, 0.0).tolist()
+                + np.maximum(T_r_pred - p.T_max, 0.0).tolist()
+            )
+        )
 
         return MPCSolution(
             control_sequence_kw=np.asarray(u.value, dtype=float).reshape(N),
             predicted_states_c=np.asarray(x.value, dtype=float).T,
             objective_value=float(problem.value),
             solver_status=str(problem.status),
+            max_comfort_violation_c=viol,
             used_fallback=False,
         )
 
     # ------------------------------------------------------------------
-    # Greedy 1-step-ahead fallback (no cvxpy dependency)
+    # Greedy 1-step-ahead fallback  (no cvxpy dependency)
     # ------------------------------------------------------------------
 
     def _solve_greedy(
@@ -211,7 +226,6 @@ class UFHMPCController:
         forecast: ForecastHorizon,
         prev_u: float,
     ) -> MPCSolution:
-        """Greedy receding-horizon with a dense candidate grid."""
         p = self.params
         A, B, E = self.model.state_matrices()
         B_vec = B[:, 0]
@@ -220,6 +234,7 @@ class UFHMPCController:
         refs = forecast.room_temperature_ref_c
         prices = forecast.price_eur_per_kwh
         N = p.horizon_steps
+        rho = _RHO_FACTOR * max(p.Q_c, 1.0)
 
         x = x0.copy()
         xs = [x.copy()]
@@ -235,12 +250,13 @@ class UFHMPCController:
             best_u, best_xnext, best_score = candidates[0], None, np.inf
             for c in candidates:
                 xn = A @ x + B_vec * c + E @ D[k]
-                viol = max(p.T_min - xn[0], 0.0) ** 2 + max(xn[0] - p.T_max, 0.0) ** 2
+                s_lo = max(p.T_min - xn[0], 0.0)
+                s_hi = max(xn[0] - p.T_max, 0.0)
                 score = (
                     p.Q_c * (x[0] - refs[k]) ** 2
                     + prices[k] * c * dt
                     + p.R_c * c**2
-                    + 1e6 * viol
+                    + rho * (s_lo**2 + s_hi**2)
                     + 5.0 * p.Q_N * max(refs[k + 1] - xn[0], 0.0) ** 2
                 )
                 if k == N - 1:
@@ -256,17 +272,24 @@ class UFHMPCController:
 
         us_arr = np.array(us, dtype=float)
         xs_arr = np.array(xs, dtype=float)
-        obj = self._eval_objective(xs_arr, us_arr, forecast)
+        T_r_pred = xs_arr[1:, 0]
+        viol = float(
+            np.max(
+                np.maximum(p.T_min - T_r_pred, 0.0).tolist()
+                + np.maximum(T_r_pred - p.T_max, 0.0).tolist()
+            )
+        )
         return MPCSolution(
             control_sequence_kw=us_arr,
             predicted_states_c=xs_arr,
-            objective_value=obj,
+            objective_value=self._eval_objective(xs_arr, us_arr, forecast),
             solver_status="greedy-fallback",
+            max_comfort_violation_c=viol,
             used_fallback=True,
         )
 
     # ------------------------------------------------------------------
-    # Objective evaluation helper (post-hoc, unit tests)
+    # Objective evaluation
     # ------------------------------------------------------------------
 
     def _eval_objective(
