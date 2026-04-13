@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "home-optimizer"
+version = "0.1.0"
+description = "2-state thermal model, Kalman filter, and MPC for underfloor heating home optimization"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "gerjanvdbosch" },
+]
+dependencies = [
+  "numpy>=1.26,<3.0",
+  "cvxpy>=1.5,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.0,<25.0",
+  "pyflakes>=3.2,<4.0",
+  "pytest>=8.0,<9.0",
+  "ruff>=0.11,<0.12",
+]
+
+[project.scripts]
+home-optimizer-demo = "home_optimizer.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

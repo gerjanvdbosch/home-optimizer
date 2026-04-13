@@ -3,6 +3,7 @@ name: Python lint
 on:
   push:
     branches: [ "main" ]
+  pull_request:
 
 jobs:
   lint:
@@ -20,14 +21,17 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install runtime deps and linters
-        run: python -m pip install ruff black pyflakes
+      - name: Install project with dev dependencies
+        run: python -m pip install -e .[dev]
 
       - name: Pyflakes (syntax check)
-        run: pyflakes addon
+        run: pyflakes src/home_optimizer tests examples
 
       - name: Ruff (lint)
-        run: ruff check addon
+        run: ruff check src tests examples
 
       - name: Black (format check)
-        run: black --check addon
+        run: black --check src tests examples
+
+      - name: Pytest
+        run: python -m pytest
