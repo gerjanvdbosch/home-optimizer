@@ -1,3 +1,10 @@
+"""Demo entry-point: run a single MPC step and one Kalman update.
+
+Usage
+-----
+  python -m home_optimizer
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -8,7 +15,7 @@ from .thermal_model import ThermalModel
 from .types import ForecastHorizon, KalmanNoiseParameters, MPCParameters, ThermalParameters
 
 
-def build_demo_configuration() -> tuple[
+def build_demo() -> tuple[
     ThermalModel,
     MPCParameters,
     ForecastHorizon,
@@ -16,19 +23,25 @@ def build_demo_configuration() -> tuple[
     float,
     KalmanNoiseParameters,
 ]:
-    thermal_parameters = ThermalParameters(
+    """Construct a representative winter-day demo configuration.
+
+    The forecast uses mild outdoor conditions (≥10 °C) and a warm floor
+    initial state so the MPC problem is physically feasible under the
+    hard comfort bounds (T_min=19 °C, T_max=22.5 °C).
+    """
+    params = ThermalParameters(
         dt_hours=1.0,
-        C_r=3.0,
-        C_b=18.0,
-        R_br=2.5,
-        R_ro=4.0,
+        C_r=3.0,  # kWh/K  – room air + furniture
+        C_b=18.0,  # kWh/K  – concrete floor slab
+        R_br=2.5,  # K/kW   – floor → room
+        R_ro=4.0,  # K/kW   – room → outside
         alpha=0.35,
         eta=0.62,
         A_glass=12.0,
     )
-    model = ThermalModel(thermal_parameters)
+    model = ThermalModel(params)
 
-    mpc_parameters = MPCParameters(
+    mpc_params = MPCParameters(
         horizon_steps=12,
         Q_c=8.0,
         R_c=0.05,
@@ -51,51 +64,52 @@ def build_demo_configuration() -> tuple[
             dtype=float,
         ),
     )
+    # Initial state: room slightly below setpoint, warm slab
     initial_state_c = np.array([20.8, 24.0], dtype=float)
     previous_power_kw = 0.5
+
     kalman_noise = KalmanNoiseParameters(
         process_covariance=np.diag([0.01, 0.015]),
         measurement_variance=0.05**2,
     )
-    return model, mpc_parameters, forecast, initial_state_c, previous_power_kw, kalman_noise
+    return model, mpc_params, forecast, initial_state_c, previous_power_kw, kalman_noise
 
 
 def main() -> None:
-    model, mpc_parameters, forecast, initial_state_c, previous_power_kw, kalman_noise = (
-        build_demo_configuration()
-    )
-    controller = UFHMPCController(model=model, parameters=mpc_parameters)
-    solution = controller.solve(
-        initial_state_c=initial_state_c,
-        forecast=forecast,
-        previous_power_kw=previous_power_kw,
-    )
+    model, mpc_params, forecast, x0, u_prev, kalman_noise = build_demo()
 
-    print(f"Observability rank: {model.observability_rank()}")
-    print(f"Controllability rank: {model.controllability_rank()}")
-    print(f"MPC status: {solution.solver_status}")
-    print(f"Fallback used: {solution.used_fallback}")
-    print(f"First UFH power command: {solution.first_control_kw:.2f} kW")
-    print(
-        "Predicted room temperatures [°C]:",
-        np.round(solution.predicted_states_c[:, 0], 2).tolist(),
-    )
+    # ── Model checks ──────────────────────────────────────────────────
+    obs_rank = model.observability_rank()
+    ctrl_rank = model.controllability_rank()
+    print(f"Model observability rank : {obs_rank} / 2  ({'✓' if obs_rank == 2 else '✗'})")
+    print(f"Model controllability rank: {ctrl_rank} / 2  ({'✓' if ctrl_rank == 2 else '✗'})")
 
-    kalman_filter = UFHKalmanFilter(
+    # ── MPC solve ─────────────────────────────────────────────────────
+    controller = UFHMPCController(model=model, params=mpc_params)
+    solution = controller.solve(initial_state_c=x0, forecast=forecast, previous_power_kw=u_prev)
+
+    print(f"\nMPC solver status : {solution.solver_status}")
+    print(f"Fallback used     : {solution.used_fallback}")
+    print(f"First P_UFH [kW]  : {solution.first_control_kw:.3f}")
+    t_r_traj = np.round(solution.predicted_states_c[:, 0], 2).tolist()
+    print(f"T_r trajectory [°C]: {t_r_traj}")
+
+    # ── Kalman update ─────────────────────────────────────────────────
+    kf = UFHKalmanFilter(
         model=model,
         noise=kalman_noise,
-        initial_state_c=np.array([19.0, 20.0], dtype=float),
+        initial_state_c=np.array([19.5, 22.0], dtype=float),
         initial_covariance=np.diag([0.25, 1.0]),
     )
-    first_disturbance = forecast.disturbance_matrix(model.parameters)[0]
-    first_measurement_c = 19.6
-    estimate, innovation, _ = kalman_filter.step(
+    d0 = forecast.disturbance_matrix(model.parameters)[0]
+    estimate, innovation, K = kf.step(
         control_kw=solution.first_control_kw,
-        disturbance_vector=first_disturbance,
-        room_temperature_measurement_c=first_measurement_c,
+        disturbance=d0,
+        room_temp_measurement_c=20.4,
     )
-    print(f"Kalman innovation: {innovation:.3f} °C")
-    print("Estimated state [T_r, T_b] [°C]:", np.round(estimate.mean_c, 3).tolist())
+    print(f"\nKalman innovation : {innovation:+.3f} °C")
+    print(f"Estimated [T_r, T_b]: {np.round(estimate.mean_c, 3).tolist()} °C")
+    print(f"Kalman gain         : {np.round(K[:, 0], 4).tolist()}")
 
 
 if __name__ == "__main__":

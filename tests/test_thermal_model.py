@@ -1,3 +1,7 @@
+"""Unit tests for the thermal model: equations, matrices, and system properties."""
+
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -6,7 +10,7 @@ from home_optimizer.types import ThermalParameters
 
 
 @pytest.fixture
-def thermal_parameters() -> ThermalParameters:
+def params() -> ThermalParameters:
     return ThermalParameters(
         dt_hours=1.0,
         C_r=3.0,
@@ -19,73 +23,76 @@ def thermal_parameters() -> ThermalParameters:
     )
 
 
-def test_solar_gain_kw_matches_physical_formula() -> None:
+# ── solar_gain_kw ─────────────────────────────────────────────────────────────
+
+
+def test_solar_gain_formula() -> None:
+    # Q = A * GTI * η / 1000 = 10 * 800 * 0.6 / 1000 = 4.8 kW
     assert solar_gain_kw(800.0, glass_area_m2=10.0, transmittance=0.6) == pytest.approx(4.8)
 
 
-def test_state_matrices_match_forward_euler_derivation(
-    thermal_parameters: ThermalParameters,
-) -> None:
-    model = ThermalModel(thermal_parameters)
-    A, B, E = model.state_matrices()
+def test_solar_gain_zero_irradiance() -> None:
+    assert solar_gain_kw(0.0, 12.0, 0.62) == pytest.approx(0.0)
 
-    a_br = thermal_parameters.dt_hours / (thermal_parameters.C_r * thermal_parameters.R_br)
-    a_ro = thermal_parameters.dt_hours / (thermal_parameters.C_r * thermal_parameters.R_ro)
-    b_br = thermal_parameters.dt_hours / (thermal_parameters.C_b * thermal_parameters.R_br)
 
-    np.testing.assert_allclose(
-        A,
-        np.array(
-            [[1.0 - a_br - a_ro, a_br], [b_br, 1.0 - b_br]],
-            dtype=float,
-        ),
+def test_solar_gain_array_input() -> None:
+    gti = np.array([0.0, 400.0, 800.0])
+    result = solar_gain_kw(gti, glass_area_m2=10.0, transmittance=0.5)
+    np.testing.assert_allclose(result, [0.0, 2.0, 4.0])
+
+
+# ── state matrices ────────────────────────────────────────────────────────────
+
+
+def test_state_matrix_A_matches_specification(params: ThermalParameters) -> None:
+    model = ThermalModel(params)
+    A, _, _ = model.state_matrices()
+    dt = params.dt_hours
+    a_br = dt / (params.C_r * params.R_br)
+    a_ro = dt / (params.C_r * params.R_ro)
+    b_br = dt / (params.C_b * params.R_br)
+    expected = np.array([[1 - a_br - a_ro, a_br], [b_br, 1 - b_br]])
+    np.testing.assert_allclose(A, expected)
+
+
+def test_state_matrix_B_matches_specification(params: ThermalParameters) -> None:
+    model = ThermalModel(params)
+    _, B, _ = model.state_matrices()
+    expected = np.array([[0.0], [params.dt_hours / params.C_b]])
+    np.testing.assert_allclose(B, expected)
+
+
+def test_state_matrix_E_matches_specification(params: ThermalParameters) -> None:
+    model = ThermalModel(params)
+    _, _, E = model.state_matrices()
+    dt = params.dt_hours
+    a_ro = dt / (params.C_r * params.R_ro)
+    expected = np.array(
+        [
+            [a_ro, params.alpha * dt / params.C_r, dt / params.C_r],
+            [0.0, (1 - params.alpha) * dt / params.C_b, 0.0],
+        ]
     )
-    np.testing.assert_allclose(
-        B,
-        np.array([[0.0], [thermal_parameters.dt_hours / thermal_parameters.C_b]]),
-    )
-    np.testing.assert_allclose(
-        E,
-        np.array(
-            [
-                [
-                    a_ro,
-                    thermal_parameters.alpha * thermal_parameters.dt_hours / thermal_parameters.C_r,
-                    thermal_parameters.dt_hours / thermal_parameters.C_r,
-                ],
-                [
-                    0.0,
-                    (1.0 - thermal_parameters.alpha)
-                    * thermal_parameters.dt_hours
-                    / thermal_parameters.C_b,
-                    0.0,
-                ],
-            ],
-            dtype=float,
-        ),
-    )
+    np.testing.assert_allclose(E, expected)
 
 
-def test_discrete_step_matches_state_space_update(thermal_parameters: ThermalParameters) -> None:
-    model = ThermalModel(thermal_parameters)
-    state = np.array([20.5, 22.0], dtype=float)
-    control_kw = 1.4
-    disturbance = np.array([5.0, 0.85, 0.3], dtype=float)
-
-    direct = model.discrete_step(
-        state_c=state,
-        control_kw=control_kw,
-        outdoor_temperature_c=disturbance[0],
-        solar_gain_kw_input=disturbance[1],
-        internal_gain_kw=disturbance[2],
-    )
-    matrix_form = model.step_with_disturbance_vector(state, control_kw, disturbance)
-    np.testing.assert_allclose(direct, matrix_form)
+# ── simulation consistency ────────────────────────────────────────────────────
 
 
-def test_observability_and_controllability_are_full_rank(
-    thermal_parameters: ThermalParameters,
-) -> None:
-    model = ThermalModel(thermal_parameters)
-    assert model.observability_rank() == 2
-    assert model.controllability_rank() == 2
+def test_step_and_matrix_form_agree(params: ThermalParameters) -> None:
+    model = ThermalModel(params)
+    x = np.array([20.5, 22.0])
+    u, d = 1.4, np.array([5.0, 0.85, 0.3])
+
+    direct = model.step(x, u, d[0], d[1], d[2])
+    matrix = model.step_with_disturbance_vector(x, u, d)
+    np.testing.assert_allclose(direct, matrix)
+
+
+# ── observability and controllability ────────────────────────────────────────
+
+
+def test_system_is_fully_observable_and_controllable(params: ThermalParameters) -> None:
+    model = ThermalModel(params)
+    assert model.observability_rank() == 2, "System must be fully observable (rank 2)"
+    assert model.controllability_rank() == 2, "System must be fully controllable (rank 2)"

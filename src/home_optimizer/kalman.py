@@ -1,3 +1,18 @@
+"""Linear Kalman filter for estimating T_r (room) and T_b (floor) temperatures.
+
+Only the room temperature T_r is measured (C = [1, 0]).
+The floor temperature T_b is a hidden state estimated from past observations.
+
+Predict:
+  x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
+  P⁻[k]  = A P[k-1] Aᵀ + Q_n
+
+Update (measurement y[k] = T_r[k]):
+  K[k]   = P⁻[k] Cᵀ (C P⁻[k] Cᵀ + R_n)⁻¹
+  x̂[k]   = x̂⁻[k] + K[k] (y[k] − C x̂⁻[k])
+  P[k]   = (I − K[k] C) P⁻[k] (I − K[k] C)ᵀ + K[k] R_n K[k]ᵀ  (Joseph form)
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,11 +25,29 @@ from .types import KalmanNoiseParameters
 
 @dataclass(frozen=True, slots=True)
 class KalmanEstimate:
+    """Snapshot of the Kalman state estimate.
+
+    Attributes
+    ----------
+    mean_c:       State estimate [T_r, T_b] in °C.
+    covariance:   2×2 error covariance matrix [K²].
+    """
+
     mean_c: np.ndarray
     covariance: np.ndarray
 
 
 class UFHKalmanFilter:
+    """Discrete-time linear Kalman filter for the 2-state UFH thermal model.
+
+    Parameters
+    ----------
+    model:                Discrete thermal model (provides A, B, E).
+    noise:                Process noise Q_n and measurement noise R_n.
+    initial_state_c:      Initial state estimate [T_r, T_b] [°C].
+    initial_covariance:   Initial 2×2 error covariance [K²].
+    """
+
     def __init__(
         self,
         model: ThermalModel,
@@ -24,61 +57,84 @@ class UFHKalmanFilter:
     ) -> None:
         self.model = model
         self.noise = noise
-        self.state_estimate = np.asarray(initial_state_c, dtype=float).copy()
-        self.covariance = np.asarray(initial_covariance, dtype=float).copy()
+        self._x = np.asarray(initial_state_c, dtype=float).copy()
+        self._P = np.asarray(initial_covariance, dtype=float).copy()
 
-        if self.state_estimate.shape != (2,):
-            raise ValueError("initial_state_c must be a 2-vector ordered as [T_r, T_b].")
-        if self.covariance.shape != (2, 2):
-            raise ValueError("initial_covariance must be a 2x2 covariance matrix.")
-        if not np.allclose(self.covariance, self.covariance.T):
+        if self._x.shape != (2,):
+            raise ValueError("initial_state_c must be [T_r, T_b].")
+        if self._P.shape != (2, 2):
+            raise ValueError("initial_covariance must be 2×2.")
+        if not np.allclose(self._P, self._P.T):
             raise ValueError("initial_covariance must be symmetric.")
 
     @property
     def estimate(self) -> KalmanEstimate:
-        return KalmanEstimate(self.state_estimate.copy(), self.covariance.copy())
+        """Current (post-update) state estimate."""
+        return KalmanEstimate(self._x.copy(), self._P.copy())
 
-    def predict(self, control_kw: float, disturbance_vector: np.ndarray) -> KalmanEstimate:
-        disturbance_vector = np.asarray(disturbance_vector, dtype=float)
-        if disturbance_vector.shape != (3,):
-            raise ValueError(
-                "disturbance_vector must be a 3-vector ordered as [T_out, Q_solar, Q_int]."
-            )
+    # ------------------------------------------------------------------
+    # Predict step
+    # ------------------------------------------------------------------
+
+    def predict(self, control_kw: float, disturbance: np.ndarray) -> KalmanEstimate:
+        """Propagate the state estimate one time step forward.
+
+        Parameters
+        ----------
+        control_kw:   UFH power applied at the previous step [kW].
+        disturbance:  [T_out, Q_solar, Q_int] at the previous step.
+        """
+        d = np.asarray(disturbance, dtype=float)
+        if d.shape != (3,):
+            raise ValueError("disturbance must be [T_out, Q_solar, Q_int].")
 
         A, B, E = self.model.state_matrices()
-        self.state_estimate = (
-            A @ self.state_estimate + B[:, 0] * control_kw + E @ disturbance_vector
-        )
-        self.covariance = A @ self.covariance @ A.T + self.noise.process_covariance
-        self.covariance = 0.5 * (self.covariance + self.covariance.T)
+        self._x = A @ self._x + B[:, 0] * control_kw + E @ d
+        self._P = A @ self._P @ A.T + self.noise.process_covariance
+        # Enforce symmetry to prevent numerical drift
+        self._P = 0.5 * (self._P + self._P.T)
         return self.estimate
 
-    def update(
-        self, room_temperature_measurement_c: float
-    ) -> tuple[KalmanEstimate, float, np.ndarray]:
-        C = MEASUREMENT_MATRIX
-        measurement = np.array([room_temperature_measurement_c], dtype=float)
-        innovation = measurement - C @ self.state_estimate
-        innovation_covariance = C @ self.covariance @ C.T + np.array(
-            [[self.noise.measurement_variance]], dtype=float
-        )
-        kalman_gain = self.covariance @ C.T @ np.linalg.inv(innovation_covariance)
+    # ------------------------------------------------------------------
+    # Update step
+    # ------------------------------------------------------------------
 
-        self.state_estimate = self.state_estimate + (kalman_gain @ innovation).reshape(-1)
+    def update(self, room_temp_measurement_c: float) -> tuple[KalmanEstimate, float, np.ndarray]:
+        """Incorporate a new room-temperature measurement.
 
-        identity = np.eye(2, dtype=float)
-        measurement_covariance = np.array([[self.noise.measurement_variance]], dtype=float)
-        covariance = (identity - kalman_gain @ C) @ self.covariance @ (
-            identity - kalman_gain @ C
-        ).T + kalman_gain @ measurement_covariance @ kalman_gain.T
-        self.covariance = 0.5 * (covariance + covariance.T)
-        return self.estimate, float(innovation[0]), kalman_gain
+        Returns
+        -------
+        estimate:    Updated state estimate.
+        innovation:  Scalar measurement residual y − C x̂⁻  [K].
+        gain:        2×1 Kalman gain vector.
+        """
+        C = MEASUREMENT_MATRIX  # shape (1, 2)
+        R_n = np.array([[self.noise.measurement_variance]], dtype=float)
+
+        y = np.array([room_temp_measurement_c], dtype=float)
+        innovation = y - C @ self._x  # shape (1,)
+        S = C @ self._P @ C.T + R_n  # shape (1, 1)
+        K = self._P @ C.T @ np.linalg.inv(S)  # shape (2, 1)
+
+        self._x = self._x + K[:, 0] * float(innovation[0])
+
+        # Joseph form for numerical stability: P = (I-KC)P(I-KC)ᵀ + K R_n Kᵀ
+        I_KC = np.eye(2) - K @ C
+        self._P = I_KC @ self._P @ I_KC.T + K @ R_n @ K.T
+        self._P = 0.5 * (self._P + self._P.T)
+
+        return self.estimate, float(innovation[0]), K
+
+    # ------------------------------------------------------------------
+    # Combined predict + update
+    # ------------------------------------------------------------------
 
     def step(
         self,
         control_kw: float,
-        disturbance_vector: np.ndarray,
-        room_temperature_measurement_c: float,
+        disturbance: np.ndarray,
+        room_temp_measurement_c: float,
     ) -> tuple[KalmanEstimate, float, np.ndarray]:
-        self.predict(control_kw=control_kw, disturbance_vector=disturbance_vector)
-        return self.update(room_temperature_measurement_c=room_temperature_measurement_c)
+        """Predict then update in a single call."""
+        self.predict(control_kw=control_kw, disturbance=disturbance)
+        return self.update(room_temp_measurement_c=room_temp_measurement_c)
