@@ -33,6 +33,9 @@ home-optimizer-demo = "home_optimizer.__main__:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.package-data]
+home_optimizer = ["templates/*.html"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

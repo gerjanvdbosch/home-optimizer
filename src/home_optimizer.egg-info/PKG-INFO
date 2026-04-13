@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: home-optimizer
+Version: 0.1.0
+Summary: 2-state thermal model, Kalman filter, and MPC for underfloor heating home optimization
+Author: gerjanvdbosch
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: numpy<3.0,>=1.26
+Requires-Dist: cvxpy<2.0,>=1.5
+Requires-Dist: fastapi>=0.110
+Requires-Dist: uvicorn>=0.29
+Requires-Dist: plotly>=5.20
+Provides-Extra: dev
+Requires-Dist: black>=24.0; extra == "dev"
+Requires-Dist: pyflakes>=3.2; extra == "dev"
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: ruff>=0.4; extra == "dev"

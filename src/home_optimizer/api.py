@@ -13,6 +13,7 @@ Run with:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import plotly.graph_objects as go
@@ -157,54 +158,48 @@ def _temperature_figure(
     T_out: float,
 ) -> str:
     fig = go.Figure()
+    n = len(labels)
 
-    # Comfort band (fill between T_min and T_max)
+    # ── Comfort band as a single closed polygon ───────────────────────────
+    # Using fill="toself" on one trace avoids the ghost-line artefact that
+    # occurs when two separate boundary traces (T_max / T_min) with width=0
+    # inherit Plotly's default auto-colour (blue) and appear as extra lines.
     fig.add_trace(
         go.Scatter(
-            x=labels,
-            y=[T_max] * len(labels),
-            mode="lines",
-            line=dict(width=0),
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=labels,
-            y=[T_min] * len(labels),
-            mode="lines",
-            fill="tonexty",
-            fillcolor="rgba(100,149,237,0.15)",
-            line=dict(width=0),
+            x=labels + labels[::-1],
+            y=[T_max] * n + [T_min] * n,
+            fill="toself",
+            fillcolor="rgba(100,149,237,0.18)",
+            line=dict(color="rgba(0,0,0,0)"),  # completely transparent boundary
             name="Comfortband",
             hoverinfo="skip",
+            showlegend=True,
         )
     )
 
-    # Outdoor temperature
+    # ── Outdoor temperature ───────────────────────────────────────────────
     fig.add_trace(
         go.Scatter(
             x=labels,
-            y=[T_out] * len(labels),
+            y=[T_out] * n,
             name="T<sub>buiten</sub>",
             mode="lines",
             line=dict(color="#999", width=1.5, dash="dot"),
         )
     )
 
-    # Setpoint
+    # ── Comfort setpoint ──────────────────────────────────────────────────
     fig.add_trace(
         go.Scatter(
             x=labels,
-            y=[T_ref] * len(labels),
+            y=[T_ref] * n,
             name="T<sub>ref</sub> (setpoint)",
             mode="lines",
             line=dict(color="#2ca02c", width=1.5, dash="dash"),
         )
     )
 
-    # Predicted room temperature
+    # ── Predicted room temperature (single blue line) ─────────────────────
     fig.add_trace(
         go.Scatter(
             x=labels,
@@ -296,221 +291,12 @@ app = FastAPI(
     version="0.1.0",
 )
 
-_HTML = """<!DOCTYPE html>
-<html lang="nl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Home Optimizer</title>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:#f0f2f5;color:#333;font-size:14px}
-header{background:#1e3a5f;color:#fff;padding:.9rem 1.4rem;display:flex;align-items:center;gap:1rem}
-header h1{font-size:1.1rem;font-weight:700}
-header p{font-size:.8rem;opacity:.75;margin-top:.15rem}
-.layout{display:grid;grid-template-columns:270px 1fr;min-height:calc(100vh - 54px)}
-.sidebar{background:#fff;border-right:1px solid #e0e0e0;padding:.8rem;overflow-y:auto;display:flex;flex-direction:column;gap:.1rem}
-.section-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;
-  border-top:1px solid #f0f0f0;padding:.7rem 0 .3rem;margin-top:.3rem}
-.section-title:first-child{border-top:none;padding-top:0}
-.field{margin:.3rem 0}
-.field label{display:flex;justify-content:space-between;color:#555;margin-bottom:.2rem}
-.field label span{font-weight:700;color:#1e3a5f;min-width:2.5rem;text-align:right}
-.field input[type=number]{width:100%;padding:.3rem .45rem;border:1px solid #ddd;border-radius:4px;font-size:.82rem}
-.field input[type=number]:focus{outline:none;border-color:#1e6bbf}
-.toggle{display:flex;align-items:center;gap:.5rem;margin:.4rem 0}
-.toggle label{color:#555}
-.toggle input{width:16px;height:16px;accent-color:#1e3a5f;cursor:pointer}
-.btn{width:100%;padding:.65rem;background:#1e3a5f;color:#fff;border:none;border-radius:6px;
-  font-size:.88rem;font-weight:700;cursor:pointer;margin-top:.8rem;letter-spacing:.02em;transition:background .15s}
-.btn:hover{background:#2a5491}
-.btn:disabled{background:#aaa;cursor:not-allowed}
-.spin{display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;
-  border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:.4rem}
-@keyframes spin{to{transform:rotate(360deg)}}
-.main{padding:.9rem;display:flex;flex-direction:column;gap:.8rem}
-.stats{display:flex;flex-wrap:wrap;gap:.6rem}
-.stat-card{background:#fff;border-radius:7px;padding:.6rem .9rem;flex:1;min-width:120px;
-  box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.stat-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:#888}
-.stat-value{font-size:1.1rem;font-weight:700;color:#1e3a5f;margin-top:.1rem}
-.stat-unit{font-size:.75rem;color:#888;margin-left:.2rem}
-.chart-card{background:#fff;border-radius:7px;padding:.9rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.chart-card h3{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
-  color:#888;margin-bottom:.6rem}
-.error-banner{background:#fde;color:#a00;border-radius:6px;padding:.6rem .9rem;font-size:.82rem;display:none}
-.warn-banner{background:#fff3cd;color:#856404;border-radius:6px;padding:.6rem .9rem;font-size:.82rem;display:none}
-</style>
-</head>
-<body>
-<header>
-  <div>
-    <h1>🏠 Home Optimizer &mdash; Vloerverwarming MPC</h1>
-    <p>2-state thermisch model &middot; Kalman filter &middot; Model Predictive Control</p>
-  </div>
-</header>
-<div class="layout">
-  <div class="sidebar">
-    <div class="section-title">Huis (thermisch)</div>
-    <div class="field"><label>C_r – ruimtecapaciteit [kWh/K]<span id="vCr">3.0</span></label>
-      <input type="number" id="C_r" value="3.0" min="0.5" max="50" step="0.5" oninput="upd('vCr',this.value)"></div>
-    <div class="field"><label>C_b – vloercapaciteit [kWh/K]<span id="vCb">18.0</span></label>
-      <input type="number" id="C_b" value="18.0" min="1" max="200" step="1" oninput="upd('vCb',this.value)"></div>
-    <div class="field"><label>R_br – weerstand vloer→kamer [K/kW]<span id="vRbr">2.5</span></label>
-      <input type="number" id="R_br" value="2.5" min="0.1" max="20" step="0.5" oninput="upd('vRbr',this.value)"></div>
-    <div class="field"><label>R_ro – weerstand kamer→buiten [K/kW]<span id="vRro">4.0</span></label>
-      <input type="number" id="R_ro" value="4.0" min="0.1" max="30" step="0.5" oninput="upd('vRro',this.value)"></div>
-
-    <div class="section-title">Beginstaat</div>
-    <div class="field"><label>T_r begin [°C]<span id="vTri">20.8</span></label>
-      <input type="number" id="T_r_init" value="20.8" min="5" max="35" step="0.1" oninput="upd('vTri',this.value)"></div>
-    <div class="field"><label>T_b begin [°C]<span id="vTbi">24.0</span></label>
-      <input type="number" id="T_b_init" value="24.0" min="5" max="45" step="0.5" oninput="upd('vTbi',this.value)"></div>
-    <div class="field"><label>Vorig vermogen [kW]<span id="vPprev">0.5</span></label>
-      <input type="number" id="previous_power_kw" value="0.5" min="0" max="20" step="0.1" oninput="upd('vPprev',this.value)"></div>
-
-    <div class="section-title">MPC instellingen</div>
-    <div class="field"><label>Horizon N [uur]<span id="vN">24</span></label>
-      <input type="number" id="horizon_hours" value="24" min="4" max="48" step="1" oninput="upd('vN',this.value)"></div>
-    <div class="field"><label>T_ref – setpoint [°C]<span id="vTref">21.0</span></label>
-      <input type="number" id="T_ref" value="21.0" min="15" max="26" step="0.5" oninput="upd('vTref',this.value)"></div>
-    <div class="field"><label>T_min [°C]<span id="vTmin">19.0</span></label>
-      <input type="number" id="T_min" value="19.0" min="10" max="25" step="0.5" oninput="upd('vTmin',this.value)"></div>
-    <div class="field"><label>T_max [°C]<span id="vTmax">22.5</span></label>
-      <input type="number" id="T_max" value="22.5" min="16" max="30" step="0.5" oninput="upd('vTmax',this.value)"></div>
-    <div class="field"><label>P_max [kW]<span id="vPmax">4.0</span></label>
-      <input type="number" id="P_max" value="4.0" min="0.5" max="20" step="0.5" oninput="upd('vPmax',this.value)"></div>
-    <div class="field"><label>ΔP_max [kW/stap]<span id="vDPmax">1.0</span></label>
-      <input type="number" id="delta_P_max" value="1.0" min="0.1" max="10" step="0.1" oninput="upd('vDPmax',this.value)"></div>
-    <div class="field"><label>Q_c – comfortgewicht<span id="vQc">8.0</span></label>
-      <input type="number" id="Q_c" value="8.0" min="0" max="100" step="1" oninput="upd('vQc',this.value)"></div>
-    <div class="field"><label>R_c – regularisatie<span id="vRc">0.05</span></label>
-      <input type="number" id="R_c" value="0.05" min="0" max="5" step="0.01" oninput="upd('vRc',this.value)"></div>
-
-    <div class="section-title">Weersvoorspelling</div>
-    <div class="field"><label>T_buiten [°C]<span id="vTout">10.0</span></label>
-      <input type="number" id="outdoor_temperature_c" value="10.0" min="-20" max="35" step="1" oninput="upd('vTout',this.value)"></div>
-    <div class="field"><label>Interne winst [kW]<span id="vQint">0.35</span></label>
-      <input type="number" id="internal_gains_kw" value="0.35" min="0" max="3" step="0.05" oninput="upd('vQint',this.value)"></div>
-    <div class="toggle"><input type="checkbox" id="solar_gain" checked>
-      <label for="solar_gain">Zoninstraling meenemen</label></div>
-    <div class="toggle"><input type="checkbox" id="dynamic_price" checked>
-      <label for="dynamic_price">Dynamische stroomprijs</label></div>
-    <div class="field" id="flat_price_field" style="display:none">
-      <label>Vaste prijs [€/kWh]<span id="vFlatP">0.25</span></label>
-      <input type="number" id="flat_price" value="0.25" min="0" max="2" step="0.01" oninput="upd('vFlatP',this.value)">
-    </div>
-
-    <button class="btn" id="run-btn" onclick="runOptimize()">&#9654; Optimaliseer</button>
-  </div>
-
-  <div class="main">
-    <div class="error-banner" id="err"></div>
-    <div class="warn-banner" id="warn" style="display:none"></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-label">Solver status</div>
-        <div class="stat-value" id="s-status">–</div></div>
-      <div class="stat-card"><div class="stat-label">Eerste P_UFH</div>
-        <div class="stat-value" id="s-power">–<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">Totale energie</div>
-        <div class="stat-value" id="s-energy">–<span class="stat-unit">kWh</span></div></div>
-      <div class="stat-card"><div class="stat-label">Energiekosten</div>
-        <div class="stat-value" id="s-cost">–<span class="stat-unit">€</span></div></div>
-      <div class="stat-card"><div class="stat-label">Comfortoverschrijding</div>
-        <div class="stat-value" id="s-viol">–<span class="stat-unit">K</span></div></div>
-    </div>
-    <div class="chart-card">
-      <h3>Kamertemperatuur T_r &mdash; MPC horizon</h3>
-      <div id="temp-chart" style="height:310px"></div>
-    </div>
-    <div class="chart-card">
-      <h3>UFH vermogen &amp; stroomprijs</h3>
-      <div id="power-chart" style="height:260px"></div>
-    </div>
-  </div>
-</div>
-
-<script>
-function upd(id, val){document.getElementById(id).textContent=parseFloat(val).toFixed(+val<1&&val!='0'?2:1)}
-
-document.getElementById('dynamic_price').addEventListener('change', function(){
-  document.getElementById('flat_price_field').style.display = this.checked ? 'none' : '';
-});
-
-function getReq(){
-  const n=id=>parseFloat(document.getElementById(id).value);
-  const b=id=>document.getElementById(id).checked;
-  return {
-    C_r:n('C_r'),C_b:n('C_b'),R_br:n('R_br'),R_ro:n('R_ro'),alpha:0.35,
-    T_r_init:n('T_r_init'),T_b_init:n('T_b_init'),previous_power_kw:n('previous_power_kw'),
-    horizon_hours:parseInt(document.getElementById('horizon_hours').value),
-    Q_c:n('Q_c'),R_c:n('R_c'),P_max:n('P_max'),delta_P_max:n('delta_P_max'),
-    T_min:n('T_min'),T_max:n('T_max'),T_ref:n('T_ref'),
-    outdoor_temperature_c:n('outdoor_temperature_c'),
-    dynamic_price:b('dynamic_price'),flat_price:n('flat_price'),
-    solar_gain:b('solar_gain'),internal_gains_kw:n('internal_gains_kw'),
-  };
-}
-
-async function runOptimize(){
-  const btn=document.getElementById('run-btn');
-  btn.disabled=true;
-  btn.innerHTML='<span class="spin"></span>Bezig…';
-  document.getElementById('err').style.display='none';
-
-  try{
-    const resp=await fetch('/api/optimize',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(getReq()),
-    });
-    if(!resp.ok){
-      const msg=(await resp.json()).detail||resp.statusText;
-      throw new Error(msg);
-    }
-    const d=await resp.json();
-
-    document.getElementById('s-status').textContent=d.status;
-    document.getElementById('s-power').innerHTML=d.first_power_kw.toFixed(2)+'<span class="stat-unit">kW</span>';
-    document.getElementById('s-energy').innerHTML=d.total_energy_kwh.toFixed(2)+'<span class="stat-unit">kWh</span>';
-    document.getElementById('s-cost').innerHTML=d.total_cost_eur.toFixed(3)+'<span class="stat-unit">€</span>';
-    const viol=d.max_comfort_violation_c;
-    const violEl=document.getElementById('s-viol');
-    violEl.innerHTML=(viol>0.01?'⚠ '+viol.toFixed(2):'✓ 0.00')+'<span class="stat-unit">K</span>';
-    violEl.style.color=viol>0.01?'#c0392b':'#27ae60';
-    // Show warning banner if physics forced a comfort violation
-    const warn=document.getElementById('warn');
-    if(viol>0.01){
-      warn.textContent='⚠ Comfortgrens overschreden met '+viol.toFixed(2)+' K – de warmtepomp draait al op maximum gegeven de ramp-rate. Vergroot P_max, ΔP_max of verlaag T_min.';
-      warn.style.display='block';
-    } else {
-      warn.style.display='none';
-    }
-
-    const tf=JSON.parse(d.temperature_fig);
-    const pf=JSON.parse(d.power_fig);
-    Plotly.react('temp-chart', tf.data, tf.layout, {responsive:true,displayModeBar:false});
-    Plotly.react('power-chart', pf.data, pf.layout, {responsive:true,displayModeBar:false});
-  }catch(e){
-    const el=document.getElementById('err');
-    el.textContent='⚠ '+e.message;
-    el.style.display='block';
-  }finally{
-    btn.disabled=false;
-    btn.innerHTML='&#9654; Optimaliseer';
-  }
-}
-
-window.addEventListener('load', runOptimize);
-</script>
-</body>
-</html>"""
+_TEMPLATE = Path(__file__).parent / "templates" / "dashboard.html"
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index() -> HTMLResponse:
-    return HTMLResponse(_HTML)
+    return HTMLResponse(_TEMPLATE.read_text(encoding="utf-8"))
 
 
 @app.get("/api/defaults")

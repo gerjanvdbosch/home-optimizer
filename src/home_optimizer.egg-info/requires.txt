@@ -1,0 +1,11 @@
+numpy<3.0,>=1.26
+cvxpy<2.0,>=1.5
+fastapi>=0.110
+uvicorn>=0.29
+plotly>=5.20
+
+[dev]
+black>=24.0
+pyflakes>=3.2
+pytest>=8.0
+ruff>=0.4

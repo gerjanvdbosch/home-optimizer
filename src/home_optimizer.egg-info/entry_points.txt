@@ -1,0 +1,2 @@
+[console_scripts]
+home-optimizer-demo = home_optimizer.__main__:main

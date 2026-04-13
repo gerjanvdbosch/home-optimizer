@@ -1,0 +1,17 @@
+pyproject.toml
+src/home_optimizer/__init__.py
+src/home_optimizer/__main__.py
+src/home_optimizer/api.py
+src/home_optimizer/kalman.py
+src/home_optimizer/mpc.py
+src/home_optimizer/thermal_model.py
+src/home_optimizer/types.py
+src/home_optimizer.egg-info/PKG-INFO
+src/home_optimizer.egg-info/SOURCES.txt
+src/home_optimizer.egg-info/dependency_links.txt
+src/home_optimizer.egg-info/entry_points.txt
+src/home_optimizer.egg-info/requires.txt
+src/home_optimizer.egg-info/top_level.txt
+tests/test_kalman.py
+tests/test_mpc.py
+tests/test_thermal_model.py
