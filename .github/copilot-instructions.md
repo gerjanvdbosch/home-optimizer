@@ -9,21 +9,21 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > **Het hardcoden van numerieke waarden in de berekeningen of logica is streng verboden.** Elke fysieke constante, tuning-parameter, temperatuurgrens of tijdstap moet via een configuratiebestand (bijv. JSON/YAML) of parameter-object in de code worden geïnjecteerd. Zelfs universele constanten (zoals $\lambda = 1.1628$) of legionella-eisen (60°C) moeten benoemde variabelen zijn. In de formules en MPC-constraints staan uitsluitend referentienamen, géén losse getallen (met uitzondering van wiskundige operatoren zoals `0` of `1`).
 
 > ### ♻️ Architectuureis: DRY (Don't Repeat Yourself) / Geen Dubbele Code
-> **Het dupliceren van code of logica is ten strengste verboden.** Hoewel UFH en DHW fysisch andere systemen zijn, delen ze exact dezelfde wiskundige fundamenten (State-Space representaties, Kalman Filters, Forward Euler discretisatie en MPC). 
+> **Het dupliceren van code of logica is ten strengste verboden.** Hoewel UFH en DHW fysisch andere systemen zijn, delen ze exact dezelfde wiskundige fundamenten (State-Space representaties, Kalman Filters, Forward Euler discretisatie en MPC).
 > Schrijf generieke, herbruikbare functies of klassen (bijv. een algemene `KalmanFilter`-klasse die $A, B, E, C, Q, R$ matrices accepteert en de Joseph-vorm update uitvoert) in plaats van aparte hardcoded implementaties (`KalmanUFH` en `KalmanDHW`). Gebruik object-oriëntatie, compositie of afgeleide klassen om specifieke eigenschappen (zoals de tijdsvariabele $A$-matrix voor DHW) af te handelen zonder de kern-wiskunde te kopiëren.
 
 > ### 🚀 Ontwerpeis: Geen Backwards Compatibility
 > **De code hoeft nergens backwards compatible te zijn met eerdere versies.** Focus uitsluitend op het bouwen van de meest robuuste, wiskundig zuivere en efficiënte architectuur zoals beschreven in dit document. Oude API's, legacy datastructuren, of eerdere (suboptimale) implementaties mogen zonder pardon worden gebroken, overschreven of verwijderd. Sleep geen technische schuld of workarounds mee om oudere systemen in de lucht te houden: de fysica en de nieuwe DRY-architectuur krijgen absolute voorrang.
 
 > ### 🛡️ Code-eis: Fail-Fast & Harde Assertions
-> **De software moet de fysische theorie actief bewaken.** 
-> 1. **Geen verborgen fallbacks:** Ontbreekt er een variabele of parameter? Verzin géén default waarde (zoals `T = 20.0` of `V = 0`), maar laat de code direct crashen met een expliciete foutmelding (Fail-Fast). 
+> **De software moet de fysische theorie actief bewaken.**
+> 1. **Geen verborgen fallbacks:** Ontbreekt er een variabele of parameter? Verzin géén default waarde (zoals `T = 20.0` of `V = 0`), maar laat de code direct crashen met een expliciete foutmelding (Fail-Fast).
 > 2. **Assertions:** Gebruik validatie in de code om fysische onmogelijkheden (zoals negatieve warmtecapaciteit $C$, negatief volume $\dot{V}$, of temperatuur onder het absolute nulpunt) te blokkeren voordat ze de wiskundige solver bereiken.
 
 > ### 📝 Documentatie-eis: Transparantie & Traceerbaarheid
-> **Alle code (klassen, functies, variabelen) moet voorzien zijn van uitputtende, gestructureerde documentatie en type-hints.** 
-> 1. **Docstrings & Eenheden:** Gebruik een vaste docstring-standaard (bijv. Google of NumPy style) voor élke functie. Benoem in de docstring niet alleen de argumenten, maar expliciet de **fysische eenheid** en verwachte datatypes (via Type Hints in de code). 
-> 2. **Traceerbaarheid naar theorie:** Koppel wiskundige bewerkingen in de code direct terug aan dit document. Gebruik inline comments zoals: `# Implementeert Update (Joseph-vorm) uit sectie 6`. 
+> **Alle code (klassen, functies, variabelen) moet voorzien zijn van uitputtende, gestructureerde documentatie en type-hints.**
+> 1. **Docstrings & Eenheden:** Gebruik een vaste docstring-standaard (bijv. Google of NumPy style) voor élke functie. Benoem in de docstring niet alleen de argumenten, maar expliciet de **fysische eenheid** en verwachte datatypes (via Type Hints in de code).
+> 2. **Traceerbaarheid naar theorie:** Koppel wiskundige bewerkingen in de code direct terug aan dit document. Gebruik inline comments zoals: `# Implementeert Update (Joseph-vorm) uit sectie 6`.
 > 3. **Het 'Waarom', niet het 'Wat':** Code vertelt *wat* de computer doet; comments vertellen *waarom*. Documenteer expliciet matrixdimensies, gemaakte aannames bij linearisatie, en afhandeling van edge-cases (bijv. deling door nul bij $R_{strat}$).
 
 ---
@@ -50,6 +50,7 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 13. Gecombineerd State-Vector
 14. MPC Kostfunctie & Constraints
 15. Parameter Woordenboek
+16. Software Stack & Validatie-eisen
 
 ---
 
@@ -82,7 +83,7 @@ Het doel van deze module is het slim aansturen van de vloerverwarming (UFH) door
 
 | Variabele | Eenheid | Betekenis |
 |---|---|---|
-| $P_{UFH}$ | kW | Vermogen vloerverwarming (Actuator) |
+| $P_{UFH}$ | kW | Thermisch vermogen vloerverwarming (Actuator) |
 | $T_{out}$ | °C | Buitentemperatuur (Verstoring) |
 | $Q_{solar}$ | kW | Zoninstraling door de ramen (Verstoring) |
 | $Q_{int}$ | kW | Interne warmte mensen + apparaten, typisch 0.2–0.8 kW (Verstoring) |
@@ -354,28 +355,51 @@ $$x_{tot}[k+1] = \underbrace{\begin{bmatrix} A_{UFH} & 0 \\ 0 & A_{dhw}[k] \end{
 
 ## 14. MPC Kostfunctie & Constraints
 
-### 14.1 Kostfunctie
+### 14.1 COP & Elektriciteitsverbruik
 
-$$J = \underbrace{\sum_{k=0}^{N-1}\!\left[ Q_c\,(T_r[k]-T_{ref}[k])^2 + p[k]\cdot P_{UFH}[k]\cdot\Delta t + R_c\cdot P_{UFH}[k]^2 \right] + Q_N\,(T_r[N]-T_{ref}[N])^2}_{\text{UFH: comfort + energiekosten + regularisatie}}$$
-$$+\ \underbrace{\sum_{k=0}^{N-1} p[k]\cdot P_{dhw}[k]\cdot\Delta t}_{\text{DHW: energiekosten [€]}}$$
+De kostfunctie minimaliseert **elektrisch** verbruik, niet thermisch. Een warmtepomp levert meer thermische energie dan hij elektrisch verbruikt; de verhouding is de Coefficient of Performance (COP):
+
+$$P_{UFH,elec}[k] = \frac{P_{UFH}[k]}{COP_{UFH}[k]}, \qquad P_{dhw,elec}[k] = \frac{P_{dhw}[k]}{COP_{dhw}[k]}$$
+
+**Implementatie-eisen voor de COP:**
+
+| Situatie | Aanpak |
+|---|---|
+| Constante COP | Voeg `cop_ufh` en `cop_dhw` toe als scalaire parameters in de configuratie |
+| Tijdsvariabele COP | Geef `cop_ufh[k]` en `cop_dhw[k]` mee als array over de horizon (bijv. functie van $T_{out}[k]$ of $T_{bot}[k]$) |
+
+> **Modelaanname:** $COP > 1$ te allen tijde. Valideer dit als Fail-Fast assertion bij het laden van de parameters. Een COP ≤ 0 of COP > een configureerbaar maximum ($COP_{max}$) moet een exception gooien.
+>
+> **Let op de eenheden:** $P_{UFH}$ en $P_{dhw}$ zijn thermisch [kW]; $P_{UFH,elec}$ en $P_{dhw,elec}$ zijn elektrisch [kW]. De thermische vermogens zijn de beslissingsvariabelen van de MPC (ze sturen de state-dynamica); de elektrische vermogens verschijnen uitsluitend in de kostfunctie en de gedeelde vermogensconstraint.
+
+### 14.2 Kostfunctie
+
+$$J = \underbrace{\sum_{k=0}^{N-1}\!\left[ Q_c\,(T_r[k]-T_{ref}[k])^2 + p[k]\cdot \frac{P_{UFH}[k]}{COP_{UFH}[k]}\cdot\Delta t + R_c\cdot P_{UFH}[k]^2 + M \cdot \epsilon_{UFH}[k]^2 \right] + Q_N\,(T_r[N]-T_{ref}[N])^2}_{\text{UFH: comfort + energiekosten + regularisatie + soft-constraint straf}}$$
+$$+\ \underbrace{\sum_{k=0}^{N-1} \left[ p[k]\cdot \frac{P_{dhw}[k]}{COP_{dhw}[k]}\cdot\Delta t + M \cdot \epsilon_{dhw}[k]^2 \right]}_{\text{DHW: energiekosten [€] + soft-constraint straf}}$$
 
 **Toelichting per term:**
 
 | Term | Type | Betekenis |
 |---|---|---|
 | $Q_c\,(T_r-T_{ref})^2$ | Kwadratisch | Comfortafwijking ruimte (strafpunten per K²) |
-| $p[k]\cdot P_{UFH}[k]\cdot\Delta t$ | Lineair | Werkelijke UFH-energiekosten [€] — primaire optimalisatieterm |
+| $p[k]\cdot \frac{P_{UFH}[k]}{COP_{UFH}[k]}\cdot\Delta t$ | Lineair | Werkelijke UFH-elektriciteitskosten [€] — primaire optimalisatieterm |
 | $R_c\cdot P_{UFH}[k]^2$ | Kwadratisch | Regularisatie: dempt pieken, geen fysische kostenterm |
 | $Q_N\,(T_r[N]-T_{ref}[N])^2$ | Kwadratisch | Eindgewicht: stabiele afsluiting horizon |
-| $p[k]\cdot P_{dhw}[k]\cdot\Delta t$ | Lineair | Werkelijke DHW-energiekosten [€] — primaire optimalisatieterm |
+| $p[k]\cdot \frac{P_{dhw}[k]}{COP_{dhw}[k]}\cdot\Delta t$ | Lineair | Werkelijke DHW-elektriciteitskosten [€] — primaire optimalisatieterm |
+| $M \cdot \epsilon_{UFH}[k]^2$ | Kwadratisch | Straf op soft-constraint overtreding UFH (hoge $M$) |
+| $M \cdot \epsilon_{dhw}[k]^2$ | Kwadratisch | Straf op soft-constraint overtreding DHW (hoge $M$) |
 
-### 14.2 Constraints
+### 14.3 Constraints
+
+**Slack-variabelen (soft constraints):**
+
+De comfort- en tapbeperkingen zijn geïmplementeerd als **soft constraints** via slack-variabelen $\epsilon_{UFH}[k] \geq 0$ en $\epsilon_{dhw}[k] \geq 0$ om QP-onhaalbaarheid te voorkomen (thermische vertraging kan de vloer te koud laten zijn om direct aan een harde eis te voldoen). De straffactor $M$ is een configuratieparameter (bijv. $M \gg Q_c$).
 
 **UFH actuator:**
 $$0 \leq P_{UFH}[k] \leq P_{UFH,max}$$
 
-**UFH comfort:**
-$$T_{min} \leq T_r[k] \leq T_{max}$$
+**UFH comfort (soft):**
+$$T_{min} - \epsilon_{UFH}[k] \leq T_r[k] \leq T_{max} + \epsilon_{UFH}[k], \qquad \epsilon_{UFH}[k] \geq 0$$
 
 **UFH ramp-rate:**
 $$|P_{UFH}[k] - P_{UFH}[k-1]| \leq \Delta P_{UFH,max}$$
@@ -383,19 +407,24 @@ $$|P_{UFH}[k] - P_{UFH}[k-1]| \leq \Delta P_{UFH,max}$$
 **DHW actuator:**
 $$0 \leq P_{dhw}[k] \leq P_{dhw,max}$$
 
-**DHW comfort (tapbeschikbaarheid):**
-$$T_{top}[k] \geq T_{dhw,min} \quad \text{(bijv. 50 °C)}$$
+**DHW comfort (soft):**
+$$T_{top}[k] \geq T_{dhw,min} - \epsilon_{dhw}[k], \qquad \epsilon_{dhw}[k] \geq 0$$
 
 **DHW ramp-rate:**
 $$|P_{dhw}[k] - P_{dhw}[k-1]| \leq \Delta P_{dhw,max}$$
 
-**DHW legionella (periodieke harde eis):**
-$$\exists\, k^* \in \text{elke 7}\times24 \text{ stappen}:\ T_{top}[k^*] \geq 60\,°\text{C} \quad \text{gedurende } \geq \left\lceil\tfrac{1\,\text{h}}{\Delta t}\right\rceil \text{ aaneengesloten stappen}$$
+**DHW legionella (periodieke harde eis — beheerd door bovenliggende schil):**
+
+$$\exists\, k^* \in \text{elke } n_{leg} \text{ stappen}:\ T_{top}[k^*] \geq T_{leg} \quad \text{gedurende } \geq \left\lceil\tfrac{t_{leg,min}}{\Delta t}\right\rceil \text{ aaneengesloten stappen}$$
+
+> **Architectuureis legionella:** Omdat de MPC-horizon ($N$ stappen) korter is dan de legionella-cyclus ($n_{leg}$ stappen), mag de $T_{leg}$-eis **niet** blindelings als een standaard QP-constraint over de volledige horizon worden ingesteld. De MPC zou de eis dan consequent buiten zijn horizon schuiven tot de deadline bereikt is, wat kan leiden tot onhaalbaarheid.
+>
+> **Verplichte oplossing:** Een **bovenliggende logische schil** (State Machine) houdt bij hoeveel stappen geleden de laatste legionella-run plaatsvond. Als een run nodig is binnen de huidige horizon, forceert deze schil tijdelijk een harde ondergrens $T_{dhw,min} \leftarrow T_{leg}$ op een aaneengesloten blok van $\lceil t_{leg,min}/\Delta t \rceil$ stappen, bij voorkeur gekozen op het moment van laagste $p[k]$ binnen de horizon. Buiten dit geforceerde blok geldt de normale zachte comfortgrens.
 
 **Gedeeld warmtepompvermogen** (indien UFH en DHW dezelfde WP gebruiken):
-$$P_{UFH}[k] + P_{dhw}[k] \leq P_{hp,max}$$
+$$\frac{P_{UFH}[k]}{COP_{UFH}[k]} + \frac{P_{dhw}[k]}{COP_{dhw}[k]} \leq P_{hp,max,elec}$$
 
-> **Soft constraints:** $T_{min} \leq T_r$ en $T_{top} \geq T_{dhw,min}$ zijn harde QP-rijen. Omdat $P_{UFH}$ alleen de vloer verwarmt (B[0]=0), kan thermische vertraging de QP onhaalbaar maken bij een koude vloer. Productie-code moet **soft constraints** gebruiken (slackvariabelen + grote strafterm) voor robuustheid.
+> Deze constraint begrenst het **elektrische** totaalvermogen van de warmtepomp. $P_{hp,max,elec}$ is de elektrische capaciteitsgrens [kW] van de installatie. Als de WP een vaste maximale thermische output heeft ($P_{hp,max,therm}$), voeg dan ook de thermische constraint $P_{UFH}[k] + P_{dhw}[k] \leq P_{hp,max,therm}$ toe — beide kunnen gelijktijdig actief zijn.
 
 ---
 
@@ -421,8 +450,10 @@ $$P_{UFH}[k] + P_{dhw}[k] \leq P_{hp,max}$$
 | $Q_c$ | K⁻² | Comfortgewicht |
 | $R_c$ | kW⁻² | Regularisatiegewicht (demping pieken) |
 | $Q_N$ | K⁻² | Eindgewicht horizon |
-| $P_{UFH,max}$ | kW | Maximaal vermogen UFH-kant warmtepomp |
+| $M$ | — | Straffactor soft-constraint overtreding ($M \gg Q_c$) |
+| $P_{UFH,max}$ | kW | Maximaal thermisch vermogen UFH-kant warmtepomp |
 | $\Delta P_{UFH,max}$ | kW/stap | Maximale ramp-rate UFH |
+| $COP_{UFH}$ of $COP_{UFH}[k]$ | — | COP warmtepomp UFH-modus (schaalbaar of tijdsvariabele array) |
 
 ### UFH — Kalman Filter
 
@@ -459,7 +490,17 @@ $$P_{UFH}[k] + P_{dhw}[k] \leq P_{hp,max}$$
 | $P_{dhw,max}$ | kW | Max. thermisch vermogen naar DHW |
 | $\Delta P_{dhw,max}$ | kW/stap | Max. ramp-rate DHW |
 | $T_{dhw,min}$ | °C | Min. taptemperatuur comfort (bijv. 50 °C) |
-| $P_{hp,max}$ | kW | Max. totaalvermogen gedeelde warmtepomp |
+| $COP_{dhw}$ of $COP_{dhw}[k]$ | — | COP warmtepomp DHW-modus (schaalbaar of tijdsvariabele array) |
+| $COP_{max}$ | — | Bovengrens COP voor Fail-Fast validatie |
+| $P_{hp,max,elec}$ | kW | Max. elektrisch totaalvermogen gedeelde warmtepomp |
+
+### DHW — Legionella
+
+| Parameter | Eenheid | Betekenis |
+|---|---|---|
+| $T_{leg}$ | °C | Legionella-doeltemperatuur (bijv. 60 °C) |
+| $t_{leg,min}$ | h | Minimale aanhoudtijd bij $T_{leg}$ (bijv. 1 h) |
+| $n_{leg}$ | stappen | Max. interval tussen twee legionella-runs (bijv. $7 \times 24 / \Delta t$) |
 
 ### DHW — Kalman Filter
 
@@ -475,6 +516,49 @@ $$P_{UFH}[k] + P_{dhw}[k] \leq P_{hp,max}$$
 |---|---|---|
 | $p[k]$ | €/kWh | Dynamisch elektriciteitstarief op tijdstip $k$ |
 | $\Delta t$ | h | Tijdstap (gedeeld door UFH en DHW) |
+
+---
+
+## 16. Software Stack & Validatie-eisen
+
+### 16.1 Programmeertaal & Libraries
+
+| Laag | Keuze | Motivatie |
+|---|---|---|
+| Taal | Python 3.10+ | Type-hints, `match`-statements, moderne dataclasses |
+| Matrix-algebra | `numpy` / `scipy.sparse` | Standaard; gebruik sparse matrices voor grote horizons |
+| Data-validatie (Fail-Fast) | `Pydantic v2` | Automatische type- en waardechecks bij laden van config; alle fysische onmogelijkheden (bijv. $C \leq 0$, $COP \leq 0$) worden hier onderschept vóór de solver |
+| MPC-solver | **CVXPY** | Declaratieve QP/SOCP-formulering; compatibel met LTV-systemen; ondersteunt OSQP-backend voor snelheid |
+| Kalman Filter | Eigen generieke klasse (zie architectuureis DRY) | Geen externe library; klasse accepteert $A, B, E, C, Q, R$ en voert Joseph-vorm update uit |
+
+> **Solverkeuze is bindend.** De MPC-formulering moet expliciet als CVXPY-probleem worden geschreven (`cp.Problem`, `cp.Variable`, `cp.Minimize`). Het is verboden de MPC als handmatig uitgeschreven lus in numpy te implementeren.
+
+### 16.2 Configuratieformaat
+
+Alle parameters (zie §15) worden geladen vanuit een extern configuratiebestand (JSON of YAML). Het configuratieschema wordt gevalideerd via een `Pydantic`-model. Voorbeeld van verplichte validatieregels:
+
+```
+C_r > 0, C_b > 0          # Warmtecapaciteiten zijn positief
+R_br > 0, R_ro > 0        # Thermische weerstanden zijn positief
+0 < alpha <= 1            # Zonlichtfractie is een kans
+1 < COP_ufh <= COP_max    # COP is fysisch groter dan 1
+V_tank > 0                # Tankvolume is positief
+C_top + C_bot ≈ lambda * V_tank  # Capaciteitsconservatie (tolerantie: 1e-4)
+```
+
+### 16.3 Test-eisen (pytest)
+
+Bij de implementatie moet een `pytest`-suite worden gegenereerd die de **Fysische Consistentie-Checklist** automatisch afdwingt. Minimaal vereiste tests:
+
+| Test | Controle | Tolerantie |
+|---|---|---|
+| `test_ufh_energy_balance` | $\Delta(C_r T_r + C_b T_b)/\Delta t = P_{UFH} - (T_r-T_{out})/R_{ro} + Q_{solar} + Q_{int}$ voor 10 tijdstappen | `np.testing.assert_allclose(..., rtol=1e-6)` |
+| `test_dhw_energy_balance` | $\Delta(C_{top}T_{top}+C_{bot}T_{bot})/\Delta t = P_{dhw} - \dot{Q}_{tap} - \dot{Q}_{loss}$ voor 10 tijdstappen | `np.testing.assert_allclose(..., rtol=1e-6)` |
+| `test_kalman_covariance_pd` | $P$ blijft symmetrisch positief-definiet na 50 Kalman-stappen | Kleinste eigenwaarde $> 0$ |
+| `test_observability_rank` | Rang observeerbaarheidsmatrix = 2 voor beide subsystemen | `np.linalg.matrix_rank(...) == 2` |
+| `test_cop_validation` | Pydantic gooit `ValidationError` bij $COP \leq 1$ of $COP > COP_{max}$ | `pytest.raises(ValidationError)` |
+| `test_mpc_feasibility` | MPC-probleem is `OPTIMAL` (niet `INFEASIBLE`) voor standaardscenario | `problem.status == "optimal"` |
+| `test_lambda_constant` | $\lambda$ berekend vanuit $\rho$ en $c_p$ uit config = 1.1628 binnen tolerantie | `assert_allclose(lambda_calc, 1.1628, rtol=1e-4)` |
 
 ---
 
@@ -494,6 +578,11 @@ Bij elke implementatie of parameterwijziging verifiëren:
 | LTV matrices | $A_{dhw}[k]$ en $E_{dhw}[k]$ herberekenen bij elke $k$ met actuele $\dot{V}_{tap}[k]$ |
 | Observeerbaarheid | Rang observeerbaarheidsmatrix = 2 voor beide subsystemen na parametrisatie |
 | Kalman covariantie | $P$ blijft symmetrisch PD dankzij Joseph-vorm update |
-| Soft constraints | Comfort- en tapbeperkingen als soft constraints in productie-code |
-| Geen Magic Numbers | Code-review: Zoeken naar hardcoded floats in wiskundige of logische vergelijkingen. Elke parameter komt uit een config-object. |
-| Volledige Documentatie | Code-review: Elke functie heeft een docstring mét eenheden, type-hints, en verwijzingen naar het wiskundige theorie-document. |
+| COP > 1 | Fail-Fast validatie bij laden config; kostfunctie gebruikt elektrisch vermogen = thermisch / COP |
+| Soft constraints | $\epsilon_{UFH}[k] \geq 0$ en $\epsilon_{dhw}[k] \geq 0$ in QP; straffactor $M$ uit config |
+| Legionella State Machine | Bovenliggende schil forceert $T_{leg}$-run binnen horizon; niet als blinde permanente QP-constraint |
+| Gedeelde WP-constraint | Begrenst elektrisch vermogen via $P_{UFH}/COP_{UFH} + P_{dhw}/COP_{dhw} \leq P_{hp,max,elec}$ |
+| Geen Magic Numbers | Code-review: zoeken naar hardcoded floats in wiskundige of logische vergelijkingen. Elke parameter komt uit een config-object. |
+| Volledige Documentatie | Code-review: elke functie heeft een docstring mét eenheden, type-hints, en verwijzingen naar het wiskundige theorie-document. |
+| CVXPY-formulering | MPC is een `cp.Problem`; geen handmatig uitgeschreven lus-optimalisatie |
+| Pydantic-validatie | Alle config-parameters worden bij laden gevalideerd; fysische onmogelijkheden gooien een exception |

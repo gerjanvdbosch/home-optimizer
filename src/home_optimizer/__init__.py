@@ -15,7 +15,7 @@ Physical model assumptions
 
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from .kalman import DHWKalmanFilter, KalmanEstimate, UFHKalmanFilter
-from .mpc import CombinedMPCController, CombinedMPCSolution, MPCController, MPCSolution, UFHMPCController
+from .mpc import MPCController, MPCSolution
 from .thermal_model import MEASUREMENT_MATRIX, ThermalModel, solar_gain_kw
 from .types import (
     CombinedMPCParameters,
@@ -31,9 +31,7 @@ from .types import (
 )
 
 __all__ = [
-    "CombinedMPCController",
     "CombinedMPCParameters",
-    "CombinedMPCSolution",
     "DHWForecastHorizon",
     "DHWKalmanFilter",
     "DHWMPCParameters",
@@ -51,7 +49,6 @@ __all__ = [
     "ThermalModel",
     "ThermalParameters",
     "UFHKalmanFilter",
-    "UFHMPCController",
     "W_PER_KW",
     "solar_gain_kw",
 ]

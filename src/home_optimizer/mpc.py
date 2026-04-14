@@ -7,9 +7,9 @@ Supported modes
 * UFH-only: ``MPCController(..., dhw_model=None, params=MPCParameters)``
 * Combined: ``MPCController(..., dhw_model=DHWModel(...), params=CombinedMPCParameters)``
 
-Backward-compatible adapter/alias names remain available:
-* ``UFHMPCController`` → UFH-only convenience wrapper
-* ``CombinedMPCController`` → alias of ``MPCController``
+No legacy controller aliases are maintained here: there is one public solver API
+and one public result type, in line with the project DRY and no-backwards-
+compatibility requirements.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ _AnyMPCParams = Union[MPCParameters, CombinedMPCParameters]
 
 
 @dataclass(frozen=True, slots=True)
-class CombinedMPCSolution:
+class MPCSolution:
     """Result of a unified MPC solve call.
 
     Attributes
@@ -81,32 +81,6 @@ class CombinedMPCSolution:
     @property
     def first_dhw_control_kw(self) -> float:
         return float(self.dhw_control_sequence_kw[0]) if self.dhw_control_sequence_kw.size else 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class MPCSolution:
-    """UFH-only view of the unified MPC result.
-
-    Attributes
-    ----------
-    control_sequence_kw:      Optimal P_UFH sequence [kW], length N.
-    predicted_states_c:       Predicted [T_r, T_b] trajectory, shape (N+1, 2).
-    objective_value:          Value of the cost function J.
-    solver_status:            Status string from the convex solver.
-    max_comfort_violation_c:  Largest soft-constraint violation in °C (0 = feasible).
-    used_fallback:            True when the greedy fallback was used.
-    """
-
-    control_sequence_kw: np.ndarray
-    predicted_states_c: np.ndarray
-    objective_value: float
-    solver_status: str
-    max_comfort_violation_c: float = 0.0
-    used_fallback: bool = False
-
-    @property
-    def first_control_kw(self) -> float:
-        return float(self.control_sequence_kw[0]) if self.control_sequence_kw.size else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +151,10 @@ class MPCController:
         dhw_forecast: DHWForecastHorizon | None = None,
         previous_p_ufh_kw: float = 0.0,
         previous_p_dhw_kw: float = 0.0,
-    ) -> CombinedMPCSolution:
+    ) -> MPCSolution:
         """Compute the optimal control sequence for the coming horizon.
 
-        Always returns a valid ``CombinedMPCSolution``. Invalid dimensions fail
+        Always returns a valid ``MPCSolution``. Invalid dimensions fail
         fast with ``ValueError``.
         """
         x_ufh0 = np.asarray(initial_ufh_state_c, dtype=float)
@@ -259,7 +233,7 @@ class MPCController:
         dhw_forecast: DHWForecastHorizon | None,
         prev_u_ufh: float,
         prev_u_dhw: float,
-    ) -> CombinedMPCSolution:
+    ) -> MPCSolution:
         assert cp is not None
 
         p_ufh = self._p_ufh
@@ -365,7 +339,7 @@ class MPCController:
         dhw_forecast: DHWForecastHorizon | None,
         prev_u_ufh: float,
         prev_u_dhw: float,
-    ) -> CombinedMPCSolution:
+    ) -> MPCSolution:
         p_ufh = self._p_ufh
         p_dhw = self._p_dhw
         g = p_ufh.greedy
@@ -476,7 +450,7 @@ class MPCController:
         ufh_forecast: ForecastHorizon,
         dhw_forecast: DHWForecastHorizon | None,
         used_fallback: bool,
-    ) -> CombinedMPCSolution:
+    ) -> MPCSolution:
         p_ufh = self._p_ufh
         p_dhw = self._p_dhw
         t_r_pred = x_val[1:, 0]
@@ -497,7 +471,7 @@ class MPCController:
                 )
             ))
 
-        return CombinedMPCSolution(
+        return MPCSolution(
             ufh_control_sequence_kw=u_ufh_val,
             dhw_control_sequence_kw=u_dhw_val,
             predicted_states_c=x_val,
@@ -509,52 +483,4 @@ class MPCController:
             used_fallback=used_fallback,
         )
 
-
-# ---------------------------------------------------------------------------
-# Backward-compatible UFH-only adapter and aliases
-# ---------------------------------------------------------------------------
-
-
-class UFHMPCController:
-    """UFH-only convenience wrapper over the unified ``MPCController``."""
-
-    def __init__(
-        self,
-        model: ThermalModel,
-        params: MPCParameters,
-        solver: str = "OSQP",
-    ) -> None:
-        self.model = model
-        self.params = params
-        self._delegate = MPCController(ufh_model=model, params=params, dhw_model=None, solver=solver)
-
-    def solve(
-        self,
-        initial_state_c: np.ndarray,
-        forecast: ForecastHorizon,
-        previous_power_kw: float = 0.0,
-    ) -> MPCSolution:
-        x0 = np.asarray(initial_state_c, dtype=float)
-        if x0.shape != (2,):
-            raise ValueError("initial_state_c must be [T_r, T_b].")
-        if forecast.horizon_steps != self.params.horizon_steps:
-            raise ValueError("Forecast horizon must equal MPCParameters.horizon_steps.")
-
-        sol = self._delegate.solve(
-            initial_ufh_state_c=x0,
-            ufh_forecast=forecast,
-            previous_p_ufh_kw=float(previous_power_kw),
-        )
-
-        return MPCSolution(
-            control_sequence_kw=sol.ufh_control_sequence_kw,
-            predicted_states_c=sol.predicted_states_c,
-            objective_value=sol.objective_value,
-            solver_status=sol.solver_status,
-            max_comfort_violation_c=sol.max_ufh_comfort_violation_c,
-            used_fallback=sol.used_fallback,
-        )
-
-
-CombinedMPCController = MPCController
 

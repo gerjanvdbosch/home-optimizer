@@ -26,6 +26,8 @@ def test_optimize_exposes_pv_forecast_in_api_response() -> None:
     payload = response.json()
 
     assert payload["pv_enabled"] is True
+    assert payload["first_ufh_power_kw"] >= 0.0
+    assert payload["first_total_hp_power_kw"] >= payload["first_ufh_power_kw"]
     assert len(payload["control_labels"]) == 24
     assert len(payload["pv_forecast_kw"]) == 24
     assert max(payload["pv_forecast_kw"]) > 0.0
@@ -52,9 +54,24 @@ def test_optimize_supports_combined_mode_through_unified_mpc() -> None:
     payload = response.json()
 
     assert payload["dhw_enabled"] is True
+    assert payload["first_dhw_power_kw"] >= 0.0
     assert payload["dhw_fig"]
     assert payload["power_fig"]
     assert len(payload["control_labels"]) == 8
     assert len(payload["pv_forecast_kw"]) == 8
     assert payload["max_dhw_comfort_violation_c"] >= 0.0
+
+
+def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
+    """The dashboard page must expose grouped DHW/PV UI elements for the unified controller."""
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="dhw_enabled"' in html
+    assert 'id="dhw-settings"' in html
+    assert 'id="dhw-chart-card"' in html
+    assert 'id="pv_enabled"' in html
+    assert 'UFH + DHW + PV MPC' in html
+
 

@@ -156,12 +156,20 @@ class RunRequest(BaseModel):
 
 
 class OptimizeResponse(BaseModel):
+    """Structured optimisation response for the dashboard and API clients."""
+
     status: str
     objective: float
-    total_energy_kwh: float
+    hp_total_energy_kwh: float
     total_cost_eur: float
-    first_power_kw: float
-    max_comfort_violation_c: float
+    ufh_total_energy_kwh: float
+    dhw_total_energy_kwh: float = 0.0
+    ufh_grid_cost_eur: float
+    dhw_grid_cost_eur: float = 0.0
+    first_ufh_power_kw: float
+    first_dhw_power_kw: float = 0.0
+    first_total_hp_power_kw: float
+    max_ufh_comfort_violation_c: float
     # PV / grid
     pv_total_kwh: float = 0.0
     net_grid_energy_kwh: float = 0.0
@@ -170,8 +178,6 @@ class OptimizeResponse(BaseModel):
     pv_forecast_kw: list[float]
     # DHW
     dhw_enabled: bool = False
-    dhw_total_energy_kwh: float = 0.0
-    dhw_total_cost_eur: float = 0.0
     max_dhw_comfort_violation_c: float = 0.0
     max_legionella_violation_c: float = 0.0
     # Charts
@@ -417,8 +423,8 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
             dhw_forecast=dhw_forecast,
             previous_p_ufh_kw=req.previous_power_kw,
         )
-        P_UFH = solution.ufh_control_sequence_kw
-        P_dhw = solution.dhw_control_sequence_kw
+        P_UFH = np.maximum(solution.ufh_control_sequence_kw, 0.0)
+        P_dhw = np.maximum(solution.dhw_control_sequence_kw, 0.0)
         states = solution.predicted_states_c
         solver_status = solution.solver_status
         objective = solution.objective_value
@@ -433,11 +439,16 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     P_hp_total = P_UFH + P_dhw
     P_import = np.maximum(P_hp_total - pv_kw, 0.0)
     total_energy = float(np.sum(P_hp_total) * dt)
-    total_cost = float(np.sum(P_import * prices * dt))
+    total_cost_steps = P_import * prices * dt
+    total_cost = float(np.sum(total_cost_steps))
     pv_total = float(np.sum(pv_kw) * dt)
     net_grid = float(np.sum(P_import) * dt)
+    ufh_energy = float(np.sum(P_UFH) * dt)
     dhw_energy = float(np.sum(P_dhw) * dt)
-    dhw_cost = float(np.sum(P_dhw * prices * dt))
+    ufh_cost_weights = np.divide(P_UFH, P_hp_total, out=np.zeros_like(P_UFH), where=P_hp_total > 0.0)
+    dhw_cost_weights = np.divide(P_dhw, P_hp_total, out=np.zeros_like(P_dhw), where=P_hp_total > 0.0)
+    ufh_grid_cost = float(np.sum(total_cost_steps * ufh_cost_weights))
+    dhw_grid_cost = float(np.sum(total_cost_steps * dhw_cost_weights))
 
     # ── Build charts ──────────────────────────────────────────────────────
     labels_states = _time_labels(start_hour, N + 1)
@@ -456,18 +467,22 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     return OptimizeResponse(
         status=solver_status,
         objective=objective,
-        total_energy_kwh=total_energy,
+        hp_total_energy_kwh=total_energy,
         total_cost_eur=total_cost,
-        first_power_kw=float(P_UFH[0]),
-        max_comfort_violation_c=max_comfort_viol,
+        ufh_total_energy_kwh=ufh_energy,
+        dhw_total_energy_kwh=dhw_energy,
+        ufh_grid_cost_eur=ufh_grid_cost,
+        dhw_grid_cost_eur=dhw_grid_cost,
+        first_ufh_power_kw=float(P_UFH[0]),
+        first_dhw_power_kw=float(P_dhw[0]),
+        first_total_hp_power_kw=float(P_hp_total[0]),
+        max_ufh_comfort_violation_c=max_comfort_viol,
         pv_total_kwh=pv_total,
         net_grid_energy_kwh=net_grid,
         pv_enabled=req.pv_enabled,
         control_labels=labels_ctrl,
         pv_forecast_kw=pv_kw.tolist(),
         dhw_enabled=req.dhw_enabled,
-        dhw_total_energy_kwh=dhw_energy,
-        dhw_total_cost_eur=dhw_cost,
         max_dhw_comfort_violation_c=max_dhw_viol,
         max_legionella_violation_c=max_leg_viol,
         temperature_fig=temp_fig,
