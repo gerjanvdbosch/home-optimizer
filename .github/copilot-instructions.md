@@ -1,9 +1,38 @@
-# Home Optimizer: 2-State Thermisch Model (UFH & MPC)
+# Home Optimizer: Thermisch Model (UFH & DHW & MPC)
 
-Dit document bevat de volledige wiskundige en logische instructies voor het implementeren van de thermische regeling in het Home Optimizer project. Het model combineert een fysisch model (grey-box) met een Kalman-filter voor schattingen en een Model Predictive Controller (MPC) voor het optimaliseren van het energieverbruik.
+Dit document bevat de volledige wiskundige en logische instructies voor het implementeren van de thermische regeling in het Home Optimizer project. Het model combineert een fysisch model (grey-box) met een Kalman-filter voor schattingen en een Model Predictive Controller (MPC) voor het optimaliseren van het energieverbruik van zowel ruimteverwarming (UFH) als tapwater (DHW).
 
 > ### ⚠️ Kerneis: Fysische Correctheid
-> **Elke vergelijking, matrix en parameter in dit document moet 100% fysisch en wiskundig correct zijn.** Alle eenheden moeten consistent zijn (SI-eenheden met kW en kWh als energiegrootheid). Elke discretisatie moet stabiel zijn voor de gekozen $\Delta t$. Elke kostterm moet aansluiten op de werkelijke fysische grootheid die geoptimaliseerd wordt. Bij twijfel: afleiden vanuit de continue fysica, niet aanpassen op basis van convenientie. Modelaannames (bijv. lineair warmtetransport, gemiddelde zoninstraling) moeten expliciet benoemd zijn.
+> **Elke vergelijking, matrix en parameter in dit document moet 100% fysisch en wiskundig correct zijn.** Alle eenheden zijn consistent: vermogen in **kW**, energie in **kWh**, temperatuur in **°C**, volume in **m³**, tijd in **h**. Elke discretisatie moet stabiel zijn voor de gekozen $\Delta t$. Elke kostterm moet aansluiten op de werkelijke fysische grootheid die geoptimaliseerd wordt. Bij twijfel: afleiden vanuit de continue fysica, niet aanpassen op basis van convenientie. Alle modelaannames zijn expliciet benoemd.
+
+---
+
+## Inhoudsopgave
+
+**Deel A — UFH (Ruimteverwarming)**
+1. Doel & Architectuur
+2. Variabelendefinities UFH
+3. Continue Fysica UFH
+4. Discrete Vorm UFH
+5. State-Space Representatie UFH
+6. Kalman Filter UFH
+
+**Deel B — DHW (Tapwater)**
+7. Modelkeuze & Aannames DHW
+8. Variabelendefinities DHW
+9. Continue Fysica DHW
+10. Discrete Vorm DHW
+11. State-Space Representatie DHW
+12. Kalman Filter DHW
+
+**Deel C — Gecombineerd Systeem & MPC**
+13. Gecombineerd State-Vector
+14. MPC Kostfunctie & Constraints
+15. Parameter Woordenboek
+
+---
+
+# Deel A — UFH (Ruimteverwarming)
 
 ---
 
@@ -19,24 +48,30 @@ Het doel van deze module is het slim aansturen van de vloerverwarming (UFH) door
 
 ---
 
-## 2. Definities van de Variabelen
+## 2. Variabelendefinities UFH
 
-### 2.1 States (Toestandsgrootheden)
-*   **$T_r$ [°C]:** Gemeten ruimtetemperatuur (lucht).
-*   **$T_b$ [°C]:** Niet-gemeten temperatuur van de thermische massa (de betonvloer/buffer).
+### 2.1 States
+
+| Variabele | Eenheid | Betekenis |
+|---|---|---|
+| $T_r$ | °C | Gemeten ruimtetemperatuur (lucht) |
+| $T_b$ | °C | Niet-gemeten temperatuur thermische massa (betonvloer/buffer) |
 
 ### 2.2 Inputs & Verstoringen
-*   **$P_{UFH}$ [kW]:** Het vermogen dat de vloerverwarming in de vloer pompt (Actuator).
-*   **$T_{out}$ [°C]:** Buitentemperatuur (Verstoring).
-*   **$Q_{solar}$ [kW]:** Zoninstraling door de ramen (Verstoring).
-*   **$Q_{int}$ [kW]:** Interne warmte van mensen en apparaten, typisch 0.2–0.8 kW per huis (Verstoring).
-*   **$p[k]$ [€/kWh]:** Dynamisch elektriciteitstarief op tijdstip $k$ (voor kostenoptimalisatie).
+
+| Variabele | Eenheid | Betekenis |
+|---|---|---|
+| $P_{UFH}$ | kW | Vermogen vloerverwarming (Actuator) |
+| $T_{out}$ | °C | Buitentemperatuur (Verstoring) |
+| $Q_{solar}$ | kW | Zoninstraling door de ramen (Verstoring) |
+| $Q_{int}$ | kW | Interne warmte mensen + apparaten, typisch 0.2–0.8 kW (Verstoring) |
+| $p[k]$ | €/kWh | Dynamisch elektriciteitstarief op tijdstip $k$ |
 
 ---
 
-## 3. Continue Fysica (Het Thermische Model)
+## 3. Continue Fysica UFH
 
-Het huis wordt gemodelleerd als twee 'emmers' met warmte: de vloer (buffer) en de lucht (ruimte).
+Het huis wordt gemodelleerd als twee thermische knooppunten: de vloer (buffer) en de lucht (ruimte).
 
 **Modelaanname:** Warmtetransport tussen zones is lineair (Newtons afkoelwet). Zoninstraling wordt uniform verdeeld over vloer en lucht via factor $\alpha$.
 
@@ -46,19 +81,20 @@ $$C_b \cdot \frac{dT_b}{dt} = P_{UFH} - \frac{T_b - T_r}{R_{br}} + (1 - \alpha) 
 **De Ruimte (Lucht):**
 $$C_r \cdot \frac{dT_r}{dt} = \frac{T_b - T_r}{R_{br}} - \frac{T_r - T_{out}}{R_{ro}} + \alpha \cdot Q_{solar} + Q_{int}$$
 
-> *   $C_b$ en $C_r$ zijn de warmtecapaciteiten [kWh/K].
-> *   Warmte stroomt van vloer naar kamer via weerstand $R_{br}$ [K/kW], gedreven door het temperatuurverschil $T_b - T_r$.
-> *   Warmte lekt van kamer naar buiten via $R_{ro}$ [K/kW].
-> *   De zon warmt voor fractie $\alpha$ direct de lucht op, en $(1-\alpha)$ gaat naar de vloer/meubels.
+> - $C_b$ en $C_r$: warmtecapaciteiten [kWh/K].
+> - Warmte stroomt van vloer naar kamer via $R_{br}$ [K/kW], gedreven door $T_b - T_r$.
+> - Warmte lekt van kamer naar buiten via $R_{ro}$ [K/kW].
+> - De zon warmt voor fractie $\alpha$ direct de lucht op; $(1-\alpha)$ gaat naar de vloer/meubels.
 
 ---
 
-## 4. Discrete Vorm (Voor in de Code)
+## 4. Discrete Vorm UFH
 
 **Methode:** Forward Euler discretisatie met tijdstap $\Delta t$ [h].
 
-**Stabiliteitseis:** De tijdstap $\Delta t$ moet voldoen aan:
+**Stabiliteitseis:**
 $$\Delta t \ll \min\left(C_r \cdot R_{br},\ C_b \cdot R_{br},\ C_r \cdot R_{ro}\right)$$
+
 Typisch is $\Delta t \in \{0.25, 0.5, 1.0\}$ uur acceptabel voor een woning. Bij twijfel: gebruik Zero-Order Hold (ZOH) discretisatie, die onvoorwaardelijk stabiel is.
 
 $$T_b[k+1] = T_b[k] + \frac{\Delta t}{C_b} \cdot \left( P_{UFH}[k] - \frac{T_b[k] - T_r[k]}{R_{br}} + (1 - \alpha) \cdot Q_{solar}[k] \right)$$
@@ -66,97 +102,375 @@ $$T_b[k+1] = T_b[k] + \frac{\Delta t}{C_b} \cdot \left( P_{UFH}[k] - \frac{T_b[k
 $$T_r[k+1] = T_r[k] + \frac{\Delta t}{C_r} \cdot \left( \frac{T_b[k] - T_r[k]}{R_{br}} - \frac{T_r[k] - T_{out}[k]}{R_{ro}} + \alpha \cdot Q_{solar}[k] + Q_{int}[k] \right)$$
 
 **Zoninstraling berekenen:**
-$$Q_{solar} = \frac{A_{glass} \cdot GTI \cdot \eta}{1000}$$
-*(GTI in W/m², $A_{glass}$ in m², resultaat in kW.)*
+$$Q_{solar}[k] = \frac{A_{glass} \cdot GTI[k] \cdot \eta}{1000} \quad \text{(GTI in W/m², resultaat in kW)}$$
 
 ---
 
-## 5. State-Space Representatie (Matrix Vorm)
+## 5. State-Space Representatie UFH
 
-$$x[k+1] = A x[k] + B u[k] + E d[k]$$
+$$x_{UFH}[k+1] = A_{UFH}\, x_{UFH}[k] + B_{UFH}\, u_{UFH}[k] + E_{UFH}\, d_{UFH}[k]$$
 
-*   $x = [T_r, T_b]^T$
-*   $u = P_{UFH}$
-*   $d = [T_{out}, Q_{solar}, Q_{int}]^T$
+- $x_{UFH} = [T_r,\ T_b]^T$
+- $u_{UFH} = P_{UFH}$
+- $d_{UFH} = [T_{out},\ Q_{solar},\ Q_{int}]^T$
 
-**Hulpgrootheden (eenheidloos, afleidbaar uit parameters):**
-
-$$a_{br} = \frac{\Delta t}{C_r \cdot R_{br}}, \quad a_{ro} = \frac{\Delta t}{C_r \cdot R_{ro}}, \quad b_{br} = \frac{\Delta t}{C_b \cdot R_{br}}$$
+**Hulpgrootheden:**
+$$a_{br} = \frac{\Delta t}{C_r \cdot R_{br}}, \qquad a_{ro} = \frac{\Delta t}{C_r \cdot R_{ro}}, \qquad b_{br} = \frac{\Delta t}{C_b \cdot R_{br}}$$
 
 **Matrices:**
+$$A_{UFH} = \begin{bmatrix} 1 - a_{br} - a_{ro} & a_{br} \\ b_{br} & 1 - b_{br} \end{bmatrix}$$
 
-$$A = \begin{bmatrix} 1 - a_{br} - a_{ro} & a_{br} \\ b_{br} & 1 - b_{br} \end{bmatrix}$$
+$$B_{UFH} = \begin{bmatrix} 0 \\ \dfrac{\Delta t}{C_b} \end{bmatrix}$$
 
-$$B = \begin{bmatrix} 0 \\ \frac{\Delta t}{C_b} \end{bmatrix}$$
+$$E_{UFH} = \begin{bmatrix} a_{ro} & \alpha \cdot \dfrac{\Delta t}{C_r} & \dfrac{\Delta t}{C_r} \\[6pt] 0 & (1-\alpha) \cdot \dfrac{\Delta t}{C_b} & 0 \end{bmatrix}$$
 
-$$E = \begin{bmatrix} a_{ro} & \alpha \cdot \frac{\Delta t}{C_r} & \frac{\Delta t}{C_r} \\ 0 & (1-\alpha) \cdot \frac{\Delta t}{C_b} & 0 \end{bmatrix}$$
-
-> Het model is **observeerbaar** (vloertemperatuur is afleidbaar uit kamertemperatuur over tijd) en **regelbaar** (de warmtepomp kan de vloertemperatuur sturen). Observeerbaarheid moet gecontroleerd worden na parametrisatie via de observeerbaarheidsmatrix $\mathcal{O} = [C^T, (CA)^T]^T$ met rang 2.
+> Het systeem is **observeerbaar** en **regelbaar**. Controleer observeerbaarheid na parametrisatie via $\mathcal{O} = [C_{UFH}^T,\ (C_{UFH} A_{UFH})^T]^T$ met rang 2, waarbij $C_{UFH} = [1,\ 0]$.
 
 ---
 
-## 6. Kalman Filter (Temperatuur Schatter)
+## 6. Kalman Filter UFH
 
 **Predictie:**
-$$\hat{x}^-[k] = A \hat{x}[k-1] + B u[k-1] + E d[k-1]$$
-$$P^-[k] = A P[k-1] A^T + Q_n$$
+$$\hat{x}^-_{UFH}[k] = A_{UFH}\,\hat{x}_{UFH}[k-1] + B_{UFH}\,u_{UFH}[k-1] + E_{UFH}\,d_{UFH}[k-1]$$
+$$P^-_{UFH}[k] = A_{UFH}\,P_{UFH}[k-1]\,A_{UFH}^T + Q_{n,UFH}$$
 
-**Update:**
-$$K[k] = P^-[k] C^T \cdot (C P^-[k] C^T + R_n)^{-1}$$
-$$\hat{x}[k] = \hat{x}^-[k] + K[k] \cdot (y[k] - C \hat{x}^-[k])$$
-$$P[k] = (I - K[k] C) P^-[k]$$
+**Update (Joseph-vorm voor numerieke stabiliteit):**
+$$K_{UFH}[k] = P^-_{UFH}[k]\,C_{UFH}^T \cdot \left(C_{UFH}\,P^-_{UFH}[k]\,C_{UFH}^T + R_{n,UFH}\right)^{-1}$$
+$$\hat{x}_{UFH}[k] = \hat{x}^-_{UFH}[k] + K_{UFH}[k] \cdot \left(y_{UFH}[k] - C_{UFH}\,\hat{x}^-_{UFH}[k]\right)$$
+$$P_{UFH}[k] = \left(I - K_{UFH}C_{UFH}\right)P^-_{UFH}[k]\left(I - K_{UFH}C_{UFH}\right)^T + R_{n,UFH}\,K_{UFH}K_{UFH}^T$$
 
-Met meetmatrix $C = [1, 0]$ (alleen $T_r$ wordt gemeten).
-
----
-
-## 7. Model Predictive Control (De Optimizer)
-
-De MPC kijkt $N$ stappen in de toekomst en minimaliseert energiekosten terwijl comfort gewaarborgd blijft.
-
-**Kostfunctie:**
-$$J = \sum_{k=0}^{N-1} \left[ Q_c \cdot (T_r[k] - T_{ref}[k])^2 + p[k] \cdot P_{UFH}[k] \cdot \Delta t + R_c \cdot P_{UFH}[k]^2 \right] + Q_N \cdot (T_r[N] - T_{ref}[N])^2$$
-
-> **Toelichting kostfunctie:**
-> - $Q_c \cdot (T_r - T_{ref})^2$: comfortafwijking (kwadratisch, convex).
-> - $p[k] \cdot P_{UFH}[k] \cdot \Delta t$: **werkelijke energiekosten** [€] op tijdstip $k$ — lineair met het dynamische tarief en het energieverbruik in kWh. Dit is de primaire optimalisatieterm.
-> - $R_c \cdot P_{UFH}[k]^2$: regularisatieterm die abrupte vermogenspieken dempt (convexiteit, geen fysische kostenterm).
-> - $Q_N$: eindgewicht voor stabiele afsluiting van de horizon.
-
-**Constraints:**
-1. $0 \leq P_{UFH}[k] \leq P_{max}$ — verwarming werkt niet negatief.
-2. $T_{min} \leq T_r[k] \leq T_{max}$ — comfortbereik.
-3. $|P_{UFH}[k] - P_{UFH}[k-1]| \leq \Delta P_{max}$ — ramp-rate beperking warmtepomp.
+Met meetmatrix $C_{UFH} = [1,\ 0]$ (alleen $T_r$ wordt gemeten).
 
 ---
 
-## 8. Parameter Woordenboek
+# Deel B — DHW (Tapwater)
 
-### Systeem & Huis Parameters
+---
+
+## 7. Modelkeuze & Aannames DHW
+
+Het DHW-systeem wordt gemodelleerd als een **2-node stratificatietank** (boven- en onderlaag). Dit is de minimale representatie die stratificatie, koude inlaat en warme uitlaat fysisch correct vangt. Het DHW-subsysteem is thermisch ontkoppeld van de ruimte; de koppeling met UFH loopt uitsluitend via gedeeld elektrisch vermogen van de warmtepomp.
+
+**Expliciete modelaannames:**
+
+| # | Aanname | Consequentie |
+|---|---|---|
+| A1 | Elke laag is perfect gemengd (wel-roerd) | Binnen een laag is $T$ uniform |
+| A2 | Warmtetransport tussen lagen alleen via interne conductie/menging | Geen convectief transport anders dan via tapstroom |
+| A3 | Tapstroom is plug-flow: warm water verlaat bovenaan, koud water komt onderaan | Tapterm is bilineair (state × disturbance); linearisatie via bekende $\dot{V}_{tap}[k]$ |
+| A4 | Standby-verlies evenredig met $(T_{laag} - T_{amb})$ (Newton) | Verlies aanwezig zolang $T > T_{amb}$ |
+| A5 | Warmtepomp-warmtewisselaar zit **onderin** de tank (industriestandaard) | $P_{dhw}$ gaat volledig naar de onderlaag |
+| A6 | $T_{dhw}$ (gemiddelde tanktemperatuur) is een **afgeleid** signaal, geen extra state | Geen overspecificatie; $T_{dhw} = (C_{top}T_{top} + C_{bot}T_{bot})/(C_{top}+C_{bot})$ |
+
+---
+
+## 8. Variabelendefinities DHW
+
+### 8.1 States
+
+| Variabele | Eenheid | Betekenis |
+|---|---|---|
+| $T_{top}$ | °C | Temperatuur bovenlaag (tapwater uitgang) |
+| $T_{bot}$ | °C | Temperatuur onderlaag (koude instroombuffer, WP-kant) |
+
+**Afgeleid (geen state):**
+$$T_{dhw}[k] = \frac{C_{top}\,T_{top}[k] + C_{bot}\,T_{bot}[k]}{C_{top} + C_{bot}}$$
+
+### 8.2 Actuator
+
+| Variabele | Eenheid | Betekenis |
+|---|---|---|
+| $P_{dhw}$ | kW | Thermisch vermogen naar de onderlaag (warmtepompuitgang) |
+
+### 8.3 Verstoringen
+
+| Variabele | Eenheid | Betekenis |
+|---|---|---|
+| $\dot{V}_{tap}[k]$ | m³/h | Tapwaterdebiet (gebruikersvraag) |
+| $T_{mains}[k]$ | °C | Temperatuur inkomend koud leidingwater |
+| $T_{amb}[k]$ | °C | Omgevingstemperatuur rond de boiler (bijv. meterkast) |
+
+### 8.4 Eenheidsconversie (éénmalig vastgelegd)
+
+$$\lambda = \rho \cdot c_p = 1000\,\frac{\text{kg}}{\text{m}^3} \times \frac{4186\,\text{J}}{\text{kg}\cdot\text{K}} \times \frac{1\,\text{kWh}}{3{,}600{,}000\,\text{J}} = 1.1628\,\frac{\text{kWh}}{\text{m}^3 \cdot \text{K}}$$
+
+Gebruik **uitsluitend** $\lambda$ in alle formules. Gebruik $c_p$ in J/kgK nergens direct.
+
+---
+
+## 9. Continue Fysica DHW
+
+### 9.1 Tapwater-energiestroom
+
+Warm water verlaat de tank **bovenaan** met temperatuur $T_{top}$; koud leidingwater komt **onderaan** binnen met $T_{mains}$. De totale netto warmteonttrekking aan het systeem is:
+
+$$\dot{Q}_{tap} = \lambda \cdot \dot{V}_{tap} \cdot (T_{top} - T_{mains}) \quad \text{[kW]}$$
+
+Intern splitst deze stroom zich fysisch correct over beide lagen:
+
+| Laag | Term | Betekenis |
+|---|---|---|
+| Bovenlaag verliest | $-\lambda \cdot \dot{V}_{tap} \cdot T_{top}$ | Heet water verlaat de tank |
+| Onderlaag wint | $+\lambda \cdot \dot{V}_{tap} \cdot T_{mains}$ | Koud leidingwater stroomt in |
+
+> Als $\dot{Q}_{tap}$ als één term in de bovenlaag staat, ontbreekt de mains-bijdrage in de onderlaag en sluit de energiebalans **niet**. De splitsing hierboven is de enige fysisch correcte aanpak.
+
+### 9.2 Standby-verliezen
+
+$$\dot{Q}_{loss,top} = \frac{T_{top} - T_{amb}}{R_{loss}}, \qquad \dot{Q}_{loss,bot} = \frac{T_{bot} - T_{amb}}{R_{loss}} \quad \text{[kW]}$$
+
+### 9.3 Interne conductie (stratificatie)
+
+$$\dot{Q}_{strat} = \frac{T_{top} - T_{bot}}{R_{strat}} \quad \text{[kW]}$$
+
+Hogere $R_{strat}$ → minder menging → betere stratificatie.
+
+### 9.4 Continue differentiaalvergelijkingen
+
+**Bovenlaag:**
+$$C_{top}\frac{dT_{top}}{dt} = -\dot{Q}_{strat} - \lambda\dot{V}_{tap}\,T_{top} - \dot{Q}_{loss,top}$$
+
+**Onderlaag:**
+$$C_{bot}\frac{dT_{bot}}{dt} = +\dot{Q}_{strat} + P_{dhw} + \lambda\dot{V}_{tap}\,T_{mains} - \dot{Q}_{loss,bot}$$
+
+### 9.5 Verificatie energiebalans
+
+Som van beide knooppunten (gewogen):
+
+$$\frac{d}{dt}(C_{top}T_{top} + C_{bot}T_{bot}) = P_{dhw} \underbrace{-\lambda\dot{V}_{tap}(T_{top}-T_{mains})}_{=-\dot{Q}_{tap}} \underbrace{-\frac{T_{top}-T_{amb}}{R_{loss}} - \frac{T_{bot}-T_{amb}}{R_{loss}}}_{=-\dot{Q}_{loss}} \quad \checkmark$$
+
+De $\dot{Q}_{strat}$-term valt weg (intern transport, netto nul). Dit is de eerste wet van de thermodynamica voor het gehele tankvolume.
+
+---
+
+## 10. Discrete Vorm DHW
+
+### 10.1 Bilineariteit & Linearisatie
+
+De termen $\lambda\dot{V}_{tap}[k]\cdot T_{top}[k]$ zijn bilineair (state × disturbance). Omdat $\dot{V}_{tap}[k]$ op elk tijdstip $k$ **bekend** is (gemeten of voorspeld), behandelen we het systeem als **lineair tijdsvariabel (LTV)**. Definieer:
+
+$$a_{tap}[k] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \dot{V}_{tap}[k], \qquad b_{tap}[k] = \frac{\Delta t}{C_{bot}} \cdot \lambda \cdot \dot{V}_{tap}[k]$$
+
+### 10.2 Stabiliteitseis
+
+$$\Delta t \ll \min\!\left(C_{top}\cdot R_{strat},\ C_{bot}\cdot R_{strat},\ C_{top}\cdot R_{loss}\right)$$
+
+### 10.3 Vergelijkingen
+
+**Bovenlaag:**
+$$\boxed{T_{top}[k+1] = T_{top}[k] + \frac{\Delta t}{C_{top}}\!\left( -\frac{T_{top}[k]-T_{bot}[k]}{R_{strat}} - \lambda\dot{V}_{tap}[k]\,T_{top}[k] - \frac{T_{top}[k]-T_{amb}[k]}{R_{loss}} \right)}$$
+
+**Onderlaag:**
+$$\boxed{T_{bot}[k+1] = T_{bot}[k] + \frac{\Delta t}{C_{bot}}\!\left( \frac{T_{top}[k]-T_{bot}[k]}{R_{strat}} + P_{dhw}[k] + \lambda\dot{V}_{tap}[k]\,T_{mains}[k] - \frac{T_{bot}[k]-T_{amb}[k]}{R_{loss}} \right)}$$
+
+---
+
+## 11. State-Space Representatie DHW
+
+$$x_{dhw}[k+1] = A_{dhw}[k]\,x_{dhw}[k] + B_{dhw}\,u_{dhw}[k] + E_{dhw}[k]\,d_{dhw}[k]$$
+
+- $x_{dhw} = [T_{top},\ T_{bot}]^T$
+- $u_{dhw} = P_{dhw}$
+- $d_{dhw} = [T_{amb},\ T_{mains}]^T$
+
+**Hulpgrootheden (constant):**
+$$a_{strat} = \frac{\Delta t}{C_{top}\cdot R_{strat}}, \quad b_{strat} = \frac{\Delta t}{C_{bot}\cdot R_{strat}}, \quad a_{loss} = \frac{\Delta t}{C_{top}\cdot R_{loss}}, \quad b_{loss} = \frac{\Delta t}{C_{bot}\cdot R_{loss}}$$
+
+**State-transitiematrix (tijdsvariabel via $\dot{V}_{tap}[k]$):**
+$$A_{dhw}[k] = \begin{bmatrix} 1 - a_{strat} - a_{loss} - a_{tap}[k] & a_{strat} \\ b_{strat} & 1 - b_{strat} - b_{loss} \end{bmatrix}$$
+
+**Inputmatrix (constant):**
+$$B_{dhw} = \begin{bmatrix} 0 \\ \dfrac{\Delta t}{C_{bot}} \end{bmatrix}$$
+
+> $P_{dhw}$ gaat naar de onderlaag (aanname A5). Bij een elektrisch verwarmingselement bovenaan: vervang door $[\Delta t/C_{top},\ 0]^T$ en documenteer dit als configuratiekeuze.
+
+**Verstoringenmatrix (tijdsvariabel via $\dot{V}_{tap}[k]$):**
+$$E_{dhw}[k] = \begin{bmatrix} a_{loss} & 0 \\ b_{loss} & b_{tap}[k] \end{bmatrix}$$
+
+> Kolom 1 = $T_{amb}$ (standby-verlies beide lagen). Kolom 2 = $T_{mains}$ (koud instromend water, alleen onderlaag).
+
+**Observeerbaarheid** (alleen $T_{top}$ gemeten, $C_{obs,dhw} = [1,\ 0]$):
+$$\mathcal{O}_{dhw} = \begin{bmatrix} 1 & 0 \\ 1 - a_{strat} - a_{loss} - a_{tap}[k] & a_{strat} \end{bmatrix}$$
+
+$\text{rang}(\mathcal{O}_{dhw}) = 2 \iff a_{strat} \neq 0$, wat altijd geldt voor een reële tank met eindige $R_{strat}$.
+
+---
+
+## 12. Kalman Filter DHW
+
+Het DHW-submodel wordt onafhankelijk van het UFH-model gefilterd (eigen covariantiematrix).
+
+> **Let op:** $A_{dhw}$ is tijdsvariabel — gebruik altijd $A_{dhw}[k-1]$ (waarde op het vorige tijdstip) in de predictie.
+
+**Predictie:**
+$$\hat{x}^-_{dhw}[k] = A_{dhw}[k-1]\,\hat{x}_{dhw}[k-1] + B_{dhw}\,u_{dhw}[k-1] + E_{dhw}[k-1]\,d_{dhw}[k-1]$$
+$$P^-_{dhw}[k] = A_{dhw}[k-1]\,P_{dhw}[k-1]\,A_{dhw}[k-1]^T + Q_{n,dhw}$$
+
+**Update (Joseph-vorm):**
+$$K_{dhw}[k] = P^-_{dhw}[k]\,C_{obs,dhw}^T \cdot \left(C_{obs,dhw}\,P^-_{dhw}[k]\,C_{obs,dhw}^T + R_{n,dhw}\right)^{-1}$$
+$$\hat{x}_{dhw}[k] = \hat{x}^-_{dhw}[k] + K_{dhw}[k]\cdot\left(y_{dhw}[k] - C_{obs,dhw}\,\hat{x}^-_{dhw}[k]\right)$$
+$$P_{dhw}[k] = \left(I - K_{dhw}C_{obs,dhw}\right)P^-_{dhw}[k]\left(I - K_{dhw}C_{obs,dhw}\right)^T + R_{n,dhw}\,K_{dhw}K_{dhw}^T$$
+
+---
+
+# Deel C — Gecombineerd Systeem & MPC
+
+---
+
+## 13. Gecombineerd State-Vector
+
+De twee subsystemen zijn thermisch ontkoppeld. Het gecombineerde state-vector is:
+
+$$x_{tot}[k] = \begin{bmatrix} T_r \\ T_b \\ T_{top} \\ T_{bot} \end{bmatrix}, \qquad u_{tot}[k] = \begin{bmatrix} P_{UFH} \\ P_{dhw} \end{bmatrix}$$
+
+De gecombineerde state-space heeft blokdiagonale structuur (geen cross-termen):
+
+$$x_{tot}[k+1] = \underbrace{\begin{bmatrix} A_{UFH} & 0 \\ 0 & A_{dhw}[k] \end{bmatrix}}_{A_{tot}[k]} x_{tot}[k] + \underbrace{\begin{bmatrix} B_{UFH} & 0 \\ 0 & B_{dhw} \end{bmatrix}}_{B_{tot}} u_{tot}[k] + \begin{bmatrix} E_{UFH} & 0 \\ 0 & E_{dhw}[k] \end{bmatrix} \begin{bmatrix} d_{UFH}[k] \\ d_{dhw}[k] \end{bmatrix}$$
+
+> De koppeling tussen UFH en DHW loopt **uitsluitend** via de gedeelde warmtepomp-vermogensconstraint (zie §14).
+
+---
+
+## 14. MPC Kostfunctie & Constraints
+
+### 14.1 Kostfunctie
+
+$$J = \underbrace{\sum_{k=0}^{N-1}\!\left[ Q_c\,(T_r[k]-T_{ref}[k])^2 + p[k]\cdot P_{UFH}[k]\cdot\Delta t + R_c\cdot P_{UFH}[k]^2 \right] + Q_N\,(T_r[N]-T_{ref}[N])^2}_{\text{UFH: comfort + energiekosten + regularisatie}}$$
+$$+\ \underbrace{\sum_{k=0}^{N-1} p[k]\cdot P_{dhw}[k]\cdot\Delta t}_{\text{DHW: energiekosten [€]}}$$
+
+**Toelichting per term:**
+
+| Term | Type | Betekenis |
+|---|---|---|
+| $Q_c\,(T_r-T_{ref})^2$ | Kwadratisch | Comfortafwijking ruimte (strafpunten per K²) |
+| $p[k]\cdot P_{UFH}[k]\cdot\Delta t$ | Lineair | Werkelijke UFH-energiekosten [€] — primaire optimalisatieterm |
+| $R_c\cdot P_{UFH}[k]^2$ | Kwadratisch | Regularisatie: dempt pieken, geen fysische kostenterm |
+| $Q_N\,(T_r[N]-T_{ref}[N])^2$ | Kwadratisch | Eindgewicht: stabiele afsluiting horizon |
+| $p[k]\cdot P_{dhw}[k]\cdot\Delta t$ | Lineair | Werkelijke DHW-energiekosten [€] — primaire optimalisatieterm |
+
+### 14.2 Constraints
+
+**UFH actuator:**
+$$0 \leq P_{UFH}[k] \leq P_{UFH,max}$$
+
+**UFH comfort:**
+$$T_{min} \leq T_r[k] \leq T_{max}$$
+
+**UFH ramp-rate:**
+$$|P_{UFH}[k] - P_{UFH}[k-1]| \leq \Delta P_{UFH,max}$$
+
+**DHW actuator:**
+$$0 \leq P_{dhw}[k] \leq P_{dhw,max}$$
+
+**DHW comfort (tapbeschikbaarheid):**
+$$T_{top}[k] \geq T_{dhw,min} \quad \text{(bijv. 50 °C)}$$
+
+**DHW ramp-rate:**
+$$|P_{dhw}[k] - P_{dhw}[k-1]| \leq \Delta P_{dhw,max}$$
+
+**DHW legionella (periodieke harde eis):**
+$$\exists\, k^* \in \text{elke 7}\times24 \text{ stappen}:\ T_{top}[k^*] \geq 60\,°\text{C} \quad \text{gedurende } \geq \left\lceil\tfrac{1\,\text{h}}{\Delta t}\right\rceil \text{ aaneengesloten stappen}$$
+
+**Gedeeld warmtepompvermogen** (indien UFH en DHW dezelfde WP gebruiken):
+$$P_{UFH}[k] + P_{dhw}[k] \leq P_{hp,max}$$
+
+> **Soft constraints:** $T_{min} \leq T_r$ en $T_{top} \geq T_{dhw,min}$ zijn harde QP-rijen. Omdat $P_{UFH}$ alleen de vloer verwarmt (B[0]=0), kan thermische vertraging de QP onhaalbaar maken bij een koude vloer. Productie-code moet **soft constraints** gebruiken (slackvariabelen + grote strafterm) voor robuustheid.
+
+---
+
+## 15. Parameter Woordenboek
+
+### UFH — Huis & Systeem
+
 | Parameter | Eenheid | Betekenis |
 |---|---|---|
-| $C_r$ | kWh/K | Warmtecapaciteit lucht + meubels. |
-| $C_b$ | kWh/K | Warmtecapaciteit vloer/beton. |
-| $R_{br}$ | K/kW | Thermische weerstand vloer → lucht. |
-| $R_{ro}$ | K/kW | Thermische weerstand huis → buiten. |
-| $\alpha$ | — | Fractie zonlicht direct naar lucht (0–1). |
-| $\eta$ | — | Glasdoorlaatfactor (transmissie). |
-| $A_{glass}$ | m² | Raamoppervlak op de zonkant. |
+| $C_r$ | kWh/K | Warmtecapaciteit lucht + meubels |
+| $C_b$ | kWh/K | Warmtecapaciteit vloer/beton |
+| $R_{br}$ | K/kW | Thermische weerstand vloer → lucht |
+| $R_{ro}$ | K/kW | Thermische weerstand huis → buiten |
+| $\alpha$ | — | Fractie zonlicht direct naar lucht (0–1) |
+| $\eta$ | — | Glasdoorlaatfactor (transmissie, 0–1) |
+| $A_{glass}$ | m² | Raamoppervlak op de zonkant |
 
-### MPC Instellingen
+### UFH — MPC
+
 | Parameter | Eenheid | Betekenis |
 |---|---|---|
-| $N$ | — | Vooruitkijk-horizon (bijv. 24 of 48 stappen). |
-| $Q_c$ | K⁻² | Comfortgewicht. |
-| $R_c$ | kW⁻² | Regularisatiegewicht (demping pieken). |
-| $Q_N$ | K⁻² | Eindgewicht horizon. |
-| $p[k]$ | €/kWh | Dynamisch elektriciteitstarief op tijdstip $k$. |
-| $P_{max}$ | kW | Maximaal vermogen warmtepomp. |
-| $\Delta P_{max}$ | kW/stap | Maximale ramp-rate. |
+| $N$ | — | Vooruitkijk-horizon (bijv. 24 of 48 stappen) |
+| $Q_c$ | K⁻² | Comfortgewicht |
+| $R_c$ | kW⁻² | Regularisatiegewicht (demping pieken) |
+| $Q_N$ | K⁻² | Eindgewicht horizon |
+| $P_{UFH,max}$ | kW | Maximaal vermogen UFH-kant warmtepomp |
+| $\Delta P_{UFH,max}$ | kW/stap | Maximale ramp-rate UFH |
 
-### Kalman Filter Variabelen
+### UFH — Kalman Filter
+
 | Parameter | Eenheid | Betekenis |
 |---|---|---|
-| $Q_n$ | K² | Procesruis covariantie (modelonzekerheid). |
-| $R_n$ | K² | Meetruis covariantie (sensorafwijking). |
-| $C$ | Matrix | `[1, 0]` — alleen $T_r$ wordt gemeten. |
+| $Q_{n,UFH}$ | K² | Procesruis covariantie (2×2, symmetrisch PD) |
+| $R_{n,UFH}$ | K² | Meetruis variantie thermostaatsensor |
+| $C_{UFH}$ | Matrix | $[1,\ 0]$ — alleen $T_r$ gemeten |
+
+### DHW — Tank (fysisch)
+
+| Parameter | Eenheid | Typische waarde | Betekenis |
+|---|---|---|---|
+| $C_{top}$ | kWh/K | 0.03–0.07 | Warmtecapaciteit bovenlaag ($\approx \tfrac{1}{2}V_{tank}\cdot\lambda$) |
+| $C_{bot}$ | kWh/K | 0.03–0.07 | Warmtecapaciteit onderlaag |
+| $R_{strat}$ | K/kW | 5–50 | Stratificatieweerstand (empirisch kalibreren) |
+| $R_{loss}$ | K/kW | 20–100 | Isolatieweerstand boiler naar omgeving |
+| $\lambda$ | kWh/(m³·K) | **1.1628** | $\rho c_p$ water (vaste fysische constante) |
+
+> $C_{top} + C_{bot} = \lambda \cdot V_{tank}$, met $V_{tank}$ het totale tankvolume [m³].
+
+### DHW — Verstoringen
+
+| Parameter | Eenheid | Betekenis |
+|---|---|---|
+| $\dot{V}_{tap}[k]$ | m³/h | Tapwaterdebiet op tijdstip $k$ |
+| $T_{mains}[k]$ | °C | Koud leidingwater (~10–12 °C NL gemiddeld) |
+| $T_{amb}[k]$ | °C | Omgevingstemperatuur rond de boiler |
+
+### DHW — MPC
+
+| Parameter | Eenheid | Betekenis |
+|---|---|---|
+| $P_{dhw,max}$ | kW | Max. thermisch vermogen naar DHW |
+| $\Delta P_{dhw,max}$ | kW/stap | Max. ramp-rate DHW |
+| $T_{dhw,min}$ | °C | Min. taptemperatuur comfort (bijv. 50 °C) |
+| $P_{hp,max}$ | kW | Max. totaalvermogen gedeelde warmtepomp |
+
+### DHW — Kalman Filter
+
+| Parameter | Eenheid | Betekenis |
+|---|---|---|
+| $Q_{n,dhw}$ | K² | Procesruis covariantie (2×2, symmetrisch PD) |
+| $R_{n,dhw}$ | K² | Meetruis variantie taptemperatuursensor |
+| $C_{obs,dhw}$ | Matrix | $[1,\ 0]$ — alleen $T_{top}$ gemeten |
+
+### Gedeeld
+
+| Parameter | Eenheid | Betekenis |
+|---|---|---|
+| $p[k]$ | €/kWh | Dynamisch elektriciteitstarief op tijdstip $k$ |
+| $\Delta t$ | h | Tijdstap (gedeeld door UFH en DHW) |
+
+---
+
+## Fysische Consistentie-Checklist
+
+Bij elke implementatie of parameterwijziging verifiëren:
+
+| Eis | Controle |
+|---|---|
+| UFH energiebalans | $\Delta(C_r T_r + C_b T_b)/\Delta t = P_{UFH} - (T_r-T_{out})/R_{ro} + Q_{solar} + Q_{int}$ |
+| DHW energiebalans | $\Delta(C_{top}T_{top}+C_{bot}T_{bot})/\Delta t = P_{dhw} - \dot{Q}_{tap} - \dot{Q}_{loss}$ exact per stap |
+| $\lambda$ correct | $\lambda = 1.1628$ kWh/(m³·K); nooit $c_p$ in J/kgK direct gebruiken |
+| Tapterm gesplitst | $-\lambda\dot{V}T_{top}$ in bovenlaag; $+\lambda\dot{V}T_{mains}$ in onderlaag |
+| $P_{dhw}$ locatie | WP-wisselaar onderin → $B_{dhw}[0]=0$; elektrisch element boverin → $B_{dhw}[1]=0$ |
+| $T_{dhw}$ afgeleid | Nooit als onafhankelijke state; altijd gewogen gemiddelde van $T_{top}$ en $T_{bot}$ |
+| Stabiliteit Euler | $\Delta t \ll$ kleinste tijdconstante van elk subsysteem afzonderlijk |
+| LTV matrices | $A_{dhw}[k]$ en $E_{dhw}[k]$ herberekenen bij elke $k$ met actuele $\dot{V}_{tap}[k]$ |
+| Observeerbaarheid | Rang observeerbaarheidsmatrix = 2 voor beide subsystemen na parametrisatie |
+| Kalman covariantie | $P$ blijft symmetrisch PD dankzij Joseph-vorm update |
+| Soft constraints | Comfort- en tapbeperkingen als soft constraints in productie-code |
