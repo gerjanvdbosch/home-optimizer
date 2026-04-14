@@ -5,6 +5,9 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > ### ⚠️ Kerneis: Fysische Correctheid
 > **Elke vergelijking, matrix en parameter in dit document moet 100% fysisch en wiskundig correct zijn.** Alle eenheden zijn consistent: vermogen in **kW**, energie in **kWh**, temperatuur in **°C**, volume in **m³**, tijd in **h**. Elke discretisatie moet stabiel zijn voor de gekozen $\Delta t$. Elke kostterm moet aansluiten op de werkelijke fysische grootheid die geoptimaliseerd wordt. Bij twijfel: afleiden vanuit de continue fysica, niet aanpassen op basis van convenientie. Alle modelaannames zijn expliciet benoemd.
 
+> ### 🚫 Anti-Patroon: Geen Magic Numbers
+> **Het hardcoden van numerieke waarden in de berekeningen of logica is streng verboden.** Elke fysieke constante, tuning-parameter, temperatuurgrens of tijdstap moet via een configuratiebestand (bijv. JSON/YAML) of parameter-object in de code worden geïnjecteerd. Zelfs universele constanten (zoals $\lambda = 1.1628$) of legionella-eisen (60°C) moeten benoemde variabelen zijn. In de formules en MPC-constraints staan uitsluitend referentienamen, géén losse getallen (met uitzondering van wiskundige operatoren zoals `0` of `1`).
+
 ---
 
 ## Inhoudsopgave
@@ -474,3 +477,4 @@ Bij elke implementatie of parameterwijziging verifiëren:
 | Observeerbaarheid | Rang observeerbaarheidsmatrix = 2 voor beide subsystemen na parametrisatie |
 | Kalman covariantie | $P$ blijft symmetrisch PD dankzij Joseph-vorm update |
 | Soft constraints | Comfort- en tapbeperkingen als soft constraints in productie-code |
+| Geen Magic Numbers | Code-review: Zoeken naar hardcoded floats in wiskundige of logische vergelijkingen. Elke parameter komt uit een config-object. |
