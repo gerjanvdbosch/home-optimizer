@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .kalman import UFHKalmanFilter
 from .mpc import MPCController
 from .thermal_model import ThermalModel
@@ -27,18 +28,51 @@ def build_demo() -> tuple[
 
     The defaults reflect a reasonably well insulated between-house dwelling with
     a heat pump, south-facing glazing, and a pre-warmed floor slab.
+
+    The COP is no longer a magic-number scalar; it is derived from the physical
+    Carnot model (§14.1).  The ``HeatPumpCOPModel`` computes a time-varying
+    ``cop_ufh_k`` array from the outdoor-temperature forecast using the heating
+    curve (stooklijn), so colder hours automatically attract a lower COP.
     """
     params = ThermalParameters(
         dt_hours=1.0,
-        C_r=6.0,  # kWh/K  – room air + light interior mass
+        C_r=6.0,   # kWh/K  – room air + light interior mass
         C_b=10.0,  # kWh/K  – thermally active UFH floor zone
         R_br=1.0,  # K/kW   – floor → room
-        R_ro=10.0,  # K/kW   – room → outside
+        R_ro=10.0, # K/kW   – room → outside
         alpha=0.25,
         eta=0.55,
         A_glass=7.5,
     )
     model = ThermalModel(params)
+
+    # ── Outdoor temperature forecast ──────────────────────────────────────
+    t_out = np.array([6, 6, 5, 5, 4, 4, 5, 6, 7, 7, 6, 6], dtype=float)
+
+    # ── Carnot COP model — no magic numbers; all parameters named (§14.1) ─
+    # These parameters should come from a config file in production use.
+    cop_params = HeatPumpCOPParameters(
+        eta_carnot=0.45,            # Carnot efficiency factor η [-]
+        delta_T_cond=5.0,           # condensing approach temperature Δ_cond [K]
+        delta_T_evap=5.0,           # evaporating approach temperature Δ_evap [K]
+        T_supply_min=28.0,          # minimum UFH supply temperature [°C]
+        T_ref_outdoor=18.0,         # heating-curve balance point [°C]
+        heating_curve_slope=1.0,    # heating-curve slope [K/K]
+        cop_min=1.5,                # physical floor on COP (Fail-Fast lower bound)
+        cop_max=7.0,                # Fail-Fast upper bound on COP
+    )
+    cop_model = HeatPumpCOPModel(cop_params)
+
+    # §14.1 – pre-compute time-varying COP for the full forecast horizon.
+    # Colder outdoor hours → higher T_supply (heating curve) AND lower T_evap
+    # → double COP penalty, modelled correctly by cop_model.cop_ufh().
+    cop_ufh_k = cop_model.cop_ufh(t_out)
+
+    # Scalar COP for MPCParameters (Fail-Fast bounds check at construction time).
+    # Use the minimum COP in the horizon as a conservative representative value
+    # so that MPCParameters validation is always satisfied; the MPC itself uses
+    # the time-varying array from the forecast.
+    cop_ufh_scalar = float(np.min(cop_ufh_k))
 
     mpc_params = MPCParameters(
         horizon_steps=12,
@@ -49,12 +83,12 @@ def build_demo() -> tuple[
         delta_P_max=1.0,
         T_min=19.0,
         T_max=22.5,
-        # §14.1: COP for UFH mode (air source HP, ~6°C outdoor → COP ≈ 3.5)
-        cop_ufh=3.5,
-        cop_max=7.0,
+        # §14.1: scalar derived from the Carnot model (not a magic number)
+        cop_ufh=cop_ufh_scalar,
+        cop_max=cop_params.cop_max,
     )
     forecast = ForecastHorizon(
-        outdoor_temperature_c=np.array([6, 6, 5, 5, 4, 4, 5, 6, 7, 7, 6, 6], dtype=float),
+        outdoor_temperature_c=t_out,
         gti_w_per_m2=np.array([0, 0, 20, 80, 160, 260, 300, 220, 120, 40, 0, 0], dtype=float),
         internal_gains_kw=np.full(12, 0.30, dtype=float),
         price_eur_per_kwh=np.array(
@@ -65,6 +99,8 @@ def build_demo() -> tuple[
             [20.0, 20.0, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.0, 20.0],
             dtype=float,
         ),
+        # §14.1 – time-varying COP from the physical Carnot model
+        cop_ufh_k=cop_ufh_k,
     )
     # Initial state: room near setpoint, slab already a bit warmer than the air
     initial_state_c = np.array([20.5, 22.5], dtype=float)
@@ -85,6 +121,13 @@ def main() -> None:
     ctrl_rank = model.controllability_rank()
     print(f"Model observability rank : {obs_rank} / 2  ({'✓' if obs_rank == 2 else '✗'})")
     print(f"Model controllability rank: {ctrl_rank} / 2  ({'✓' if ctrl_rank == 2 else '✗'})")
+
+    # ── COP profile (from physical Carnot model) ───────────────────────
+    assert forecast.cop_ufh_k is not None  # always set by build_demo()
+    cop_arr = forecast.cop_ufh_k
+    print(f"\nCOP_UFH profile (Carnot): min={cop_arr.min():.3f}  "
+          f"max={cop_arr.max():.3f}  mean={cop_arr.mean():.3f}")
+    print(f"  per step: {np.round(cop_arr, 3).tolist()}")
 
     # ── MPC solve ─────────────────────────────────────────────────────
     controller = MPCController(ufh_model=model, params=mpc_params)

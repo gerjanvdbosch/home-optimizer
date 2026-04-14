@@ -13,6 +13,7 @@ Physical model assumptions
 * Discretisation: forward-Euler with time step dt_hours.
 """
 
+from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters, T_CELSIUS_TO_KELVIN
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from .kalman import DHWKalmanFilter, KalmanEstimate, UFHKalmanFilter
 from .mpc import MPCController, MPCSolution

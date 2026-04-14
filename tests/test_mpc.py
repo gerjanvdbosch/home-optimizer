@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
 from home_optimizer.mpc import MPCController
 from home_optimizer.thermal_model import ThermalModel
@@ -16,6 +17,22 @@ from home_optimizer.types import (
     ForecastHorizon,
     MPCParameters,
     ThermalParameters,
+)
+
+# ---------------------------------------------------------------------------
+# Shared COP model fixture — used by tests that exercise the physical model
+# ---------------------------------------------------------------------------
+
+#: Physical Carnot COP parameters representative of a Dutch ASHP installation.
+COP_PARAMS = HeatPumpCOPParameters(
+    eta_carnot=0.45,
+    delta_T_cond=5.0,
+    delta_T_evap=5.0,
+    T_supply_min=28.0,
+    T_ref_outdoor=18.0,
+    heating_curve_slope=1.0,
+    cop_min=1.5,
+    cop_max=7.0,
 )
 
 # ---------------------------------------------------------------------------
@@ -345,4 +362,130 @@ def test_mpc_cost_uses_electrical_power() -> None:
         "Higher COP must yield lower objective (cheaper electrical energy)."
     )
 
+
+# ---------------------------------------------------------------------------
+# Combined UFH + DHW with physical Carnot COP arrays (§14.1 end-to-end)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.filterwarnings("ignore:Solution may be inaccurate:UserWarning")
+def test_combined_mpc_with_carnot_cop_arrays() -> None:
+    """Combined UFH + DHW MPC with time-varying Carnot COP arrays (§14.1).
+
+    This test exercises the full physical COP path:
+    1. Compute cop_ufh_k and cop_dhw_k from ``HeatPumpCOPModel``.
+    2. Inject them into the forecast objects.
+    3. Solve the combined MPC.
+    4. Verify the shared electrical budget constraint using the *actual* COP
+       arrays that the MPC used — not scalar stand-ins.
+
+    Physical expectations:
+    - DHW COP is lower than UFH COP at the same outdoor temperature, because
+      the DHW supply temperature (≈ T_dhw_min = 50 °C) is higher than the
+      UFH supply temperature from the heating curve (~34 °C at 8 °C outdoor).
+    - The electrical constraint P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec
+      must be satisfied for every time step.
+    """
+    cop_model = HeatPumpCOPModel(COP_PARAMS)
+
+    n = MPC_PARAMS.horizon_steps
+    t_out = np.full(n, 8.0)  # mild winter conditions [°C]
+
+    # §14.1 – pre-compute time-varying COP arrays before passing to the MPC.
+    cop_ufh_k = cop_model.cop_ufh(t_out)
+    cop_dhw_k = cop_model.cop_dhw(t_out, t_dhw_supply=DHW_MPC_PARAMS.T_dhw_min)
+
+    # UFH COP > DHW COP: heating curve raises T_supply for UFH, but UFH supply is
+    # still much lower than T_dhw_min.  Both should be well above cop_min.
+    assert np.all(cop_ufh_k > cop_dhw_k), (
+        "DHW requires higher T_supply → higher lift → lower COP than UFH at same T_out."
+    )
+    assert np.all(cop_ufh_k >= COP_PARAMS.cop_min)
+    assert np.all(cop_dhw_k >= COP_PARAMS.cop_min)
+
+    # Derive scalar COP values for MPCParameters (Fail-Fast bounds check).
+    # Use np.min to always stay within [cop_min, cop_max] regardless of horizon.
+    cop_ufh_scalar = float(np.min(cop_ufh_k))
+    cop_dhw_scalar = float(np.min(cop_dhw_k))
+
+    mpc_params_with_cop = MPCParameters(
+        horizon_steps=MPC_PARAMS.horizon_steps,
+        Q_c=MPC_PARAMS.Q_c,
+        R_c=MPC_PARAMS.R_c,
+        Q_N=MPC_PARAMS.Q_N,
+        P_max=MPC_PARAMS.P_max,
+        delta_P_max=MPC_PARAMS.delta_P_max,
+        T_min=MPC_PARAMS.T_min,
+        T_max=MPC_PARAMS.T_max,
+        cop_ufh=cop_ufh_scalar,       # from Carnot model — no magic number
+        cop_max=COP_PARAMS.cop_max,
+    )
+    dhw_mpc_params_with_cop = DHWMPCParameters(
+        P_dhw_max=DHW_MPC_PARAMS.P_dhw_max,
+        delta_P_dhw_max=DHW_MPC_PARAMS.delta_P_dhw_max,
+        T_dhw_min=DHW_MPC_PARAMS.T_dhw_min,
+        T_legionella=DHW_MPC_PARAMS.T_legionella,
+        legionella_period_steps=DHW_MPC_PARAMS.legionella_period_steps,
+        legionella_duration_steps=DHW_MPC_PARAMS.legionella_duration_steps,
+        cop_dhw=cop_dhw_scalar,       # from Carnot model — no magic number
+        cop_max=COP_PARAMS.cop_max,
+    )
+
+    # P_hp_max_elec: generous budget so the constraint does not cut into comfort.
+    # At T_out=8°C: COP_UFH ≈ 3.5, COP_DHW ≈ 2.5.
+    # P_UFH_max_elec ≈ 4.5/3.5 ≈ 1.3 kW; P_dhw_max_elec ≈ 3.0/2.5 ≈ 1.2 kW → ~2.5 total.
+    # Setting 4.0 kW keeps the budget non-binding; feasibility is guaranteed.
+    p_hp_max_elec = 4.0  # [kW elec]
+
+    controller = MPCController(
+        ufh_model=ThermalModel(THERMAL_PARAMS),
+        dhw_model=DHWModel(DHW_PARAMS),
+        params=CombinedMPCParameters(
+            ufh=mpc_params_with_cop,
+            dhw=dhw_mpc_params_with_cop,
+            P_hp_max_elec=p_hp_max_elec,
+        ),
+    )
+
+    ufh_forecast = ForecastHorizon(
+        outdoor_temperature_c=t_out,
+        gti_w_per_m2=np.zeros(n),
+        internal_gains_kw=np.full(n, 0.25),
+        price_eur_per_kwh=np.full(n, 0.30),
+        room_temperature_ref_c=np.full(n + 1, 21.0),
+        cop_ufh_k=cop_ufh_k,   # §14.1: time-varying COP from physical model
+    )
+    dhw_forecast = DHWForecastHorizon(
+        v_tap_m3_per_h=np.full(n, 0.01),
+        t_mains_c=np.full(n, 10.0),
+        t_amb_c=np.full(n, 20.0),
+        legionella_required=np.zeros(n, dtype=bool),
+        cop_dhw_k=cop_dhw_k,   # §14.1: time-varying COP from physical model
+    )
+
+    sol = controller.solve(
+        initial_ufh_state_c=np.array([20.8, 24.0]),
+        ufh_forecast=ufh_forecast,
+        initial_dhw_state_c=np.array([55.0, 45.0]),
+        dhw_forecast=dhw_forecast,
+        previous_p_ufh_kw=0.5,
+    )
+
+    # ── Shape and sign checks ─────────────────────────────────────────
+    assert sol.ufh_control_sequence_kw.shape == (n,)
+    assert sol.dhw_control_sequence_kw.shape == (n,)
+    assert sol.predicted_states_c.shape == (n + 1, 4)
+    assert np.all(sol.ufh_control_sequence_kw >= -1e-6)
+    assert np.all(sol.dhw_control_sequence_kw >= -1e-6)
+
+    # ── §14 Shared electrical budget constraint ───────────────────────
+    # Verify using the *actual* time-varying COP arrays used by the MPC,
+    # not the scalar stand-ins from MPCParameters.
+    elec_ufh = sol.ufh_control_sequence_kw / cop_ufh_k    # [kW elec], shape (N,)
+    elec_dhw = sol.dhw_control_sequence_kw / cop_dhw_k    # [kW elec], shape (N,)
+    elec_combined = elec_ufh + elec_dhw                    # total electrical demand
+    assert np.all(elec_combined <= p_hp_max_elec + 1e-4), (
+        f"Shared electrical budget violated: max={elec_combined.max():.4f} kW "
+        f"> {p_hp_max_elec} kW (using time-varying Carnot COP arrays)"
+    )
 

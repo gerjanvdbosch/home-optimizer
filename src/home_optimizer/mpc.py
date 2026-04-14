@@ -1,15 +1,63 @@
-"""Unified MPC implementation for UFH-only and UFH + DHW operation.
+"""Receding-horizon Model Predictive Controller for UFH and UFH + DHW operation.
 
-This module is the single canonical MPC entry point for the project.
+Overview
+--------
+This module is the **single canonical MPC entry point** for the project.  It
+implements a receding-horizon optimiser that decides, at each control step,
+the optimal thermal power sequence for the combined heat-pump system over a
+look-ahead horizon of N steps.
 
 Supported modes
 ---------------
-* UFH-only: ``MPCController(..., dhw_model=None, params=MPCParameters)``
-* Combined: ``MPCController(..., dhw_model=DHWModel(...), params=CombinedMPCParameters)``
+* **UFH-only** : ``MPCController(ufh_model, params=MPCParameters, dhw_model=None)``
+* **Combined** : ``MPCController(ufh_model, params=CombinedMPCParameters, dhw_model=DHWModel(...))``
 
-No legacy controller aliases are maintained here: there is one public solver API
-and one public result type, in line with the project DRY and no-backwards-
-compatibility requirements.
+Mathematical Formulation (§13–§14)
+------------------------------------
+The combined system state is the block-diagonal concatenation of the UFH and
+DHW subsystem states:
+
+    x_tot[k] = [T_r, T_b, T_top, T_bot]^T   (4 states when DHW enabled)
+    u_tot[k] = [P_UFH, P_dhw]^T              (thermal powers [kW])
+
+State dynamics (Forward-Euler, time-varying due to DHW tap-flow):
+
+    x[k+1] = A[k] x[k] + B u[k] + E[k] d[k]
+
+where d[k] = [T_out, Q_solar, Q_int, T_amb, T_mains]^T are known disturbances.
+
+Cost function J (§14.2) minimised over horizon N:
+
+    J = Σ_{k=0}^{N-1} [
+          Q_c · (T_r[k] - T_ref[k])²          ← comfort deviation [K²]
+        + p[k] · (P_UFH[k]/COP_UFH[k]
+                + P_dhw[k]/COP_dhw[k]) · Δt   ← electrical energy cost [€]
+        + R_c · P_UFH[k]²                      ← regularisation (damps spikes)
+        + M · (ε_UFH[k]² + ε_dhw[k]²)         ← soft-constraint penalty
+    ] + Q_N · (T_r[N] - T_ref[N])²             ← terminal comfort weight
+
+Key design choices:
+* **Thermal power as decision variable**: P_UFH and P_dhw drive the state
+  equations (heat balance).  Electrical power = thermal / COP appears only
+  in the cost function and the shared electrical power constraint.
+* **Time-varying COP**: Both COP arrays may vary over the horizon (e.g., as a
+  function of outdoor temperature via a Carnot / heating-curve model).  The
+  MPC accepts pre-computed arrays from ``ForecastHorizon.cop_ufh_k`` and
+  ``DHWForecastHorizon.cop_dhw_k``.
+* **Soft constraints**: Room temperature and DHW temperature bounds are
+  enforced via slack variables to prevent QP infeasibility (§14.3).
+* **Shared electrical budget** (combined mode only):
+      P_UFH[k]/COP_UFH[k] + P_dhw[k]/COP_dhw[k]  ≤  P_hp_max_elec
+* **Legionella**: Managed by an external State Machine that injects a
+  hard lower bound on T_top in the relevant horizon window.
+
+Solver architecture
+-------------------
+1. **Primary**: CVXPY convex QP via OSQP backend (``_solve_convex``).
+2. **Fallback**: Greedy one-step-ahead heuristic (``_solve_greedy``) — used
+   automatically when CVXPY raises or is unavailable.
+
+Units: power [kW], energy [kWh], temperature [°C], time step [h], cost [€].
 """
 
 from __future__ import annotations
@@ -91,16 +139,54 @@ class MPCSolution:
 class MPCController:
     """Receding-horizon MPC controller for UFH or UFH + DHW combined.
 
-    This is the single authoritative solver implementation. The same convex-QP
-    and greedy-fallback logic cover both UFH-only and combined operation.
+    This is the **single authoritative solver implementation**.  The same
+    convex-QP and greedy-fallback logic cover both UFH-only and combined
+    operation.
+
+    Operating principle
+    -------------------
+    At each control step the controller solves a finite-horizon optimisation
+    problem that balances three competing objectives:
+
+    1. **Comfort**: keep the room temperature T_r close to the setpoint T_ref.
+    2. **Cost**: minimise the actual electricity bill (thermal power / COP × price).
+    3. **Constraints**: respect actuator limits, ramp-rates, comfort bands, and
+       the shared electrical budget of the heat pump.
+
+    The controller then applies only the **first** element of the optimal
+    sequence (receding-horizon principle) and re-solves at the next step with
+    an updated state estimate from the Kalman filter.
+
+    COP handling (§14.1)
+    --------------------
+    The MPC decision variables are always **thermal** power [kW].  Electrical
+    power is computed as ``P_elec = P_thermal / COP`` and appears exclusively
+    in the cost function and the shared electrical-budget constraint.
+
+    The COP may be:
+
+    * **Scalar** (constant over horizon): set via ``MPCParameters.cop_ufh``
+      and ``DHWMPCParameters.cop_dhw``.
+    * **Time-varying** (per time step): provide ``ForecastHorizon.cop_ufh_k``
+      and / or ``DHWForecastHorizon.cop_dhw_k`` arrays of length N.  These
+      are typically computed by ``HeatPumpCOPModel`` from the outdoor-temperature
+      forecast via the Carnot formula and a heating curve (stooklijn).
 
     Parameters
     ----------
-    ufh_model:   Discrete UFH thermal model.
-    params:      ``MPCParameters`` when DHW is disabled; ``CombinedMPCParameters``
-                 when DHW is active.
-    dhw_model:   Optional DHW stratification model. ``None`` → UFH-only mode.
-    solver:      CVXPY solver name (default: ``"OSQP"``).
+    ufh_model:
+        Discrete UFH two-zone thermal model (§5).
+    params:
+        ``MPCParameters`` for UFH-only; ``CombinedMPCParameters`` for DHW.
+    dhw_model:
+        Optional DHW two-node stratification model (§11).  ``None`` → UFH-only.
+    solver:
+        CVXPY solver identifier.  Default: ``"OSQP"`` (fast, sparse QP).
+
+    Raises
+    ------
+    ValueError
+        If ``dhw_model`` and ``params`` types are inconsistent.
     """
 
     def __init__(

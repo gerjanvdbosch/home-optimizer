@@ -165,19 +165,13 @@
     }
     .stat-unit { font-size: .75rem; color: #888; margin-left: .2rem; }
 
-    .chart-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: .8rem;
-    }
-
+    /* ── All chart cards: full-width, uniform height ── */
     .chart-card {
       background: #fff;
       border-radius: 8px;
       padding: .9rem;
       box-shadow: 0 1px 3px rgba(0,0,0,.08);
     }
-    .chart-card.wide { grid-column: 1 / -1; }
     .chart-card h3 {
       font-size: .8rem;
       font-weight: 700;
@@ -186,6 +180,8 @@
       color: #888;
       margin-bottom: .6rem;
     }
+    /* Single canonical chart height — all charts the same size */
+    .chart-inner { height: 280px; }
 
     .error-banner,
     .warn-banner {
@@ -195,7 +191,7 @@
       display: none;
     }
     .error-banner { background: #fde; color: #a00; }
-    .warn-banner { background: #fff3cd; color: #856404; }
+    .warn-banner  { background: #fff3cd; color: #856404; }
 
     .hidden { display: none !important; }
 
@@ -209,12 +205,14 @@
 <header>
   <div>
     <h1>🏠 Home Optimizer &mdash; UFH + DHW + PV MPC</h1>
-    <p>Gecombineerd thermisch model met één MPC-controller voor ruimteverwarming, tapwater en net/PV-optimalisatie</p>
+    <p>Gecombineerd thermisch model &middot; MPC-optimalisatie &middot; Carnot COP-model (stooklijn) &middot; Kalman-filter &middot; PV self-consumption</p>
   </div>
 </header>
 
 <div class="layout">
+  <!-- ═══════════════════════════════ SIDEBAR ═══════════════════════════════ -->
   <aside class="sidebar">
+
     <div class="panel">
       <div class="panel-title">Systeem</div>
       <div class="field">
@@ -241,7 +239,7 @@
         <input type="checkbox" id="solar_gain" checked />
         <label for="solar_gain">Zoninstraling meenemen</label>
       </div>
-      <div class="hint">Gebruik DHW alleen wanneer dezelfde warmtepomp zowel UFH als tapwater voedt. Dan wordt ook de gedeelde vermogensconstraint actief.</div>
+      <div class="hint">DHW alleen actief als dezelfde warmtepomp zowel UFH als tapwater voedt. Dan geldt de gedeelde elektrische vermogensconstraint.</div>
     </div>
 
     <div class="panel">
@@ -271,7 +269,7 @@
         <input type="number" id="eta" value="0.55" min="0" max="1" step="0.05" oninput="upd('vEta', this.value)" />
       </div>
       <div class="field">
-        <label>A_glass [m²] <span id="vAglass">7.5</span></label>
+        <label>A_glass [m&sup2;] <span id="vAglass">7.5</span></label>
         <input type="number" id="A_glass" value="7.5" min="0.5" max="40" step="0.5" oninput="upd('vAglass', this.value)" />
       </div>
     </div>
@@ -303,7 +301,7 @@
         <input type="number" id="T_max" value="22.5" min="16" max="30" step="0.5" oninput="upd('vTmax', this.value)" />
       </div>
       <div class="field">
-        <label>P_UFH,max [kW] <span id="vPmax">4.5</span></label>
+        <label>P_UFH,max [kW therm] <span id="vPmax">4.5</span></label>
         <input type="number" id="P_max" value="4.5" min="0.5" max="20" step="0.5" oninput="upd('vPmax', this.value)" />
       </div>
       <div class="field">
@@ -344,6 +342,49 @@
       </div>
     </div>
 
+    <!-- Carnot COP model panel -->
+    <div class="panel">
+      <div class="panel-title">Warmtepomp &mdash; COP model (Carnot + stooklijn)</div>
+      <div class="hint" style="margin-bottom:.5rem">
+        COP = &eta; &middot; T<sub>cond,K</sub> / (T<sub>cond,K</sub> &minus; T<sub>evap,K</sub>).
+        UFH: aanvoertemp via stooklijn T<sub>aanvoer</sub> = T<sub>min</sub> + helling &middot; max(T<sub>ref</sub> &minus; T<sub>buiten</sub>, 0).
+        DHW: vaste aanvoertemp = T<sub>DHW,min</sub>.
+      </div>
+      <div class="field">
+        <label>&eta;<sub>Carnot</sub> [-] <span id="vEtaCarnot">0.45</span></label>
+        <input type="number" id="eta_carnot" value="0.45" min="0.1" max="0.99" step="0.01" oninput="upd('vEtaCarnot', this.value)" />
+      </div>
+      <div class="field">
+        <label>&Delta;T_cond [K] <span id="vDTcond">5.0</span></label>
+        <input type="number" id="delta_T_cond" value="5.0" min="0" max="15" step="0.5" oninput="upd('vDTcond', this.value)" />
+      </div>
+      <div class="field">
+        <label>&Delta;T_evap [K] <span id="vDTevap">5.0</span></label>
+        <input type="number" id="delta_T_evap" value="5.0" min="0" max="15" step="0.5" oninput="upd('vDTevap', this.value)" />
+      </div>
+      <div class="field">
+        <label>T_aanvoer,min [&deg;C] <span id="vTsupMin">28.0</span></label>
+        <input type="number" id="T_supply_min" value="28.0" min="15" max="60" step="1" oninput="upd('vTsupMin', this.value)" />
+      </div>
+      <div class="field">
+        <label>T_buiten,ref stooklijn [&deg;C] <span id="vTrefCurve">18.0</span></label>
+        <input type="number" id="T_ref_outdoor_curve" value="18.0" min="5" max="25" step="1" oninput="upd('vTrefCurve', this.value)" />
+      </div>
+      <div class="field">
+        <label>Stooklijnhelling [K/K] <span id="vHcSlope">1.0</span></label>
+        <input type="number" id="heating_curve_slope" value="1.0" min="0" max="3" step="0.1" oninput="upd('vHcSlope', this.value)" />
+      </div>
+      <div class="field">
+        <label>COP_min [-] <span id="vCopMin">1.5</span></label>
+        <input type="number" id="cop_min" value="1.5" min="1.01" max="5" step="0.1" oninput="upd('vCopMin', this.value)" />
+      </div>
+      <div class="field">
+        <label>COP_max [-] <span id="vCopMax">7.0</span></label>
+        <input type="number" id="cop_max" value="7.0" min="2" max="15" step="0.5" oninput="upd('vCopMax', this.value)" />
+      </div>
+    </div>
+
+    <!-- DHW tank panel -->
     <div class="panel" id="dhw-settings">
       <div class="panel-title">DHW &mdash; tank en constraints</div>
       <div class="field">
@@ -371,7 +412,7 @@
         <input type="number" id="dhw_T_bot_init" value="45.0" min="15" max="80" step="0.5" oninput="upd('vDhwTbot', this.value)" />
       </div>
       <div class="field">
-        <label>P_DHW,max [kW] <span id="vDhwPmax">3.0</span></label>
+        <label>P_DHW,max [kW therm] <span id="vDhwPmax">3.0</span></label>
         <input type="number" id="dhw_P_max" value="3.0" min="0.5" max="15" step="0.5" oninput="upd('vDhwPmax', this.value)" />
       </div>
       <div class="field">
@@ -387,15 +428,15 @@
         <input type="number" id="dhw_T_legionella" value="60.0" min="55" max="85" step="0.5" oninput="upd('vDhwTleg', this.value)" />
       </div>
       <div class="field">
-        <label>Legionella periode [stappen] <span id="vDhwLegP">168.0</span></label>
+        <label>Legionella periode [stappen] <span id="vDhwLegP">168</span></label>
         <input type="number" id="dhw_legionella_period_steps" value="168" min="24" max="336" step="1" oninput="upd('vDhwLegP', this.value)" />
       </div>
       <div class="field">
-        <label>Legionella duur [stappen] <span id="vDhwLegD">1.0</span></label>
+        <label>Legionella duur [stappen] <span id="vDhwLegD">1</span></label>
         <input type="number" id="dhw_legionella_duration_steps" value="1" min="1" max="4" step="1" oninput="upd('vDhwLegD', this.value)" />
       </div>
       <div class="field">
-        <label>V̇_tap [m³/h] <span id="vDhwVtap">0.01</span></label>
+        <label>V&#775;_tap [m&sup3;/h] <span id="vDhwVtap">0.01</span></label>
         <input type="number" id="dhw_v_tap_m3_per_h" value="0.01" min="0" max="0.2" step="0.005" oninput="upd('vDhwVtap', this.value)" />
       </div>
       <div class="field">
@@ -407,51 +448,62 @@
         <input type="number" id="dhw_t_amb_c" value="20.0" min="5" max="35" step="0.5" oninput="upd('vDhwTamb', this.value)" />
       </div>
       <div class="field">
-        <label>P_HP,max gedeeld [kW] <span id="vPhpMax">6.0</span></label>
-        <input type="number" id="P_hp_max" value="6.0" min="1" max="30" step="0.5" oninput="upd('vPhpMax', this.value)" />
+        <label>P_HP,max <strong>elektrisch</strong> [kW] <span id="vPhpMaxElec">2.5</span></label>
+        <input type="number" id="P_hp_max_elec" value="2.5" min="0.5" max="30" step="0.5" oninput="upd('vPhpMaxElec', this.value)" />
       </div>
+      <div class="hint">Begrenst gedeeld elektrisch WP-vermogen: P_UFH/COP_UFH + P_dhw/COP_dhw &le; P_HP,max,elec</div>
     </div>
 
     <button class="btn" id="run-btn" onclick="runOptimize()">&#9654; Optimaliseer</button>
   </aside>
 
+  <!-- ═══════════════════════════════ MAIN ════════════════════════════════ -->
   <main class="main">
     <div class="error-banner" id="err"></div>
-    <div class="warn-banner" id="warn"></div>
+    <div class="warn-banner"  id="warn"></div>
 
     <div class="stats">
       <div class="stat-card"><div class="stat-label">Solver status</div><div class="stat-value" id="s-status">&ndash;</div></div>
-      <div class="stat-card"><div class="stat-label">Eerste P_UFH</div><div class="stat-value" id="s-pufh">&ndash;<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">Eerste P_DHW</div><div class="stat-value" id="s-pdhw">&ndash;<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">Eerste P_HP totaal</div><div class="stat-value" id="s-php">&ndash;<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">HP energie totaal</div><div class="stat-value" id="s-energy">&ndash;<span class="stat-unit">kWh</span></div></div>
+      <div class="stat-card"><div class="stat-label">P_UFH stap 1</div><div class="stat-value" id="s-pufh">&ndash;<span class="stat-unit">kW</span></div></div>
+      <div class="stat-card"><div class="stat-label">P_DHW stap 1</div><div class="stat-value" id="s-pdhw">&ndash;<span class="stat-unit">kW</span></div></div>
+      <div class="stat-card"><div class="stat-label">P_HP totaal stap 1</div><div class="stat-value" id="s-php">&ndash;<span class="stat-unit">kW</span></div></div>
+      <div class="stat-card"><div class="stat-label">COP<sub>UFH</sub> stap 1</div><div class="stat-value" id="s-cop-ufh">&ndash;</div></div>
+      <div class="stat-card"><div class="stat-label">COP<sub>DHW</sub> stap 1</div><div class="stat-value" id="s-cop-dhw">&ndash;</div></div>
+      <div class="stat-card"><div class="stat-label">HP thermische energie</div><div class="stat-value" id="s-energy">&ndash;<span class="stat-unit">kWh</span></div></div>
       <div class="stat-card"><div class="stat-label">Netto gridimport</div><div class="stat-value" id="s-grid">&ndash;<span class="stat-unit">kWh</span></div></div>
       <div class="stat-card"><div class="stat-label">Totale gridkosten</div><div class="stat-value" id="s-cost">&ndash;<span class="stat-unit">&euro;</span></div></div>
       <div class="stat-card"><div class="stat-label">UFH comfortviolation</div><div class="stat-value" id="s-ufh-viol">&ndash;<span class="stat-unit">K</span></div></div>
       <div class="stat-card"><div class="stat-label">DHW comfortviolation</div><div class="stat-value" id="s-dhw-viol">&ndash;<span class="stat-unit">K</span></div></div>
-      <div class="stat-card"><div class="stat-label">Legionella violation</div><div class="stat-value" id="s-leg-viol">&ndash;<span class="stat-unit">K</span></div></div>
       <div class="stat-card"><div class="stat-label">PV forecast totaal</div><div class="stat-value" id="s-pv">&ndash;<span class="stat-unit">kWh</span></div></div>
     </div>
 
-    <div class="chart-card wide">
+    <!-- All charts: full-width, same height (280 px via .chart-inner) -->
+
+    <div class="chart-card">
       <h3>UFH &mdash; kamertemperatuur</h3>
-      <div id="temp-chart" style="height: 310px"></div>
+      <div id="temp-chart" class="chart-inner"></div>
     </div>
 
-    <div class="chart-grid">
-      <div class="chart-card wide">
-        <h3>Warmtepompvermogen, PV en stroomprijs</h3>
-        <div id="power-chart" style="height: 280px"></div>
-      </div>
-      <div class="chart-card" id="dhw-chart-card">
-        <h3>DHW &mdash; tanktemperaturen</h3>
-        <div id="dhw-chart" style="height: 260px"></div>
-      </div>
-      <div class="chart-card">
-        <h3>PV forecast</h3>
-        <div id="pv-chart" style="height: 260px"></div>
-      </div>
+    <div class="chart-card">
+      <h3>Warmtepompvermogen (thermisch), PV en stroomprijs</h3>
+      <div id="power-chart" class="chart-inner"></div>
     </div>
+
+    <div class="chart-card">
+      <h3>Warmtepomp COP profiel &mdash; Carnot model (stooklijn + buitentemperatuur)</h3>
+      <div id="cop-chart" class="chart-inner"></div>
+    </div>
+
+    <div class="chart-card" id="dhw-chart-card">
+      <h3>DHW &mdash; tanktemperaturen</h3>
+      <div id="dhw-chart" class="chart-inner"></div>
+    </div>
+
+    <div class="chart-card">
+      <h3>PV forecast</h3>
+      <div id="pv-chart" class="chart-inner"></div>
+    </div>
+
   </main>
 </div>
 
@@ -468,8 +520,8 @@
 
   function syncVisibility() {
     setVisible('flat_price_field', !document.getElementById('dynamic_price').checked);
-    setVisible('dhw-settings', document.getElementById('dhw_enabled').checked);
-    setVisible('dhw-chart-card', document.getElementById('dhw_enabled').checked);
+    setVisible('dhw-settings',     document.getElementById('dhw_enabled').checked);
+    setVisible('dhw-chart-card',   document.getElementById('dhw_enabled').checked);
   }
 
   document.getElementById('dynamic_price').addEventListener('change', syncVisibility);
@@ -480,50 +532,35 @@
     const i = (id) => parseInt(document.getElementById(id).value, 10);
     const b = (id) => document.getElementById(id).checked;
     return {
-      C_r: n('C_r'),
-      C_b: n('C_b'),
-      R_br: n('R_br'),
-      R_ro: n('R_ro'),
-      alpha: n('alpha'),
-      eta: n('eta'),
-      A_glass: n('A_glass'),
-      T_r_init: n('T_r_init'),
-      T_b_init: n('T_b_init'),
+      C_r: n('C_r'), C_b: n('C_b'), R_br: n('R_br'), R_ro: n('R_ro'),
+      alpha: n('alpha'), eta: n('eta'), A_glass: n('A_glass'),
+      T_r_init: n('T_r_init'), T_b_init: n('T_b_init'),
       previous_power_kw: n('previous_power_kw'),
-      horizon_hours: i('horizon_hours'),
-      dt_hours: n('dt_hours'),
-      Q_c: n('Q_c'),
-      R_c: n('R_c'),
-      Q_N: n('Q_N'),
-      P_max: n('P_max'),
-      delta_P_max: n('delta_P_max'),
-      T_min: n('T_min'),
-      T_max: n('T_max'),
-      T_ref: n('T_ref'),
+      horizon_hours: i('horizon_hours'), dt_hours: n('dt_hours'),
+      Q_c: n('Q_c'), R_c: n('R_c'), Q_N: n('Q_N'),
+      P_max: n('P_max'), delta_P_max: n('delta_P_max'),
+      T_min: n('T_min'), T_max: n('T_max'), T_ref: n('T_ref'),
       outdoor_temperature_c: n('outdoor_temperature_c'),
-      dynamic_price: b('dynamic_price'),
-      flat_price: n('flat_price'),
-      solar_gain: b('solar_gain'),
-      internal_gains_kw: n('internal_gains_kw'),
-      pv_enabled: b('pv_enabled'),
-      pv_peak_kw: n('pv_peak_kw'),
+      dynamic_price: b('dynamic_price'), flat_price: n('flat_price'),
+      solar_gain: b('solar_gain'), internal_gains_kw: n('internal_gains_kw'),
+      pv_enabled: b('pv_enabled'), pv_peak_kw: n('pv_peak_kw'),
       dhw_enabled: b('dhw_enabled'),
-      dhw_C_top: n('dhw_C_top'),
-      dhw_C_bot: n('dhw_C_bot'),
-      dhw_R_strat: n('dhw_R_strat'),
-      dhw_R_loss: n('dhw_R_loss'),
-      dhw_T_top_init: n('dhw_T_top_init'),
-      dhw_T_bot_init: n('dhw_T_bot_init'),
-      dhw_P_max: n('dhw_P_max'),
-      dhw_delta_P_max: n('dhw_delta_P_max'),
-      dhw_T_min: n('dhw_T_min'),
-      dhw_T_legionella: n('dhw_T_legionella'),
+      dhw_C_top: n('dhw_C_top'), dhw_C_bot: n('dhw_C_bot'),
+      dhw_R_strat: n('dhw_R_strat'), dhw_R_loss: n('dhw_R_loss'),
+      dhw_T_top_init: n('dhw_T_top_init'), dhw_T_bot_init: n('dhw_T_bot_init'),
+      dhw_P_max: n('dhw_P_max'), dhw_delta_P_max: n('dhw_delta_P_max'),
+      dhw_T_min: n('dhw_T_min'), dhw_T_legionella: n('dhw_T_legionella'),
       dhw_legionella_period_steps: i('dhw_legionella_period_steps'),
       dhw_legionella_duration_steps: i('dhw_legionella_duration_steps'),
       dhw_v_tap_m3_per_h: n('dhw_v_tap_m3_per_h'),
-      dhw_t_mains_c: n('dhw_t_mains_c'),
-      dhw_t_amb_c: n('dhw_t_amb_c'),
-      P_hp_max: n('P_hp_max'),
+      dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),
+      P_hp_max_elec: n('P_hp_max_elec'),          // elektrisch budget
+      eta_carnot: n('eta_carnot'),
+      delta_T_cond: n('delta_T_cond'), delta_T_evap: n('delta_T_evap'),
+      T_supply_min: n('T_supply_min'),
+      T_ref_outdoor_curve: n('T_ref_outdoor_curve'),
+      heating_curve_slope: n('heating_curve_slope'),
+      cop_min: n('cop_min'), cop_max: n('cop_max'),
     };
   }
 
@@ -534,23 +571,24 @@
       return;
     }
     const prefix = okThreshold !== null ? (value > okThreshold ? '⚠ ' : '✓ ') : '';
-    const color = okThreshold !== null ? (value > okThreshold ? '#c0392b' : '#27ae60') : '#1e3a5f';
+    const color  = okThreshold !== null ? (value > okThreshold ? '#c0392b' : '#27ae60') : '#1e3a5f';
     el.style.color = color;
-    el.innerHTML = prefix + Number(value).toFixed(decimals) + (unit ? '<span class="stat-unit">' + unit + '</span>' : '');
+    el.innerHTML = prefix + Number(value).toFixed(decimals)
+      + (unit ? '<span class="stat-unit">' + unit + '</span>' : '');
   }
 
   async function runOptimize() {
     const btn = document.getElementById('run-btn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span>Bezig&hellip;';
-    document.getElementById('err').style.display = 'none';
+    document.getElementById('err').style.display  = 'none';
     document.getElementById('warn').style.display = 'none';
 
     try {
       const resp = await fetch('/api/optimize', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getReq()),
+        body:    JSON.stringify(getReq()),
       });
       if (!resp.ok) {
         const msg = (await resp.json()).detail || resp.statusText;
@@ -559,44 +597,51 @@
       const d = await resp.json();
 
       document.getElementById('s-status').textContent = d.status;
-      setMetric('s-pufh', d.first_ufh_power_kw, 'kW');
-      setMetric('s-pdhw', d.first_dhw_power_kw, 'kW');
-      setMetric('s-php', d.first_total_hp_power_kw, 'kW');
-      setMetric('s-energy', d.hp_total_energy_kwh, 'kWh');
-      setMetric('s-grid', d.net_grid_energy_kwh, 'kWh');
-      setMetric('s-cost', d.total_cost_eur, '€', 3);
-      setMetric('s-pv', d.pv_total_kwh, 'kWh');
-      setMetric('s-ufh-viol', d.max_ufh_comfort_violation_c, 'K', 2, 0.01);
-      setMetric('s-dhw-viol', d.max_dhw_comfort_violation_c, 'K', 2, 0.01);
-      setMetric('s-leg-viol', d.max_legionella_violation_c, 'K', 2, 0.01);
+      setMetric('s-pufh',    d.first_ufh_power_kw,    'kW');
+      setMetric('s-pdhw',    d.first_dhw_power_kw,    'kW');
+      setMetric('s-php',     d.first_total_hp_power_kw,'kW');
+      setMetric('s-energy',  d.hp_total_energy_kwh,   'kWh');
+      setMetric('s-grid',    d.net_grid_energy_kwh,   'kWh');
+      setMetric('s-cost',    d.total_cost_eur,         '€', 3);
+      setMetric('s-pv',      d.pv_total_kwh,           'kWh');
+      setMetric('s-ufh-viol',d.max_ufh_comfort_violation_c, 'K', 2, 0.01);
+      setMetric('s-dhw-viol',d.max_dhw_comfort_violation_c, 'K', 2, 0.01);
+
+      if (d.cop_ufh_profile && d.cop_ufh_profile.length > 0)
+        setMetric('s-cop-ufh', d.cop_ufh_profile[0], '', 2);
+      if (d.dhw_enabled && d.cop_dhw_profile && d.cop_dhw_profile.length > 0)
+        setMetric('s-cop-dhw', d.cop_dhw_profile[0], '', 2);
 
       const warn = document.getElementById('warn');
       const warnings = [];
-      if (d.max_ufh_comfort_violation_c > 0.01) {
-        warnings.push('UFH comfortgrens overschreden met ' + d.max_ufh_comfort_violation_c.toFixed(2) + ' K');
-      }
-      if (d.max_dhw_comfort_violation_c > 0.01) {
-        warnings.push('DHW comfortgrens overschreden met ' + d.max_dhw_comfort_violation_c.toFixed(2) + ' K');
-      }
-      if (d.max_legionella_violation_c > 0.01) {
-        warnings.push('legionella-eis gemist met ' + d.max_legionella_violation_c.toFixed(2) + ' K');
-      }
+      if (d.max_ufh_comfort_violation_c > 0.01)
+        warnings.push('UFH comfort +' + d.max_ufh_comfort_violation_c.toFixed(2) + ' K');
+      if (d.max_dhw_comfort_violation_c > 0.01)
+        warnings.push('DHW comfort +' + d.max_dhw_comfort_violation_c.toFixed(2) + ' K');
+      if (d.max_legionella_violation_c  > 0.01)
+        warnings.push('Legionella gemist +' + d.max_legionella_violation_c.toFixed(2) + ' K');
       if (warnings.length > 0) {
         warn.textContent = '⚠ ' + warnings.join(' · ');
         warn.style.display = 'block';
       }
 
-      const tf = JSON.parse(d.temperature_fig);
-      const pf = JSON.parse(d.power_fig);
+      const cfg = { responsive: true, displayModeBar: false };
+      const tf  = JSON.parse(d.temperature_fig);
+      const pf  = JSON.parse(d.power_fig);
       const pvf = JSON.parse(d.pv_forecast_fig);
-      Plotly.react('temp-chart', tf.data, tf.layout, { responsive: true, displayModeBar: false });
-      Plotly.react('power-chart', pf.data, pf.layout, { responsive: true, displayModeBar: false });
-      Plotly.react('pv-chart', pvf.data, pvf.layout, { responsive: true, displayModeBar: false });
+      Plotly.react('temp-chart',  tf.data,  tf.layout,  cfg);
+      Plotly.react('power-chart', pf.data,  pf.layout,  cfg);
+      Plotly.react('pv-chart',    pvf.data, pvf.layout, cfg);
+
+      if (d.cop_fig) {
+        const cf = JSON.parse(d.cop_fig);
+        Plotly.react('cop-chart', cf.data, cf.layout, cfg);
+      }
 
       setVisible('dhw-chart-card', d.dhw_enabled);
       if (d.dhw_enabled && d.dhw_fig) {
         const dhwf = JSON.parse(d.dhw_fig);
-        Plotly.react('dhw-chart', dhwf.data, dhwf.layout, { responsive: true, displayModeBar: false });
+        Plotly.react('dhw-chart', dhwf.data, dhwf.layout, cfg);
       }
     } catch (e) {
       const el = document.getElementById('err');
