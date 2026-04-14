@@ -12,10 +12,19 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > **Het dupliceren van code of logica is ten strengste verboden.** Hoewel UFH en DHW fysisch andere systemen zijn, delen ze exact dezelfde wiskundige fundamenten (State-Space representaties, Kalman Filters, Forward Euler discretisatie en MPC). 
 > Schrijf generieke, herbruikbare functies of klassen (bijv. een algemene `KalmanFilter`-klasse die $A, B, E, C, Q, R$ matrices accepteert en de Joseph-vorm update uitvoert) in plaats van aparte hardcoded implementaties (`KalmanUFH` en `KalmanDHW`). Gebruik object-oriëntatie, compositie of afgeleide klassen om specifieke eigenschappen (zoals de tijdsvariabele $A$-matrix voor DHW) af te handelen zonder de kern-wiskunde te kopiëren.
 
+> ### 🚀 Ontwerpeis: Geen Backwards Compatibility
+> **De code hoeft nergens backwards compatible te zijn met eerdere versies.** Focus uitsluitend op het bouwen van de meest robuuste, wiskundig zuivere en efficiënte architectuur zoals beschreven in dit document. Oude API's, legacy datastructuren, of eerdere (suboptimale) implementaties mogen zonder pardon worden gebroken, overschreven of verwijderd. Sleep geen technische schuld of workarounds mee om oudere systemen in de lucht te houden: de fysica en de nieuwe DRY-architectuur krijgen absolute voorrang.
+
 > ### 🛡️ Code-eis: Fail-Fast & Harde Assertions
 > **De software moet de fysische theorie actief bewaken.** 
 > 1. **Geen verborgen fallbacks:** Ontbreekt er een variabele of parameter? Verzin géén default waarde (zoals `T = 20.0` of `V = 0`), maar laat de code direct crashen met een expliciete foutmelding (Fail-Fast). 
 > 2. **Assertions:** Gebruik validatie in de code om fysische onmogelijkheden (zoals negatieve warmtecapaciteit $C$, negatief volume $\dot{V}$, of temperatuur onder het absolute nulpunt) te blokkeren voordat ze de wiskundige solver bereiken.
+
+> ### 📝 Documentatie-eis: Transparantie & Traceerbaarheid
+> **Alle code (klassen, functies, variabelen) moet voorzien zijn van uitputtende, gestructureerde documentatie en type-hints.** 
+> 1. **Docstrings & Eenheden:** Gebruik een vaste docstring-standaard (bijv. Google of NumPy style) voor élke functie. Benoem in de docstring niet alleen de argumenten, maar expliciet de **fysische eenheid** en verwachte datatypes (via Type Hints in de code). 
+> 2. **Traceerbaarheid naar theorie:** Koppel wiskundige bewerkingen in de code direct terug aan dit document. Gebruik inline comments zoals: `# Implementeert Update (Joseph-vorm) uit sectie 6`. 
+> 3. **Het 'Waarom', niet het 'Wat':** Code vertelt *wat* de computer doet; comments vertellen *waarom*. Documenteer expliciet matrixdimensies, gemaakte aannames bij linearisatie, en afhandeling van edge-cases (bijv. deling door nul bij $R_{strat}$).
 
 ---
 
@@ -487,3 +496,4 @@ Bij elke implementatie of parameterwijziging verifiëren:
 | Kalman covariantie | $P$ blijft symmetrisch PD dankzij Joseph-vorm update |
 | Soft constraints | Comfort- en tapbeperkingen als soft constraints in productie-code |
 | Geen Magic Numbers | Code-review: Zoeken naar hardcoded floats in wiskundige of logische vergelijkingen. Elke parameter komt uit een config-object. |
+| Volledige Documentatie | Code-review: Elke functie heeft een docstring mét eenheden, type-hints, en verwijzingen naar het wiskundige theorie-document. |

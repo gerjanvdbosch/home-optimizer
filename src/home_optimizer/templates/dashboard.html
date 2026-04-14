@@ -330,6 +330,18 @@
              oninput="upd('vFlatP', this.value)" />
     </div>
 
+    <div class="section-title">PV forecast</div>
+
+    <div class="toggle">
+      <input type="checkbox" id="pv_enabled" />
+      <label for="pv_enabled">PV meenemen in netverbruik</label>
+    </div>
+    <div class="field">
+      <label>PV piekvermogen [kW] <span id="vPvPeak">4.0</span></label>
+      <input type="number" id="pv_peak_kw" value="4.0" min="0" max="20" step="0.5"
+             oninput="upd('vPvPeak', this.value)" />
+    </div>
+
     <button class="btn" id="run-btn" onclick="runOptimize()">
       &#9654; Optimaliseer
     </button>
@@ -364,6 +376,14 @@
         <div class="stat-label">Comfortoverschrijding</div>
         <div class="stat-value" id="s-viol">&ndash;<span class="stat-unit">K</span></div>
       </div>
+      <div class="stat-card">
+        <div class="stat-label">PV forecast totaal</div>
+        <div class="stat-value" id="s-pv">&ndash;<span class="stat-unit">kWh</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Netto gridimport</div>
+        <div class="stat-value" id="s-grid">&ndash;<span class="stat-unit">kWh</span></div>
+      </div>
     </div>
 
     <!-- Temperature chart -->
@@ -374,8 +394,14 @@
 
     <!-- Power & price chart -->
     <div class="chart-card">
-      <h3>UFH vermogen &amp; stroomprijs</h3>
+      <h3>Warmtepompvermogen, PV &amp; stroomprijs</h3>
       <div id="power-chart" style="height: 260px"></div>
+    </div>
+
+    <!-- PV forecast chart -->
+    <div class="chart-card">
+      <h3>PV forecast</h3>
+      <div id="pv-chart" style="height: 230px"></div>
     </div>
 
   </main>
@@ -420,6 +446,8 @@
       flat_price:            n('flat_price'),
       solar_gain:            b('solar_gain'),
       internal_gains_kw:     n('internal_gains_kw'),
+      pv_enabled:            b('pv_enabled'),
+      pv_peak_kw:            n('pv_peak_kw'),
     };
   }
 
@@ -452,6 +480,10 @@
         d.total_energy_kwh.toFixed(2) + '<span class="stat-unit">kWh</span>';
       document.getElementById('s-cost').innerHTML =
         d.total_cost_eur.toFixed(3) + '<span class="stat-unit">&euro;</span>';
+      document.getElementById('s-pv').innerHTML =
+        d.pv_total_kwh.toFixed(2) + '<span class="stat-unit">kWh</span>';
+      document.getElementById('s-grid').innerHTML =
+        d.net_grid_energy_kwh.toFixed(2) + '<span class="stat-unit">kWh</span>';
 
       const viol    = d.max_comfort_violation_c;
       const violEl  = document.getElementById('s-viol');
@@ -473,8 +505,10 @@
       // ── Render charts ─────────────────────────────────────────
       const tf = JSON.parse(d.temperature_fig);
       const pf = JSON.parse(d.power_fig);
+      const pvf = JSON.parse(d.pv_forecast_fig);
       Plotly.react('temp-chart',  tf.data, tf.layout, { responsive: true, displayModeBar: false });
       Plotly.react('power-chart', pf.data, pf.layout, { responsive: true, displayModeBar: false });
+      Plotly.react('pv-chart', pvf.data, pvf.layout, { responsive: true, displayModeBar: false });
 
     } catch (e) {
       const el = document.getElementById('err');

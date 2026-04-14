@@ -13,10 +13,9 @@ Physical model assumptions
 * Discretisation: forward-Euler with time step dt_hours.
 """
 
-from .combined_mpc import CombinedMPCController, CombinedMPCSolution
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from .kalman import DHWKalmanFilter, KalmanEstimate, UFHKalmanFilter
-from .mpc import MPCSolution, UFHMPCController
+from .mpc import CombinedMPCController, CombinedMPCSolution, MPCController, MPCSolution, UFHMPCController
 from .thermal_model import MEASUREMENT_MATRIX, ThermalModel, solar_gain_kw
 from .types import (
     CombinedMPCParameters,
@@ -47,6 +46,7 @@ __all__ = [
     "MEASUREMENT_MATRIX",
     "MEASUREMENT_MATRIX_DHW",
     "MPCParameters",
+    "MPCController",
     "MPCSolution",
     "ThermalModel",
     "ThermalParameters",

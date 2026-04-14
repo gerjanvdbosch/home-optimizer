@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 from .kalman import UFHKalmanFilter
-from .mpc import UFHMPCController
+from .mpc import MPCController
 from .thermal_model import ThermalModel
 from .types import ForecastHorizon, KalmanNoiseParameters, MPCParameters, ThermalParameters
 
@@ -84,12 +84,16 @@ def main() -> None:
     print(f"Model controllability rank: {ctrl_rank} / 2  ({'✓' if ctrl_rank == 2 else '✗'})")
 
     # ── MPC solve ─────────────────────────────────────────────────────
-    controller = UFHMPCController(model=model, params=mpc_params)
-    solution = controller.solve(initial_state_c=x0, forecast=forecast, previous_power_kw=u_prev)
+    controller = MPCController(ufh_model=model, params=mpc_params)
+    solution = controller.solve(
+        initial_ufh_state_c=x0,
+        ufh_forecast=forecast,
+        previous_p_ufh_kw=u_prev,
+    )
 
     print(f"\nMPC solver status : {solution.solver_status}")
     print(f"Fallback used     : {solution.used_fallback}")
-    print(f"First P_UFH [kW]  : {solution.first_control_kw:.3f}")
+    print(f"First P_UFH [kW]  : {solution.first_ufh_control_kw:.3f}")
     t_r_traj = np.round(solution.predicted_states_c[:, 0], 2).tolist()
     print(f"T_r trajectory [°C]: {t_r_traj}")
 
@@ -102,7 +106,7 @@ def main() -> None:
     )
     d0 = forecast.disturbance_matrix(model.parameters)[0]
     estimate, innovation, K = kf.step(
-        control_kw=solution.first_control_kw,
+        control_kw=solution.first_ufh_control_kw,
         disturbance=d0,
         room_temp_measurement_c=20.4,
     )
