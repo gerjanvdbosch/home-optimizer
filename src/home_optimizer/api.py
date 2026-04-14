@@ -61,11 +61,19 @@ _PRICES_24H = np.array(
     dtype=float,
 )
 
+# Solar proxy constants (simplified bell-shaped irradiance model)
+_SOLAR_PEAK_W_PER_M2: float = 550.0   # peak irradiance at solar noon [W/m²]
+_SOLAR_RISE_HOUR: int = 7              # proxy sunrise hour (local solar time)
+_SOLAR_SET_HOUR: int = 19             # proxy sunset hour
+_SOLAR_PERIOD_H: float = 12.0         # daylight duration for the sine argument [h]
+
 
 def _solar_gti(hour: int) -> float:
     """Simple bell-shaped south-facing solar proxy [W/m²] centred at solar noon."""
-    if 7 <= hour <= 19:
-        return 550.0 * np.sin(np.pi * (hour - 7) / 12.0)
+    if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
+        return _SOLAR_PEAK_W_PER_M2 * np.sin(
+            np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H
+        )
     return 0.0
 
 
@@ -92,9 +100,11 @@ class RunRequest(BaseModel):
     previous_power_kw: float = Field(0.8, ge=0.0, le=20.0, description="Previous UFH power [kW]")
 
     # MPC settings
-    horizon_hours: int = Field(24, ge=4, le=48, description="Horizon N [h, Δt = 1 h]")
+    horizon_hours: int = Field(24, ge=4, le=48, description="Horizon N [steps]")
+    dt_hours: float = Field(1.0, ge=0.25, le=2.0, description="Time step Δt [h]")
     Q_c: float = Field(8.0, ge=0.0, description="Comfort weight Q_c")
     R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
+    Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
     P_max: float = Field(4.5, ge=0.5, le=20.0, description="Max UFH power [kW]")
     delta_P_max: float = Field(1.0, ge=0.1, le=10.0, description="Max ramp-rate [kW/step]")
     T_min: float = Field(19.0, ge=10.0, le=25.0, description="Min comfort temperature [°C]")
@@ -310,7 +320,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     # Build physical model
     try:
         thermal_params = ThermalParameters(
-            dt_hours=1.0,
+            dt_hours=req.dt_hours,
             C_r=req.C_r,
             C_b=req.C_b,
             R_br=req.R_br,
@@ -326,7 +336,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         horizon_steps=req.horizon_hours,
         Q_c=req.Q_c,
         R_c=req.R_c,
-        Q_N=req.Q_c * 1.5,
+        Q_N=req.Q_N,
         P_max=req.P_max,
         delta_P_max=req.delta_P_max,
         T_min=req.T_min,

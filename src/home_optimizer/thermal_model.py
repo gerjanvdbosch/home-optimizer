@@ -31,7 +31,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .types import ThermalParameters
+from .types import ThermalParameters, W_PER_KW
 
 # Measurement matrix C = [1, 0]  (T_r is observable, T_b is hidden)
 MEASUREMENT_MATRIX: np.ndarray = np.array([[1.0, 0.0]], dtype=float)
@@ -53,7 +53,7 @@ def solar_gain_kw(
     arr = np.asarray(gti_w_per_m2, dtype=float)
     if np.any(arr < 0.0):
         raise ValueError("gti_w_per_m2 cannot be negative.")
-    gain = glass_area_m2 * arr * transmittance / 1000.0
+    gain = glass_area_m2 * arr * transmittance / W_PER_KW
     return float(gain) if arr.ndim == 0 else gain
 
 

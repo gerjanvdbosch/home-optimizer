@@ -37,6 +37,12 @@ _KEY_T_R = "room_temperature_c"
 _KEY_P_PV = "pv_power_kw"
 _KEY_P_HP = "hp_power_kw"
 
+# Fallback used when a key is absent from the JSON file or env var.
+# This is the safe-start default for an unoccupied room; replace in
+# sensors.json or via env HOME_OPT_T_R for any real deployment.
+_DEFAULT_ROOM_TEMPERATURE_C: float = 20.0
+_DEFAULT_POWER_KW: float = 0.0  # absence of PV/HP production is a true zero
+
 
 def _resolve(source: ValueSource) -> float:
     """Evaluate a ValueSource: call it if callable, otherwise cast to float."""
@@ -77,9 +83,9 @@ class LocalBackend(SensorBackend):
 
     def __init__(
         self,
-        room_temperature_c: ValueSource = 20.0,
-        pv_power_kw: ValueSource = 0.0,
-        hp_power_kw: ValueSource = 0.0,
+        room_temperature_c: ValueSource = _DEFAULT_ROOM_TEMPERATURE_C,
+        pv_power_kw: ValueSource = _DEFAULT_POWER_KW,
+        hp_power_kw: ValueSource = _DEFAULT_POWER_KW,
     ) -> None:
         self._room_temp = room_temperature_c
         self._pv_power = pv_power_kw
@@ -131,7 +137,11 @@ class LocalBackend(SensorBackend):
             backend = LocalBackend.from_json_file("sensors.json")
             readings = backend.read_all()
         """
-        _defaults = {"room_temperature_c": 20.0, "pv_power_kw": 0.0, "hp_power_kw": 0.0}
+        _defaults = {
+            _KEY_T_R: _DEFAULT_ROOM_TEMPERATURE_C,
+            _KEY_P_PV: _DEFAULT_POWER_KW,
+            _KEY_P_HP: _DEFAULT_POWER_KW,
+        }
         if defaults:
             _defaults.update(defaults)
 
@@ -171,9 +181,9 @@ class LocalBackend(SensorBackend):
             return float(os.environ.get(key, default))
 
         return cls(
-            room_temperature_c=lambda: _env(cls.ENV_T_R, 20.0),
-            pv_power_kw=lambda: _env(cls.ENV_P_PV, 0.0),
-            hp_power_kw=lambda: _env(cls.ENV_P_HP, 0.0),
+            room_temperature_c=lambda: _env(cls.ENV_T_R, _DEFAULT_ROOM_TEMPERATURE_C),
+            pv_power_kw=lambda: _env(cls.ENV_P_PV, _DEFAULT_POWER_KW),
+            hp_power_kw=lambda: _env(cls.ENV_P_HP, _DEFAULT_POWER_KW),
         )
 
     # ------------------------------------------------------------------

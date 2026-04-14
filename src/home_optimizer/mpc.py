@@ -1,6 +1,6 @@
 """Model Predictive Controller for underfloor heating.
 
-Objective (Section 7 of spec):
+Objective (§14.1 of spec):
   J = Σ_{k=0}^{N-1} [ Q_c·(T_r[k] − T_ref[k])²
                       + p[k]·P_UFH[k]·Δt          (energy cost [€])
                       + R_c·P_UFH[k]² ]            (power regularisation)
@@ -15,10 +15,10 @@ Soft comfort constraints (never cause infeasibility):
   T_r[k+1] ≤ T_max + s_max[k],  s_max[k] ≥ 0
   Penalty: ρ · (s_min[k]² + s_max[k]²)  added to J
 
-The soft-constraint penalty ρ is set to 1000 × Q_c so that temperature-bound
-violations are strongly penalised while the QP always has a feasible solution,
-even when physics prevent the setpoint from being reached (e.g. very cold
-outdoor conditions with a limited heat-pump ramp-rate).
+The soft-constraint penalty ρ = rho_factor × max(Q_c, 1) is configured via
+MPCParameters.rho_factor (default 1000) so that temperature-bound violations are
+strongly penalised while the QP always has a feasible solution, even when physics
+prevent the setpoint from being reached.
 """
 
 from __future__ import annotations
@@ -38,8 +38,6 @@ except ImportError:  # pragma: no cover
     cp = None  # type: ignore[assignment]
     _CVXPY_AVAILABLE = False
 
-# Soft-constraint penalty multiplier: ρ = _RHO_FACTOR × Q_c
-_RHO_FACTOR = 1_000.0
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +143,7 @@ class UFHMPCController:
         N = p.horizon_steps
         refs = forecast.room_temperature_ref_c
         prices = forecast.price_eur_per_kwh
-        rho = _RHO_FACTOR * max(p.Q_c, 1.0)  # soft-constraint penalty
+        rho = p.rho_factor * max(p.Q_c, 1.0)  # soft-constraint penalty
 
         # Decision variables
         x = cp.Variable((2, N + 1))
@@ -234,7 +232,7 @@ class UFHMPCController:
         refs = forecast.room_temperature_ref_c
         prices = forecast.price_eur_per_kwh
         N = p.horizon_steps
-        rho = _RHO_FACTOR * max(p.Q_c, 1.0)
+        rho = p.rho_factor * max(p.Q_c, 1.0)
 
         x = x0.copy()
         xs = [x.copy()]
@@ -244,8 +242,11 @@ class UFHMPCController:
         for k in range(N):
             lo = max(0.0, u_prev - p.delta_P_max)
             hi = min(p.P_max, u_prev + p.delta_P_max)
-            n_cand = max(21, int((hi - lo) / max(p.delta_P_max / 10.0, 0.01)) + 1)
-            candidates = np.linspace(lo, hi, min(n_cand, 51))
+            n_cand = max(
+                p.greedy.min_candidates,
+                int((hi - lo) / max(p.delta_P_max / p.greedy.grid_divisor, p.greedy.min_grid_step_kw)) + 1,
+            )
+            candidates = np.linspace(lo, hi, min(n_cand, p.greedy.max_candidates))
 
             best_u, best_xnext, best_score = candidates[0], None, np.inf
             for c in candidates:
@@ -257,7 +258,7 @@ class UFHMPCController:
                     + prices[k] * c * dt
                     + p.R_c * c**2
                     + rho * (s_lo**2 + s_hi**2)
-                    + 5.0 * p.Q_N * max(refs[k + 1] - xn[0], 0.0) ** 2
+                    + p.greedy.lookahead_weight * p.Q_N * max(refs[k + 1] - xn[0], 0.0) ** 2
                 )
                 if k == N - 1:
                     score += p.Q_N * (xn[0] - refs[N]) ** 2

@@ -25,6 +25,13 @@ import numpy as np
 
 _BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
+# Open-Meteo returns hourly data; these constants control how many raw hourly
+# points are fetched relative to the requested horizon.
+_HOURS_PER_DAY: int = 24          # universele tijdconstante
+_MIN_FETCH_DAYS: int = 2          # minimaal 2 dagen ophalen voor buffer
+_FETCH_BUFFER_HOURS: int = 2      # extra uur-buffer voor uitlijning op huidig uur
+_DT_FLOAT_TOLERANCE: float = 1e-9 # numerieke tolerantie voor dt ≈ 1 h vergelijking
+
 
 @dataclass(frozen=True, slots=True)
 class WeatherForecast:
@@ -156,9 +163,9 @@ class OpenMeteoClient:
         if dt_hours <= 0:
             raise ValueError("dt_hours must be positive.")
 
-        fetch_days = max(2, int(np.ceil((horizon_hours + 2) / 24)) + 1)
+        fetch_days = max(_MIN_FETCH_DAYS, int(np.ceil((horizon_hours + _FETCH_BUFFER_HOURS) / _HOURS_PER_DAY)) + 1)
         n_steps = int(np.ceil(horizon_hours / dt_hours))
-        need_h = max(int(np.ceil(n_steps * dt_hours)) + 2, horizon_hours + 2)
+        need_h = max(int(np.ceil(n_steps * dt_hours)) + _FETCH_BUFFER_HOURS, horizon_hours + _FETCH_BUFFER_HOURS)
 
         # --- call 1: temperature + window GTI ---
         params: dict[str, str | int | float | bool | None] = {
@@ -268,7 +275,7 @@ class OpenMeteoClient:
         dt_hours: float,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Resample a pair of hourly arrays to the requested dt_hours grid."""
-        if abs(dt_hours - 1.0) < 1e-9:
+        if abs(dt_hours - 1.0) < _DT_FLOAT_TOLERANCE:
             return a[:n_steps], b[:n_steps]
         t_src = np.arange(len(a), dtype=float)
         t_tgt = np.arange(n_steps, dtype=float) * dt_hours

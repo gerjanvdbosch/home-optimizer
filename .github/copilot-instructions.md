@@ -8,6 +8,15 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > ### 🚫 Anti-Patroon: Geen Magic Numbers
 > **Het hardcoden van numerieke waarden in de berekeningen of logica is streng verboden.** Elke fysieke constante, tuning-parameter, temperatuurgrens of tijdstap moet via een configuratiebestand (bijv. JSON/YAML) of parameter-object in de code worden geïnjecteerd. Zelfs universele constanten (zoals $\lambda = 1.1628$) of legionella-eisen (60°C) moeten benoemde variabelen zijn. In de formules en MPC-constraints staan uitsluitend referentienamen, géén losse getallen (met uitzondering van wiskundige operatoren zoals `0` of `1`).
 
+> ### ♻️ Architectuureis: DRY (Don't Repeat Yourself) / Geen Dubbele Code
+> **Het dupliceren van code of logica is ten strengste verboden.** Hoewel UFH en DHW fysisch andere systemen zijn, delen ze exact dezelfde wiskundige fundamenten (State-Space representaties, Kalman Filters, Forward Euler discretisatie en MPC). 
+> Schrijf generieke, herbruikbare functies of klassen (bijv. een algemene `KalmanFilter`-klasse die $A, B, E, C, Q, R$ matrices accepteert en de Joseph-vorm update uitvoert) in plaats van aparte hardcoded implementaties (`KalmanUFH` en `KalmanDHW`). Gebruik object-oriëntatie, compositie of afgeleide klassen om specifieke eigenschappen (zoals de tijdsvariabele $A$-matrix voor DHW) af te handelen zonder de kern-wiskunde te kopiëren.
+
+> ### 🛡️ Code-eis: Fail-Fast & Harde Assertions
+> **De software moet de fysische theorie actief bewaken.** 
+> 1. **Geen verborgen fallbacks:** Ontbreekt er een variabele of parameter? Verzin géén default waarde (zoals `T = 20.0` of `V = 0`), maar laat de code direct crashen met een expliciete foutmelding (Fail-Fast). 
+> 2. **Assertions:** Gebruik validatie in de code om fysische onmogelijkheden (zoals negatieve warmtecapaciteit $C$, negatief volume $\dot{V}$, of temperatuur onder het absolute nulpunt) te blokkeren voordat ze de wiskundige solver bereiken.
+
 ---
 
 ## Inhoudsopgave

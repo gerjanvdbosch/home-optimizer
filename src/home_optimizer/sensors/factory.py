@@ -84,10 +84,10 @@ def effective_price(
 
 def build_forecast(
     weather: WeatherForecast,
+    internal_gains_kw: float | np.ndarray,
+    price_eur_per_kwh: float | np.ndarray,
+    room_temperature_ref_c: float | np.ndarray,
     horizon_steps: int | None = None,
-    internal_gains_kw: float | np.ndarray = 0.3,
-    price_eur_per_kwh: float | np.ndarray = 0.25,
-    room_temperature_ref_c: float | np.ndarray = 21.0,
 ) -> ForecastHorizon:
     """Build a :class:`~home_optimizer.types.ForecastHorizon` from a WeatherForecast.
 
@@ -95,18 +95,20 @@ def build_forecast(
     ----------
     weather:
         Result of :meth:`~home_optimizer.sensors.OpenMeteoClient.get_forecast`.
-    horizon_steps:
-        Override the number of MPC steps N.
-        Defaults to ``weather.horizon_steps``.
     internal_gains_kw:
         Q_int [kW] — scalar or length-N array.
-        Typical household: 0.2–0.8 kW.  Default ``0.3``.
+        Typical household: 0.2–0.8 kW.  Must come from caller's config; no default
+        is provided to prevent silent magic-number injection.
     price_eur_per_kwh:
         Electricity tariff p[k] [€/kWh] — scalar or length-N array.
         If PV is installed, pass the output of :func:`effective_price` here.
+        Must come from caller's config or energy-price source.
     room_temperature_ref_c:
         Comfort setpoint T_ref [°C] — scalar or length-(N+1) array.
-        Default ``21.0``.
+        Must come from caller's config (user preference).
+    horizon_steps:
+        Override the number of MPC steps N.
+        Defaults to ``weather.horizon_steps``.
 
     Returns
     -------
@@ -117,13 +119,23 @@ def build_forecast(
     --------
     No PV::
 
-        forecast = build_forecast(weather, price_eur_per_kwh=0.28)
+        forecast = build_forecast(
+            weather,
+            internal_gains_kw=cfg["internal_gains_kw"],
+            price_eur_per_kwh=cfg["price_eur_per_kwh"],
+            room_temperature_ref_c=cfg["room_setpoint_c"],
+        )
 
     With PV (use :func:`effective_price` to pre-correct the tariff)::
 
         readings = backend.read_all()
-        p_eff = effective_price(0.28, readings.pv_power_kw, readings.hp_power_kw)
-        forecast = build_forecast(weather, price_eur_per_kwh=p_eff)
+        p_eff = effective_price(cfg["price_eur_per_kwh"], readings.pv_power_kw, readings.hp_power_kw)
+        forecast = build_forecast(
+            weather,
+            internal_gains_kw=cfg["internal_gains_kw"],
+            price_eur_per_kwh=p_eff,
+            room_temperature_ref_c=cfg["room_setpoint_c"],
+        )
     """
     N = horizon_steps if horizon_steps is not None else weather.horizon_steps
 
