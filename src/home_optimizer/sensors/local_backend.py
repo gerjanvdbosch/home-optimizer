@@ -1,24 +1,8 @@
-"""Local / standalone sensor backend.
+"""Local / standalone sensor backend for the full telemetry snapshot.
 
-Reads sensor values from a JSON file, environment variables, or fixed constants.
-Suitable for local development and testing without Home Assistant.
-
-JSON file format (sensors.json)
---------------------------------
-{
-    "room_temperature_c": 20.5,
-    "pv_power_kw": 1.2,
-    "hp_power_kw": 2.3
-}
-
-The file is re-read on every sensor call, so you can update it while the
-optimizer is running (e.g. from a cron job or a simple write script).
-
-Environment variables (all optional)
---------------------------------------
-HOME_OPT_T_R   room temperature  [°C]   default 20.0
-HOME_OPT_P_PV  PV production     [kW]   default 0.0
-HOME_OPT_P_HP  heat-pump power   [kW]   default 0.0
+The backend can read telemetry from a JSON file, environment variables, or
+injected callables.  Every required field must be present; missing values raise
+immediately so the persistence layer never stores partial physics data.
 """
 
 from __future__ import annotations
@@ -26,70 +10,94 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable, TypeAlias
 
-from .base import SensorBackend
+from .base import LiveReadings, SensorBackend
 
-ValueSource = Union[float, Callable[[], float]]
+NumericValueSource: TypeAlias = float | Callable[[], float]
+TextValueSource: TypeAlias = str | Callable[[], str]
 
-# Keys expected in the JSON file
-_KEY_T_R = "room_temperature_c"
-_KEY_P_PV = "pv_power_kw"
-_KEY_P_HP = "hp_power_kw"
+_NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
+    "room_temperature_c",
+    "outdoor_temperature_c",
+    "hp_supply_temperature_c",
+    "hp_return_temperature_c",
+    "hp_flow_lpm",
+    "hp_electric_power_kw",
+    "grid_import_kw",
+    "grid_export_kw",
+    "pv_output_kw",
+    "thermostat_setpoint_c",
+    "dhw_top_temperature_c",
+    "dhw_bottom_temperature_c",
+)
+_TEXT_SENSOR_KEYS: tuple[str, ...] = ("hp_mode",)
+_ALL_SENSOR_KEYS: tuple[str, ...] = _NUMERIC_SENSOR_KEYS + _TEXT_SENSOR_KEYS
 
-# Fallback used when a key is absent from the JSON file or env var.
-# This is the safe-start default for an unoccupied room; replace in
-# sensors.json or via env HOME_OPT_T_R for any real deployment.
-_DEFAULT_ROOM_TEMPERATURE_C: float = 20.0
-_DEFAULT_POWER_KW: float = 0.0  # absence of PV/HP production is a true zero
 
-
-def _resolve(source: ValueSource) -> float:
-    """Evaluate a ValueSource: call it if callable, otherwise cast to float."""
+def _resolve_numeric(source: NumericValueSource) -> float:
+    """Evaluate a numeric source: call it if needed, then cast to float."""
     return float(source() if callable(source) else source)
 
 
+def _resolve_text(source: TextValueSource) -> str:
+    """Evaluate a text source: call it if needed, then cast to string."""
+    return str(source() if callable(source) else source)
+
+
 class LocalBackend(SensorBackend):
-    """Sensor backend for local / offline use.
+    """Sensor backend for local / offline telemetry capture.
 
     Parameters
     ----------
-    room_temperature_c:
-        T_r [°C] — fixed float or zero-arg callable.
-    pv_power_kw:
-        P_pv [kW] — same.  Pass ``0.0`` if there is no PV installation.
-    hp_power_kw:
-        P_hp_total [kW] — same.
-
-    Examples
-    --------
-    Read from a JSON file (recommended for local use)::
-
-        backend = LocalBackend.from_json_file("sensors.json")
-
-    Fixed values (unit tests, quick demos)::
-
-        backend = LocalBackend(room_temperature_c=20.5, pv_power_kw=1.2, hp_power_kw=2.0)
-
-    Read from environment variables::
-
-        backend = LocalBackend.from_env()
-        # export HOME_OPT_T_R=21.3  HOME_OPT_P_PV=2.5  HOME_OPT_P_HP=3.1
+    All constructor parameters correspond one-to-one with :class:`LiveReadings`
+    fields, except ``timestamp`` which is generated at read time.
     """
 
-    ENV_T_R = "HOME_OPT_T_R"
-    ENV_P_PV = "HOME_OPT_P_PV"
-    ENV_P_HP = "HOME_OPT_P_HP"
+    ENV_ROOM_TEMPERATURE_C = "HOME_OPT_ROOM_TEMPERATURE_C"
+    ENV_OUTDOOR_TEMPERATURE_C = "HOME_OPT_OUTDOOR_TEMPERATURE_C"
+    ENV_HP_SUPPLY_TEMPERATURE_C = "HOME_OPT_HP_SUPPLY_TEMPERATURE_C"
+    ENV_HP_RETURN_TEMPERATURE_C = "HOME_OPT_HP_RETURN_TEMPERATURE_C"
+    ENV_HP_FLOW_LPM = "HOME_OPT_HP_FLOW_LPM"
+    ENV_HP_ELECTRIC_POWER_KW = "HOME_OPT_HP_ELECTRIC_POWER_KW"
+    ENV_HP_MODE = "HOME_OPT_HP_MODE"
+    ENV_GRID_IMPORT_KW = "HOME_OPT_GRID_IMPORT_KW"
+    ENV_GRID_EXPORT_KW = "HOME_OPT_GRID_EXPORT_KW"
+    ENV_PV_OUTPUT_KW = "HOME_OPT_PV_OUTPUT_KW"
+    ENV_THERMOSTAT_SETPOINT_C = "HOME_OPT_THERMOSTAT_SETPOINT_C"
+    ENV_DHW_TOP_TEMPERATURE_C = "HOME_OPT_DHW_TOP_TEMPERATURE_C"
+    ENV_DHW_BOTTOM_TEMPERATURE_C = "HOME_OPT_DHW_BOTTOM_TEMPERATURE_C"
 
     def __init__(
         self,
-        room_temperature_c: ValueSource = _DEFAULT_ROOM_TEMPERATURE_C,
-        pv_power_kw: ValueSource = _DEFAULT_POWER_KW,
-        hp_power_kw: ValueSource = _DEFAULT_POWER_KW,
+        *,
+        room_temperature_c: NumericValueSource,
+        outdoor_temperature_c: NumericValueSource,
+        hp_supply_temperature_c: NumericValueSource,
+        hp_return_temperature_c: NumericValueSource,
+        hp_flow_lpm: NumericValueSource,
+        hp_electric_power_kw: NumericValueSource,
+        hp_mode: TextValueSource,
+        grid_import_kw: NumericValueSource,
+        grid_export_kw: NumericValueSource,
+        pv_output_kw: NumericValueSource,
+        thermostat_setpoint_c: NumericValueSource,
+        dhw_top_temperature_c: NumericValueSource,
+        dhw_bottom_temperature_c: NumericValueSource,
     ) -> None:
-        self._room_temp = room_temperature_c
-        self._pv_power = pv_power_kw
-        self._hp_power = hp_power_kw
+        self._room_temperature_c = room_temperature_c
+        self._outdoor_temperature_c = outdoor_temperature_c
+        self._hp_supply_temperature_c = hp_supply_temperature_c
+        self._hp_return_temperature_c = hp_return_temperature_c
+        self._hp_flow_lpm = hp_flow_lpm
+        self._hp_electric_power_kw = hp_electric_power_kw
+        self._hp_mode = hp_mode
+        self._grid_import_kw = grid_import_kw
+        self._grid_export_kw = grid_export_kw
+        self._pv_output_kw = pv_output_kw
+        self._thermostat_setpoint_c = thermostat_setpoint_c
+        self._dhw_top_temperature_c = dhw_top_temperature_c
+        self._dhw_bottom_temperature_c = dhw_bottom_temperature_c
 
     # ------------------------------------------------------------------
     # Factory constructors
@@ -99,103 +107,124 @@ class LocalBackend(SensorBackend):
     def from_json_file(
         cls,
         path: str | Path,
-        defaults: dict[str, float] | None = None,
     ) -> "LocalBackend":
-        """Create a LocalBackend that reads sensor values from a JSON file.
-
-        The file is re-read on **every** sensor call, so updates take effect
-        immediately without restarting the optimizer.
-
-        Parameters
-        ----------
-        path:
-            Path to the JSON file.  The file must contain a JSON object with
-            the keys ``room_temperature_c``, ``pv_power_kw``, ``hp_power_kw``
-            (all in the units stated).  Missing keys fall back to ``defaults``.
-        defaults:
-            Fallback values used when a key is absent from the file.
-            Defaults to ``{"room_temperature_c": 20.0, "pv_power_kw": 0.0,
-            "hp_power_kw": 0.0}``.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the file does not exist when a sensor value is first requested.
-        ValueError
-            If the file is not valid JSON or a value is not numeric.
-
-        Example JSON file (``sensors.json``)::
-
-            {
-                "room_temperature_c": 20.8,
-                "pv_power_kw": 2.4,
-                "hp_power_kw": 3.1
-            }
-
-        Example usage::
-
-            backend = LocalBackend.from_json_file("sensors.json")
-            readings = backend.read_all()
-        """
-        _defaults = {
-            _KEY_T_R: _DEFAULT_ROOM_TEMPERATURE_C,
-            _KEY_P_PV: _DEFAULT_POWER_KW,
-            _KEY_P_HP: _DEFAULT_POWER_KW,
-        }
-        if defaults:
-            _defaults.update(defaults)
-
+        """Create a backend that re-reads the JSON file on every telemetry sample."""
         resolved_path = Path(path)
 
-        def _read(key: str) -> float:
+        def _read_json_object() -> dict[str, object]:
             if not resolved_path.exists():
                 raise FileNotFoundError(
                     f"Sensor file not found: {resolved_path.resolve()}\n"
-                    f"Create it with at least: "
-                    f'{{"{_KEY_T_R}": 20.0, "{_KEY_P_PV}": 0.0, "{_KEY_P_HP}": 0.0}}'
+                    "Create it with all required telemetry keys."
                 )
             try:
-                data: dict = json.loads(resolved_path.read_text(encoding="utf-8"))
+                data = json.loads(resolved_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Invalid JSON in {resolved_path}: {exc}") from exc
+            if not isinstance(data, dict):
+                raise ValueError(f"JSON root in {resolved_path} must be an object.")
+            return data
 
-            value = data.get(key, _defaults[key])
+        def _read_numeric(key: str) -> float:
+            data = _read_json_object()
+            if key not in data:
+                raise ValueError(f"Missing required key {key!r} in {resolved_path}.")
+            value = data[key]
             try:
-                return float(value)
+                return float(str(value))
             except (TypeError, ValueError) as exc:
                 raise ValueError(
                     f"Key {key!r} in {resolved_path} is not numeric: {value!r}"
                 ) from exc
 
+        def _read_text(key: str) -> str:
+            data = _read_json_object()
+            if key not in data:
+                raise ValueError(f"Missing required key {key!r} in {resolved_path}.")
+            value = str(data[key]).strip()
+            if not value:
+                raise ValueError(f"Key {key!r} in {resolved_path} must not be empty.")
+            return value
+
         return cls(
-            room_temperature_c=lambda: _read(_KEY_T_R),
-            pv_power_kw=lambda: _read(_KEY_P_PV),
-            hp_power_kw=lambda: _read(_KEY_P_HP),
+            room_temperature_c=lambda: _read_numeric("room_temperature_c"),
+            outdoor_temperature_c=lambda: _read_numeric("outdoor_temperature_c"),
+            hp_supply_temperature_c=lambda: _read_numeric("hp_supply_temperature_c"),
+            hp_return_temperature_c=lambda: _read_numeric("hp_return_temperature_c"),
+            hp_flow_lpm=lambda: _read_numeric("hp_flow_lpm"),
+            hp_electric_power_kw=lambda: _read_numeric("hp_electric_power_kw"),
+            hp_mode=lambda: _read_text("hp_mode"),
+            grid_import_kw=lambda: _read_numeric("grid_import_kw"),
+            grid_export_kw=lambda: _read_numeric("grid_export_kw"),
+            pv_output_kw=lambda: _read_numeric("pv_output_kw"),
+            thermostat_setpoint_c=lambda: _read_numeric("thermostat_setpoint_c"),
+            dhw_top_temperature_c=lambda: _read_numeric("dhw_top_temperature_c"),
+            dhw_bottom_temperature_c=lambda: _read_numeric("dhw_bottom_temperature_c"),
         )
 
     @classmethod
     def from_env(cls) -> "LocalBackend":
-        """Create a LocalBackend that re-reads environment variables on every call."""
+        """Create a backend that re-reads environment variables on every sample."""
 
-        def _env(key: str, default: float) -> float:
-            return float(os.environ.get(key, default))
+        def _env_numeric(key: str) -> float:
+            if key not in os.environ:
+                raise ValueError(f"Missing required environment variable {key}.")
+            return float(os.environ[key])
+
+        def _env_text(key: str) -> str:
+            value = os.environ.get(key, "").strip()
+            if not value:
+                raise ValueError(f"Missing required environment variable {key}.")
+            return value
 
         return cls(
-            room_temperature_c=lambda: _env(cls.ENV_T_R, _DEFAULT_ROOM_TEMPERATURE_C),
-            pv_power_kw=lambda: _env(cls.ENV_P_PV, _DEFAULT_POWER_KW),
-            hp_power_kw=lambda: _env(cls.ENV_P_HP, _DEFAULT_POWER_KW),
+            room_temperature_c=lambda: _env_numeric(cls.ENV_ROOM_TEMPERATURE_C),
+            outdoor_temperature_c=lambda: _env_numeric(cls.ENV_OUTDOOR_TEMPERATURE_C),
+            hp_supply_temperature_c=lambda: _env_numeric(cls.ENV_HP_SUPPLY_TEMPERATURE_C),
+            hp_return_temperature_c=lambda: _env_numeric(cls.ENV_HP_RETURN_TEMPERATURE_C),
+            hp_flow_lpm=lambda: _env_numeric(cls.ENV_HP_FLOW_LPM),
+            hp_electric_power_kw=lambda: _env_numeric(cls.ENV_HP_ELECTRIC_POWER_KW),
+            hp_mode=lambda: _env_text(cls.ENV_HP_MODE),
+            grid_import_kw=lambda: _env_numeric(cls.ENV_GRID_IMPORT_KW),
+            grid_export_kw=lambda: _env_numeric(cls.ENV_GRID_EXPORT_KW),
+            pv_output_kw=lambda: _env_numeric(cls.ENV_PV_OUTPUT_KW),
+            thermostat_setpoint_c=lambda: _env_numeric(cls.ENV_THERMOSTAT_SETPOINT_C),
+            dhw_top_temperature_c=lambda: _env_numeric(cls.ENV_DHW_TOP_TEMPERATURE_C),
+            dhw_bottom_temperature_c=lambda: _env_numeric(cls.ENV_DHW_BOTTOM_TEMPERATURE_C),
         )
 
     # ------------------------------------------------------------------
     # SensorBackend interface
     # ------------------------------------------------------------------
 
-    def get_room_temperature_c(self) -> float:
-        return _resolve(self._room_temp)
+    def read_all(self) -> LiveReadings:
+        """Read one complete telemetry snapshot.
 
-    def get_pv_power_kw(self) -> float:
-        return max(_resolve(self._pv_power), 0.0)
+        The backend resolves all configured sources at call time so tests and
+        local scripts can mutate JSON files or environment variables while the
+        collector is running.
+        """
+        return LiveReadings(
+            room_temperature_c=_resolve_numeric(self._room_temperature_c),
+            outdoor_temperature_c=_resolve_numeric(self._outdoor_temperature_c),
+            hp_supply_temperature_c=_resolve_numeric(self._hp_supply_temperature_c),
+            hp_return_temperature_c=_resolve_numeric(self._hp_return_temperature_c),
+            hp_flow_lpm=_resolve_numeric(self._hp_flow_lpm),
+            hp_electric_power_kw=_resolve_numeric(self._hp_electric_power_kw),
+            hp_mode=_resolve_text(self._hp_mode),
+            grid_import_kw=_resolve_numeric(self._grid_import_kw),
+            grid_export_kw=_resolve_numeric(self._grid_export_kw),
+            pv_output_kw=_resolve_numeric(self._pv_output_kw),
+            thermostat_setpoint_c=_resolve_numeric(self._thermostat_setpoint_c),
+            dhw_top_temperature_c=_resolve_numeric(self._dhw_top_temperature_c),
+            dhw_bottom_temperature_c=_resolve_numeric(self._dhw_bottom_temperature_c),
+            timestamp=self.now_utc(),
+        )
 
-    def get_hp_power_kw(self) -> float:
-        return max(_resolve(self._hp_power), 0.0)
+    def close(self) -> None:
+        """Release backend resources.
+
+        The local backend has no external resources; the method exists to
+        satisfy the common :class:`SensorBackend` lifecycle contract.
+        """
 

@@ -13,12 +13,20 @@ Physical model assumptions
 * Discretisation: forward-Euler with time step dt_hours.
 """
 
-from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters, T_CELSIUS_TO_KELVIN
+from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from .kalman import DHWKalmanFilter, KalmanEstimate, UFHKalmanFilter
 from .mpc import MPCController, MPCSolution
+from .telemetry import (
+    BufferedTelemetryCollector,
+    TelemetryAggregate,
+    TelemetryCollectorSettings,
+    TelemetryRepository,
+    aggregate_readings,
+)
 from .thermal_model import MEASUREMENT_MATRIX, ThermalModel, solar_gain_kw
 from .types import (
+    W_PER_KW,
     CombinedMPCParameters,
     DHWForecastHorizon,
     DHWMPCParameters,
@@ -28,7 +36,6 @@ from .types import (
     KalmanNoiseParameters,
     MPCParameters,
     ThermalParameters,
-    W_PER_KW,
 )
 
 __all__ = [
@@ -50,9 +57,14 @@ __all__ = [
     "MPCController",
     "MPCSolution",
     "T_CELSIUS_TO_KELVIN",
+    "TelemetryAggregate",
+    "TelemetryCollectorSettings",
+    "TelemetryRepository",
     "ThermalModel",
     "ThermalParameters",
+    "BufferedTelemetryCollector",
     "UFHKalmanFilter",
     "W_PER_KW",
+    "aggregate_readings",
     "solar_gain_kw",
 ]

@@ -48,11 +48,11 @@ def effective_price(
     price_eur_per_kwh:
         Grid electricity tariff [€/kWh] — scalar or array.
     pv_power_kw:
-        PV production [kW] — scalar or array.  Use ``readings.pv_power_kw``
+        PV production [kW] — scalar or array.  Use ``readings.pv_output_kw``
         for the current value, or a forecast array for the full horizon.
     hp_power_kw:
         Heat-pump electrical draw [kW] — scalar or array.  Use
-        ``readings.hp_power_kw`` for the current value.  Must be > 0 where
+        ``readings.hp_electric_power_kw`` for the current value.  Must be > 0 where
         the HP is running.
 
     Returns
@@ -129,7 +129,11 @@ def build_forecast(
     With PV (use :func:`effective_price` to pre-correct the tariff)::
 
         readings = backend.read_all()
-        p_eff = effective_price(cfg["price_eur_per_kwh"], readings.pv_power_kw, readings.hp_power_kw)
+        p_eff = effective_price(
+            cfg["price_eur_per_kwh"],
+            readings.pv_output_kw,
+            readings.hp_electric_power_kw,
+        )
         forecast = build_forecast(
             weather,
             internal_gains_kw=cfg["internal_gains_kw"],

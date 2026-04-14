@@ -46,6 +46,65 @@ of:
 python examples/minimal_run.py
 ```
 
+## Telemetry opslaan (SQLite + SQLAlchemy + APScheduler)
+
+De telemetrylaag samplet live sensoren vaker dan ze naar disk schrijft:
+
+- **sample** standaard elke `30 s`;
+- **flush / opslag** standaard elke `300 s` (= 5 minuten);
+- opslag in SQLite via SQLAlchemy ORM in tabel `telemetry_aggregates`.
+- bij een wijziging van `hp_mode` wordt de huidige bucket direct afgesloten,
+  zodat UFH- en DHW-hydrauliek nooit in dezelfde aggregatierij gemengd worden.
+
+Zo hou je voldoende meetnauwkeurigheid voor latere training en kalibratie,
+zonder elke minuut of seconde permanent op te slaan.
+
+De lokale demo leest het volledige snapshot uit `sensors.json`:
+
+```bash
+python examples/telemetry_collection.py
+```
+
+Belangrijkste velden in het lokale sensorbestand:
+
+- `room_temperature_c`
+- `outdoor_temperature_c`
+- `hp_supply_temperature_c`
+- `hp_return_temperature_c`
+- `hp_flow_lpm`
+- `hp_electric_power_kw`
+- `hp_mode`
+- `grid_import_kw`
+- `grid_export_kw`
+- `pv_output_kw`
+- `thermostat_setpoint_c`
+- `dhw_top_temperature_c`
+- `dhw_bottom_temperature_c`
+
+De hydraulische sensoren worden dus **niet** dubbel opgeslagen voor UFH en DHW.
+Er is één canonieke ruwe set (`hp_supply_temperature_c`, `hp_return_temperature_c`,
+`hp_flow_lpm`) en de interpretatie loopt via `hp_mode`.
+
+Programmatic usage:
+
+```python
+from home_optimizer.sensors import LocalBackend
+from home_optimizer.telemetry import (
+	BufferedTelemetryCollector,
+	TelemetryCollectorSettings,
+	TelemetryRepository,
+)
+
+settings = TelemetryCollectorSettings(database_url="sqlite:///telemetry.sqlite3")
+repository = TelemetryRepository(database_url=settings.database_url)
+backend = LocalBackend.from_json_file("sensors.json")
+collector = BufferedTelemetryCollector(backend=backend, repository=repository, settings=settings)
+
+collector.start()
+# ... service draait ...
+collector.shutdown(flush=True)
+```
+
 ## Tests draaien
 
 ```bash

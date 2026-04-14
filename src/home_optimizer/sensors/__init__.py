@@ -12,14 +12,24 @@ Quick-start (Home Assistant addon / standalone)
 
     # 1. Live sensor readings from HA
     backend = HomeAssistantBackend(
-        room_temp=HAEntityConfig("sensor.living_room_temperature"),
-        pv_power=HAEntityConfig("sensor.pv_inverter_power_w", scale=0.001),  # W -> kW
-        hp_power=HAEntityConfig("sensor.heat_pump_power_kw"),
+        room_temperature=HAEntityConfig("sensor.living_room_temperature"),
+        outdoor_temperature=HAEntityConfig("sensor.outdoor_temperature"),
+        hp_supply_temperature=HAEntityConfig("sensor.heat_pump_supply_temperature"),
+        hp_return_temperature=HAEntityConfig("sensor.heat_pump_return_temperature"),
+        hp_flow_lpm=HAEntityConfig("sensor.heat_pump_flow_lpm"),
+        hp_electric_power=HAEntityConfig("sensor.heat_pump_power_kw"),
+        hp_mode_entity_id="sensor.heat_pump_mode",
+        grid_import=HAEntityConfig("sensor.grid_import_power_w", scale=0.001),
+        grid_export=HAEntityConfig("sensor.grid_export_power_w", scale=0.001),
+        pv_output=HAEntityConfig("sensor.pv_inverter_power_w", scale=0.001),
+        thermostat_setpoint=HAEntityConfig("sensor.room_setpoint_temperature"),
+        dhw_top_temperature=HAEntityConfig("sensor.dhw_top_temperature"),
+        dhw_bottom_temperature=HAEntityConfig("sensor.dhw_bottom_temperature"),
         base_url="http://homeassistant.local:8123",   # omit in addon mode
         token="YOUR_LONG_LIVED_TOKEN",                # omit in addon mode
     )
     readings = backend.read_all()
-    print(readings.room_temperature_c, readings.pv_power_kw, readings.hp_power_kw)
+    print(readings.room_temperature_c, readings.hp_electric_power_kw, readings.hp_mode)
 
     # 2. Weather forecast from Open-Meteo (Amsterdam, south-facing windows)
     weather = OpenMeteoClient(latitude=52.37, longitude=4.90).get_forecast(horizon_hours=24)
@@ -28,7 +38,7 @@ Quick-start (Home Assistant addon / standalone)
     forecast = build_forecast(
         weather,
         price_eur_per_kwh=0.25,
-        pv_power_kw=readings.pv_power_kw,
+        pv_power_kw=readings.pv_output_kw,
         room_temperature_ref_c=21.0,
     )
 
@@ -38,7 +48,7 @@ Quick-start (local / standalone, no HA)
 
     from home_optimizer.sensors import LocalBackend, OpenMeteoClient, build_forecast
 
-    backend = LocalBackend(room_temperature_c=20.5, pv_power_kw=1.2, hp_power_kw=2.0)
+    backend = LocalBackend.from_json_file("sensors.json")
     # or read from env vars:  backend = LocalBackend.from_env()
 """
 
