@@ -202,10 +202,15 @@ class MPCParameters:
     Q_c:             Comfort weighting on (T_r - T_ref)² [dimensionless].
     R_c:             Regularisation weighting on P_UFH² (prevents power spikes).
     Q_N:             Terminal comfort weighting.
-    P_max:           Maximum UFH power [kW].
+    P_max:           Maximum UFH **thermal** power [kW].
     delta_P_max:     Maximum ramp-rate per step [kW/step].
     T_min:           Minimum allowed room temperature [°C].
     T_max:           Maximum allowed room temperature [°C].
+    cop_ufh:         Coefficient of Performance, UFH mode [dimensionless].
+                     The electrical power drawn is P_UFH / cop_ufh.
+                     Must satisfy 1 < cop_ufh ≤ cop_max (Fail-Fast, §14.1).
+    cop_max:         Upper bound on COP for Fail-Fast validation [dimensionless].
+                     A COP above this value indicates a sensor or model error.
     rho_factor:      Soft-constraint penalty multiplier: ρ = rho_factor × max(Q_c, 1).
     greedy:          Numerical tuning for the greedy fallback solver.
     """
@@ -218,6 +223,8 @@ class MPCParameters:
     delta_P_max: float
     T_min: float
     T_max: float
+    cop_ufh: float
+    cop_max: float
     rho_factor: float = 1000.0
     greedy: GreedySolverConfig = field(default_factory=GreedySolverConfig)
 
@@ -234,6 +241,17 @@ class MPCParameters:
             raise ValueError("T_min must be ≤ T_max.")
         if self.rho_factor <= 0.0:
             raise ValueError("rho_factor must be strictly positive.")
+        # §14.1 Fail-Fast COP validation: COP must be physically meaningful
+        if self.cop_max <= 1.0:
+            raise ValueError("cop_max must be strictly greater than 1.")
+        if self.cop_ufh <= 1.0:
+            raise ValueError(
+                f"cop_ufh={self.cop_ufh} is physically impossible: COP must be > 1."
+            )
+        if self.cop_ufh > self.cop_max:
+            raise ValueError(
+                f"cop_ufh={self.cop_ufh} exceeds cop_max={self.cop_max}."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +265,16 @@ class DHWMPCParameters:
 
     Parameters
     ----------
-    P_dhw_max:              Maximum thermal power to the bottom layer [kW].
+    P_dhw_max:              Maximum **thermal** power to the bottom layer [kW].
     delta_P_dhw_max:        Maximum ramp-rate per step [kW/step].
     T_dhw_min:              Minimum tap (top-layer) temperature for comfort [°C].
     T_legionella:           Legionella prevention temperature [°C] (typically 60).
     legionella_period_steps:  Steps between mandatory legionella cycles.
     legionella_duration_steps: Minimum consecutive steps at T_legionella.
+    cop_dhw:                Coefficient of Performance, DHW mode [dimensionless].
+                            The electrical power drawn is P_dhw / cop_dhw.
+                            Must satisfy 1 < cop_dhw ≤ cop_max (Fail-Fast, §14.1).
+    cop_max:                Upper bound on COP for Fail-Fast validation [dimensionless].
     comfort_rho_factor:     Soft-constraint penalty multiplier for T_top < T_dhw_min.
     legionella_rho_factor:  Soft-constraint penalty multiplier for T_top < T_legionella.
     """
@@ -263,6 +285,8 @@ class DHWMPCParameters:
     T_legionella: float
     legionella_period_steps: int
     legionella_duration_steps: int
+    cop_dhw: float
+    cop_max: float
     comfort_rho_factor: float = 1000.0
     legionella_rho_factor: float = 1e6
 
@@ -282,6 +306,17 @@ class DHWMPCParameters:
             raise ValueError("comfort_rho_factor must be strictly positive.")
         if self.legionella_rho_factor <= 0.0:
             raise ValueError("legionella_rho_factor must be strictly positive.")
+        # §14.1 Fail-Fast COP validation
+        if self.cop_max <= 1.0:
+            raise ValueError("cop_max must be strictly greater than 1.")
+        if self.cop_dhw <= 1.0:
+            raise ValueError(
+                f"cop_dhw={self.cop_dhw} is physically impossible: COP must be > 1."
+            )
+        if self.cop_dhw > self.cop_max:
+            raise ValueError(
+                f"cop_dhw={self.cop_dhw} exceeds cop_max={self.cop_max}."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -295,20 +330,22 @@ class CombinedMPCParameters:
 
     Parameters
     ----------
-    ufh:        UFH-specific MPC parameters (horizon, weights, bounds).
-    dhw:        DHW-specific MPC parameters (bounds, legionella requirements).
-    P_hp_max:   Maximum total heat-pump output (UFH + DHW combined) [kW].
+    ufh:              UFH-specific MPC parameters (horizon, weights, bounds, cop_ufh).
+    dhw:              DHW-specific MPC parameters (bounds, legionella, cop_dhw).
+    P_hp_max_elec:    Maximum total heat-pump **electrical** power budget [kW].
+                      The constraint enforced is:
+                          P_UFH / COP_UFH + P_dhw / COP_dhw ≤ P_hp_max_elec
+                      This correctly models a shared heat pump limited by its
+                      electrical capacity (§14, shared WP constraint).
     """
 
     ufh: MPCParameters
     dhw: DHWMPCParameters
-    P_hp_max: float
+    P_hp_max_elec: float
 
     def __post_init__(self) -> None:
-        if self.P_hp_max <= 0.0:
-            raise ValueError("P_hp_max must be strictly positive.")
-        if self.ufh.horizon_steps != self.ufh.horizon_steps:  # future-proof placeholder
-            pass
+        if self.P_hp_max_elec <= 0.0:
+            raise ValueError("P_hp_max_elec must be strictly positive.")
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +402,13 @@ class ForecastHorizon:
     internal_gains_kw:       Q_int forecast [kW], length N.
     price_eur_per_kwh:       Dynamic electricity tariff p[k] [€/kWh], length N.
     room_temperature_ref_c:  Comfort setpoint T_ref [°C], length N+1.
+    pv_kw:                   PV generation forecast [kW], length N.
+                             ``None`` means no PV installed → zeros.
+    cop_ufh_k:               Time-varying COP for UFH mode [dimensionless], length N.
+                             If ``None``, the scalar ``MPCParameters.cop_ufh`` is used.
+                             Typically a function of T_out[k] (colder outside → lower COP).
+                             All values must be > 1 (validated in MPC controller against
+                             the cop_max from MPCParameters).
     """
 
     outdoor_temperature_c: np.ndarray
@@ -374,6 +418,8 @@ class ForecastHorizon:
     room_temperature_ref_c: np.ndarray
     #: PV generation forecast [kW], length N.  ``None`` means no PV installed → zeros.
     pv_kw: np.ndarray | None = None
+    #: Time-varying UFH COP over horizon [dimensionless], length N.  ``None`` → use scalar.
+    cop_ufh_k: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         t_out = _as_1d("outdoor_temperature_c", self.outdoor_temperature_c)
@@ -408,6 +454,17 @@ class ForecastHorizon:
                 raise ValueError(f"pv_kw must have length {n}.")
             if np.any(pv < 0.0):
                 raise ValueError("pv_kw cannot be negative.")
+
+        # Time-varying COP: validate length and physical lower bound (> 1).
+        # Upper-bound check against cop_max is deferred to the MPC controller,
+        # which has access to MPCParameters.
+        if self.cop_ufh_k is not None:
+            cop_arr = _as_1d("cop_ufh_k", self.cop_ufh_k)
+            if cop_arr.size != n:
+                raise ValueError(f"cop_ufh_k must have length {n}.")
+            if np.any(cop_arr <= 1.0):
+                raise ValueError("cop_ufh_k: all COP values must be > 1 (physical lower bound).")
+            object.__setattr__(self, "cop_ufh_k", cop_arr)
 
         object.__setattr__(self, "outdoor_temperature_c", t_out)
         object.__setattr__(self, "gti_w_per_m2", gti)
@@ -473,12 +530,19 @@ class DHWForecastHorizon:
     t_amb_c:             Ambient temperature around the boiler T_amb [°C], length N.
     legionella_required: Boolean mask — True if T_top ≥ T_legionella is required,
                          length N.  Set by an external legionella scheduler.
+    cop_dhw_k:           Time-varying COP for DHW mode [dimensionless], length N.
+                         If ``None``, the scalar ``DHWMPCParameters.cop_dhw`` is used.
+                         Typically a function of T_bot[k] (higher target temp → lower COP).
+                         All values must be > 1 (validated in MPC controller against
+                         the cop_max from DHWMPCParameters).
     """
 
     v_tap_m3_per_h: np.ndarray
     t_mains_c: np.ndarray
     t_amb_c: np.ndarray
     legionella_required: np.ndarray
+    #: Time-varying DHW COP over horizon [dimensionless], length N.  ``None`` → use scalar.
+    cop_dhw_k: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         v_tap = _as_1d("v_tap_m3_per_h", self.v_tap_m3_per_h)
@@ -494,6 +558,15 @@ class DHWForecastHorizon:
             raise ValueError("legionella_required must have length N.")
         if np.any(v_tap < 0.0):
             raise ValueError("v_tap_m3_per_h cannot be negative.")
+
+        # Time-varying COP: validate length and physical lower bound (> 1).
+        if self.cop_dhw_k is not None:
+            cop_arr = _as_1d("cop_dhw_k", self.cop_dhw_k)
+            if cop_arr.size != n:
+                raise ValueError(f"cop_dhw_k must have length {n}.")
+            if np.any(cop_arr <= 1.0):
+                raise ValueError("cop_dhw_k: all COP values must be > 1 (physical lower bound).")
+            object.__setattr__(self, "cop_dhw_k", cop_arr)
 
         object.__setattr__(self, "v_tap_m3_per_h", v_tap)
         object.__setattr__(self, "t_mains_c", t_mains)

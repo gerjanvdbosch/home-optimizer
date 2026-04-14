@@ -49,6 +49,9 @@ def build_demo() -> tuple[
         delta_P_max=1.0,
         T_min=19.0,
         T_max=22.5,
+        # §14.1: COP for UFH mode (air source HP, ~6°C outdoor → COP ≈ 3.5)
+        cop_ufh=3.5,
+        cop_max=7.0,
     )
     forecast = ForecastHorizon(
         outdoor_temperature_c=np.array([6, 6, 5, 5, 4, 4, 5, 6, 7, 7, 6, 6], dtype=float),

@@ -152,7 +152,37 @@ class RunRequest(BaseModel):
     dhw_v_tap_m3_per_h: float = Field(0.01, ge=0.0, le=0.2, description="Avg tap-water flow rate [m³/h]")
     dhw_t_mains_c: float = Field(10.0, ge=0.0, le=25.0, description="Mains water temperature [°C]")
     dhw_t_amb_c: float = Field(20.0, ge=5.0, le=35.0, description="Ambient temp around boiler [°C]")
-    P_hp_max: float = Field(6.0, ge=1.0, le=30.0, description="Shared heat-pump max power [kW]")
+    P_hp_max_elec: float = Field(
+        2.5, ge=0.5, le=30.0,
+        description=(
+            "Shared heat-pump maximum **electrical** power budget [kW]. "
+            "Enforces P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec (§14)."
+        ),
+    )
+
+    # ── COP parameters (§14.1) ────────────────────────────────────────────
+    cop_ufh: float = Field(
+        3.5, ge=1.01, le=10.0,
+        description=(
+            "Coefficient of Performance, UFH heat-pump mode [-]. "
+            "Electrical power = P_UFH / cop_ufh. Must be > 1."
+        ),
+    )
+    cop_max: float = Field(
+        7.0, ge=1.01, le=15.0,
+        description="Upper bound on COP for Fail-Fast validation [-].",
+    )
+    cop_dhw: float = Field(
+        3.0, ge=1.01, le=10.0,
+        description=(
+            "Coefficient of Performance, DHW heat-pump mode [-]. "
+            "Electrical power = P_dhw / cop_dhw. Must be > 1."
+        ),
+    )
+    cop_max_dhw: float = Field(
+        7.0, ge=1.01, le=15.0,
+        description="Upper bound on COP for DHW Fail-Fast validation [-].",
+    )
 
 
 class OptimizeResponse(BaseModel):
@@ -377,6 +407,9 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         horizon_steps=N, Q_c=req.Q_c, R_c=req.R_c, Q_N=req.Q_N,
         P_max=req.P_max, delta_P_max=req.delta_P_max,
         T_min=req.T_min, T_max=req.T_max,
+        # §14.1: COP for UFH mode; electrical power = thermal / cop_ufh
+        cop_ufh=req.cop_ufh,
+        cop_max=req.cop_max,
     )
 
     ufh_forecast = _build_ufh_forecast(req, start_hour)
@@ -403,9 +436,12 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
                 T_dhw_min=req.dhw_T_min, T_legionella=req.dhw_T_legionella,
                 legionella_period_steps=req.dhw_legionella_period_steps,
                 legionella_duration_steps=req.dhw_legionella_duration_steps,
+                # §14.1: COP for DHW mode; electrical power = thermal / cop_dhw
+                cop_dhw=req.cop_dhw,
+                cop_max=req.cop_max_dhw,
             )
             controller_params = CombinedMPCParameters(
-                ufh=mpc_params, dhw=dhw_mpc_params, P_hp_max=req.P_hp_max,
+                ufh=mpc_params, dhw=dhw_mpc_params, P_hp_max_elec=req.P_hp_max_elec,
             )
             dhw_model = DHWModel(dhw_params)
             dhw_forecast = _build_dhw_forecast(req, N)
@@ -436,17 +472,24 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # ── Compute energy / cost summaries ──────────────────────────────────
-    P_hp_total = P_UFH + P_dhw
-    P_import = np.maximum(P_hp_total - pv_kw, 0.0)
-    total_energy = float(np.sum(P_hp_total) * dt)
+    # §14.1: Electrical power = thermal / COP.  Costs are always on electrical basis.
+    P_UFH_elec = P_UFH / req.cop_ufh
+    P_dhw_elec = P_dhw / req.cop_dhw
+    P_hp_total_elec = P_UFH_elec + P_dhw_elec     # total electrical demand [kW]
+    P_hp_total_therm = P_UFH + P_dhw               # total thermal output [kW]
+    P_import = np.maximum(P_hp_total_elec - pv_kw, 0.0)  # net grid import [kW elec]
+    # Thermal energy delivered (useful heat) [kWh thermal]
+    total_energy = float(np.sum(P_hp_total_therm) * dt)
+    # Electricity cost based on net grid import [€]
     total_cost_steps = P_import * prices * dt
     total_cost = float(np.sum(total_cost_steps))
     pv_total = float(np.sum(pv_kw) * dt)
     net_grid = float(np.sum(P_import) * dt)
     ufh_energy = float(np.sum(P_UFH) * dt)
     dhw_energy = float(np.sum(P_dhw) * dt)
-    ufh_cost_weights = np.divide(P_UFH, P_hp_total, out=np.zeros_like(P_UFH), where=P_hp_total > 0.0)
-    dhw_cost_weights = np.divide(P_dhw, P_hp_total, out=np.zeros_like(P_dhw), where=P_hp_total > 0.0)
+    # Cost attribution by electrical share (proportional to actual electricity drawn)
+    ufh_cost_weights = np.divide(P_UFH_elec, P_hp_total_elec, out=np.zeros_like(P_UFH_elec), where=P_hp_total_elec > 0.0)
+    dhw_cost_weights = np.divide(P_dhw_elec, P_hp_total_elec, out=np.zeros_like(P_dhw_elec), where=P_hp_total_elec > 0.0)
     ufh_grid_cost = float(np.sum(total_cost_steps * ufh_cost_weights))
     dhw_grid_cost = float(np.sum(total_cost_steps * dhw_cost_weights))
 
@@ -475,7 +518,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         dhw_grid_cost_eur=dhw_grid_cost,
         first_ufh_power_kw=float(P_UFH[0]),
         first_dhw_power_kw=float(P_dhw[0]),
-        first_total_hp_power_kw=float(P_hp_total[0]),
+        first_total_hp_power_kw=float(P_hp_total_therm[0]),
         max_ufh_comfort_violation_c=max_comfort_viol,
         pv_total_kwh=pv_total,
         net_grid_energy_kwh=net_grid,

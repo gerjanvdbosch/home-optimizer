@@ -41,6 +41,9 @@ MPC_PARAMS = MPCParameters(
     delta_P_max=1.0,
     T_min=19.0,
     T_max=22.5,
+    # §14.1: scalar COP for UFH heat-pump mode
+    cop_ufh=3.5,
+    cop_max=7.0,
 )
 DHW_PARAMS = DHWParameters(
     dt_hours=1.0,
@@ -56,6 +59,9 @@ DHW_MPC_PARAMS = DHWMPCParameters(
     T_legionella=60.0,
     legionella_period_steps=168,
     legionella_duration_steps=1,
+    # §14.1: scalar COP for DHW heat-pump mode (higher lift → lower COP than UFH)
+    cop_dhw=3.0,
+    cop_max=7.0,
 )
 
 
@@ -137,6 +143,8 @@ def test_mpc_always_returns_solution_when_physics_prevent_comfort() -> None:
         delta_P_max=1.0,
         T_min=19.0,  # physics prevent this when outdoor=2°C and slab is cold
         T_max=22.5,
+        cop_ufh=3.5,
+        cop_max=7.0,
     )
     controller = MPCController(ufh_model=model, params=tight_params)
     # Scenario that was previously infeasible
@@ -168,13 +176,17 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
     """The canonical MPCController must solve the combined UFH + DHW problem."""
     ufh_model = ThermalModel(THERMAL_PARAMS)
     dhw_model = DHWModel(DHW_PARAMS)
+    # P_hp_max_elec: maximum electrical budget for the shared heat pump.
+    # With COP_UFH=3.5 and P_UFH_max=4.0 → max UFH elec ≈ 1.14 kW.
+    # With COP_DHW=3.0 and P_dhw_max=3.0 → max DHW elec = 1.0 kW.
+    # Setting 3.0 kW elec is non-binding, ensuring the problem is always feasible.
     controller = MPCController(
         ufh_model=ufh_model,
         dhw_model=dhw_model,
         params=CombinedMPCParameters(
             ufh=MPC_PARAMS,
             dhw=DHW_MPC_PARAMS,
-            P_hp_max=6.0,
+            P_hp_max_elec=3.0,
         ),
     )
     ufh_forecast = ForecastHorizon(
@@ -205,5 +217,132 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
     assert sol.predicted_states_c.shape == (MPC_PARAMS.horizon_steps + 1, 4)
     assert np.all(sol.ufh_control_sequence_kw >= -1e-6)
     assert np.all(sol.dhw_control_sequence_kw >= -1e-6)
-    assert np.all(sol.ufh_control_sequence_kw + sol.dhw_control_sequence_kw <= 6.0 + 1e-5)
+    # §14: Verify the shared electrical budget constraint:
+    #   P_UFH / COP_UFH + P_dhw / COP_dhw ≤ P_hp_max_elec
+    elec_combined = (
+        sol.ufh_control_sequence_kw / MPC_PARAMS.cop_ufh
+        + sol.dhw_control_sequence_kw / DHW_MPC_PARAMS.cop_dhw
+    )
+    assert np.all(elec_combined <= 3.0 + 1e-5), (
+        f"Electrical budget violated: max={elec_combined.max():.4f} kW > 3.0 kW"
+    )
+
+
+# ---------------------------------------------------------------------------
+# COP Fail-Fast validation tests (§14.1)
+# ---------------------------------------------------------------------------
+
+
+def test_cop_validation_ufh_rejects_cop_below_or_equal_one() -> None:
+    """MPCParameters must raise ValueError when cop_ufh ≤ 1 (physically impossible)."""
+    with pytest.raises(ValueError, match="cop_ufh"):
+        MPCParameters(
+            horizon_steps=4, Q_c=1.0, R_c=0.01, Q_N=1.0,
+            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=23.0,
+            cop_ufh=1.0,   # exactly 1 is invalid (must be strictly > 1)
+            cop_max=7.0,
+        )
+
+
+def test_cop_validation_ufh_rejects_cop_of_zero() -> None:
+    """MPCParameters must raise ValueError when cop_ufh ≤ 0."""
+    with pytest.raises(ValueError, match="cop_ufh"):
+        MPCParameters(
+            horizon_steps=4, Q_c=1.0, R_c=0.01, Q_N=1.0,
+            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=23.0,
+            cop_ufh=0.0,
+            cop_max=7.0,
+        )
+
+
+def test_cop_validation_ufh_rejects_cop_above_max() -> None:
+    """MPCParameters must raise ValueError when cop_ufh > cop_max."""
+    with pytest.raises(ValueError, match="cop_max"):
+        MPCParameters(
+            horizon_steps=4, Q_c=1.0, R_c=0.01, Q_N=1.0,
+            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=23.0,
+            cop_ufh=8.0,   # exceeds cop_max
+            cop_max=7.0,
+        )
+
+
+def test_cop_validation_dhw_rejects_cop_below_or_equal_one() -> None:
+    """DHWMPCParameters must raise ValueError when cop_dhw ≤ 1."""
+    with pytest.raises(ValueError, match="cop_dhw"):
+        DHWMPCParameters(
+            P_dhw_max=3.0, delta_P_dhw_max=1.0, T_dhw_min=50.0,
+            T_legionella=60.0, legionella_period_steps=168, legionella_duration_steps=1,
+            cop_dhw=0.5,   # physically impossible
+            cop_max=7.0,
+        )
+
+
+def test_cop_validation_dhw_rejects_cop_above_max() -> None:
+    """DHWMPCParameters must raise ValueError when cop_dhw > cop_max."""
+    with pytest.raises(ValueError, match="cop_max"):
+        DHWMPCParameters(
+            P_dhw_max=3.0, delta_P_dhw_max=1.0, T_dhw_min=50.0,
+            T_legionella=60.0, legionella_period_steps=168, legionella_duration_steps=1,
+            cop_dhw=9.0,
+            cop_max=7.0,
+        )
+
+
+def test_cop_time_varying_forecast_rejects_cop_below_one() -> None:
+    """ForecastHorizon must raise ValueError if any cop_ufh_k value is ≤ 1."""
+    n = 4
+    with pytest.raises(ValueError, match="cop_ufh_k"):
+        ForecastHorizon(
+            outdoor_temperature_c=np.full(n, 10.0),
+            gti_w_per_m2=np.zeros(n),
+            internal_gains_kw=np.full(n, 0.3),
+            price_eur_per_kwh=np.full(n, 0.25),
+            room_temperature_ref_c=np.full(n + 1, 21.0),
+            cop_ufh_k=np.array([3.5, 3.2, 0.9, 3.0]),  # 0.9 is invalid
+        )
+
+
+def test_cop_time_varying_forecast_valid() -> None:
+    """A valid time-varying cop_ufh_k array must be accepted without error."""
+    n = 4
+    fh = ForecastHorizon(
+        outdoor_temperature_c=np.full(n, 5.0),
+        gti_w_per_m2=np.zeros(n),
+        internal_gains_kw=np.full(n, 0.3),
+        price_eur_per_kwh=np.full(n, 0.25),
+        room_temperature_ref_c=np.full(n + 1, 21.0),
+        cop_ufh_k=np.array([4.0, 3.8, 3.5, 3.2]),  # valid: all > 1
+    )
+    assert fh.cop_ufh_k is not None
+    assert fh.cop_ufh_k.shape == (n,)
+
+
+def test_mpc_cost_uses_electrical_power() -> None:
+    """With COP > 1, the MPC cost must be strictly lower than with COP=1 assumption.
+
+    A higher COP means the same thermal output costs less electricity.
+    The MPC objective value must decrease as the COP increases (cheaper electricity).
+    """
+    model = ThermalModel(THERMAL_PARAMS)
+    forecast = _feasible_forecast(n=8)
+
+    def _solve_with_cop(cop: float) -> float:
+        params = MPCParameters(
+            horizon_steps=8, Q_c=10.0, R_c=0.05, Q_N=15.0,
+            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=22.5,
+            cop_ufh=cop, cop_max=8.0,
+        )
+        sol = MPCController(ufh_model=model, params=params).solve(
+            initial_ufh_state_c=np.array([20.8, 24.0]),
+            ufh_forecast=forecast,
+            previous_p_ufh_kw=0.5,
+        )
+        return sol.objective_value
+
+    cost_low_cop = _solve_with_cop(cop=2.0)   # low COP → expensive electricity
+    cost_high_cop = _solve_with_cop(cop=5.0)  # high COP → cheap electricity
+    assert cost_high_cop < cost_low_cop, (
+        "Higher COP must yield lower objective (cheaper electrical energy)."
+    )
+
 

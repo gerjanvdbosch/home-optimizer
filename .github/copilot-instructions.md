@@ -357,20 +357,25 @@ $$x_{tot}[k+1] = \underbrace{\begin{bmatrix} A_{UFH} & 0 \\ 0 & A_{dhw}[k] \end{
 
 ### 14.1 COP & Elektriciteitsverbruik
 
-De kostfunctie minimaliseert **elektrisch** verbruik, niet thermisch. Een warmtepomp levert meer thermische energie dan hij elektrisch verbruikt; de verhouding is de Coefficient of Performance (COP):
+**Modelaanname & Pre-calculatie Tijdsvariabele COP (Carnot-benadering):**
+Om de MPC als een lineair/convex QP-probleem in CVXPY te houden, mag de COP niet afhankelijk zijn van de beslissingsvariabelen (zoals actuele state-temperaturen) *tijdens* de optimalisatie. De arrays $COP_{UFH}[k]$ en $COP_{dhw}[k]$ worden daarom **voorafgaand aan de MPC-stap berekend** (pre-calculatie) op basis van de weersverwachting ($T_{out}[k]$) en de aangenomen aanvoertemperaturen.
 
-$$P_{UFH,elec}[k] = \frac{P_{UFH}[k]}{COP_{UFH}[k]}, \qquad P_{dhw,elec}[k] = \frac{P_{dhw}[k]}{COP_{dhw}[k]}$$
+De fysica-gebaseerde berekening hiervoor gebruikt de Carnot-efficiëntie:
 
-**Implementatie-eisen voor de COP:**
+$$COP[k] = \eta_{Carnot} \cdot \frac{T_{cond}[k]}{T_{cond}[k] - T_{evap}[k]}$$
 
-| Situatie | Aanpak |
-|---|---|
-| Constante COP | Voeg `cop_ufh` en `cop_dhw` toe als scalaire parameters in de configuratie |
-| Tijdsvariabele COP | Geef `cop_ufh[k]` en `cop_dhw[k]` mee als array over de horizon (bijv. functie van $T_{out}[k]$ of $T_{bot}[k]$) |
+Waarbij (in Kelvin):
+$$T_{cond}[k] = (T_{aanvoer} + \Delta T_{cond}) + 273.15$$
+$$T_{evap}[k]  = (T_{out}[k]  - \Delta T_{evap}) + 273.15$$
 
-> **Modelaanname:** $COP > 1$ te allen tijde. Valideer dit als Fail-Fast assertion bij het laden van de parameters. Een COP ≤ 0 of COP > een configureerbaar maximum ($COP_{max}$) moet een exception gooien.
->
-> **Let op de eenheden:** $P_{UFH}$ en $P_{dhw}$ zijn thermisch [kW]; $P_{UFH,elec}$ en $P_{dhw,elec}$ zijn elektrisch [kW]. De thermische vermogens zijn de beslissingsvariabelen van de MPC (ze sturen de state-dynamica); de elektrische vermogens verschijnen uitsluitend in de kostfunctie en de gedeelde vermogensconstraint.
+**Implementatie-eis:** 
+- Voor **UFH** wordt een weersafhankelijke stooklijn of vaste ontwerptemperatuur gebruikt voor $T_{aanvoer}$ (bijv. 30–35 °C).
+- Voor **DHW** wordt de doeltemperatuur van de tank gebruikt voor $T_{aanvoer}$ (bijv. 55 °C of $T_{leg}$).
+- De parameters $\eta_{Carnot}$ (typisch 0.4–0.6), $\Delta T_{cond}$ (typisch 2–5 K) en $\Delta T_{evap}$ (typisch 2–5 K) moeten in de configuratie (Pydantic) als benoemde variabelen aanwezig zijn.
+
+**Let op de eenheden:** $P_{UFH}$ en $P_{dhw}$ zijn thermisch [kW]; $P_{UFH,elec}$ en $P_{dhw,elec}$ zijn elektrisch [kW]. De thermische vermogens zijn de beslissingsvariabelen van de MPC (ze sturen de state-dynamica); de elektrische vermogens verschijnen uitsluitend in de kostfunctie en de gedeelde vermogensconstraint.
+
+**Fail-Fast:** Na de Carnot pre-calculatie loopt er een check: forceer $COP > 1.0$ te allen tijde. Valideer dit vóór de matrices naar CVXPY gaan. Een $COP \leq 1.0$ of $COP > COP_{max}$ gooit een exception.
 
 ### 14.2 Kostfunctie
 

@@ -138,10 +138,77 @@ class MPCController:
         return self.params.dhw if isinstance(self.params, CombinedMPCParameters) else None
 
     @property
-    def _p_hp_max(self) -> float:
+    def _p_hp_max_elec(self) -> float:
+        """Maximum **electrical** power budget for the shared heat pump [kW].
+
+        In combined mode this is ``CombinedMPCParameters.P_hp_max_elec``.
+        In UFH-only mode there is no shared constraint; the property returns
+        the maximum UFH electrical power (P_max / cop_ufh) for internal use only.
+        """
         if isinstance(self.params, CombinedMPCParameters):
-            return self.params.P_hp_max
-        return self._p_ufh.P_max
+            return self.params.P_hp_max_elec
+        # UFH-only: no shared constraint; return the UFH electrical ceiling
+        return self._p_ufh.P_max / self._p_ufh.cop_ufh
+
+    def _resolve_cop_ufh(self, forecast: ForecastHorizon) -> np.ndarray:
+        """Return the UFH COP as an array of length N [dimensionless].
+
+        Priority:
+        1. ``forecast.cop_ufh_k`` (time-varying) if provided.
+        2. Scalar ``MPCParameters.cop_ufh`` expanded to length N.
+
+        The cop_max upper-bound check is enforced here against the scalar from
+        MPCParameters (the forecast __post_init__ already verified > 1).
+
+        Args:
+            forecast: UFH forecast horizon, optionally containing cop_ufh_k.
+
+        Returns:
+            Array of COP values, shape (N,) [dimensionless, > 1].
+
+        Raises:
+            ValueError: If any time-varying value exceeds cop_max.
+        """
+        p_ufh = self._p_ufh
+        N = p_ufh.horizon_steps
+        if forecast.cop_ufh_k is not None:
+            cop = np.asarray(forecast.cop_ufh_k, dtype=float)
+            if np.any(cop > p_ufh.cop_max):
+                raise ValueError(
+                    f"cop_ufh_k contains values > cop_max={p_ufh.cop_max}."
+                )
+            return cop
+        # Expand scalar COP to a constant array (already validated > 1 in MPCParameters)
+        return np.full(N, p_ufh.cop_ufh)
+
+    def _resolve_cop_dhw(self, forecast: DHWForecastHorizon) -> np.ndarray:
+        """Return the DHW COP as an array of length N [dimensionless].
+
+        Priority:
+        1. ``forecast.cop_dhw_k`` (time-varying) if provided.
+        2. Scalar ``DHWMPCParameters.cop_dhw`` expanded to length N.
+
+        Args:
+            forecast: DHW forecast horizon, optionally containing cop_dhw_k.
+
+        Returns:
+            Array of COP values, shape (N,) [dimensionless, > 1].
+
+        Raises:
+            ValueError: If any time-varying value exceeds cop_max, or if DHW is
+                        not enabled.
+        """
+        p_dhw = self._p_dhw
+        assert p_dhw is not None, "DHW must be enabled to resolve DHW COP."
+        N = self._p_ufh.horizon_steps
+        if forecast.cop_dhw_k is not None:
+            cop = np.asarray(forecast.cop_dhw_k, dtype=float)
+            if np.any(cop > p_dhw.cop_max):
+                raise ValueError(
+                    f"cop_dhw_k contains values > cop_max={p_dhw.cop_max}."
+                )
+            return cop
+        return np.full(N, p_dhw.cop_dhw)
 
     def solve(
         self,
@@ -246,6 +313,11 @@ class MPCController:
         rho_ufh = p_ufh.rho_factor * max(p_ufh.Q_c, 1.0)
         has_pv = bool(np.any(pv > 0.0))
 
+        # §14.1 Resolve COP arrays over the horizon [dimensionless].
+        # Thermal power is the decision variable; electrical = thermal / COP.
+        cop_ufh = self._resolve_cop_ufh(ufh_forecast)
+        cop_dhw = self._resolve_cop_dhw(dhw_forecast) if self._dhw_enabled and dhw_forecast is not None else None
+
         A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
         n_states = A_list[0].shape[0]
 
@@ -266,22 +338,40 @@ class MPCController:
             u_k = cp.hstack([u_ufh[k:k + 1], u_dhw[k:k + 1]]) if self._dhw_enabled else u_ufh[k:k + 1]  # type: ignore[index]
             constraints.append(x[:, k + 1] == A_list[k] @ x[:, k] + B_mat @ u_k + E_list[k] @ D_tot[k])
 
-            P_hp_k = u_ufh[k] + (u_dhw[k] if self._dhw_enabled else 0.0)  # type: ignore[index]
+            # §14.1: Electrical power = thermal / COP.  COP values are known floats,
+            # so these are affine CVXPY expressions (linear in the decision variables).
+            inv_cop_ufh_k = 1.0 / float(cop_ufh[k])
+            P_ufh_elec_k = u_ufh[k] * inv_cop_ufh_k  # [kW elec]
+
+            if self._dhw_enabled:
+                assert u_dhw is not None and cop_dhw is not None
+                inv_cop_dhw_k = 1.0 / float(cop_dhw[k])
+                P_dhw_elec_k = u_dhw[k] * inv_cop_dhw_k  # type: ignore[index]  # [kW elec]
+                P_elec_k = P_ufh_elec_k + P_dhw_elec_k
+            else:
+                P_elec_k = P_ufh_elec_k
+
             if has_pv:
                 assert P_import is not None
-                constraints.append(P_import[k] >= P_hp_k - float(pv[k]))
+                # Net grid import = electrical HP demand minus on-site PV generation.
+                constraints.append(P_import[k] >= P_elec_k - float(pv[k]))
 
+            # UFH actuator bounds (thermal) and ramp-rate
             constraints.extend([u_ufh[k] >= 0.0, u_ufh[k] <= p_ufh.P_max])
             prev_ufh = prev_u_ufh if k == 0 else u_ufh[k - 1]
             constraints.append(cp.abs(u_ufh[k] - prev_ufh) <= p_ufh.delta_P_max)
 
             if self._dhw_enabled:
                 assert u_dhw is not None and p_dhw is not None
+                # DHW actuator bounds (thermal) and ramp-rate
                 constraints.extend([u_dhw[k] >= 0.0, u_dhw[k] <= p_dhw.P_dhw_max])  # type: ignore[index]
                 prev_dhw = prev_u_dhw if k == 0 else u_dhw[k - 1]  # type: ignore[index]
                 constraints.append(cp.abs(u_dhw[k] - prev_dhw) <= p_dhw.delta_P_dhw_max)  # type: ignore[index]
-                constraints.append(u_ufh[k] + u_dhw[k] <= self._p_hp_max)  # type: ignore[index]
+                # §14: Shared WP electrical budget constraint:
+                #   P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec
+                constraints.append(P_elec_k <= self._p_hp_max_elec)
 
+            # UFH comfort (soft constraints via slack variables)
             constraints.extend([
                 x[0, k + 1] >= p_ufh.T_min - s_lo_ufh[k],
                 x[0, k + 1] <= p_ufh.T_max + s_hi_ufh[k],
@@ -293,7 +383,12 @@ class MPCController:
                 if leg_req is not None and leg_req[k]:
                     constraints.append(x[2, k + 1] >= p_dhw.T_legionella - s_leg[k])
 
-            energy_cost_k = prices[k] * P_import[k] * dt if has_pv else prices[k] * P_hp_k * dt  # type: ignore[index]
+            # §14.2 Cost terms:
+            #   - Electrical energy cost: p[k] * (P_UFH/COP_UFH + P_dhw/COP_dhw) * dt  [€]
+            #   - Comfort quadratic penalty on room temperature deviation
+            #   - Regularisation on UFH thermal power (damps spikes)
+            #   - Soft-constraint penalties
+            energy_cost_k = prices[k] * P_import[k] * dt if has_pv else prices[k] * P_elec_k * dt  # type: ignore[index]
             cost_k = (
                 p_ufh.Q_c * cp.square(x[0, k] - refs[k])
                 + energy_cost_k
@@ -351,6 +446,14 @@ class MPCController:
         rho_ufh = p_ufh.rho_factor * max(p_ufh.Q_c, 1.0)
         leg_req = dhw_forecast.legionella_required if dhw_forecast is not None else None
 
+        # §14.1 Resolve COP arrays for the horizon
+        cop_ufh = self._resolve_cop_ufh(ufh_forecast)
+        cop_dhw = (
+            self._resolve_cop_dhw(dhw_forecast)
+            if self._dhw_enabled and dhw_forecast is not None
+            else None
+        )
+
         A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
 
         x = x0.copy()
@@ -378,19 +481,27 @@ class MPCController:
             best_score = np.inf
             best_u_ufh, best_u_dhw, best_xn = cands_ufh[0], 0.0, None
 
+            inv_cop_ufh_k = 1.0 / float(cop_ufh[k])
+            inv_cop_dhw_k = 1.0 / float(cop_dhw[k]) if cop_dhw is not None else 0.0
+
             for c_ufh in cands_ufh:
                 for c_dhw in cands_dhw:
-                    if c_ufh + c_dhw > self._p_hp_max + 1e-9:
+                    # §14 Shared WP constraint (electrical):
+                    #   P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec
+                    p_elec_k = c_ufh * inv_cop_ufh_k + c_dhw * inv_cop_dhw_k
+                    if self._dhw_enabled and p_elec_k > self._p_hp_max_elec + 1e-9:
                         continue
                     u_vec = np.array([c_ufh, c_dhw]) if self._dhw_enabled else np.array([c_ufh])
                     xn = A_list[k] @ x + B_mat @ u_vec + E_list[k] @ D_tot[k]
-                    p_import_k = max(0.0, c_ufh + c_dhw - float(pv[k]))
+
+                    # Net grid import after PV offset (electrical power basis)
+                    p_import_k = max(0.0, p_elec_k - float(pv[k]))
 
                     s_lo_ufh = max(p_ufh.T_min - xn[0], 0.0)
                     s_hi_ufh = max(xn[0] - p_ufh.T_max, 0.0)
                     score = (
                         p_ufh.Q_c * (x[0] - refs[k]) ** 2
-                        + prices[k] * p_import_k * dt
+                        + prices[k] * p_import_k * dt   # electrical energy cost [€]
                         + p_ufh.R_c * c_ufh ** 2
                         + rho_ufh * (s_lo_ufh ** 2 + s_hi_ufh ** 2)
                         + g.lookahead_weight * p_ufh.Q_N * max(refs[k + 1] - xn[0], 0.0) ** 2
@@ -421,7 +532,11 @@ class MPCController:
 
         objective = 0.0
         for k in range(N):
-            p_import_k = max(0.0, us_ufh_arr[k] + us_dhw_arr[k] - float(pv[k]))
+            # Reconstruct electrical import for objective accounting
+            p_elec_k = float(us_ufh_arr[k]) / float(cop_ufh[k])
+            if cop_dhw is not None:
+                p_elec_k += float(us_dhw_arr[k]) / float(cop_dhw[k])
+            p_import_k = max(0.0, p_elec_k - float(pv[k]))
             objective += (
                 p_ufh.Q_c * (xs_arr[k, 0] - refs[k]) ** 2
                 + prices[k] * p_import_k * dt
