@@ -163,16 +163,13 @@ def _temperature_figure(
     n = len(labels)
 
     # ── Comfort band as a single closed polygon ───────────────────────────
-    # Using fill="toself" on one trace avoids the ghost-line artefact that
-    # occurs when two separate boundary traces (T_max / T_min) with width=0
-    # inherit Plotly's default auto-colour (blue) and appear as extra lines.
     fig.add_trace(
         go.Scatter(
             x=labels + labels[::-1],
             y=[T_max] * n + [T_min] * n,
             fill="toself",
             fillcolor="rgba(100,149,237,0.18)",
-            line=dict(color="rgba(0,0,0,0)"),  # completely transparent boundary
+            line=dict(color="rgba(0,0,0,0)"),
             name="Comfortband",
             hoverinfo="skip",
             showlegend=True,
