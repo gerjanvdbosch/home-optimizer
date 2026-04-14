@@ -89,6 +89,31 @@ def test_step_and_matrix_form_agree(params: ThermalParameters) -> None:
     np.testing.assert_allclose(direct, matrix)
 
 
+def test_room_can_warm_without_solar_for_realistic_ufh_house() -> None:
+    params = ThermalParameters(
+        dt_hours=1.0,
+        C_r=6.0,
+        C_b=10.0,
+        R_br=1.0,
+        R_ro=10.0,
+        alpha=0.25,
+        eta=0.55,
+        A_glass=7.5,
+    )
+    model = ThermalModel(params)
+    x = np.array([20.5, 22.5])
+
+    x_next = model.step(
+        state=x,
+        control_kw=1.5,
+        outdoor_temperature_c=6.0,
+        solar_gain_kw_value=0.0,
+        internal_gain_kw=0.30,
+    )
+
+    assert x_next[0] > x[0], "A warmer slab plus UFH should be able to raise room temperature without solar gains."
+
+
 # ── observability and controllability ────────────────────────────────────────
 
 

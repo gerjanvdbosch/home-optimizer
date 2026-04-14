@@ -23,21 +23,20 @@ def build_demo() -> tuple[
     float,
     KalmanNoiseParameters,
 ]:
-    """Construct a representative winter-day demo configuration.
+    """Construct a representative demo for a 2023 Dutch terraced house with UFH.
 
-    The forecast uses mild outdoor conditions (≥10 °C) and a warm floor
-    initial state so the MPC problem is physically feasible under the
-    hard comfort bounds (T_min=19 °C, T_max=22.5 °C).
+    The defaults reflect a reasonably well insulated between-house dwelling with
+    a heat pump, south-facing glazing, and a pre-warmed floor slab.
     """
     params = ThermalParameters(
         dt_hours=1.0,
-        C_r=3.0,  # kWh/K  – room air + furniture
-        C_b=18.0,  # kWh/K  – concrete floor slab
-        R_br=2.5,  # K/kW   – floor → room
-        R_ro=4.0,  # K/kW   – room → outside
-        alpha=0.35,
-        eta=0.62,
-        A_glass=12.0,
+        C_r=6.0,  # kWh/K  – room air + light interior mass
+        C_b=10.0,  # kWh/K  – thermally active UFH floor zone
+        R_br=1.0,  # K/kW   – floor → room
+        R_ro=10.0,  # K/kW   – room → outside
+        alpha=0.25,
+        eta=0.55,
+        A_glass=7.5,
     )
     model = ThermalModel(params)
 
@@ -46,27 +45,27 @@ def build_demo() -> tuple[
         Q_c=8.0,
         R_c=0.05,
         Q_N=12.0,
-        P_max=4.0,
+        P_max=4.5,
         delta_P_max=1.0,
         T_min=19.0,
         T_max=22.5,
     )
     forecast = ForecastHorizon(
-        outdoor_temperature_c=np.array([10, 10, 9, 9, 8, 8, 9, 10, 11, 11, 10, 10], dtype=float),
-        gti_w_per_m2=np.array([0, 0, 40, 90, 150, 220, 220, 160, 80, 20, 0, 0], dtype=float),
-        internal_gains_kw=np.full(12, 0.35, dtype=float),
+        outdoor_temperature_c=np.array([6, 6, 5, 5, 4, 4, 5, 6, 7, 7, 6, 6], dtype=float),
+        gti_w_per_m2=np.array([0, 0, 20, 80, 160, 260, 300, 220, 120, 40, 0, 0], dtype=float),
+        internal_gains_kw=np.full(12, 0.30, dtype=float),
         price_eur_per_kwh=np.array(
             [0.34, 0.30, 0.27, 0.21, 0.18, 0.17, 0.18, 0.24, 0.32, 0.38, 0.41, 0.36],
             dtype=float,
         ),
         room_temperature_ref_c=np.array(
-            [20.0, 20.0, 20.5, 20.5, 21.0, 21.0, 21.0, 21.0, 21.0, 20.5, 20.5, 20.0, 20.0],
+            [20.0, 20.0, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.5, 20.0, 20.0],
             dtype=float,
         ),
     )
-    # Initial state: room slightly below setpoint, warm slab
-    initial_state_c = np.array([20.8, 24.0], dtype=float)
-    previous_power_kw = 0.5
+    # Initial state: room near setpoint, slab already a bit warmer than the air
+    initial_state_c = np.array([20.5, 22.5], dtype=float)
+    previous_power_kw = 0.8
 
     kalman_noise = KalmanNoiseParameters(
         process_covariance=np.diag([0.01, 0.015]),

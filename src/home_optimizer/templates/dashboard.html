@@ -204,41 +204,56 @@
     <div class="section-title">Huis (thermisch)</div>
 
     <div class="field">
-      <label>C_r &ndash; ruimtecapaciteit [kWh/K] <span id="vCr">3.0</span></label>
-      <input type="number" id="C_r" value="3.0" min="0.5" max="50" step="0.5"
+      <label>C_r &ndash; ruimtecapaciteit [kWh/K] <span id="vCr">6.0</span></label>
+      <input type="number" id="C_r" value="6.0" min="0.5" max="50" step="0.5"
              oninput="upd('vCr', this.value)" />
     </div>
     <div class="field">
-      <label>C_b &ndash; vloercapaciteit [kWh/K] <span id="vCb">18.0</span></label>
-      <input type="number" id="C_b" value="18.0" min="1" max="200" step="1"
+      <label>C_b &ndash; vloercapaciteit [kWh/K] <span id="vCb">10.0</span></label>
+      <input type="number" id="C_b" value="10.0" min="1" max="200" step="0.5"
              oninput="upd('vCb', this.value)" />
     </div>
     <div class="field">
-      <label>R_br &ndash; weerstand vloer&rarr;kamer [K/kW] <span id="vRbr">2.5</span></label>
-      <input type="number" id="R_br" value="2.5" min="0.1" max="20" step="0.5"
+      <label>R_br &ndash; weerstand vloer&rarr;kamer [K/kW] <span id="vRbr">1.0</span></label>
+      <input type="number" id="R_br" value="1.0" min="0.1" max="20" step="0.1"
              oninput="upd('vRbr', this.value)" />
     </div>
     <div class="field">
-      <label>R_ro &ndash; weerstand kamer&rarr;buiten [K/kW] <span id="vRro">4.0</span></label>
-      <input type="number" id="R_ro" value="4.0" min="0.1" max="30" step="0.5"
+      <label>R_ro &ndash; weerstand kamer&rarr;buiten [K/kW] <span id="vRro">10.0</span></label>
+      <input type="number" id="R_ro" value="10.0" min="0.1" max="30" step="0.5"
              oninput="upd('vRro', this.value)" />
+    </div>
+    <div class="field">
+      <label>&alpha; &ndash; zon direct naar lucht [-] <span id="vAlpha">0.25</span></label>
+      <input type="number" id="alpha" value="0.25" min="0" max="1" step="0.05"
+             oninput="upd('vAlpha', this.value)" />
+    </div>
+    <div class="field">
+      <label>&eta; &ndash; glasdoorlaatfactor [-] <span id="vEta">0.55</span></label>
+      <input type="number" id="eta" value="0.55" min="0" max="1" step="0.05"
+             oninput="upd('vEta', this.value)" />
+    </div>
+    <div class="field">
+      <label>A_glass &ndash; zuidgericht glas [m²] <span id="vAglass">7.5</span></label>
+      <input type="number" id="A_glass" value="7.5" min="0.5" max="40" step="0.5"
+             oninput="upd('vAglass', this.value)" />
     </div>
 
     <div class="section-title">Beginstaat</div>
 
     <div class="field">
-      <label>T_r begin [&deg;C] <span id="vTri">20.8</span></label>
-      <input type="number" id="T_r_init" value="20.8" min="5" max="35" step="0.1"
+      <label>T_r begin [&deg;C] <span id="vTri">20.5</span></label>
+      <input type="number" id="T_r_init" value="20.5" min="5" max="35" step="0.1"
              oninput="upd('vTri', this.value)" />
     </div>
     <div class="field">
-      <label>T_b begin [&deg;C] <span id="vTbi">24.0</span></label>
-      <input type="number" id="T_b_init" value="24.0" min="5" max="45" step="0.5"
+      <label>T_b begin [&deg;C] <span id="vTbi">22.5</span></label>
+      <input type="number" id="T_b_init" value="22.5" min="5" max="45" step="0.5"
              oninput="upd('vTbi', this.value)" />
     </div>
     <div class="field">
-      <label>Vorig vermogen [kW] <span id="vPprev">0.5</span></label>
-      <input type="number" id="previous_power_kw" value="0.5" min="0" max="20" step="0.1"
+      <label>Vorig vermogen [kW] <span id="vPprev">0.8</span></label>
+      <input type="number" id="previous_power_kw" value="0.8" min="0" max="20" step="0.1"
              oninput="upd('vPprev', this.value)" />
     </div>
 
@@ -250,8 +265,8 @@
              oninput="upd('vN', this.value)" />
     </div>
     <div class="field">
-      <label>T_ref &ndash; setpoint [&deg;C] <span id="vTref">21.0</span></label>
-      <input type="number" id="T_ref" value="21.0" min="15" max="26" step="0.5"
+      <label>T_ref &ndash; setpoint [&deg;C] <span id="vTref">20.5</span></label>
+      <input type="number" id="T_ref" value="20.5" min="15" max="26" step="0.5"
              oninput="upd('vTref', this.value)" />
     </div>
     <div class="field">
@@ -265,8 +280,8 @@
              oninput="upd('vTmax', this.value)" />
     </div>
     <div class="field">
-      <label>P_max [kW] <span id="vPmax">4.0</span></label>
-      <input type="number" id="P_max" value="4.0" min="0.5" max="20" step="0.5"
+      <label>P_max [kW] <span id="vPmax">4.5</span></label>
+      <input type="number" id="P_max" value="4.5" min="0.5" max="20" step="0.5"
              oninput="upd('vPmax', this.value)" />
     </div>
     <div class="field">
@@ -288,13 +303,13 @@
     <div class="section-title">Weersvoorspelling</div>
 
     <div class="field">
-      <label>T_buiten [&deg;C] <span id="vTout">10.0</span></label>
-      <input type="number" id="outdoor_temperature_c" value="10.0" min="-20" max="35" step="1"
+      <label>T_buiten [&deg;C] <span id="vTout">6.0</span></label>
+      <input type="number" id="outdoor_temperature_c" value="6.0" min="-20" max="35" step="1"
              oninput="upd('vTout', this.value)" />
     </div>
     <div class="field">
-      <label>Interne warmte [kW] <span id="vQint">0.35</span></label>
-      <input type="number" id="internal_gains_kw" value="0.35" min="0" max="3" step="0.05"
+      <label>Interne warmte [kW] <span id="vQint">0.3</span></label>
+      <input type="number" id="internal_gains_kw" value="0.30" min="0" max="3" step="0.05"
              oninput="upd('vQint', this.value)" />
     </div>
     <div class="toggle">
@@ -382,7 +397,9 @@
       C_b:                   n('C_b'),
       R_br:                  n('R_br'),
       R_ro:                  n('R_ro'),
-      alpha:                 0.35,
+      alpha:                 n('alpha'),
+      eta:                   n('eta'),
+      A_glass:               n('A_glass'),
       T_r_init:              n('T_r_init'),
       T_b_init:              n('T_b_init'),
       previous_power_kw:     n('previous_power_kw'),

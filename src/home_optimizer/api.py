@@ -63,9 +63,9 @@ _PRICES_24H = np.array(
 
 
 def _solar_gti(hour: int) -> float:
-    """Simple bell-shaped GTI [W/m²] centred at solar noon (13 h)."""
+    """Simple bell-shaped south-facing solar proxy [W/m²] centred at solar noon."""
     if 7 <= hour <= 19:
-        return 800.0 * np.sin(np.pi * (hour - 7) / 12.0)
+        return 550.0 * np.sin(np.pi * (hour - 7) / 12.0)
     return 0.0
 
 
@@ -78,35 +78,37 @@ class RunRequest(BaseModel):
     """All adjustable parameters for one MPC solve."""
 
     # House thermal parameters
-    C_r: float = Field(3.0, ge=0.5, le=50.0, description="Room thermal capacity [kWh/K]")
-    C_b: float = Field(18.0, ge=1.0, le=200.0, description="Floor thermal capacity [kWh/K]")
-    R_br: float = Field(2.5, ge=0.1, le=20.0, description="Floor→room resistance [K/kW]")
-    R_ro: float = Field(4.0, ge=0.1, le=30.0, description="Room→outside resistance [K/kW]")
-    alpha: float = Field(0.35, ge=0.0, le=1.0, description="Solar fraction to room air")
+    C_r: float = Field(6.0, ge=0.5, le=50.0, description="Room-zone thermal capacity [kWh/K]")
+    C_b: float = Field(10.0, ge=1.0, le=200.0, description="UFH floor/slab thermal capacity [kWh/K]")
+    R_br: float = Field(1.0, ge=0.1, le=20.0, description="Floor→room resistance [K/kW]")
+    R_ro: float = Field(10.0, ge=0.1, le=30.0, description="Room→outside resistance [K/kW]")
+    alpha: float = Field(0.25, ge=0.0, le=1.0, description="Solar fraction direct to room air [-]")
+    eta: float = Field(0.55, ge=0.0, le=1.0, description="Solar transmittance of the glazing [-]")
+    A_glass: float = Field(7.5, ge=0.5, le=40.0, description="South-facing glazing area [m²]")
 
     # Initial state
-    T_r_init: float = Field(20.8, ge=5.0, le=35.0, description="Initial room temperature [°C]")
-    T_b_init: float = Field(24.0, ge=5.0, le=45.0, description="Initial floor temperature [°C]")
-    previous_power_kw: float = Field(0.5, ge=0.0, le=20.0, description="Previous UFH power [kW]")
+    T_r_init: float = Field(20.5, ge=5.0, le=35.0, description="Initial room temperature [°C]")
+    T_b_init: float = Field(22.5, ge=5.0, le=45.0, description="Initial floor temperature [°C]")
+    previous_power_kw: float = Field(0.8, ge=0.0, le=20.0, description="Previous UFH power [kW]")
 
     # MPC settings
     horizon_hours: int = Field(24, ge=4, le=48, description="Horizon N [h, Δt = 1 h]")
     Q_c: float = Field(8.0, ge=0.0, description="Comfort weight Q_c")
     R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
-    P_max: float = Field(4.0, ge=0.5, le=20.0, description="Max UFH power [kW]")
+    P_max: float = Field(4.5, ge=0.5, le=20.0, description="Max UFH power [kW]")
     delta_P_max: float = Field(1.0, ge=0.1, le=10.0, description="Max ramp-rate [kW/step]")
     T_min: float = Field(19.0, ge=10.0, le=25.0, description="Min comfort temperature [°C]")
     T_max: float = Field(22.5, ge=16.0, le=30.0, description="Max comfort temperature [°C]")
-    T_ref: float = Field(21.0, ge=15.0, le=26.0, description="Setpoint temperature [°C]")
+    T_ref: float = Field(20.5, ge=15.0, le=26.0, description="Setpoint temperature [°C]")
 
     # Forecast
     outdoor_temperature_c: float = Field(
-        10.0, ge=-20.0, le=35.0, description="Outdoor temperature [°C]"
+        6.0, ge=-20.0, le=35.0, description="Outdoor temperature [°C]"
     )
     dynamic_price: bool = Field(True, description="Use typical Dutch price pattern")
     flat_price: float = Field(0.25, ge=0.0, le=2.0, description="Flat price [€/kWh]")
     solar_gain: bool = Field(True, description="Include solar irradiance profile")
-    internal_gains_kw: float = Field(0.35, ge=0.0, le=3.0, description="Internal gains [kW]")
+    internal_gains_kw: float = Field(0.30, ge=0.0, le=3.0, description="Internal gains [kW]")
 
 
 class OptimizeResponse(BaseModel):
@@ -317,8 +319,8 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
             R_br=req.R_br,
             R_ro=req.R_ro,
             alpha=req.alpha,
-            eta=0.62,
-            A_glass=12.0,
+            eta=req.eta,
+            A_glass=req.A_glass,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
