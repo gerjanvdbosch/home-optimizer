@@ -36,8 +36,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
+from .sensors.open_meteo import OpenMeteoClient
 from .telemetry import (
     BufferedTelemetryCollector,
+    ForecastPersister,
     TelemetryCollectorSettings,
     TelemetryRepository,
 )
@@ -138,6 +140,33 @@ class AddonOptions(BaseModel):
                                        description="binary_sensor for HP defrost cycle")
     sensor_booster_heater_active: str = Field(..., min_length=1,
                                               description="binary_sensor for DHW booster element")
+
+    # --- PV panel orientation (Open-Meteo GTI forecast) ---
+    pv_tilt: float = Field(
+        50.0, ge=0.0, le=90.0,
+        description=(
+            "PV panel tilt angle [°].  0 = horizontal surface, 90 = vertical wall.  "
+            "Passed directly to Open-Meteo to compute irradiance on the PV surface."
+        ),
+    )
+    pv_azimuth: float = Field(
+        148.0, ge=0.0, lt=360.0,
+        description=(
+            "PV panel orientation as a compass bearing [°].  "
+            "0 = North, 90 = East, 180 = South, 270 = West.  "
+            "Converted internally to the Open-Meteo solar convention "
+            "(0 = South, −90 = East, +90 = West) via azimuth_OM = pv_azimuth − 180."
+        ),
+    )
+
+    # --- DHW boiler geometry ---
+    boiler_tank_liters: int = Field(
+        200, gt=0,
+        description=(
+            "Total DHW boiler tank volume [L].  "
+            "Used to derive DHW thermal capacities C_top and C_bot via λ·V_tank."
+        ),
+    )
 
     @field_validator(
         "sensor_hp_flow_scale",
@@ -295,6 +324,39 @@ def main() -> None:
     backend = _build_backend(opts)
     log.info("HomeAssistantBackend configured with %d entity IDs", 20)
 
+    # ── 3b. Fetch home location from zone.home ─────────────────────────────
+    # The latitude/longitude are stored as zone entity *attributes*, not as
+    # config options, so they are fetched automatically at startup.
+    log.info("Fetching home location from zone.home …")
+    try:
+        latitude, longitude = backend.fetch_zone_location("zone.home")
+    except (ConnectionError, ValueError) as exc:
+        log.critical("Could not fetch lat/lon from zone.home: %s", exc)
+        sys.exit(1)
+    log.info("Home location: lat=%.5f  lon=%.5f", latitude, longitude)
+
+    # ── 3c. Build OpenMeteoClient ──────────────────────────────────────────
+    # Convert compass bearing to Open-Meteo solar azimuth convention:
+    #   azimuth_OM = compass_bearing − 180
+    #   (0° compass/North → −180° OM; 180° compass/South → 0° OM)
+    open_meteo_pv_azimuth: float = opts.pv_azimuth - 180.0
+    weather_client = OpenMeteoClient(
+        latitude=latitude,
+        longitude=longitude,
+        pv_tilt=opts.pv_tilt,
+        pv_azimuth=open_meteo_pv_azimuth,
+    )
+    log.info(
+        "OpenMeteoClient: lat=%.5f  lon=%.5f  pv_tilt=%.1f°  pv_azimuth_compass=%.1f°  "
+        "pv_azimuth_om=%.1f°",
+        latitude, longitude, opts.pv_tilt, opts.pv_azimuth, open_meteo_pv_azimuth,
+    )
+
+    forecast_persister = ForecastPersister(
+        weather_client=weather_client,
+        repository=repository,
+    )
+
     # ── 4. Start telemetry collector ───────────────────────────────────────
     collector_settings = TelemetryCollectorSettings(
         database_url=database_url,
@@ -312,6 +374,12 @@ def main() -> None:
         opts.sampling_interval_seconds,
         opts.flush_interval_seconds,
     )
+
+    # ── 4b. Start forecast persister on the shared scheduler ──────────────
+    # persist_once() is called immediately (run_immediately=True) so forecast
+    # data is available from the first second rather than waiting one full hour.
+    forecast_persister.start(collector.scheduler, run_immediately=True)
+    log.info("ForecastPersister started (hourly Open-Meteo updates)")
 
     # ── 5. SIGTERM handler — graceful shutdown from `docker stop` ──────────
     def _handle_sigterm(signum: int, frame: object) -> None:  # noqa: ANN001

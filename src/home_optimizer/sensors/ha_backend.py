@@ -204,11 +204,25 @@ class HomeAssistantBackend(SensorBackend):
         )
 
     # ------------------------------------------------------------------
-    # Internal helper
+    # Internal helpers
     # ------------------------------------------------------------------
 
-    def _fetch_raw_state(self, entity_id: str) -> str:
-        """GET /api/states/<entity_id> and return the raw state string."""
+    def _fetch_entity_json(self, entity_id: str) -> dict:
+        """GET /api/states/<entity_id> and return the full JSON response dict.
+
+        This is the low-level HTTP helper used by all public read methods.
+        It handles connection and HTTP errors uniformly (Fail-Fast §5).
+
+        Args:
+            entity_id: Full HA entity ID, e.g. ``"sensor.living_room_temperature"``.
+
+        Returns:
+            Full HA state JSON dict, e.g.
+            ``{"entity_id": ..., "state": ..., "attributes": {...}}``.
+
+        Raises:
+            ConnectionError: On network or HTTP errors.
+        """
         url = f"{self._base_url}/api/states/{entity_id}"
         try:
             response = self._client.get(url)
@@ -222,8 +236,12 @@ class HomeAssistantBackend(SensorBackend):
             raise ConnectionError(
                 f"Could not reach Home Assistant at {self._base_url}: {exc}"
             ) from exc
+        return response.json()
 
-        raw_state = str(response.json().get("state", "unavailable"))
+    def _fetch_raw_state(self, entity_id: str) -> str:
+        """GET /api/states/<entity_id> and return the raw state string."""
+        data = self._fetch_entity_json(entity_id)
+        raw_state = str(data.get("state", "unavailable"))
         if raw_state in ("unavailable", "unknown", "none", ""):
             raise ValueError(
                 f"Entity {entity_id!r} reports state {raw_state!r}. "
@@ -261,6 +279,45 @@ class HomeAssistantBackend(SensorBackend):
             f"Entity {entity_id!r} returned unrecognised boolean state {raw!r}. "
             "Expected 'on'/'off', '1'/'0', or 'true'/'false'."
         )
+
+    # ------------------------------------------------------------------
+    # Zone / location helpers
+    # ------------------------------------------------------------------
+
+    def fetch_zone_location(self, zone_entity_id: str = "zone.home") -> tuple[float, float]:
+        """Fetch the geographic coordinates of a Home Assistant zone entity.
+
+        HA exposes zone coordinates as entity *attributes* (``latitude`` and
+        ``longitude``), not as the numeric state.  This method retrieves the
+        full entity JSON and extracts those attributes.
+
+        Typical use at addon startup::
+
+            latitude, longitude = backend.fetch_zone_location("zone.home")
+
+        Args:
+            zone_entity_id: HA entity ID of the zone.  Default ``"zone.home"``.
+
+        Returns:
+            Tuple ``(latitude [°N], longitude [°E])`` as floats.
+
+        Raises:
+            ConnectionError: If the HA REST API is unreachable.
+            ValueError: If the entity is unavailable or the ``latitude`` /
+                ``longitude`` attributes are absent.
+        """
+        data = self._fetch_entity_json(zone_entity_id)
+        attributes: dict = data.get("attributes", {})
+        lat = attributes.get("latitude")
+        lon = attributes.get("longitude")
+        if lat is None or lon is None:
+            missing = [k for k, v in (("latitude", lat), ("longitude", lon)) if v is None]
+            raise ValueError(
+                f"Zone entity {zone_entity_id!r} is missing attribute(s) "
+                f"{missing!r}.  Ensure the entity is a valid HA zone with a "
+                "configured home location."
+            )
+        return float(lat), float(lon)
 
     # ------------------------------------------------------------------
     # SensorBackend interface

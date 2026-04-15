@@ -78,6 +78,15 @@ options:
   sensor_defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
   sensor_booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
 
+  # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
+  # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
+  # pv_tilt:    0=horizontal, 90=vertical wall
+  pv_tilt: 50.0
+  pv_azimuth: 148.0
+
+  # DHW boiler tank volume [litres]
+  boiler_tank_liters: 200
+
 # ---------------------------------------------------------------------------
 # Schema — types validated by the HA supervisor before the addon starts.
 # Use "type?" for optional fields that have a sensible default in options:.
@@ -115,4 +124,8 @@ schema:
   sensor_shutter_living_room: str
   sensor_defrost_active: str
   sensor_booster_heater_active: str
+
+  pv_tilt: float
+  pv_azimuth: float
+  boiler_tank_liters: int
 
