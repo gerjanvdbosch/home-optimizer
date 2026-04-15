@@ -63,7 +63,7 @@ from .factory import build_forecast, effective_price
 from .ha_backend import HAEntityConfig, HomeAssistantBackend
 from .local_backend import LocalBackend
 from .open_meteo import OpenMeteoClient, SeasonalMainsModel, WeatherForecast
-from .weather_backend import WeatherAugmentedBackend, WeatherCurrentValues
+from .weather_backend import WeatherAugmentedBackend
 
 __all__ = [
     # Core abstractions
@@ -84,7 +84,6 @@ __all__ = [
     "SeasonalMainsModel",
     # Weather-augmented backend (production wrapper)
     "WeatherAugmentedBackend",
-    "WeatherCurrentValues",
     # ForecastHorizon factory
     "build_forecast",
     "effective_price",

@@ -1,8 +1,7 @@
 """Hourly Open-Meteo forecast persistence.
 
 The :class:`ForecastPersister` runs on its own APScheduler interval (typically
-once per UTC hour) and persists the full N-step forecast from
-:class:`~home_optimizer.sensors.WeatherAugmentedBackend` into the
+once per UTC hour) and persists the full N-step Open-Meteo forecast into the
 ``forecast_snapshots`` table.
 
 Design rationale
@@ -17,21 +16,19 @@ Keeping forecast persistence in a separate class with its own APScheduler job
 avoids polluting the 30-second telemetry loop with hourly API calls and makes
 the update frequencies explicit.
 
-The ``ForecastPersister`` reads the cached :class:`~home_optimizer.sensors.WeatherForecast`
-from :attr:`WeatherAugmentedBackend.latest_forecast` so **no extra API call**
-is made — the data was already fetched by the backend when the first telemetry
-sample of the current UTC hour was taken.
-
-If the backend cache is not yet populated (e.g. at startup before the first
-``read_all()``), :meth:`ForecastPersister.persist_once` calls
-:meth:`WeatherAugmentedBackend.warm_up` to force an immediate fetch.
+The :class:`ForecastPersister` owns its own
+:class:`~home_optimizer.sensors.OpenMeteoClient` instance and calls
+:meth:`~home_optimizer.sensors.OpenMeteoClient.get_forecast` directly on each
+scheduled tick.  This is architecturally clean: ``ForecastPersister`` is
+responsible for *forecast data*; ``BufferedTelemetryCollector`` is responsible
+for *sensor data*.  No shared state or cache between the two.
 
 Database uniqueness
 -------------------
 Each ``(fetched_at_utc, step_k)`` pair is unique in ``forecast_snapshots``.
 If the persister is called multiple times within the same UTC hour (e.g. after
-a restart), the ``INSERT OR IGNORE`` / SQLAlchemy exception handling skips
-already-persisted steps instead of raising an error.
+a restart), the duplicate-skip logic in the repository skips already-persisted
+steps instead of raising an error.
 
 Units
 -----
@@ -47,7 +44,7 @@ from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ..sensors.weather_backend import WeatherAugmentedBackend
+from ..sensors.open_meteo import OpenMeteoClient
 from .repository import TelemetryRepository
 
 #: Default APScheduler job ID for the forecast persister.
@@ -58,20 +55,25 @@ DEFAULT_FORECAST_JOB_ID: str = "forecast-persist"
 #: wastes API calls.  3600 s = 1 h.
 DEFAULT_FORECAST_INTERVAL_SECONDS: int = 3600
 
+#: Default forecast horizon fetched from Open-Meteo [h].
+#: 48 h gives two days of lookahead — sufficient for MPC and forecast-error training.
+DEFAULT_FORECAST_HORIZON_HOURS: int = 48
+
 
 class ForecastPersister:
     """Persist the full Open-Meteo N-step forecast to ``forecast_snapshots`` hourly.
 
     Parameters
     ----------
-    backend:
-        :class:`~home_optimizer.sensors.WeatherAugmentedBackend` that holds the
-        cached :class:`~home_optimizer.sensors.WeatherForecast`.  The persister
-        reads :attr:`~WeatherAugmentedBackend.latest_forecast` and calls
-        :meth:`~WeatherAugmentedBackend.warm_up` on the first run if the cache
-        is empty.
+    weather_client:
+        Configured :class:`~home_optimizer.sensors.OpenMeteoClient` for the
+        site location and window / PV orientation.  The persister calls
+        :meth:`~OpenMeteoClient.get_forecast` directly on each scheduled tick.
     repository:
         :class:`TelemetryRepository` used to write to ``forecast_snapshots``.
+    horizon_hours:
+        Number of forecast hours to fetch and persist per run.
+        Default ``48`` (two days).  Must be ≥ 1.
     interval_seconds:
         APScheduler interval [s].  Default ``3600`` (one hour).
     job_id:
@@ -80,15 +82,19 @@ class ForecastPersister:
 
     def __init__(
         self,
-        backend: WeatherAugmentedBackend,
+        weather_client: OpenMeteoClient,
         repository: TelemetryRepository,
+        horizon_hours: int = DEFAULT_FORECAST_HORIZON_HOURS,
         interval_seconds: int = DEFAULT_FORECAST_INTERVAL_SECONDS,
         job_id: str = DEFAULT_FORECAST_JOB_ID,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be strictly positive.")
-        self._backend = backend
+        if horizon_hours < 1:
+            raise ValueError("horizon_hours must be ≥ 1.")
+        self._weather = weather_client
         self._repository = repository
+        self._horizon_hours = horizon_hours
         self._interval_seconds = interval_seconds
         self._job_id = job_id
 
@@ -97,25 +103,23 @@ class ForecastPersister:
     # ------------------------------------------------------------------
 
     def persist_once(self) -> int:
-        """Persist the current forecast to ``forecast_snapshots``.
+        """Fetch the current Open-Meteo forecast and persist it to ``forecast_snapshots``.
 
-        Reads :attr:`WeatherAugmentedBackend.latest_forecast`.  If the cache is
-        empty (first call before any ``read_all()``), calls
-        :meth:`WeatherAugmentedBackend.warm_up` to populate it first.
+        Calls :meth:`~OpenMeteoClient.get_forecast` with the configured
+        ``horizon_hours`` at 1-hour resolution, then inserts one row per step.
 
         Duplicate rows (same ``fetched_at_utc`` + ``step_k``) are silently
-        skipped via SQLAlchemy's ``INSERT OR IGNORE`` emulation — the repository
-        raises :class:`sqlalchemy.exc.IntegrityError` which is caught here.
+        skipped via the repository's duplicate-handling logic.
 
         Returns
         -------
         int
             Number of rows successfully inserted (0 if all were duplicates).
         """
-        forecast = self._backend.latest_forecast
-        if forecast is None:
-            # Cache is empty — warm up to trigger the first fetch.
-            forecast = self._backend.warm_up()
+        forecast = self._weather.get_forecast(
+            horizon_hours=self._horizon_hours,
+            dt_hours=1.0,
+        )
 
         rows: list[dict[str, Any]] = []
         for k in range(forecast.horizon_steps):

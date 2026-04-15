@@ -104,6 +104,12 @@ class LiveReadings:
         Measured refrigerant evaporator (suction) temperature T_evap [°C].
         Used directly in the Carnot COP formula (§14.1).  Replaces the
         approximation T_evap ≈ T_out − Δ_evap when this sensor is available.
+    t_mains_estimated_c:
+        Seasonal estimate of cold mains water temperature [°C].  Derived from
+        a cosine seasonal model (:class:`~home_optimizer.sensors.SeasonalMainsModel`).
+        Used as the T_mains disturbance in the DHW energy balance (§9.1, §10.3).
+        Typical NL range: 7–14 °C.  Injected by
+        :class:`~home_optimizer.sensors.WeatherAugmentedBackend` at read time.
     timestamp:
         UTC timestamp of the reading.
     """
@@ -128,42 +134,8 @@ class LiveReadings:
     boiler_ambient_temp_c: float
     refrigerant_condensation_temp_c: float
     refrigerant_temp_c: float
-    # --- Weather fields (injected by WeatherAugmentedBackend, §4 & §8.3) ---
-    gti_w_per_m2: float
-    """Global Tilted Irradiance for south-facing windows [W/m²].
-
-    Current forecast hour from Open-Meteo.  Used to compute Q_solar in the
-    UFH disturbance vector (§4).  Must be ≥ 0 (physically non-negative).
-    Use WeatherAugmentedBackend to populate this field automatically.
-    """
-    gti_pv_w_per_m2: float
-    """Global Tilted Irradiance for PV panels [W/m²].
-
-    0.0 when no PV surface is configured on the OpenMeteoClient.  Used in
-    effective_price() to correct the electricity cost for PV self-consumption.
-    Must be ≥ 0.
-    """
+    # --- Seasonal DHW parameter (injected by WeatherAugmentedBackend, §9.1) ---
     t_mains_estimated_c: float
-    """Seasonal estimate of cold mains water temperature [°C].
-
-    Derived from a cosine seasonal model (SeasonalMainsModel).  Used as the
-    T_mains disturbance in the DHW energy balance (§9.1, §10.3).  Typical NL
-    range: 7–14 °C.  WeatherAugmentedBackend computes this automatically.
-    """
-    t_out_forecast_c: float
-    """Open-Meteo forecast of outdoor temperature for the current UTC hour [°C].
-
-    This is the *predicted* T_out (step 0 of the Open-Meteo forecast), not the
-    measured value from the HA sensor (``outdoor_temperature_c``).
-
-    Storing both enables forecast-error analysis:
-        error[k] = outdoor_temperature_c[k] − t_out_forecast_c[k]
-    These residuals are used to train bias-correction models and to evaluate
-    MPC forecast quality (§16, training requirement 7).
-
-    WeatherAugmentedBackend injects this field automatically.  The
-    HomeAssistantBackend placeholder is ``0.0`` — only meaningful when wrapped.
-    """
     timestamp: datetime
 
     def __post_init__(self) -> None:
@@ -184,10 +156,7 @@ class LiveReadings:
             "boiler_ambient_temp_c",
             "refrigerant_condensation_temp_c",
             "refrigerant_temp_c",
-            "gti_w_per_m2",
-            "gti_pv_w_per_m2",
             "t_mains_estimated_c",
-            "t_out_forecast_c",
         )
         for field_name in numeric_fields:
             _assert_finite(field_name, float(getattr(self, field_name)))
@@ -209,11 +178,6 @@ class LiveReadings:
                 f"shutter_living_room_pct must be in [0, 100], got {shutter}."
             )
 
-        # GTI is physically non-negative (irradiance cannot be negative).
-        if float(self.gti_w_per_m2) < 0.0:
-            raise ValueError("gti_w_per_m2 must be non-negative.")
-        if float(self.gti_pv_w_per_m2) < 0.0:
-            raise ValueError("gti_pv_w_per_m2 must be non-negative.")
 
         # Coerce bool fields — JSON may deliver 0/1 integers.
         object.__setattr__(self, "defrost_active", bool(self.defrost_active))

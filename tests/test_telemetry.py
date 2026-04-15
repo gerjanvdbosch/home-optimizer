@@ -63,10 +63,7 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         boiler_ambient_temp_c=18.0,
         refrigerant_condensation_temp_c=38.0,
         refrigerant_temp_c=2.0,
-        gti_w_per_m2=350.0,
-        gti_pv_w_per_m2=280.0,
         t_mains_estimated_c=10.5,
-        t_out_forecast_c=7.8,
         timestamp=timestamp,
     )
 
@@ -96,10 +93,7 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "boiler_ambient_temp_c": 18.5,
                 "refrigerant_condensation_temp_c": 37.5,
                 "refrigerant_temp_c": 1.5,
-                "gti_w_per_m2": 500.0,
-                "gti_pv_w_per_m2": 400.0,
                 "t_mains_estimated_c": 10.5,
-                "t_out_forecast_c": 7.8,
             }
         ),
         encoding="utf-8",
@@ -289,10 +283,7 @@ def test_aggregate_includes_new_sensor_fields() -> None:
             boiler_ambient_temp_c=19.0,
             refrigerant_condensation_temp_c=40.0,
             refrigerant_temp_c=3.0,
-            gti_w_per_m2=400.0,
-            gti_pv_w_per_m2=320.0,
             t_mains_estimated_c=11.0,
-            t_out_forecast_c=7.5,
             timestamp=t0 + timedelta(seconds=30),
         ),
     ]
@@ -383,13 +374,9 @@ def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
     assert row.hp_supply_target_temperature_mean_c == pytest.approx(33.0)
     assert row.hp_supply_target_temperature_last_c == pytest.approx(33.0)
 
-    # New weather fields
-    assert row.gti_mean_w_per_m2 == pytest.approx(350.0)
-    assert row.gti_last_w_per_m2 == pytest.approx(350.0)
-    assert row.gti_pv_mean_w_per_m2 == pytest.approx(280.0)
+    # Seasonal DHW parameter (t_mains_estimated_c)
     assert row.t_mains_estimated_mean_c == pytest.approx(10.5)
-    assert row.t_out_forecast_mean_c == pytest.approx(7.8)
-    assert row.t_out_forecast_last_c == pytest.approx(7.8)
+    assert row.t_mains_estimated_last_c == pytest.approx(10.5)
 
     # Derived quantities
     # hp_thermal_power = 9 L/min × 0.06 × 1.1628 × (31-27) ≈ 2.5076 kW
@@ -401,12 +388,11 @@ def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
 def test_forecast_persister_inserts_all_steps(tmp_path: Path) -> None:
     """ForecastPersister must persist all N forecast steps, skip duplicates."""
     from datetime import timezone
+    from unittest.mock import MagicMock
 
     import numpy as np
 
-    from home_optimizer.sensors.open_meteo import WeatherForecast
-    from home_optimizer.sensors.weather_backend import WeatherAugmentedBackend
-    from home_optimizer.sensors.base import SensorBackend
+    from home_optimizer.sensors.open_meteo import OpenMeteoClient, WeatherForecast
     from home_optimizer.telemetry import ForecastPersister
 
     _N = 4  # small horizon for speed
@@ -422,29 +408,21 @@ def test_forecast_persister_inserts_all_steps(tmp_path: Path) -> None:
         valid_from=valid_from,
     )
 
-    # Stub backend that exposes the fake forecast via latest_forecast
-    class _StubBackend(WeatherAugmentedBackend):
-        def __init__(self) -> None:  # type: ignore[override]
-            self._cached_forecast = fake_forecast
-            self._cached_current = None
-            self._lock = __import__("threading").Lock()
+    # Mock OpenMeteoClient so no real HTTP call is made
+    mock_client = MagicMock(spec=OpenMeteoClient)
+    mock_client.get_forecast.return_value = fake_forecast
 
-        def read_all(self) -> "LiveReadings":  # type: ignore[override]
-            raise NotImplementedError
-
-        def close(self) -> None:
-            pass
-
-    stub = _StubBackend()
     database_url = f"sqlite:///{tmp_path / 'forecast.sqlite3'}"
     repository = TelemetryRepository(database_url=database_url)
     repository.create_schema()
 
-    persister = ForecastPersister(stub, repository)
+    persister = ForecastPersister(mock_client, repository, horizon_hours=_N)
 
     # First persist: should insert 4 rows
     n_inserted = persister.persist_once()
     assert n_inserted == _N
+    # get_forecast must have been called with the configured horizon
+    mock_client.get_forecast.assert_called_once_with(horizon_hours=_N, dt_hours=1.0)
 
     rows = repository.list_forecast_snapshots()
     assert len(rows) == _N

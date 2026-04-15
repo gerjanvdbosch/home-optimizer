@@ -168,25 +168,12 @@ class TelemetryAggregate(Base):
     refrigerant_temp_mean_c: Mapped[float] = mapped_column(Float)
     refrigerant_temp_last_c: Mapped[float] = mapped_column(Float)
 
-    # Weather / Open-Meteo (injected by WeatherAugmentedBackend) -----------
-    # GTI for south-facing windows [W/m²] — used for Q_solar in §4.
-    # Current forecast hour; constant within each 5-minute bucket.
-    gti_mean_w_per_m2: Mapped[float] = mapped_column(Float)
-    gti_last_w_per_m2: Mapped[float] = mapped_column(Float)
-    # GTI for PV panels [W/m²] — used in effective_price() PV correction.
-    # 0.0 when no PV surface is configured on the OpenMeteoClient.
-    gti_pv_mean_w_per_m2: Mapped[float] = mapped_column(Float)
-    gti_pv_last_w_per_m2: Mapped[float] = mapped_column(Float)
+    # Weather / seasonal DHW parameter (injected by WeatherAugmentedBackend) ------
     # Cold mains water temperature estimate [°C] — DHW disturbance T_mains (§9.1).
-    # Derived from SeasonalMainsModel (cosine seasonal model).
+    # Derived from SeasonalMainsModel (cosine seasonal model).  Daily variation
+    # is meaningful for DHW energy-balance training; stored per bucket.
     t_mains_estimated_mean_c: Mapped[float] = mapped_column(Float)
     t_mains_estimated_last_c: Mapped[float] = mapped_column(Float)
-    # Forecast outdoor temperature for the current UTC hour [°C] (step 0 of
-    # the Open-Meteo forecast).  Compare with outdoor_temperature_last_c to
-    # compute forecast error per bucket (§16, training requirement 7):
-    #     error = outdoor_temperature_last_c − t_out_forecast_last_c
-    t_out_forecast_mean_c: Mapped[float] = mapped_column(Float)
-    t_out_forecast_last_c: Mapped[float] = mapped_column(Float)
 
     # Derived quantities (pre-computed at flush for training convenience) ---
     # HP thermal power Q_therm = V̇ × λ × ΔT [kW] (§15, hydraulic power formula).
