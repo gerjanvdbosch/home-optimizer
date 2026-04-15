@@ -31,8 +31,21 @@ NUMERIC_READING_FIELD_NAMES: tuple[str, ...] = (
     "thermostat_setpoint_c",
     "dhw_top_temperature_c",
     "dhw_bottom_temperature_c",
+    "shutter_living_room_pct",
+    "boiler_ambient_temp_c",
+    "refrigerant_condensation_temp_c",
+    "refrigerant_temp_c",
 )
-_UNIT_SUFFIXES: tuple[str, ...] = ("_c", "_kw", "_lpm")
+
+#: Boolean fields stored as (fraction-active, last-value) pairs.
+#: The fraction captures transient events that ended before the flush window;
+#: the last value initialises the next Kalman step.
+BOOL_READING_FIELD_NAMES: tuple[str, ...] = (
+    "defrost_active",
+    "booster_heater_active",
+)
+
+_UNIT_SUFFIXES: tuple[str, ...] = ("_c", "_kw", "_lpm", "_pct")
 
 
 def _stat_column_name(field_name: str, statistic: str) -> str:
@@ -56,6 +69,15 @@ def aggregate_readings(samples: Sequence[LiveReadings]) -> dict[str, Any]:
     -------
     dict[str, Any]
         Keyword arguments ready for :class:`home_optimizer.telemetry.models.TelemetryAggregate`.
+
+    Notes
+    -----
+    Numeric fields (temperature, power, flow, shutter position) are aggregated
+    as arithmetic mean + last observed value.
+
+    Boolean fields (``defrost_active``, ``booster_heater_active``) are aggregated
+    as fraction-of-samples-True (captures transient events) + last observed value
+    (initialises the next Kalman step).
     """
     if not samples:
         raise ValueError("samples must not be empty.")
@@ -77,6 +99,7 @@ def aggregate_readings(samples: Sequence[LiveReadings]) -> dict[str, Any]:
         "hp_mode_last": last_sample.hp_mode,
     }
 
+    # Numeric fields: persist arithmetic mean and last value.
     for field_name in NUMERIC_READING_FIELD_NAMES:
         values = np.asarray(
             [getattr(sample, field_name) for sample in ordered_samples],
@@ -84,6 +107,15 @@ def aggregate_readings(samples: Sequence[LiveReadings]) -> dict[str, Any]:
         )
         aggregate[_stat_column_name(field_name, "mean")] = float(np.mean(values))
         aggregate[_stat_column_name(field_name, "last")] = float(values[-1])
+
+    # Boolean fields: persist fraction-active (mean of 0/1 array) and last state.
+    for field_name in BOOL_READING_FIELD_NAMES:
+        values = np.asarray(
+            [float(getattr(sample, field_name)) for sample in ordered_samples],
+            dtype=float,
+        )
+        aggregate[f"{field_name}_fraction"] = float(np.mean(values))
+        aggregate[f"{field_name}_last"] = bool(ordered_samples[-1].__getattribute__(field_name))
 
     return aggregate
 

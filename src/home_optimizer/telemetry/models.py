@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DEFAULT_TELEMETRY_TIMEZONE_NAME: str = "UTC"
@@ -139,6 +139,33 @@ class TelemetryAggregate(Base):
     dhw_top_temperature_last_c: Mapped[float] = mapped_column(Float)
     dhw_bottom_temperature_mean_c: Mapped[float] = mapped_column(Float)
     dhw_bottom_temperature_last_c: Mapped[float] = mapped_column(Float)
+
+    # Shutter telemetry ---------------------------------------------------
+    # shutter_living_room_pct: fraction of the MPC horizon with sunlight entering
+    # the room.  Mean captures the average obstruction over the bucket; last
+    # reflects the end-of-window position used to initialise the next MPC step.
+    shutter_living_room_mean_pct: Mapped[float] = mapped_column(Float)
+    shutter_living_room_last_pct: Mapped[float] = mapped_column(Float)
+
+    # Heat-pump status flags -----------------------------------------------
+    # Fraction of samples within the bucket where the flag was True [0.0–1.0].
+    # A non-zero fraction shows that a transient event (defrost, booster) occurred
+    # during the window even if it ended before the flush.
+    defrost_active_fraction: Mapped[float] = mapped_column(Float)
+    # End-of-window boolean state: relevant for initialising the next Kalman step.
+    defrost_active_last: Mapped[bool] = mapped_column(Boolean)
+    booster_heater_active_fraction: Mapped[float] = mapped_column(Float)
+    booster_heater_active_last: Mapped[bool] = mapped_column(Boolean)
+
+    # Boiler ambient / refrigerant temperatures ----------------------------
+    # These feed directly into COP pre-calculation (§14.1) and DHW standby-loss
+    # estimation (§9.2).  Both mean and last are stored for model identification.
+    boiler_ambient_temp_mean_c: Mapped[float] = mapped_column(Float)
+    boiler_ambient_temp_last_c: Mapped[float] = mapped_column(Float)
+    refrigerant_condensation_temp_mean_c: Mapped[float] = mapped_column(Float)
+    refrigerant_condensation_temp_last_c: Mapped[float] = mapped_column(Float)
+    refrigerant_temp_mean_c: Mapped[float] = mapped_column(Float)
+    refrigerant_temp_last_c: Mapped[float] = mapped_column(Float)
 
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

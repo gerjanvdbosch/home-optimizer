@@ -254,3 +254,112 @@ def test_settings_fail_when_flush_interval_is_not_a_multiple() -> None:
             flush_interval_seconds=300,
         )
 
+
+def test_aggregate_includes_new_sensor_fields() -> None:
+    """Aggregation must include shutter, defrost, booster and refrigerant columns."""
+    t0 = datetime(2026, 4, 15, 8, 0, tzinfo=timezone.utc)
+    samples = [
+        _reading(t0, room_temperature_c=20.0, hp_mode="ufh"),
+        LiveReadings(
+            room_temperature_c=20.2,
+            outdoor_temperature_c=8.0,
+            hp_supply_temperature_c=31.0,
+            hp_return_temperature_c=27.0,
+            hp_flow_lpm=9.0,
+            hp_electric_power_kw=2.0,
+            hp_mode="ufh",
+            grid_import_kw=1.4,
+            grid_export_kw=0.0,
+            pv_output_kw=0.6,
+            thermostat_setpoint_c=20.5,
+            dhw_top_temperature_c=52.0,
+            dhw_bottom_temperature_c=45.0,
+            shutter_living_room_pct=50.0,
+            defrost_active=True,
+            booster_heater_active=False,
+            boiler_ambient_temp_c=19.0,
+            refrigerant_condensation_temp_c=40.0,
+            refrigerant_temp_c=3.0,
+            timestamp=t0 + timedelta(seconds=30),
+        ),
+    ]
+
+    agg = aggregate_readings(samples)
+
+    # Shutter: mean of [100, 50] = 75, last = 50
+    assert agg["shutter_living_room_mean_pct"] == pytest.approx(75.0)
+    assert agg["shutter_living_room_last_pct"] == pytest.approx(50.0)
+
+    # Defrost: active in 1 of 2 samples → fraction = 0.5, last = True
+    assert agg["defrost_active_fraction"] == pytest.approx(0.5)
+    assert agg["defrost_active_last"] is True
+
+    # Booster: never active → fraction = 0.0, last = False
+    assert agg["booster_heater_active_fraction"] == pytest.approx(0.0)
+    assert agg["booster_heater_active_last"] is False
+
+    # Boiler ambient: mean of [18, 19] = 18.5, last = 19
+    assert agg["boiler_ambient_temp_mean_c"] == pytest.approx(18.5)
+    assert agg["boiler_ambient_temp_last_c"] == pytest.approx(19.0)
+
+    # Refrigerant condensation: mean of [38, 40] = 39, last = 40
+    assert agg["refrigerant_condensation_temp_mean_c"] == pytest.approx(39.0)
+    assert agg["refrigerant_condensation_temp_last_c"] == pytest.approx(40.0)
+
+    # Refrigerant evap: mean of [2, 3] = 2.5, last = 3
+    assert agg["refrigerant_temp_mean_c"] == pytest.approx(2.5)
+    assert agg["refrigerant_temp_last_c"] == pytest.approx(3.0)
+
+
+def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
+    """New sensor columns must round-trip through SQLite without data loss."""
+    t0 = datetime(2026, 4, 15, 9, 0, tzinfo=timezone.utc)
+    backend = SequenceBackend(
+        [
+            _reading(t0, room_temperature_c=20.0, hp_mode="ufh"),
+            _reading(t0 + timedelta(seconds=30), room_temperature_c=20.4, hp_mode="ufh"),
+        ]
+    )
+    database_url = f"sqlite:///{tmp_path / 'new_sensors.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    settings = TelemetryCollectorSettings(
+        database_url=database_url,
+        sampling_interval_seconds=30,
+        flush_interval_seconds=300,
+    )
+    collector = BufferedTelemetryCollector(
+        backend=backend,
+        repository=repository,
+        settings=settings,
+    )
+
+    repository.create_schema()
+    collector.sample_once()
+    collector.sample_once()
+    collector.flush_once()
+
+    rows = repository.list_aggregates()
+    assert len(rows) == 1
+    row = rows[0]
+
+    # Shutter fully open in both samples → mean and last = 100.0
+    assert row.shutter_living_room_mean_pct == pytest.approx(100.0)
+    assert row.shutter_living_room_last_pct == pytest.approx(100.0)
+
+    # No defrost or booster in default _reading fixture
+    assert row.defrost_active_fraction == pytest.approx(0.0)
+    assert row.defrost_active_last is False
+    assert row.booster_heater_active_fraction == pytest.approx(0.0)
+    assert row.booster_heater_active_last is False
+
+    # Boiler ambient temperature
+    assert row.boiler_ambient_temp_mean_c == pytest.approx(18.0)
+    assert row.boiler_ambient_temp_last_c == pytest.approx(18.0)
+
+    # Refrigerant temperatures
+    assert row.refrigerant_condensation_temp_mean_c == pytest.approx(38.0)
+    assert row.refrigerant_condensation_temp_last_c == pytest.approx(38.0)
+    assert row.refrigerant_temp_mean_c == pytest.approx(2.0)
+    assert row.refrigerant_temp_last_c == pytest.approx(2.0)
+
+
