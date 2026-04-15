@@ -1,8 +1,9 @@
 # ---------------------------------------------------------------------------
 # Home Optimizer — Home Assistant Addon
 #
-# Build context: repository root  (docker build -f addon/Dockerfile .)
-# Base image: official HA Python base for the target architecture.
+# Build context: addon/  (set by the HA supervisor — repo root is NOT available)
+# The Python package is installed directly from GitHub, which is the standard
+# pattern for HA addons; the supervisor cannot pass the repo root as context.
 # ---------------------------------------------------------------------------
 
 ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12-alpine3.18
@@ -14,7 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Build dependencies required by numpy/cvxpy on Alpine-based images.
+# Build + VCS dependencies required by numpy/cvxpy and pip's git-based install.
 RUN apk add --no-cache \
     build-base \
     libffi-dev \
@@ -22,21 +23,26 @@ RUN apk add --no-cache \
     gcc \
     g++ \
     lapack-dev \
-    openblas-dev
+    openblas-dev \
+    git
 
 WORKDIR /app
 
-# Copy only the files needed for dependency installation first so Docker
-# can cache the pip layer when only source code changes.
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
+# Git ref (branch, tag, or SHA) to install.
+# The release pipeline overrides this with the concrete version tag.
+# Default: main — always gets the latest pushed code.
+ARG PACKAGE_REF=main
 
-# Install the package and all runtime dependencies.
-# The `.[dev]` extras are intentionally excluded from the addon image.
-RUN pip install --no-cache-dir .
+# Install the package from GitHub.
+# The HA supervisor uses the addon directory as the Docker build context, so
+# files from the repository root (src/, pyproject.toml) are not accessible via
+# COPY.  Installing from the git URL is the canonical solution for HA addons.
+RUN pip install --no-cache-dir \
+    "git+https://github.com/gerjanvandenbosch/home-optimizer.git@${PACKAGE_REF}"
 
-# Copy the addon run script last (cheapest layer to invalidate).
-COPY addon/run.sh /run.sh
+# Copy the addon run script.
+# Path is relative to the build context (= addon/), so no "addon/" prefix.
+COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
 # Labels required by the HA addon build system.
@@ -56,4 +62,3 @@ LABEL \
     maintainer="gerjanvandenbosch"
 
 CMD ["/run.sh"]
-
