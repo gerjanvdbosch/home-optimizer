@@ -52,8 +52,8 @@ options:
   sensor_dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
   sensor_dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
   sensor_boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
-  sensor_refrigerant_condensation_temperature: "sensor.refrigerant_condensation_temp"
-  sensor_refrigerant_temperature: "sensor.refrigerant_temp"
+  sensor_refrigerant_condensation_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_condensatie_temp"
+  sensor_refrigerant_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_temp"
 
   # Flow (L/min; set scale=16.667 if HA reports m³/h)
   sensor_hp_flow_lpm: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
