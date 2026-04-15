@@ -5,7 +5,7 @@
 # Base image: official HA Python base for the target architecture.
 # ---------------------------------------------------------------------------
 
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12
+ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12
 FROM ${BUILD_FROM}
 
 # Disable .pyc files and enable unbuffered logs (fail-fast visibility).

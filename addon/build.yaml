@@ -1,0 +1,17 @@
+---
+# ---------------------------------------------------------------------------
+# Home Optimizer — Addon build configuration
+#
+# Maps each supported architecture to the correct HA base Python image.
+# The HA supervisor uses this file to set BUILD_FROM before calling
+# `docker build`, ensuring the correct base image is pulled per arch.
+# Without this file the supervisor falls back to the ARG default in the
+# Dockerfile (amd64), which causes build failures on aarch64 hosts.
+# ---------------------------------------------------------------------------
+build_from:
+  aarch64: "ghcr.io/home-assistant/aarch64-base-python:3.12"
+  amd64:   "ghcr.io/home-assistant/amd64-base-python:3.12"
+  armhf:   "ghcr.io/home-assistant/armhf-base-python:3.12"
+  armv7:   "ghcr.io/home-assistant/armv7-base-python:3.12"
+  i386:    "ghcr.io/home-assistant/i386-base-python:3.12"
+
