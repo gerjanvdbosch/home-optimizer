@@ -66,6 +66,23 @@ class HomeAssistantBackend(SensorBackend):
     All numeric parameters are entity configs with an optional scaling factor.
     ``hp_mode_entity_id`` is read as a raw text state because operating modes are
     categorical rather than numeric.
+    shutter_living_room:
+        Shutter position entity [%].  100 = fully open, 0 = fully closed.
+        Many HA cover integrations expose this as ``cover.living_room``
+        with attribute ``current_position``, but it can also be a
+        ``sensor`` entity that directly reports the percentage.
+    defrost_active_entity_id:
+        Entity reporting ``"on"``/``"off"`` (or ``1``/``0``) for the
+        heat-pump defrost sub-state (§14.1, Kalman correction).
+    booster_heater_active_entity_id:
+        Entity reporting ``"on"``/``"off"`` for the DHW booster element
+        (§11, top-layer power injection).
+    boiler_ambient_temperature:
+        Ambient temperature sensor inside the boiler cupboard [°C] (T_amb, §8.3).
+    refrigerant_condensation_temperature:
+        Measured refrigerant condensation temperature T_cond [°C] (§14.1).
+    refrigerant_temperature:
+        Measured refrigerant evaporator / suction temperature T_evap [°C] (§14.1).
     base_url:
         HA base URL.  Falls back to ``HA_BASE_URL`` env var, then the
         supervisor addon endpoint ``http://supervisor/core``.
@@ -95,28 +112,16 @@ class HomeAssistantBackend(SensorBackend):
             thermostat_setpoint=HAEntityConfig("sensor.room_setpoint_temperature"),
             dhw_top_temperature=HAEntityConfig("sensor.dhw_top_temperature"),
             dhw_bottom_temperature=HAEntityConfig("sensor.dhw_bottom_temperature"),
+            shutter_living_room=HAEntityConfig("sensor.shutter_living_room_pct"),
+            defrost_active_entity_id="binary_sensor.heat_pump_defrost",
+            booster_heater_active_entity_id="binary_sensor.dhw_booster_heater",
+            boiler_ambient_temperature=HAEntityConfig("sensor.boiler_ambient_temp"),
+            refrigerant_condensation_temperature=HAEntityConfig("sensor.refrigerant_condensation_temp"),
+            refrigerant_temperature=HAEntityConfig("sensor.refrigerant_temp"),
             base_url="http://homeassistant.local:8123",
             token="YOUR_LONG_LIVED_TOKEN",
         )
         readings = backend.read_all()
-
-    Addon mode (no base_url / token needed — supervisor injects them)::
-
-        backend = HomeAssistantBackend(
-            room_temperature=HAEntityConfig("sensor.living_room_temperature"),
-            outdoor_temperature=HAEntityConfig("sensor.outdoor_temperature"),
-            hp_supply_temperature=HAEntityConfig("sensor.heat_pump_supply_temperature"),
-            hp_return_temperature=HAEntityConfig("sensor.heat_pump_return_temperature"),
-            hp_flow_lpm=HAEntityConfig("sensor.heat_pump_flow_lpm"),
-            hp_electric_power=HAEntityConfig("sensor.heat_pump_power_kw"),
-            hp_mode_entity_id="sensor.heat_pump_mode",
-            grid_import=HAEntityConfig("sensor.grid_import_power_kw"),
-            grid_export=HAEntityConfig("sensor.grid_export_power_kw"),
-            pv_output=HAEntityConfig("sensor.pv_power_kw"),
-            thermostat_setpoint=HAEntityConfig("sensor.room_setpoint_temperature"),
-            dhw_top_temperature=HAEntityConfig("sensor.dhw_top_temperature"),
-            dhw_bottom_temperature=HAEntityConfig("sensor.dhw_bottom_temperature"),
-        )
     """
 
     def __init__(
@@ -135,6 +140,12 @@ class HomeAssistantBackend(SensorBackend):
         thermostat_setpoint: HAEntityConfig,
         dhw_top_temperature: HAEntityConfig,
         dhw_bottom_temperature: HAEntityConfig,
+        shutter_living_room: HAEntityConfig,
+        defrost_active_entity_id: str,
+        booster_heater_active_entity_id: str,
+        boiler_ambient_temperature: HAEntityConfig,
+        refrigerant_condensation_temperature: HAEntityConfig,
+        refrigerant_temperature: HAEntityConfig,
         base_url: str | None = None,
         token: str | None = None,
         timeout: float = 10.0,
@@ -152,8 +163,18 @@ class HomeAssistantBackend(SensorBackend):
         self._thermostat_setpoint = thermostat_setpoint
         self._dhw_top_temperature = dhw_top_temperature
         self._dhw_bottom_temperature = dhw_bottom_temperature
+        self._shutter_living_room = shutter_living_room
+        self._defrost_active_entity_id = defrost_active_entity_id
+        self._booster_heater_active_entity_id = booster_heater_active_entity_id
+        self._boiler_ambient_temperature = boiler_ambient_temperature
+        self._refrigerant_condensation_temperature = refrigerant_condensation_temperature
+        self._refrigerant_temperature = refrigerant_temperature
         if not self._hp_mode_entity_id:
             raise ValueError("hp_mode_entity_id must not be empty.")
+        if not self._defrost_active_entity_id:
+            raise ValueError("defrost_active_entity_id must not be empty.")
+        if not self._booster_heater_active_entity_id:
+            raise ValueError("booster_heater_active_entity_id must not be empty.")
 
         resolved_url = base_url or os.environ.get("HA_BASE_URL") or _HA_ADDON_BASE
         self._base_url = resolved_url.rstrip("/")
@@ -214,6 +235,23 @@ class HomeAssistantBackend(SensorBackend):
         """Return the raw string state of an HA entity."""
         return self._fetch_raw_state(entity_id).strip()
 
+    def _fetch_bool_state(self, entity_id: str) -> bool:
+        """Return the boolean state of a HA binary_sensor or switch entity.
+
+        Accepts HA canonical values ``"on"``/``"off"`` as well as numeric
+        ``"1"``/``"0"``.  Any unrecognised state raises ``ValueError`` so
+        the snapshot is never populated with ambiguous data (Fail-Fast).
+        """
+        raw = self._fetch_raw_state(entity_id).lower()
+        if raw in ("on", "1", "true"):
+            return True
+        if raw in ("off", "0", "false"):
+            return False
+        raise ValueError(
+            f"Entity {entity_id!r} returned unrecognised boolean state {raw!r}. "
+            "Expected 'on'/'off', '1'/'0', or 'true'/'false'."
+        )
+
     # ------------------------------------------------------------------
     # SensorBackend interface
     # ------------------------------------------------------------------
@@ -234,6 +272,12 @@ class HomeAssistantBackend(SensorBackend):
             thermostat_setpoint_c=self._fetch_state(self._thermostat_setpoint),
             dhw_top_temperature_c=self._fetch_state(self._dhw_top_temperature),
             dhw_bottom_temperature_c=self._fetch_state(self._dhw_bottom_temperature),
+            shutter_living_room_pct=self._fetch_state(self._shutter_living_room),
+            defrost_active=self._fetch_bool_state(self._defrost_active_entity_id),
+            booster_heater_active=self._fetch_bool_state(self._booster_heater_active_entity_id),
+            boiler_ambient_temp_c=self._fetch_state(self._boiler_ambient_temperature),
+            refrigerant_condensation_temp_c=self._fetch_state(self._refrigerant_condensation_temperature),
+            refrigerant_temp_c=self._fetch_state(self._refrigerant_temperature),
             timestamp=self.now_utc(),
         )
 

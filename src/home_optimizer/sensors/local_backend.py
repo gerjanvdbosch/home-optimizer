@@ -16,6 +16,7 @@ from .base import LiveReadings, SensorBackend
 
 NumericValueSource: TypeAlias = float | Callable[[], float]
 TextValueSource: TypeAlias = str | Callable[[], str]
+BoolValueSource: TypeAlias = bool | int | Callable[[], bool | int]
 
 _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     "room_temperature_c",
@@ -30,9 +31,14 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     "thermostat_setpoint_c",
     "dhw_top_temperature_c",
     "dhw_bottom_temperature_c",
+    "shutter_living_room_pct",
+    "boiler_ambient_temp_c",
+    "refrigerant_condensation_temp_c",
+    "refrigerant_temp_c",
 )
 _TEXT_SENSOR_KEYS: tuple[str, ...] = ("hp_mode",)
-_ALL_SENSOR_KEYS: tuple[str, ...] = _NUMERIC_SENSOR_KEYS + _TEXT_SENSOR_KEYS
+_BOOL_SENSOR_KEYS: tuple[str, ...] = ("defrost_active", "booster_heater_active")
+_ALL_SENSOR_KEYS: tuple[str, ...] = _NUMERIC_SENSOR_KEYS + _TEXT_SENSOR_KEYS + _BOOL_SENSOR_KEYS
 
 
 def _resolve_numeric(source: NumericValueSource) -> float:
@@ -43,6 +49,15 @@ def _resolve_numeric(source: NumericValueSource) -> float:
 def _resolve_text(source: TextValueSource) -> str:
     """Evaluate a text source: call it if needed, then cast to string."""
     return str(source() if callable(source) else source)
+
+
+def _resolve_bool(source: BoolValueSource) -> bool:
+    """Evaluate a boolean source: call it if needed, then cast to bool.
+
+    JSON delivers 0/1 integers; this coercion ensures a clean Python bool.
+    """
+    raw = source() if callable(source) else source
+    return bool(raw)
 
 
 class LocalBackend(SensorBackend):
@@ -67,6 +82,12 @@ class LocalBackend(SensorBackend):
     ENV_THERMOSTAT_SETPOINT_C = "HOME_OPT_THERMOSTAT_SETPOINT_C"
     ENV_DHW_TOP_TEMPERATURE_C = "HOME_OPT_DHW_TOP_TEMPERATURE_C"
     ENV_DHW_BOTTOM_TEMPERATURE_C = "HOME_OPT_DHW_BOTTOM_TEMPERATURE_C"
+    ENV_SHUTTER_LIVING_ROOM_PCT = "HOME_OPT_SHUTTER_LIVING_ROOM_PCT"
+    ENV_DEFROST_ACTIVE = "HOME_OPT_DEFROST_ACTIVE"
+    ENV_BOOSTER_HEATER_ACTIVE = "HOME_OPT_BOOSTER_HEATER_ACTIVE"
+    ENV_BOILER_AMBIENT_TEMP_C = "HOME_OPT_BOILER_AMBIENT_TEMP_C"
+    ENV_REFRIGERANT_CONDENSATION_TEMP_C = "HOME_OPT_REFRIGERANT_CONDENSATION_TEMP_C"
+    ENV_REFRIGERANT_TEMP_C = "HOME_OPT_REFRIGERANT_TEMP_C"
 
     def __init__(
         self,
@@ -84,6 +105,12 @@ class LocalBackend(SensorBackend):
         thermostat_setpoint_c: NumericValueSource,
         dhw_top_temperature_c: NumericValueSource,
         dhw_bottom_temperature_c: NumericValueSource,
+        shutter_living_room_pct: NumericValueSource,
+        defrost_active: BoolValueSource,
+        booster_heater_active: BoolValueSource,
+        boiler_ambient_temp_c: NumericValueSource,
+        refrigerant_condensation_temp_c: NumericValueSource,
+        refrigerant_temp_c: NumericValueSource,
     ) -> None:
         self._room_temperature_c = room_temperature_c
         self._outdoor_temperature_c = outdoor_temperature_c
@@ -98,6 +125,12 @@ class LocalBackend(SensorBackend):
         self._thermostat_setpoint_c = thermostat_setpoint_c
         self._dhw_top_temperature_c = dhw_top_temperature_c
         self._dhw_bottom_temperature_c = dhw_bottom_temperature_c
+        self._shutter_living_room_pct = shutter_living_room_pct
+        self._defrost_active = defrost_active
+        self._booster_heater_active = booster_heater_active
+        self._boiler_ambient_temp_c = boiler_ambient_temp_c
+        self._refrigerant_condensation_temp_c = refrigerant_condensation_temp_c
+        self._refrigerant_temp_c = refrigerant_temp_c
 
     # ------------------------------------------------------------------
     # Factory constructors
@@ -137,6 +170,12 @@ class LocalBackend(SensorBackend):
                     f"Key {key!r} in {resolved_path} is not numeric: {value!r}"
                 ) from exc
 
+        def _read_bool(key: str) -> bool:
+            data = _read_json_object()
+            if key not in data:
+                raise ValueError(f"Missing required key {key!r} in {resolved_path}.")
+            return bool(data[key])
+
         def _read_text(key: str) -> str:
             data = _read_json_object()
             if key not in data:
@@ -160,6 +199,12 @@ class LocalBackend(SensorBackend):
             thermostat_setpoint_c=lambda: _read_numeric("thermostat_setpoint_c"),
             dhw_top_temperature_c=lambda: _read_numeric("dhw_top_temperature_c"),
             dhw_bottom_temperature_c=lambda: _read_numeric("dhw_bottom_temperature_c"),
+            shutter_living_room_pct=lambda: _read_numeric("shutter_living_room_pct"),
+            defrost_active=lambda: _read_bool("defrost_active"),
+            booster_heater_active=lambda: _read_bool("booster_heater_active"),
+            boiler_ambient_temp_c=lambda: _read_numeric("boiler_ambient_temp_c"),
+            refrigerant_condensation_temp_c=lambda: _read_numeric("refrigerant_condensation_temp_c"),
+            refrigerant_temp_c=lambda: _read_numeric("refrigerant_temp_c"),
         )
 
     @classmethod
@@ -170,6 +215,11 @@ class LocalBackend(SensorBackend):
             if key not in os.environ:
                 raise ValueError(f"Missing required environment variable {key}.")
             return float(os.environ[key])
+
+        def _env_bool(key: str) -> bool:
+            if key not in os.environ:
+                raise ValueError(f"Missing required environment variable {key}.")
+            return bool(int(os.environ[key]))
 
         def _env_text(key: str) -> str:
             value = os.environ.get(key, "").strip()
@@ -191,6 +241,12 @@ class LocalBackend(SensorBackend):
             thermostat_setpoint_c=lambda: _env_numeric(cls.ENV_THERMOSTAT_SETPOINT_C),
             dhw_top_temperature_c=lambda: _env_numeric(cls.ENV_DHW_TOP_TEMPERATURE_C),
             dhw_bottom_temperature_c=lambda: _env_numeric(cls.ENV_DHW_BOTTOM_TEMPERATURE_C),
+            shutter_living_room_pct=lambda: _env_numeric(cls.ENV_SHUTTER_LIVING_ROOM_PCT),
+            defrost_active=lambda: _env_bool(cls.ENV_DEFROST_ACTIVE),
+            booster_heater_active=lambda: _env_bool(cls.ENV_BOOSTER_HEATER_ACTIVE),
+            boiler_ambient_temp_c=lambda: _env_numeric(cls.ENV_BOILER_AMBIENT_TEMP_C),
+            refrigerant_condensation_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_CONDENSATION_TEMP_C),
+            refrigerant_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_TEMP_C),
         )
 
     # ------------------------------------------------------------------
@@ -218,6 +274,12 @@ class LocalBackend(SensorBackend):
             thermostat_setpoint_c=_resolve_numeric(self._thermostat_setpoint_c),
             dhw_top_temperature_c=_resolve_numeric(self._dhw_top_temperature_c),
             dhw_bottom_temperature_c=_resolve_numeric(self._dhw_bottom_temperature_c),
+            shutter_living_room_pct=_resolve_numeric(self._shutter_living_room_pct),
+            defrost_active=_resolve_bool(self._defrost_active),
+            booster_heater_active=_resolve_bool(self._booster_heater_active),
+            boiler_ambient_temp_c=_resolve_numeric(self._boiler_ambient_temp_c),
+            refrigerant_condensation_temp_c=_resolve_numeric(self._refrigerant_condensation_temp_c),
+            refrigerant_temp_c=_resolve_numeric(self._refrigerant_temp_c),
             timestamp=self.now_utc(),
         )
 

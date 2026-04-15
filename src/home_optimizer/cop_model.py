@@ -308,3 +308,65 @@ class HeatPumpCOPModel:
         """
         return self.cop_from_temperatures(t_dhw_supply, np.asarray(t_out, dtype=float))
 
+    def cop_from_measured_refrigerant(
+        self,
+        t_cond_c: np.ndarray | float,
+        t_evap_c: np.ndarray | float,
+    ) -> np.ndarray:
+        """Compute COP directly from **measured** refrigerant temperatures.
+
+        When the heat pump exposes ``refrigerant_condensation_temp_c`` and
+        ``refrigerant_temp_c`` (evaporator/suction side) as live sensor
+        readings (see :class:`~home_optimizer.sensors.base.LiveReadings`),
+        this method bypasses the approximations
+
+            T_cond ≈ T_supply + Δ_cond
+            T_evap ≈ T_out   − Δ_evap
+
+        and uses the actual refrigerant cycle temperatures directly in the
+        Carnot formula (§14.1).  This gives higher COP accuracy, especially
+        during transients or when the heat pump operates outside its design
+        envelope.
+
+        Args:
+            t_cond_c: Measured refrigerant condensation temperature [°C].
+                      Scalar or array; shape must be broadcastable with
+                      ``t_evap_c``.
+            t_evap_c: Measured refrigerant evaporator / suction temperature
+                      [°C].  Scalar or array.
+
+        Returns:
+            COP array [dimensionless], clipped to ``[cop_min, cop_max]``.
+
+        Notes
+        -----
+        The ``delta_T_cond`` and ``delta_T_evap`` parameters from
+        :class:`HeatPumpCOPParameters` are **not** applied here because the
+        refrigerant temperatures are measured directly — no approach-temperature
+        correction is needed.
+
+        Examples
+        --------
+        >>> readings = backend.read_all()
+        >>> cop_now = model.cop_from_measured_refrigerant(
+        ...     t_cond_c=readings.refrigerant_condensation_temp_c,
+        ...     t_evap_c=readings.refrigerant_temp_c,
+        ... )
+        """
+        p = self.params
+        t_cond_arr = np.asarray(t_cond_c, dtype=float)
+        t_evap_arr = np.asarray(t_evap_c, dtype=float)
+
+        # Convert directly to absolute temperatures [K] — no approach-temperature
+        # correction because the sensors measure the refrigerant cycle directly.
+        t_cond_k = t_cond_arr + T_CELSIUS_TO_KELVIN
+        t_evap_k = t_evap_arr + T_CELSIUS_TO_KELVIN
+
+        # Temperature lift [K]; floor to prevent division by zero (same guard as
+        # cop_from_temperatures).
+        lift_k = np.maximum(t_cond_k - t_evap_k, _MIN_TEMP_LIFT_K)
+
+        cop_carnot = t_cond_k / lift_k
+        cop_actual = p.eta_carnot * cop_carnot
+        return np.clip(cop_actual, p.cop_min, p.cop_max)
+

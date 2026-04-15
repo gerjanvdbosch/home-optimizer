@@ -53,6 +53,40 @@ class LiveReadings:
         DHW tank top-layer temperature T_top [°C].
     dhw_bottom_temperature_c:
         DHW tank bottom-layer temperature T_bot [°C].
+    shutter_living_room_pct:
+        Living-room shutter position [%].  100 = fully open (maximum solar
+        gain), 0 = fully closed (zero solar gain through glazing).  Used to
+        compute the effective solar transmittance η_eff = η × (shutter / 100)
+        for the Q_solar disturbance term (§4).
+        Must be in [0, 100].
+    defrost_active:
+        ``True`` when the heat pump is executing a defrost cycle.  During
+        defrost the refrigerant cycle is reversed and the HP *extracts* heat
+        from the hydraulic circuit instead of delivering it, making P_UFH
+        effectively negative.  Exposed separately from ``hp_mode`` because
+        many controllers report defrost as a sub-state while ``hp_mode``
+        still reads ``"ufh"`` or ``"dhw"``.
+    booster_heater_active:
+        ``True`` when the DHW booster (electric resistance) element is active.
+        The booster heats the **top layer** of the tank (assumption A5 note,
+        §11), adding power P_booster_kw to C_top instead of C_bot.  The
+        Kalman filter must account for this to avoid model-measurement
+        discrepancies during legionella or peak-load events.
+    boiler_ambient_temp_c:
+        Measured ambient temperature around the DHW boiler [°C].  This is the
+        direct measurement of T_amb used in the standby-loss term
+        Q_loss = (T_layer − T_amb) / R_loss (§8.3, §9.2).  Replaces the
+        estimated value in DHWForecastHorizon.t_amb_c at the current timestep.
+    refrigerant_condensation_temp_c:
+        Measured refrigerant condensation temperature T_cond [°C].  Used
+        directly in the Carnot COP formula (§14.1):
+            COP = η_Carnot × T_cond_K / (T_cond_K − T_evap_K)
+        Replaces the approximation T_cond ≈ T_supply + Δ_cond when this
+        sensor is available.
+    refrigerant_temp_c:
+        Measured refrigerant evaporator (suction) temperature T_evap [°C].
+        Used directly in the Carnot COP formula (§14.1).  Replaces the
+        approximation T_evap ≈ T_out − Δ_evap when this sensor is available.
     timestamp:
         UTC timestamp of the reading.
     """
@@ -70,6 +104,13 @@ class LiveReadings:
     thermostat_setpoint_c: float
     dhw_top_temperature_c: float
     dhw_bottom_temperature_c: float
+    # --- New sensors (§4, §9.2, §11, §14.1) ---
+    shutter_living_room_pct: float
+    defrost_active: bool
+    booster_heater_active: bool
+    boiler_ambient_temp_c: float
+    refrigerant_condensation_temp_c: float
+    refrigerant_temp_c: float
     timestamp: datetime
 
     def __post_init__(self) -> None:
@@ -86,6 +127,10 @@ class LiveReadings:
             "thermostat_setpoint_c",
             "dhw_top_temperature_c",
             "dhw_bottom_temperature_c",
+            "shutter_living_room_pct",
+            "boiler_ambient_temp_c",
+            "refrigerant_condensation_temp_c",
+            "refrigerant_temp_c",
         )
         for field_name in numeric_fields:
             _assert_finite(field_name, float(getattr(self, field_name)))
@@ -100,6 +145,17 @@ class LiveReadings:
         for field_name in non_negative_fields:
             if float(getattr(self, field_name)) < 0.0:
                 raise ValueError(f"{field_name} must be non-negative.")
+
+        # Shutter is a percentage [0, 100].
+        shutter = float(self.shutter_living_room_pct)
+        if not 0.0 <= shutter <= 100.0:
+            raise ValueError(
+                f"shutter_living_room_pct must be in [0, 100], got {shutter}."
+            )
+
+        # Coerce bool fields — JSON may deliver 0/1 integers.
+        object.__setattr__(self, "defrost_active", bool(self.defrost_active))
+        object.__setattr__(self, "booster_heater_active", bool(self.booster_heater_active))
 
         normalized_hp_mode = self.hp_mode.strip().lower()
         if not normalized_hp_mode:
@@ -117,6 +173,15 @@ class LiveReadings:
     def hp_delta_t_c(self) -> float:
         """Heat-pump supply-return temperature difference [K ≡ °C]."""
         return self.hp_supply_temperature_c - self.hp_return_temperature_c
+
+    @property
+    def shutter_fraction(self) -> float:
+        """Shutter openness as a unit fraction [0.0–1.0].
+
+        Used to compute effective solar transmittance:
+            η_eff = η × shutter_fraction   (§4, Q_solar disturbance)
+        """
+        return self.shutter_living_room_pct / 100.0
 
 
 class SensorBackend(ABC):

@@ -409,6 +409,13 @@ class ForecastHorizon:
                              Typically a function of T_out[k] (colder outside → lower COP).
                              All values must be > 1 (validated in MPC controller against
                              the cop_max from MPCParameters).
+    shutter_pct:             Living-room shutter position [%] over the horizon, length N.
+                             100 = fully open, 0 = fully closed.  When provided, the
+                             effective solar transmittance at step k becomes:
+                                 η_eff[k] = η × (shutter_pct[k] / 100)
+                             so Q_solar[k] = A_glass × GTI[k] × η_eff[k] / W_PER_KW (§4).
+                             ``None`` means shutters are assumed fully open → η_eff = η.
+                             Values must be in [0, 100].
     """
 
     outdoor_temperature_c: np.ndarray
@@ -420,6 +427,8 @@ class ForecastHorizon:
     pv_kw: np.ndarray | None = None
     #: Time-varying UFH COP over horizon [dimensionless], length N.  ``None`` → use scalar.
     cop_ufh_k: np.ndarray | None = None
+    #: Shutter position forecast [%], length N.  ``None`` → fully open (η_eff = η).
+    shutter_pct: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         t_out = _as_1d("outdoor_temperature_c", self.outdoor_temperature_c)
@@ -466,6 +475,15 @@ class ForecastHorizon:
                 raise ValueError("cop_ufh_k: all COP values must be > 1 (physical lower bound).")
             object.__setattr__(self, "cop_ufh_k", cop_arr)
 
+        # Shutter forecast: None → fully open (shutter_fraction = 1.0 everywhere).
+        if self.shutter_pct is not None:
+            shutter = _as_1d("shutter_pct", self.shutter_pct)
+            if shutter.size != n:
+                raise ValueError(f"shutter_pct must have length {n}.")
+            if np.any(shutter < 0.0) or np.any(shutter > 100.0):
+                raise ValueError("shutter_pct values must be in [0, 100].")
+            object.__setattr__(self, "shutter_pct", shutter)
+
         object.__setattr__(self, "outdoor_temperature_c", t_out)
         object.__setattr__(self, "gti_w_per_m2", gti)
         object.__setattr__(self, "internal_gains_kw", q_int)
@@ -478,8 +496,30 @@ class ForecastHorizon:
         return int(self.outdoor_temperature_c.size)
 
     def solar_gains_kw(self, p: ThermalParameters) -> np.ndarray:
-        """Convert GTI forecast to solar gain [kW]: Q_solar = A_glass * GTI * η / W_PER_KW."""
-        return p.A_glass * self.gti_w_per_m2 * p.eta / W_PER_KW
+        """Convert GTI forecast to solar gain [kW], accounting for shutter position.
+
+        Without shutter data (``shutter_pct is None``):
+            Q_solar = A_glass × GTI × η / W_PER_KW
+
+        With shutter data (§4):
+            η_eff[k] = η × (shutter_pct[k] / 100)
+            Q_solar[k] = A_glass × GTI[k] × η_eff[k] / W_PER_KW
+
+        Args:
+            p: Thermal parameters supplying A_glass [m²], η [-], and
+               the W_PER_KW conversion constant.
+
+        Returns:
+            Solar gain array [kW], shape (N,).  Non-negative by construction
+            because GTI ≥ 0 and η_eff ∈ [0, 1].
+        """
+        if self.shutter_pct is None:
+            # Shutters fully open — standard formula.
+            eta_eff = p.eta
+        else:
+            # Dynamic effective transmittance: η_eff[k] = η × fraction[k].
+            eta_eff = p.eta * (self.shutter_pct / 100.0)
+        return p.A_glass * self.gti_w_per_m2 * eta_eff / W_PER_KW
 
     def disturbance_matrix(self, p: ThermalParameters) -> np.ndarray:
         """Return N×3 matrix with columns [T_out, Q_solar, Q_int]."""

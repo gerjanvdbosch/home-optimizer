@@ -11,5 +11,11 @@
     "pv_output_kw": 0.6,
     "thermostat_setpoint_c": 20.5,
     "dhw_top_temperature_c": 52.0,
-    "dhw_bottom_temperature_c": 45.5
+    "dhw_bottom_temperature_c": 45.5,
+    "shutter_living_room_pct": 100.0,
+    "defrost_active": 0,
+    "booster_heater_active": 0,
+    "boiler_ambient_temp_c": 18.5,
+    "refrigerant_condensation_temp_c": 38.0,
+    "refrigerant_temp_c": 2.0
 }

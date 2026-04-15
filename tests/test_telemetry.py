@@ -57,6 +57,12 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         thermostat_setpoint_c=20.5,
         dhw_top_temperature_c=52.0,
         dhw_bottom_temperature_c=45.0,
+        shutter_living_room_pct=100.0,
+        defrost_active=False,
+        booster_heater_active=False,
+        boiler_ambient_temp_c=18.0,
+        refrigerant_condensation_temp_c=38.0,
+        refrigerant_temp_c=2.0,
         timestamp=timestamp,
     )
 
@@ -80,6 +86,12 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "thermostat_setpoint_c": 20.5,
                 "dhw_top_temperature_c": 53.0,
                 "dhw_bottom_temperature_c": 46.0,
+                "shutter_living_room_pct": 80.0,
+                "defrost_active": 0,
+                "booster_heater_active": 0,
+                "boiler_ambient_temp_c": 18.5,
+                "refrigerant_condensation_temp_c": 37.5,
+                "refrigerant_temp_c": 1.5,
             }
         ),
         encoding="utf-8",
@@ -92,6 +104,13 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
     assert reading.outdoor_temperature_c == pytest.approx(7.5)
     assert reading.hp_mode == "ufh"
     assert reading.hp_flow_lpm == pytest.approx(8.5)
+    assert reading.shutter_living_room_pct == pytest.approx(80.0)
+    assert reading.shutter_fraction == pytest.approx(0.8)
+    assert reading.defrost_active is False
+    assert reading.booster_heater_active is False
+    assert reading.boiler_ambient_temp_c == pytest.approx(18.5)
+    assert reading.refrigerant_condensation_temp_c == pytest.approx(37.5)
+    assert reading.refrigerant_temp_c == pytest.approx(1.5)
 
 
 def test_aggregate_readings_computes_mean_and_last() -> None:
