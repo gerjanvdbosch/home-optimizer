@@ -45,7 +45,7 @@ options:
   # --- Sensor entity IDs ---
   # Temperatures (°C — no scaling needed)
   sensor_room_temperature: "sensor.danfoss_15_temperature"
-  sensor_outdoor_temperature: "sensor.outdoor_temperature"
+  sensor_outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
   sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
   sensor_hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
   sensor_hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
