@@ -20,6 +20,7 @@ dependencies = [
   "httpx>=0.27",
   "SQLAlchemy>=2.0,<3.0",
   "APScheduler>=3.10,<4.0",
+  "pydantic>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ dev = [
 
 [project.scripts]
 home-optimizer-demo = "home_optimizer.__main__:main"
+home-optimizer-addon = "home_optimizer.addon:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

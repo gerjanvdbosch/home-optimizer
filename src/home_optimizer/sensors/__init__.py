@@ -25,6 +25,12 @@ Quick-start (Home Assistant addon / standalone)
         thermostat_setpoint=HAEntityConfig("sensor.room_setpoint_temperature"),
         dhw_top_temperature=HAEntityConfig("sensor.dhw_top_temperature"),
         dhw_bottom_temperature=HAEntityConfig("sensor.dhw_bottom_temperature"),
+        shutter_living_room=HAEntityConfig("sensor.shutter_living_room_pct"),
+        defrost_active_entity_id="binary_sensor.hp_defrost",
+        booster_heater_active_entity_id="binary_sensor.dhw_booster_heater",
+        boiler_ambient_temperature=HAEntityConfig("sensor.boiler_ambient_temp"),
+        refrigerant_condensation_temperature=HAEntityConfig("sensor.refrigerant_cond_temp"),
+        refrigerant_temperature=HAEntityConfig("sensor.refrigerant_evap_temp"),
         base_url="http://homeassistant.local:8123",   # omit in addon mode
         token="YOUR_LONG_LIVED_TOKEN",                # omit in addon mode
     )

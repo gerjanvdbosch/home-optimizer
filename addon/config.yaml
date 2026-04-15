@@ -1,0 +1,117 @@
+---
+name: "Home Optimizer"
+description: >-
+  Slimme warmtepompregeling met MPC, Kalman-filter en telemetrie-opslag.
+  Ondersteunt UFH (vloerverwarming) en DHW (tapwater) via een gedeelde warmtepomp.
+  Bereikbaar via Ingress of direct op poort 8099.
+version: "0.1.0"
+slug: "home_optimizer"
+url: "https://github.com/gerjanvandenbosch/home-optimizer"
+init: false
+
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+
+ports:
+  8099/tcp: 8099
+
+ports_description:
+  8099/tcp: "Home Optimizer dashboard & REST API"
+
+map:
+  - data:rw   # /data is writable — used for the SQLite telemetry database
+
+# ---------------------------------------------------------------------------
+# Default option values — user can override via the addon Configuration tab.
+# ---------------------------------------------------------------------------
+options:
+  # --- Telemetry storage ---
+  database_path: "/data/telemetry.sqlite3"
+  sampling_interval_seconds: 30
+  flush_interval_seconds: 300
+  api_port: 8099
+
+  # --- Sensor entity IDs ---
+  # Temperatures (°C — no scaling needed)
+  sensor_room_temperature: "sensor.room_temperature"
+  sensor_outdoor_temperature: "sensor.outdoor_temperature"
+  sensor_hp_supply_temperature: "sensor.hp_supply_temperature"
+  sensor_hp_return_temperature: "sensor.hp_return_temperature"
+  sensor_thermostat_setpoint: "sensor.thermostat_setpoint"
+  sensor_dhw_top_temperature: "sensor.dhw_top_temperature"
+  sensor_dhw_bottom_temperature: "sensor.dhw_bottom_temperature"
+  sensor_boiler_ambient_temperature: "sensor.boiler_ambient_temperature"
+  sensor_refrigerant_condensation_temperature: "sensor.refrigerant_condensation_temp"
+  sensor_refrigerant_temperature: "sensor.refrigerant_temp"
+
+  # Flow (L/min; set scale=16.667 if HA reports m³/h)
+  sensor_hp_flow_lpm: "sensor.hp_flow_lpm"
+  sensor_hp_flow_scale: 1.0
+
+  # Power (kW; set scale=0.001 if HA reports W)
+  sensor_hp_electric_power: "sensor.hp_electric_power"
+  sensor_hp_electric_power_scale: 1.0
+  sensor_grid_import: "sensor.grid_import"
+  sensor_grid_import_scale: 1.0
+  sensor_grid_export: "sensor.grid_export"
+  sensor_grid_export_scale: 1.0
+  sensor_pv_output: "sensor.pv_output"
+  sensor_pv_output_scale: 1.0
+
+  # Text / categorical
+  sensor_hp_mode: "sensor.hp_mode"
+
+  # Shutter position (0–100 %)
+  sensor_shutter_living_room: "sensor.shutter_living_room_pct"
+
+  # Binary sensors (on/off or 1/0)
+  sensor_defrost_active: "binary_sensor.hp_defrost"
+  sensor_booster_heater_active: "binary_sensor.dhw_booster_heater"
+
+# ---------------------------------------------------------------------------
+# Schema — types validated by the HA supervisor before the addon starts.
+# Use "type?" for optional fields that have a sensible default in options:.
+# ---------------------------------------------------------------------------
+schema:
+  database_path: str
+  sampling_interval_seconds: int
+  flush_interval_seconds: int
+  api_port: int
+
+  sensor_room_temperature: str
+  sensor_outdoor_temperature: str
+  sensor_hp_supply_temperature: str
+  sensor_hp_return_temperature: str
+  sensor_thermostat_setpoint: str
+  sensor_dhw_top_temperature: str
+  sensor_dhw_bottom_temperature: str
+  sensor_boiler_ambient_temperature: str
+  sensor_refrigerant_condensation_temperature: str
+  sensor_refrigerant_temperature: str
+
+  sensor_hp_flow_lpm: str
+  sensor_hp_flow_scale: float
+
+  sensor_hp_electric_power: str
+  sensor_hp_electric_power_scale: float
+  sensor_grid_import: str
+  sensor_grid_import_scale: float
+  sensor_grid_export: str
+  sensor_grid_export_scale: float
+  sensor_pv_output: str
+  sensor_pv_output_scale: float
+
+  sensor_hp_mode: str
+
+  sensor_shutter_living_room: str
+  sensor_defrost_active: str
+  sensor_booster_heater_active: str
+
