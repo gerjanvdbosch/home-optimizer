@@ -35,6 +35,15 @@ NUMERIC_READING_FIELD_NAMES: tuple[str, ...] = (
     "boiler_ambient_temp_c",
     "refrigerant_condensation_temp_c",
     "refrigerant_temp_c",
+    # Weather fields (Open-Meteo via WeatherAugmentedBackend, §4 & §8.3)
+    "gti_w_per_m2",
+    "gti_pv_w_per_m2",
+    "t_mains_estimated_c",
+    # Derived quantities — accessed via LiveReadings properties (§15)
+    # hp_thermal_power_kw  : V̇ × λ × ΔT  [kW]  (property, not a stored field)
+    # household_elec_power_kw : P1 + PV − HP  [kW]  (property, not a stored field)
+    "hp_thermal_power_kw",
+    "household_elec_power_kw",
 )
 
 #: Boolean fields stored as (fraction-active, last-value) pairs.
@@ -45,7 +54,7 @@ BOOL_READING_FIELD_NAMES: tuple[str, ...] = (
     "booster_heater_active",
 )
 
-_UNIT_SUFFIXES: tuple[str, ...] = ("_c", "_kw", "_lpm", "_pct")
+_UNIT_SUFFIXES: tuple[str, ...] = ("_c", "_kw", "_lpm", "_pct", "_w_per_m2")
 
 
 def _stat_column_name(field_name: str, statistic: str) -> str:

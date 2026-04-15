@@ -12,6 +12,18 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 
+# ---------------------------------------------------------------------------
+# Physical unit-conversion constants (named; never hardcode inline — §anti-pattern)
+# ---------------------------------------------------------------------------
+
+#: 1 L/min × 60 min/h / 1000 L/m³ → m³/h.  Used in hp_thermal_power_kw.
+LITERS_PER_MIN_TO_M3_PER_H: float = 60.0 / 1000.0
+
+#: ρ·c_p of water [kWh/(m³·K)] — the λ constant from §8.4.
+#: Derived: 1000 kg/m³ × 4186 J/(kg·K) / 3_600_000 J/kWh = 1.1628.
+#: Never substitute c_p in J/(kg·K) directly in any formula.
+LAMBDA_WATER_KWH_PER_M3_K: float = 1.1628
+
 
 def _assert_finite(name: str, value: float) -> None:
     """Fail fast when a sensor reports a non-finite numeric value."""
@@ -116,6 +128,28 @@ class LiveReadings:
     boiler_ambient_temp_c: float
     refrigerant_condensation_temp_c: float
     refrigerant_temp_c: float
+    # --- Weather fields (injected by WeatherAugmentedBackend, §4 & §8.3) ---
+    gti_w_per_m2: float
+    """Global Tilted Irradiance for south-facing windows [W/m²].
+
+    Current forecast hour from Open-Meteo.  Used to compute Q_solar in the
+    UFH disturbance vector (§4).  Must be ≥ 0 (physically non-negative).
+    Use WeatherAugmentedBackend to populate this field automatically.
+    """
+    gti_pv_w_per_m2: float
+    """Global Tilted Irradiance for PV panels [W/m²].
+
+    0.0 when no PV surface is configured on the OpenMeteoClient.  Used in
+    effective_price() to correct the electricity cost for PV self-consumption.
+    Must be ≥ 0.
+    """
+    t_mains_estimated_c: float
+    """Seasonal estimate of cold mains water temperature [°C].
+
+    Derived from a cosine seasonal model (SeasonalMainsModel).  Used as the
+    T_mains disturbance in the DHW energy balance (§9.1, §10.3).  Typical NL
+    range: 7–14 °C.  WeatherAugmentedBackend computes this automatically.
+    """
     timestamp: datetime
 
     def __post_init__(self) -> None:
@@ -136,6 +170,9 @@ class LiveReadings:
             "boiler_ambient_temp_c",
             "refrigerant_condensation_temp_c",
             "refrigerant_temp_c",
+            "gti_w_per_m2",
+            "gti_pv_w_per_m2",
+            "t_mains_estimated_c",
         )
         for field_name in numeric_fields:
             _assert_finite(field_name, float(getattr(self, field_name)))
@@ -156,6 +193,12 @@ class LiveReadings:
             raise ValueError(
                 f"shutter_living_room_pct must be in [0, 100], got {shutter}."
             )
+
+        # GTI is physically non-negative (irradiance cannot be negative).
+        if float(self.gti_w_per_m2) < 0.0:
+            raise ValueError("gti_w_per_m2 must be non-negative.")
+        if float(self.gti_pv_w_per_m2) < 0.0:
+            raise ValueError("gti_pv_w_per_m2 must be non-negative.")
 
         # Coerce bool fields — JSON may deliver 0/1 integers.
         object.__setattr__(self, "defrost_active", bool(self.defrost_active))
@@ -189,6 +232,48 @@ class LiveReadings:
             η_eff = η × shutter_fraction   (§4, Q_solar disturbance)
         """
         return self.shutter_living_room_pct / 100.0
+
+    @property
+    def hp_thermal_power_kw(self) -> float:
+        """Instantaneous heat-pump thermal power derived from hydraulic measurements [kW].
+
+        Implements the hydraulic power formula (§15, UFH & DHW parameter table):
+
+            Q_therm [kW] = V̇ [m³/h] × λ [kWh/(m³·K)] × ΔT [K]
+
+        where:
+            V̇   = hp_flow_lpm × LITERS_PER_MIN_TO_M3_PER_H  [m³/h]
+            ΔT  = hp_supply_temperature_c − hp_return_temperature_c  [K]
+            λ   = LAMBDA_WATER_KWH_PER_M3_K = 1.1628  [kWh/(m³·K)]
+
+        Notes
+        -----
+        * The raw signed value is returned.  During defrost, ΔT < 0 and this
+          property is negative — use ``defrost_active`` to exclude those periods.
+        * The result represents total thermal output regardless of HP mode
+          (UFH or DHW).  Split by ``hp_mode`` in training pipelines.
+        """
+        flow_m3_per_h = self.hp_flow_lpm * LITERS_PER_MIN_TO_M3_PER_H
+        return flow_m3_per_h * LAMBDA_WATER_KWH_PER_M3_K * self.hp_delta_t_c
+
+    @property
+    def household_elec_power_kw(self) -> float:
+        """Net non-HP household electricity consumption — Q_int proxy [kW].
+
+        Proxy for internal heat gains from occupants and appliances (§2, Q_int):
+
+            Q_household [kW] = P1_net [kW] + P_PV [kW] − P_HP_elec [kW]
+
+        This is the share of grid electricity consumed by household loads.
+        Multiplied by an appliance heat-dissipation fraction (typically 0.8–1.0),
+        it provides an estimate of Q_int for the UFH disturbance vector.
+
+        Notes
+        -----
+        * Can be negative when PV production exceeds all non-HP loads.
+        * Does not distinguish appliance heat from occupant metabolic gains.
+        """
+        return self.p1_net_power_kw + self.pv_output_kw - self.hp_electric_power_kw
 
 
 class SensorBackend(ABC):

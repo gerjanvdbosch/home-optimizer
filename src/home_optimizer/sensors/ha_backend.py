@@ -92,6 +92,18 @@ class HomeAssistantBackend(SensorBackend):
     timeout:
         HTTP request timeout in seconds.  Default ``10.0``.
 
+    .. important::
+
+        This backend provides **placeholder values** (``0.0``) for the three
+        weather-sourced :class:`LiveReadings` fields:
+        ``gti_w_per_m2``, ``gti_pv_w_per_m2``, and ``t_mains_estimated_c``.
+        In production, wrap this backend with
+        :class:`~home_optimizer.sensors.WeatherAugmentedBackend` so that real
+        Open-Meteo GTI and seasonal T_mains are injected before telemetry
+        is persisted.  Telemetry collected without the wrapper will have
+        zero GTI and zero T_mains, which renders DHW and UFH solar-gain
+        training data unusable.
+
     Examples
     --------
     Standalone (LAN access, outside HA)::
@@ -278,6 +290,12 @@ class HomeAssistantBackend(SensorBackend):
             boiler_ambient_temp_c=self._fetch_state(self._boiler_ambient_temperature),
             refrigerant_condensation_temp_c=self._fetch_state(self._refrigerant_condensation_temperature),
             refrigerant_temp_c=self._fetch_state(self._refrigerant_temperature),
+            # Weather fields: placeholder 0.0 — must be overridden by WeatherAugmentedBackend.
+            # GTI = 0.0 is physically valid (nighttime); T_mains = 0.0 is a sentinel
+            # indicating that the WeatherAugmentedBackend wrapper is not in use.
+            gti_w_per_m2=0.0,
+            gti_pv_w_per_m2=0.0,
+            t_mains_estimated_c=0.0,
             timestamp=self.now_utc(),
         )
 

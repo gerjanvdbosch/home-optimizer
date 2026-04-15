@@ -58,16 +58,20 @@ Quick-start (local / standalone, no HA)
     # or read from env vars:  backend = LocalBackend.from_env()
 """
 
-from .base import LiveReadings, SensorBackend
+from .base import LAMBDA_WATER_KWH_PER_M3_K, LITERS_PER_MIN_TO_M3_PER_H, LiveReadings, SensorBackend
 from .factory import build_forecast, effective_price
 from .ha_backend import HAEntityConfig, HomeAssistantBackend
 from .local_backend import LocalBackend
-from .open_meteo import OpenMeteoClient, WeatherForecast
+from .open_meteo import OpenMeteoClient, SeasonalMainsModel, WeatherForecast
+from .weather_backend import WeatherAugmentedBackend, WeatherCurrentValues
 
 __all__ = [
     # Core abstractions
     "LiveReadings",
     "SensorBackend",
+    # Physical constants exposed for downstream use
+    "LAMBDA_WATER_KWH_PER_M3_K",
+    "LITERS_PER_MIN_TO_M3_PER_H",
     # Home Assistant backend
     "HAEntityConfig",
     "HomeAssistantBackend",
@@ -76,6 +80,11 @@ __all__ = [
     # Weather forecast
     "OpenMeteoClient",
     "WeatherForecast",
+    # Seasonal T_mains model
+    "SeasonalMainsModel",
+    # Weather-augmented backend (production wrapper)
+    "WeatherAugmentedBackend",
+    "WeatherCurrentValues",
     # ForecastHorizon factory
     "build_forecast",
     "effective_price",

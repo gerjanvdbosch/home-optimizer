@@ -35,6 +35,11 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     "boiler_ambient_temp_c",
     "refrigerant_condensation_temp_c",
     "refrigerant_temp_c",
+    # Weather fields — injected here for local/test use; use WeatherAugmentedBackend
+    # in production to pull live values from Open-Meteo (§4, §8.3).
+    "gti_w_per_m2",
+    "gti_pv_w_per_m2",
+    "t_mains_estimated_c",
 )
 _TEXT_SENSOR_KEYS: tuple[str, ...] = ("hp_mode",)
 _BOOL_SENSOR_KEYS: tuple[str, ...] = ("defrost_active", "booster_heater_active")
@@ -88,6 +93,9 @@ class LocalBackend(SensorBackend):
     ENV_BOILER_AMBIENT_TEMP_C = "HOME_OPT_BOILER_AMBIENT_TEMP_C"
     ENV_REFRIGERANT_CONDENSATION_TEMP_C = "HOME_OPT_REFRIGERANT_CONDENSATION_TEMP_C"
     ENV_REFRIGERANT_TEMP_C = "HOME_OPT_REFRIGERANT_TEMP_C"
+    ENV_GTI_W_PER_M2 = "HOME_OPT_GTI_W_PER_M2"
+    ENV_GTI_PV_W_PER_M2 = "HOME_OPT_GTI_PV_W_PER_M2"
+    ENV_T_MAINS_ESTIMATED_C = "HOME_OPT_T_MAINS_ESTIMATED_C"
 
     def __init__(
         self,
@@ -111,6 +119,9 @@ class LocalBackend(SensorBackend):
         boiler_ambient_temp_c: NumericValueSource,
         refrigerant_condensation_temp_c: NumericValueSource,
         refrigerant_temp_c: NumericValueSource,
+        gti_w_per_m2: NumericValueSource,
+        gti_pv_w_per_m2: NumericValueSource,
+        t_mains_estimated_c: NumericValueSource,
     ) -> None:
         self._room_temperature_c = room_temperature_c
         self._outdoor_temperature_c = outdoor_temperature_c
@@ -131,6 +142,9 @@ class LocalBackend(SensorBackend):
         self._boiler_ambient_temp_c = boiler_ambient_temp_c
         self._refrigerant_condensation_temp_c = refrigerant_condensation_temp_c
         self._refrigerant_temp_c = refrigerant_temp_c
+        self._gti_w_per_m2 = gti_w_per_m2
+        self._gti_pv_w_per_m2 = gti_pv_w_per_m2
+        self._t_mains_estimated_c = t_mains_estimated_c
 
     # ------------------------------------------------------------------
     # Factory constructors
@@ -205,6 +219,9 @@ class LocalBackend(SensorBackend):
             boiler_ambient_temp_c=lambda: _read_numeric("boiler_ambient_temp_c"),
             refrigerant_condensation_temp_c=lambda: _read_numeric("refrigerant_condensation_temp_c"),
             refrigerant_temp_c=lambda: _read_numeric("refrigerant_temp_c"),
+            gti_w_per_m2=lambda: _read_numeric("gti_w_per_m2"),
+            gti_pv_w_per_m2=lambda: _read_numeric("gti_pv_w_per_m2"),
+            t_mains_estimated_c=lambda: _read_numeric("t_mains_estimated_c"),
         )
 
     @classmethod
@@ -247,6 +264,9 @@ class LocalBackend(SensorBackend):
             boiler_ambient_temp_c=lambda: _env_numeric(cls.ENV_BOILER_AMBIENT_TEMP_C),
             refrigerant_condensation_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_CONDENSATION_TEMP_C),
             refrigerant_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_TEMP_C),
+            gti_w_per_m2=lambda: _env_numeric(cls.ENV_GTI_W_PER_M2),
+            gti_pv_w_per_m2=lambda: _env_numeric(cls.ENV_GTI_PV_W_PER_M2),
+            t_mains_estimated_c=lambda: _env_numeric(cls.ENV_T_MAINS_ESTIMATED_C),
         )
 
     # ------------------------------------------------------------------
@@ -280,6 +300,9 @@ class LocalBackend(SensorBackend):
             boiler_ambient_temp_c=_resolve_numeric(self._boiler_ambient_temp_c),
             refrigerant_condensation_temp_c=_resolve_numeric(self._refrigerant_condensation_temp_c),
             refrigerant_temp_c=_resolve_numeric(self._refrigerant_temp_c),
+            gti_w_per_m2=_resolve_numeric(self._gti_w_per_m2),
+            gti_pv_w_per_m2=_resolve_numeric(self._gti_pv_w_per_m2),
+            t_mains_estimated_c=_resolve_numeric(self._t_mains_estimated_c),
             timestamp=self.now_utc(),
         )
 

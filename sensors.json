@@ -17,5 +17,8 @@
     "booster_heater_active": 0,
     "boiler_ambient_temp_c": 18.5,
     "refrigerant_condensation_temp_c": 38.0,
-    "refrigerant_temp_c": 2.0
+    "refrigerant_temp_c": 2.0,
+    "gti_w_per_m2": 350.0,
+    "gti_pv_w_per_m2": 280.0,
+    "t_mains_estimated_c": 10.5
 }

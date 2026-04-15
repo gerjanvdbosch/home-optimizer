@@ -63,6 +63,9 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         boiler_ambient_temp_c=18.0,
         refrigerant_condensation_temp_c=38.0,
         refrigerant_temp_c=2.0,
+        gti_w_per_m2=350.0,
+        gti_pv_w_per_m2=280.0,
+        t_mains_estimated_c=10.5,
         timestamp=timestamp,
     )
 
@@ -92,6 +95,9 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "boiler_ambient_temp_c": 18.5,
                 "refrigerant_condensation_temp_c": 37.5,
                 "refrigerant_temp_c": 1.5,
+                "gti_w_per_m2": 500.0,
+                "gti_pv_w_per_m2": 400.0,
+                "t_mains_estimated_c": 10.5,
             }
         ),
         encoding="utf-8",
@@ -281,6 +287,9 @@ def test_aggregate_includes_new_sensor_fields() -> None:
             boiler_ambient_temp_c=19.0,
             refrigerant_condensation_temp_c=40.0,
             refrigerant_temp_c=3.0,
+            gti_w_per_m2=400.0,
+            gti_pv_w_per_m2=320.0,
+            t_mains_estimated_c=11.0,
             timestamp=t0 + timedelta(seconds=30),
         ),
     ]

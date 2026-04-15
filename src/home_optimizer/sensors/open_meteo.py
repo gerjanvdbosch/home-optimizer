@@ -17,6 +17,7 @@ For south-facing PV panels at 35 °:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -31,6 +32,103 @@ _HOURS_PER_DAY: int = 24          # universele tijdconstante
 _MIN_FETCH_DAYS: int = 2          # minimaal 2 dagen ophalen voor buffer
 _FETCH_BUFFER_HOURS: int = 2      # extra uur-buffer voor uitlijning op huidig uur
 _DT_FLOAT_TOLERANCE: float = 1e-9 # numerieke tolerantie voor dt ≈ 1 h vergelijking
+
+#: Days per year approximation used in the seasonal cosine model.
+#: Leap years introduce < 0.3 % error — within seasonal model uncertainty.
+_DAYS_PER_YEAR: float = 365.0
+
+#: Valid range for day-of-year input.
+_DAY_OF_YEAR_MIN: int = 1
+_DAY_OF_YEAR_MAX: int = 366  # day 366 occurs in leap years
+
+
+@dataclass(frozen=True, slots=True)
+class SeasonalMainsModel:
+    """Seasonal cosine model for cold mains water temperature.
+
+    Implements a sinusoidal annual cycle (grey-box, calibrated against water-utility
+    measurement data):
+
+        T_mains(d) = t_mean_c + t_amplitude_k × cos(2π × (d − d_peak) / 365)
+
+    where d is the day-of-year (1–365/366).
+
+    For the Netherlands, representative parameters (KIWA / Vitens seasonal data):
+
+        t_mean_c              ≈ 10.5 °C  (annual mean)
+        t_amplitude_k         ≈  3.5 K   (seasonal swing ± 3.5 K around mean)
+        day_of_year_peak_warm ≈ 246       (≈ 3 September — annual maximum)
+
+    These are provided by :meth:`for_netherlands` as named constants — not
+    hardcoded in any formula.  Validate against your local water utility before
+    deploying in a DHW energy-balance model.
+
+    Parameters
+    ----------
+    t_mean_c:
+        Annual mean cold mains temperature [°C].
+    t_amplitude_k:
+        Half-amplitude of the seasonal cycle [K].  Must be ≥ 0.
+    day_of_year_peak_warm:
+        Day-of-year on which the mains temperature is highest (1–366).
+        NL typical: 246 (first week of September).
+    """
+
+    t_mean_c: float
+    t_amplitude_k: float
+    day_of_year_peak_warm: int
+
+    def __post_init__(self) -> None:
+        if self.t_amplitude_k < 0.0:
+            raise ValueError("t_amplitude_k must be ≥ 0.")
+        if not _DAY_OF_YEAR_MIN <= self.day_of_year_peak_warm <= _DAY_OF_YEAR_MAX:
+            raise ValueError(
+                f"day_of_year_peak_warm must be in "
+                f"[{_DAY_OF_YEAR_MIN}, {_DAY_OF_YEAR_MAX}], "
+                f"got {self.day_of_year_peak_warm}."
+            )
+
+    def estimate(self, dt: datetime) -> float:
+        """Estimate cold mains temperature for a given date [°C].
+
+        Only the calendar day is used; sub-daily variation is below model accuracy.
+
+        Parameters
+        ----------
+        dt:
+            Datetime (timezone-aware or naive).
+
+        Returns
+        -------
+        float
+            Estimated T_mains [°C].
+        """
+        day = dt.timetuple().tm_yday
+        return self.t_mean_c + self.t_amplitude_k * math.cos(
+            2.0 * math.pi * (day - self.day_of_year_peak_warm) / _DAYS_PER_YEAR
+        )
+
+    @classmethod
+    def for_netherlands(cls) -> "SeasonalMainsModel":
+        """Return a SeasonalMainsModel with typical Dutch cold-mains parameters.
+
+        Source: KIWA / Vitens seasonal water temperature profiles (NL national average).
+        Validate against your regional water utility for high-accuracy DHW modelling.
+
+        Returns
+        -------
+        SeasonalMainsModel
+            t_mean_c=10.5 °C, t_amplitude_k=3.5 K, day_of_year_peak_warm=246.
+        """
+        # Named constants — never use raw literals in formulas (§anti-pattern).
+        _NL_T_MEAN_C: float = 10.5
+        _NL_T_AMPLITUDE_K: float = 3.5
+        _NL_DAY_PEAK_WARM: int = 246
+        return cls(
+            t_mean_c=_NL_T_MEAN_C,
+            t_amplitude_k=_NL_T_AMPLITUDE_K,
+            day_of_year_peak_warm=_NL_DAY_PEAK_WARM,
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,6 @@
 """Telemetry persistence helpers for Home Optimizer."""
 
-from .models import Base, TelemetryAggregate, TelemetryCollectorSettings
+from .models import Base, MPCLog, TelemetryAggregate, TelemetryCollectorSettings
 from .repository import TelemetryRepository
 from .scheduler import (
     NUMERIC_READING_FIELD_NAMES,
@@ -11,6 +11,7 @@ from .scheduler import (
 __all__ = [
     "Base",
     "BufferedTelemetryCollector",
+    "MPCLog",
     "NUMERIC_READING_FIELD_NAMES",
     "TelemetryAggregate",
     "TelemetryCollectorSettings",

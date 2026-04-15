@@ -11,11 +11,11 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from .models import Base, TelemetryAggregate
+from .models import Base, MPCLog, TelemetryAggregate
 
 
 class TelemetryRepository:
-    """Persist aggregated telemetry buckets into a SQLAlchemy database.
+    """Persist aggregated telemetry buckets and MPC log entries into a SQLAlchemy database.
 
     Parameters
     ----------
@@ -51,10 +51,37 @@ class TelemetryRepository:
             session.refresh(record)
         return record
 
+    def add_mpc_log(self, mpc_data: dict[str, Any]) -> MPCLog:
+        """Insert one MPC solve record.
+
+        Parameters
+        ----------
+        mpc_data:
+            Mapping with the exact :class:`MPCLog` constructor fields.
+            Required keys: ``solve_time_utc``, ``p_ufh_setpoint_kw``,
+            ``p_dhw_setpoint_kw``, ``solver_status``, ``t_out_forecast_c``,
+            ``gti_forecast_w_per_m2``, ``electricity_price_eur_per_kwh``,
+            ``cop_ufh``, ``cop_dhw``, ``horizon_steps``,
+            ``t_room_initial_c``, ``t_dhw_top_initial_c``.
+        """
+        record = MPCLog(**mpc_data)
+        with self._session_factory() as session:
+            session.add(record)
+            session.flush()
+            session.commit()
+            session.refresh(record)
+        return record
+
     def list_aggregates(self) -> list[TelemetryAggregate]:
         """Return all telemetry buckets ordered by their start timestamp."""
         with self._session_factory() as session:
             stmt = select(TelemetryAggregate).order_by(TelemetryAggregate.bucket_start_utc.asc())
+            return list(session.scalars(stmt).all())
+
+    def list_mpc_logs(self) -> list[MPCLog]:
+        """Return all MPC solve records ordered by solve time."""
+        with self._session_factory() as session:
+            stmt = select(MPCLog).order_by(MPCLog.solve_time_utc.asc())
             return list(session.scalars(stmt).all())
 
     def count(self) -> int:

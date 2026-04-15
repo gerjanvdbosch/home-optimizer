@@ -25,6 +25,7 @@ DEFAULT_SAMPLING_INTERVAL_SECONDS: int = 30
 DEFAULT_FLUSH_INTERVAL_SECONDS: int = 300
 DEFAULT_TELEMETRY_JOB_ID_PREFIX: str = "telemetry"
 MAX_HP_MODE_LENGTH: int = 64
+MAX_SOLVER_STATUS_LENGTH: int = 32
 
 
 class TelemetryCollectorSettings(BaseModel):
@@ -166,6 +167,93 @@ class TelemetryAggregate(Base):
     refrigerant_condensation_temp_last_c: Mapped[float] = mapped_column(Float)
     refrigerant_temp_mean_c: Mapped[float] = mapped_column(Float)
     refrigerant_temp_last_c: Mapped[float] = mapped_column(Float)
+
+    # Weather / Open-Meteo (injected by WeatherAugmentedBackend) -----------
+    # GTI for south-facing windows [W/m²] — used for Q_solar in §4.
+    # Current forecast hour; constant within each 5-minute bucket.
+    gti_mean_w_per_m2: Mapped[float] = mapped_column(Float)
+    gti_last_w_per_m2: Mapped[float] = mapped_column(Float)
+    # GTI for PV panels [W/m²] — used in effective_price() PV correction.
+    # 0.0 when no PV surface is configured on the OpenMeteoClient.
+    gti_pv_mean_w_per_m2: Mapped[float] = mapped_column(Float)
+    gti_pv_last_w_per_m2: Mapped[float] = mapped_column(Float)
+    # Cold mains water temperature estimate [°C] — DHW disturbance T_mains (§9.1).
+    # Derived from SeasonalMainsModel (cosine seasonal model).
+    t_mains_estimated_mean_c: Mapped[float] = mapped_column(Float)
+    t_mains_estimated_last_c: Mapped[float] = mapped_column(Float)
+
+    # Derived quantities (pre-computed at flush for training convenience) ---
+    # HP thermal power Q_therm = V̇ × λ × ΔT [kW] (§15, hydraulic power formula).
+    # Computed per sample as a property; aggregated here for easy model fitting.
+    # Negative during defrost — use defrost_active_fraction to filter.
+    hp_thermal_power_mean_kw: Mapped[float] = mapped_column(Float)
+    hp_thermal_power_last_kw: Mapped[float] = mapped_column(Float)
+    # Net non-HP household electricity [kW] = P1 + PV − HP_elec.
+    # Q_int proxy: represents appliance heat dissipation (§2, §14.2).
+    household_elec_power_mean_kw: Mapped[float] = mapped_column(Float)
+    household_elec_power_last_kw: Mapped[float] = mapped_column(Float)
+
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=timezone.utc),
+    )
+
+
+class MPCLog(Base):
+    """Persisted record of each MPC solve cycle.
+
+    Each row captures:
+    * The **control outputs** (thermal setpoints P_UFH, P_dhw) for the next
+      time step — the "what did the MPC decide?" record.
+    * The **forecast inputs at step 0** that the MPC used — the "what did the
+      MPC see?" record.  Comparing these with the nearest TelemetryAggregate row
+      enables forecast-error analysis (§16, training requirement 7).
+    * The **solver status** to distinguish optimal solutions from greedy fallbacks.
+
+    Relationship to TelemetryAggregate
+    ------------------------------------
+    Join on ``solve_time_utc`` ≈ ``bucket_end_utc`` of the nearest aggregate row
+    to reconstruct the closed-loop sequence:
+        actual state → MPC decision → next actual state.
+    """
+
+    __tablename__ = "mpc_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    #: UTC timestamp when the MPC solve was initiated.
+    solve_time_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    # --- Control outputs (MPC decision, step 0) ---------------------------
+    #: UFH thermal power setpoint for the next Δt [kW].
+    p_ufh_setpoint_kw: Mapped[float] = mapped_column(Float)
+    #: DHW thermal power setpoint for the next Δt [kW].
+    p_dhw_setpoint_kw: Mapped[float] = mapped_column(Float)
+    #: CVXPY solver status: "optimal", "infeasible", or "greedy_fallback".
+    solver_status: Mapped[str] = mapped_column(String(length=MAX_SOLVER_STATUS_LENGTH))
+
+    # --- Forecast inputs "as seen by the MPC" at step 0 ------------------
+    #: Outdoor temperature forecast T_out[0] [°C] — "what the MPC expected".
+    #: Compare with outdoor_temperature_last_c from the nearest aggregate row
+    #: to quantify forecast error (§16, training requirement 7).
+    t_out_forecast_c: Mapped[float] = mapped_column(Float)
+    #: GTI forecast for windows at step 0 [W/m²] — "what the MPC expected".
+    gti_forecast_w_per_m2: Mapped[float] = mapped_column(Float)
+    #: Electricity price used at step 0 [€/kWh] — primary cost signal (§14.2).
+    electricity_price_eur_per_kwh: Mapped[float] = mapped_column(Float)
+
+    # --- COP values used in the objective function (§14.1) ----------------
+    #: Pre-computed UFH COP for this solve (Carnot-based, §14.1).
+    cop_ufh: Mapped[float] = mapped_column(Float)
+    #: Pre-computed DHW COP for this solve (Carnot-based, §14.1).
+    cop_dhw: Mapped[float] = mapped_column(Float)
+
+    # --- Horizon and initial states ---------------------------------------
+    #: MPC prediction horizon N used for this solve.
+    horizon_steps: Mapped[int] = mapped_column(Integer)
+    #: Room air temperature T_r at solve time [°C] — initial state x_UFH[0].
+    t_room_initial_c: Mapped[float] = mapped_column(Float)
+    #: DHW top-layer temperature T_top at solve time [°C] — initial state x_DHW[0].
+    t_dhw_top_initial_c: Mapped[float] = mapped_column(Float)
 
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
