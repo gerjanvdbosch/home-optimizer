@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
 # Home Optimizer — Home Assistant Addon
 #
-# Build context: addon/  (set by the HA supervisor — repo root is NOT available)
-# The Python package is installed directly from GitHub, which is the standard
-# pattern for HA addons; the supervisor cannot pass the repo root as context.
+# Build context: repo root (bevat src/, pyproject.toml én dit Dockerfile).
+# Het pakket wordt via COPY lokaal geïnstalleerd — geen GitHub-authenticatie
+# nodig tijdens de build.
 # ---------------------------------------------------------------------------
 
 ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12-alpine3.18
@@ -15,7 +15,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Build + VCS dependencies required by numpy/cvxpy and pip's git-based install.
+# Build dependencies required by numpy/cvxpy.
+# git is niet meer nodig — pakket wordt lokaal geïnstalleerd.
 RUN apk add --no-cache \
     build-base \
     libffi-dev \
@@ -23,25 +24,18 @@ RUN apk add --no-cache \
     gcc \
     g++ \
     lapack-dev \
-    openblas-dev \
-    git
+    openblas-dev
 
 WORKDIR /app
 
-# Git ref (branch, tag, or SHA) to install.
-# The release pipeline overrides this with the concrete version tag.
-# Default: main — always gets the latest pushed code.
-ARG PACKAGE_REF=main
+# Kopieer de pakketdefinitie en broncode vanuit de repo root.
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
 
-# Install the package from GitHub.
-# The HA supervisor uses the addon directory as the Docker build context, so
-# files from the repository root (src/, pyproject.toml) are not accessible via
-# COPY.  Installing from the git URL is the canonical solution for HA addons.
-RUN pip install --no-cache-dir \
-    "git+https://github.com/gerjanvandenbosch/home-optimizer.git@${PACKAGE_REF}"
+# Installeer het pakket lokaal (inclusief alle dependencies).
+RUN pip install --no-cache-dir .
 
-# Copy the addon run script.
-# Path is relative to the build context (= addon/), so no "addon/" prefix.
+# Kopieer het addon run-script (ligt nu ook in de repo root).
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
@@ -62,3 +56,4 @@ LABEL \
     maintainer="gerjanvandenbosch"
 
 CMD ["/run.sh"]
+
