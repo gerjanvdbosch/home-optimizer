@@ -93,6 +93,7 @@ class AddonOptions(BaseModel):
     sensor_room_temperature: str = Field(..., min_length=1)
     sensor_outdoor_temperature: str = Field(..., min_length=1)
     sensor_hp_supply_temperature: str = Field(..., min_length=1)
+    sensor_hp_supply_target_temperature: str = Field(..., min_length=1)
     sensor_hp_return_temperature: str = Field(..., min_length=1)
     sensor_thermostat_setpoint: str = Field(..., min_length=1)
     sensor_dhw_top_temperature: str = Field(..., min_length=1)
@@ -214,6 +215,7 @@ def _build_backend(opts: AddonOptions) -> HomeAssistantBackend:
         room_temperature=HAEntityConfig(opts.sensor_room_temperature),
         outdoor_temperature=HAEntityConfig(opts.sensor_outdoor_temperature),
         hp_supply_temperature=HAEntityConfig(opts.sensor_hp_supply_temperature),
+        hp_supply_target_temperature=HAEntityConfig(opts.sensor_hp_supply_target_temperature),
         hp_return_temperature=HAEntityConfig(opts.sensor_hp_return_temperature),
         hp_flow_lpm=HAEntityConfig(opts.sensor_hp_flow_lpm,
                                    scale=opts.sensor_hp_flow_scale),
@@ -291,7 +293,7 @@ def main() -> None:
 
     # ── 3. Build HA sensor backend ─────────────────────────────────────────
     backend = _build_backend(opts)
-    log.info("HomeAssistantBackend configured with %d entity IDs", 19)
+    log.info("HomeAssistantBackend configured with %d entity IDs", 20)
 
     # ── 4. Start telemetry collector ───────────────────────────────────────
     collector_settings = TelemetryCollectorSettings(

@@ -47,6 +47,7 @@ options:
   sensor_room_temperature: "sensor.danfoss_15_temperature"
   sensor_outdoor_temperature: "sensor.outdoor_temperature"
   sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
+  sensor_hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
   sensor_hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
   sensor_thermostat_setpoint: "sensor.thermostat_setpoint"
   sensor_dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
@@ -74,8 +75,8 @@ options:
   sensor_shutter_living_room: "sensor.woonkamer_rolluik"
 
   # Binary sensors (on/off or 1/0)
-  sensor_defrost_active: "binary_sensor.hp_defrost"
-  sensor_booster_heater_active: "binary_sensor.dhw_booster_heater"
+  sensor_defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
+  sensor_booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
 
 # ---------------------------------------------------------------------------
 # Schema — types validated by the HA supervisor before the addon starts.
@@ -90,6 +91,7 @@ schema:
   sensor_room_temperature: str
   sensor_outdoor_temperature: str
   sensor_hp_supply_temperature: str
+  sensor_hp_supply_target_temperature: str
   sensor_hp_return_temperature: str
   sensor_thermostat_setpoint: str
   sensor_dhw_top_temperature: str

@@ -22,6 +22,7 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     "room_temperature_c",
     "outdoor_temperature_c",
     "hp_supply_temperature_c",
+    "hp_supply_target_temperature_c",
     "hp_return_temperature_c",
     "hp_flow_lpm",
     "hp_electric_power_kw",
@@ -71,6 +72,7 @@ class LocalBackend(SensorBackend):
     ENV_ROOM_TEMPERATURE_C = "HOME_OPT_ROOM_TEMPERATURE_C"
     ENV_OUTDOOR_TEMPERATURE_C = "HOME_OPT_OUTDOOR_TEMPERATURE_C"
     ENV_HP_SUPPLY_TEMPERATURE_C = "HOME_OPT_HP_SUPPLY_TEMPERATURE_C"
+    ENV_HP_SUPPLY_TARGET_TEMPERATURE_C = "HOME_OPT_HP_SUPPLY_TARGET_TEMPERATURE_C"
     ENV_HP_RETURN_TEMPERATURE_C = "HOME_OPT_HP_RETURN_TEMPERATURE_C"
     ENV_HP_FLOW_LPM = "HOME_OPT_HP_FLOW_LPM"
     ENV_HP_ELECTRIC_POWER_KW = "HOME_OPT_HP_ELECTRIC_POWER_KW"
@@ -93,6 +95,7 @@ class LocalBackend(SensorBackend):
         room_temperature_c: NumericValueSource,
         outdoor_temperature_c: NumericValueSource,
         hp_supply_temperature_c: NumericValueSource,
+        hp_supply_target_temperature_c: NumericValueSource,
         hp_return_temperature_c: NumericValueSource,
         hp_flow_lpm: NumericValueSource,
         hp_electric_power_kw: NumericValueSource,
@@ -112,6 +115,7 @@ class LocalBackend(SensorBackend):
         self._room_temperature_c = room_temperature_c
         self._outdoor_temperature_c = outdoor_temperature_c
         self._hp_supply_temperature_c = hp_supply_temperature_c
+        self._hp_supply_target_temperature_c = hp_supply_target_temperature_c
         self._hp_return_temperature_c = hp_return_temperature_c
         self._hp_flow_lpm = hp_flow_lpm
         self._hp_electric_power_kw = hp_electric_power_kw
@@ -185,6 +189,7 @@ class LocalBackend(SensorBackend):
             room_temperature_c=lambda: _read_numeric("room_temperature_c"),
             outdoor_temperature_c=lambda: _read_numeric("outdoor_temperature_c"),
             hp_supply_temperature_c=lambda: _read_numeric("hp_supply_temperature_c"),
+            hp_supply_target_temperature_c=lambda: _read_numeric("hp_supply_target_temperature_c"),
             hp_return_temperature_c=lambda: _read_numeric("hp_return_temperature_c"),
             hp_flow_lpm=lambda: _read_numeric("hp_flow_lpm"),
             hp_electric_power_kw=lambda: _read_numeric("hp_electric_power_kw"),
@@ -226,6 +231,7 @@ class LocalBackend(SensorBackend):
             room_temperature_c=lambda: _env_numeric(cls.ENV_ROOM_TEMPERATURE_C),
             outdoor_temperature_c=lambda: _env_numeric(cls.ENV_OUTDOOR_TEMPERATURE_C),
             hp_supply_temperature_c=lambda: _env_numeric(cls.ENV_HP_SUPPLY_TEMPERATURE_C),
+            hp_supply_target_temperature_c=lambda: _env_numeric(cls.ENV_HP_SUPPLY_TARGET_TEMPERATURE_C),
             hp_return_temperature_c=lambda: _env_numeric(cls.ENV_HP_RETURN_TEMPERATURE_C),
             hp_flow_lpm=lambda: _env_numeric(cls.ENV_HP_FLOW_LPM),
             hp_electric_power_kw=lambda: _env_numeric(cls.ENV_HP_ELECTRIC_POWER_KW),
@@ -258,6 +264,7 @@ class LocalBackend(SensorBackend):
             room_temperature_c=_resolve_numeric(self._room_temperature_c),
             outdoor_temperature_c=_resolve_numeric(self._outdoor_temperature_c),
             hp_supply_temperature_c=_resolve_numeric(self._hp_supply_temperature_c),
+            hp_supply_target_temperature_c=_resolve_numeric(self._hp_supply_target_temperature_c),
             hp_return_temperature_c=_resolve_numeric(self._hp_return_temperature_c),
             hp_flow_lpm=_resolve_numeric(self._hp_flow_lpm),
             hp_electric_power_kw=_resolve_numeric(self._hp_electric_power_kw),

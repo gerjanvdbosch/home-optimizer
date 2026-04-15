@@ -102,6 +102,7 @@ class HomeAssistantBackend(SensorBackend):
             room_temperature=HAEntityConfig("sensor.living_room_temperature"),
             outdoor_temperature=HAEntityConfig("sensor.outdoor_temperature"),
             hp_supply_temperature=HAEntityConfig("sensor.heat_pump_supply_temperature"),
+            hp_supply_target_temperature=HAEntityConfig("sensor.heat_pump_supply_target_temperature"),
             hp_return_temperature=HAEntityConfig("sensor.heat_pump_return_temperature"),
             hp_flow_lpm=HAEntityConfig("sensor.heat_pump_flow_lpm"),
             hp_electric_power=HAEntityConfig("sensor.heat_pump_power_kw"),
@@ -129,6 +130,7 @@ class HomeAssistantBackend(SensorBackend):
         room_temperature: HAEntityConfig,
         outdoor_temperature: HAEntityConfig,
         hp_supply_temperature: HAEntityConfig,
+        hp_supply_target_temperature: HAEntityConfig,
         hp_return_temperature: HAEntityConfig,
         hp_flow_lpm: HAEntityConfig,
         hp_electric_power: HAEntityConfig,
@@ -151,6 +153,7 @@ class HomeAssistantBackend(SensorBackend):
         self._room_temperature = room_temperature
         self._outdoor_temperature = outdoor_temperature
         self._hp_supply_temperature = hp_supply_temperature
+        self._hp_supply_target_temperature = hp_supply_target_temperature
         self._hp_return_temperature = hp_return_temperature
         self._hp_flow_lpm = hp_flow_lpm
         self._hp_electric_power = hp_electric_power
@@ -259,6 +262,7 @@ class HomeAssistantBackend(SensorBackend):
             room_temperature_c=self._fetch_state(self._room_temperature),
             outdoor_temperature_c=self._fetch_state(self._outdoor_temperature),
             hp_supply_temperature_c=self._fetch_state(self._hp_supply_temperature),
+            hp_supply_target_temperature_c=self._fetch_state(self._hp_supply_target_temperature),
             hp_return_temperature_c=self._fetch_state(self._hp_return_temperature),
             hp_flow_lpm=max(self._fetch_state(self._hp_flow_lpm), 0.0),
             hp_electric_power_kw=max(self._fetch_state(self._hp_electric_power), 0.0),

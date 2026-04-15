@@ -22,6 +22,7 @@ NUMERIC_READING_FIELD_NAMES: tuple[str, ...] = (
     "room_temperature_c",
     "outdoor_temperature_c",
     "hp_supply_temperature_c",
+    "hp_supply_target_temperature_c",
     "hp_return_temperature_c",
     "hp_flow_lpm",
     "hp_electric_power_kw",

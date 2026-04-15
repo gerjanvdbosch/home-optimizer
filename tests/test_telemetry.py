@@ -47,6 +47,7 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         room_temperature_c=room_temperature_c,
         outdoor_temperature_c=8.0,
         hp_supply_temperature_c=31.0,
+        hp_supply_target_temperature_c=33.0,
         hp_return_temperature_c=27.0,
         hp_flow_lpm=9.0,
         hp_electric_power_kw=2.0,
@@ -75,6 +76,7 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "room_temperature_c": 20.5,
                 "outdoor_temperature_c": 7.5,
                 "hp_supply_temperature_c": 32.0,
+                "hp_supply_target_temperature_c": 34.0,
                 "hp_return_temperature_c": 28.0,
                 "hp_flow_lpm": 8.5,
                 "hp_electric_power_kw": 1.8,
@@ -100,6 +102,7 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
 
     assert reading.room_temperature_c == pytest.approx(20.5)
     assert reading.outdoor_temperature_c == pytest.approx(7.5)
+    assert reading.hp_supply_target_temperature_c == pytest.approx(34.0)
     assert reading.hp_mode == "ufh"
     assert reading.hp_flow_lpm == pytest.approx(8.5)
     assert reading.shutter_living_room_pct == pytest.approx(80.0)
@@ -262,6 +265,7 @@ def test_aggregate_includes_new_sensor_fields() -> None:
             room_temperature_c=20.2,
             outdoor_temperature_c=8.0,
             hp_supply_temperature_c=31.0,
+            hp_supply_target_temperature_c=35.0,
             hp_return_temperature_c=27.0,
             hp_flow_lpm=9.0,
             hp_electric_power_kw=2.0,
@@ -306,6 +310,10 @@ def test_aggregate_includes_new_sensor_fields() -> None:
     # Refrigerant evap: mean of [2, 3] = 2.5, last = 3
     assert agg["refrigerant_temp_mean_c"] == pytest.approx(2.5)
     assert agg["refrigerant_temp_last_c"] == pytest.approx(3.0)
+
+    # HP supply target: mean of [33, 35] = 34, last = 35
+    assert agg["hp_supply_target_temperature_mean_c"] == pytest.approx(34.0)
+    assert agg["hp_supply_target_temperature_last_c"] == pytest.approx(35.0)
 
 
 def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
@@ -358,5 +366,9 @@ def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
     assert row.refrigerant_condensation_temp_last_c == pytest.approx(38.0)
     assert row.refrigerant_temp_mean_c == pytest.approx(2.0)
     assert row.refrigerant_temp_last_c == pytest.approx(2.0)
+
+    # HP supply target temperature
+    assert row.hp_supply_target_temperature_mean_c == pytest.approx(33.0)
+    assert row.hp_supply_target_temperature_last_c == pytest.approx(33.0)
 
 

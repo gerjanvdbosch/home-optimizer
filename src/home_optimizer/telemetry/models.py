@@ -121,6 +121,8 @@ class TelemetryAggregate(Base):
     # Heat-pump / electricity telemetry -----------------------------------
     hp_supply_temperature_mean_c: Mapped[float] = mapped_column(Float)
     hp_supply_temperature_last_c: Mapped[float] = mapped_column(Float)
+    hp_supply_target_temperature_mean_c: Mapped[float] = mapped_column(Float)
+    hp_supply_target_temperature_last_c: Mapped[float] = mapped_column(Float)
     hp_return_temperature_mean_c: Mapped[float] = mapped_column(Float)
     hp_return_temperature_last_c: Mapped[float] = mapped_column(Float)
     hp_flow_mean_lpm: Mapped[float] = mapped_column(Float)

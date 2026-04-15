@@ -15,6 +15,7 @@ Quick-start (Home Assistant addon / standalone)
         room_temperature=HAEntityConfig("sensor.living_room_temperature"),
         outdoor_temperature=HAEntityConfig("sensor.outdoor_temperature"),
         hp_supply_temperature=HAEntityConfig("sensor.heat_pump_supply_temperature"),
+        hp_supply_target_temperature=HAEntityConfig("sensor.heat_pump_supply_target_temperature"),
         hp_return_temperature=HAEntityConfig("sensor.heat_pump_return_temperature"),
         hp_flow_lpm=HAEntityConfig("sensor.heat_pump_flow_lpm"),
         hp_electric_power=HAEntityConfig("sensor.heat_pump_power_kw"),

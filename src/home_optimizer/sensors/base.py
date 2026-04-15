@@ -32,6 +32,10 @@ class LiveReadings:
     hp_supply_temperature_c:
         Heat-pump supply-water temperature [°C].  This is the canonical raw
         hydraulic sensor regardless of whether the machine is in UFH or DHW mode.
+    hp_supply_target_temperature_c:
+        Heat-pump target supply-water temperature [°C].  This is the controller
+        setpoint (requested leaving-water temperature), used to quantify control
+        error versus ``hp_supply_temperature_c`` for model identification.
     hp_return_temperature_c:
         Heat-pump return-water temperature [°C].
     hp_flow_lpm:
@@ -95,6 +99,7 @@ class LiveReadings:
     room_temperature_c: float
     outdoor_temperature_c: float
     hp_supply_temperature_c: float
+    hp_supply_target_temperature_c: float
     hp_return_temperature_c: float
     hp_flow_lpm: float
     hp_electric_power_kw: float
@@ -118,6 +123,7 @@ class LiveReadings:
             "room_temperature_c",
             "outdoor_temperature_c",
             "hp_supply_temperature_c",
+            "hp_supply_target_temperature_c",
             "hp_return_temperature_c",
             "hp_flow_lpm",
             "hp_electric_power_kw",
