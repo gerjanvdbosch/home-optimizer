@@ -15,7 +15,7 @@ Physical model assumptions
 
 from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
-from .kalman import DHWKalmanFilter, KalmanEstimate, UFHKalmanFilter
+from .kalman import DHWKalmanFilter, KalmanEstimate, LinearKalmanFilter, UFHKalmanFilter
 from .mpc import MPCController, MPCSolution
 from .telemetry import (
     BufferedTelemetryCollector,
@@ -51,6 +51,7 @@ __all__ = [
     "HeatPumpCOPParameters",
     "KalmanEstimate",
     "KalmanNoiseParameters",
+    "LinearKalmanFilter",
     "MEASUREMENT_MATRIX",
     "MEASUREMENT_MATRIX_DHW",
     "MPCParameters",

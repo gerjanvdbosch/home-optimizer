@@ -124,10 +124,16 @@ class MPCSolution:
 
     @property
     def first_ufh_control_kw(self) -> float:
+        # First receding-horizon action for UFH [kW].
+        # Return 0.0 if the sequence is empty so callers can inspect a partial
+        # solution object without an IndexError.
         return float(self.ufh_control_sequence_kw[0]) if self.ufh_control_sequence_kw.size else 0.0
 
     @property
     def first_dhw_control_kw(self) -> float:
+        # First receding-horizon action for DHW [kW].
+        # In UFH-only mode the DHW sequence is all zeros, so 0.0 is the correct
+        # fail-soft return value when no explicit element exists.
         return float(self.dhw_control_sequence_kw[0]) if self.dhw_control_sequence_kw.size else 0.0
 
 
@@ -196,6 +202,9 @@ class MPCController:
         dhw_model: DHWModel | None = None,
         solver: str = "OSQP",
     ) -> None:
+        # Fail fast on inconsistent architecture choices:
+        # - combined parameters require a DHW model
+        # - a DHW model requires the combined parameter block
         if dhw_model is None and isinstance(params, CombinedMPCParameters):
             raise ValueError(
                 "CombinedMPCParameters requires a dhw_model. "
@@ -213,14 +222,19 @@ class MPCController:
 
     @property
     def _dhw_enabled(self) -> bool:
+        # True only when the 4-state combined UFH+DHW model is active.
         return self.dhw_model is not None
 
     @property
     def _p_ufh(self) -> MPCParameters:
+        # Normalise parameter access so the rest of the solver can use one UFH path
+        # in both 2-state (UFH-only) and 4-state (combined) operation.
         return self.params.ufh if isinstance(self.params, CombinedMPCParameters) else self.params  # type: ignore[return-value]
 
     @property
     def _p_dhw(self) -> DHWMPCParameters | None:
+        # DHW parameters exist only in combined mode; otherwise there is no DHW
+        # actuator, no top-layer comfort constraint and no legionella logic.
         return self.params.dhw if isinstance(self.params, CombinedMPCParameters) else None
 
     @property
@@ -305,11 +319,8 @@ class MPCController:
         previous_p_ufh_kw: float = 0.0,
         previous_p_dhw_kw: float = 0.0,
     ) -> MPCSolution:
-        """Compute the optimal control sequence for the coming horizon.
-
-        Always returns a valid ``MPCSolution``. Invalid dimensions fail
-        fast with ``ValueError``.
-        """
+        # Current UFH posterior state estimate [T_r, T_b] in °C.
+        # Shape must be (2,) because the UFH model is fixed to two thermal states.
         x_ufh0 = np.asarray(initial_ufh_state_c, dtype=float)
         if x_ufh0.shape != (2,):
             raise ValueError("initial_ufh_state_c must be [T_r, T_b].")
@@ -318,6 +329,8 @@ class MPCController:
             raise ValueError("ufh_forecast.horizon_steps must equal MPCParameters.horizon_steps.")
 
         if self._dhw_enabled:
+            # Combined mode extends the state to x0 = [T_r, T_b, T_top, T_bot] [°C],
+            # so both the DHW state and the DHW forecast horizon are mandatory.
             if initial_dhw_state_c is None or dhw_forecast is None:
                 raise ValueError("initial_dhw_state_c and dhw_forecast are required when DHW is active.")
             x_dhw0 = np.asarray(initial_dhw_state_c, dtype=float)
@@ -331,6 +344,9 @@ class MPCController:
 
         if _CVXPY_AVAILABLE:
             try:
+                # Preferred path: solve the full convex QP in CVXPY.
+                # The fallback below is intentionally only used if CVXPY is
+                # unavailable or raises during solve/setup.
                 return self._solve_convex(
                     x0,
                     ufh_forecast,
@@ -341,6 +357,8 @@ class MPCController:
             except Exception:  # noqa: BLE001
                 pass
 
+        # Fallback path: always return a feasible best-effort sequence so the
+        # control stack remains operational instead of crashing.
         return self._solve_greedy(
             x0,
             ufh_forecast,
@@ -354,19 +372,28 @@ class MPCController:
         ufh_forecast: ForecastHorizon,
         dhw_forecast: DHWForecastHorizon | None,
     ) -> tuple[list[np.ndarray], np.ndarray, list[np.ndarray], np.ndarray]:
-        """Build time-varying state-space matrices for all horizon steps."""
+        # UFH-only base matrices:
+        # - A_ufh: 2x2
+        # - B_ufh: 2x1
+        # - E_ufh: 2x3 for [T_out, Q_solar, Q_int]
         A_ufh, B_ufh, E_ufh = self.ufh_model.state_matrices()
         N = self._p_ufh.horizon_steps
         ufh_d = ufh_forecast.disturbance_matrix(self.ufh_model.parameters)
 
         if not self._dhw_enabled:
+            # UFH-only mode is time-invariant, so the same A and E can be reused at
+            # every horizon step. The disturbance matrix still varies by time step.
             return [A_ufh] * N, B_ufh, [E_ufh] * N, ufh_d
 
         assert self.dhw_model is not None
         assert dhw_forecast is not None
         _, B_dhw, _ = self.dhw_model.state_matrices(v_tap_m3_per_h=0.0)
+        # Combined input matrix B_tot is block diagonal because UFH and DHW are
+        # thermally decoupled; they interact only via shared heat-pump constraints.
         B_mat = np.block([[B_ufh, np.zeros((2, 1))], [np.zeros((2, 1)), B_dhw]])
         dhw_d = dhw_forecast.disturbance_matrix()
+        # Disturbance vector per step becomes:
+        # [T_out, Q_solar, Q_int, T_amb, T_mains]
         D_tot = np.hstack([ufh_d, dhw_d])
 
         A_list: list[np.ndarray] = []
@@ -374,6 +401,8 @@ class MPCController:
         for k in range(N):
             v_tap_k = float(dhw_forecast.v_tap_m3_per_h[k])
             A_dhw_k, _, E_dhw_k = self.dhw_model.state_matrices(v_tap_k)
+            # DHW is LTV: A_dhw[k] and E_dhw[k] must be rebuilt with the forecast
+            # tap flow at each step. The combined system remains block diagonal.
             A_list.append(np.block([[A_ufh, np.zeros((2, 2))], [np.zeros((2, 2)), A_dhw_k]]))
             E_list.append(np.block([[E_ufh, np.zeros((2, 2))], [np.zeros((2, 3)), E_dhw_k]]))
 
@@ -399,6 +428,8 @@ class MPCController:
         rho_ufh = p_ufh.rho_factor * max(p_ufh.Q_c, 1.0)
         has_pv = bool(np.any(pv > 0.0))
 
+        # Decision variables remain thermal powers [kW]. Electrical power is derived
+        # as P_thermal / COP, which keeps the problem convex because COP is known.
         # §14.1 Resolve COP arrays over the horizon [dimensionless].
         # Thermal power is the decision variable; electrical = thermal / COP.
         cop_ufh = self._resolve_cop_ufh(ufh_forecast)
@@ -407,6 +438,11 @@ class MPCController:
         A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
         n_states = A_list[0].shape[0]
 
+        # CVXPY variable shapes:
+        # - x:      (n_states, N+1)
+        # - u_ufh:  (N,)
+        # - u_dhw:  (N,) in combined mode
+        # - slacks: (N,)
         x = cp.Variable((n_states, N + 1))
         u_ufh = cp.Variable(N)
         u_dhw = cp.Variable(N) if self._dhw_enabled else None
@@ -416,12 +452,15 @@ class MPCController:
         s_dhw = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
         s_leg = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
 
+        # x[:, 0] is fixed to the estimated current state; optimisation starts from
+        # there and only future states x[:, 1:] are decision-dependent.
         constraints: list = [x[:, 0] == x0]
         cost_terms = []
         leg_req = dhw_forecast.legionella_required if dhw_forecast is not None else None
 
         for k in range(N):
             u_k = cp.hstack([u_ufh[k:k + 1], u_dhw[k:k + 1]]) if self._dhw_enabled else u_ufh[k:k + 1]  # type: ignore[index]
+            # Discrete thermal dynamics: x[k+1] = A[k] x[k] + B u[k] + E[k] d[k].
             constraints.append(x[:, k + 1] == A_list[k] @ x[:, k] + B_mat @ u_k + E_list[k] @ D_tot[k])
 
             # §14.1: Electrical power = thermal / COP.  COP values are known floats,
@@ -458,6 +497,8 @@ class MPCController:
                 constraints.append(P_elec_k <= self._p_hp_max_elec)
 
             # UFH comfort (soft constraints via slack variables)
+            # Soft constraints keep the QP feasible under thermal inertia; violating
+            # comfort is allowed but penalised quadratically in the objective.
             constraints.extend([
                 x[0, k + 1] >= p_ufh.T_min - s_lo_ufh[k],
                 x[0, k + 1] <= p_ufh.T_max + s_hi_ufh[k],
@@ -490,11 +531,15 @@ class MPCController:
         obj = cp.Minimize(cp.sum(cost_terms) + p_ufh.Q_N * cp.square(x[0, N] - refs[N]))
         problem = cp.Problem(obj, constraints)
 
+        # Tight OSQP tolerances improve physical consistency of the reported thermal
+        # powers and temperatures, especially for soft constraints near the bounds.
         solve_kw: dict[str, object] = {"solver": self.solver, "warm_start": True, "verbose": False}
         if self.solver.upper() == "OSQP":
             solve_kw.update({"eps_abs": 1e-7, "eps_rel": 1e-7, "polishing": True})
         problem.solve(**solve_kw)
 
+        # Hard fail here so the public `solve()` method can decide whether to use the
+        # greedy fallback instead of silently returning a malformed convex solution.
         if problem.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
             raise RuntimeError(f"Solver returned status '{problem.status}'.")
         if u_ufh.value is None or x.value is None:
@@ -549,6 +594,7 @@ class MPCController:
         u_prev_ufh, u_prev_dhw = prev_u_ufh, prev_u_dhw
 
         for k in range(N):
+            # Candidate UFH powers are clipped by actuator bounds and ramp-rate limits.
             lo_ufh = max(0.0, u_prev_ufh - p_ufh.delta_P_max)
             hi_ufh = min(p_ufh.P_max, u_prev_ufh + p_ufh.delta_P_max)
             n_cand = min(g.max_candidates, max(
@@ -558,6 +604,8 @@ class MPCController:
             cands_ufh = np.linspace(lo_ufh, hi_ufh, n_cand)
 
             if self._dhw_enabled and p_dhw is not None:
+                # DHW candidates use the same local grid idea but with DHW-specific
+                # actuator and ramp-rate limits.
                 lo_dhw = max(0.0, u_prev_dhw - p_dhw.delta_P_dhw_max)
                 hi_dhw = min(p_dhw.P_dhw_max, u_prev_dhw + p_dhw.delta_P_dhw_max)
                 cands_dhw = np.linspace(lo_dhw, hi_dhw, n_cand)
@@ -583,6 +631,8 @@ class MPCController:
                     # Net grid import after PV offset (electrical power basis)
                     p_import_k = max(0.0, p_elec_k - float(pv[k]))
 
+                    # The greedy score approximates the convex objective: room comfort,
+                    # electricity cost, actuator regularisation and comfort slacks.
                     s_lo_ufh = max(p_ufh.T_min - xn[0], 0.0)
                     s_hi_ufh = max(xn[0] - p_ufh.T_max, 0.0)
                     score = (
@@ -605,6 +655,8 @@ class MPCController:
                     if score < best_score:
                         best_score, best_u_ufh, best_u_dhw, best_xn = score, float(c_ufh), float(c_dhw), xn
 
+            # Because at least one candidate always respects the local actuator bounds,
+            # the greedy loop should always select a next state.
             assert best_xn is not None
             us_ufh.append(best_u_ufh)
             us_dhw.append(best_u_dhw)
@@ -618,7 +670,8 @@ class MPCController:
 
         objective = 0.0
         for k in range(N):
-            # Reconstruct electrical import for objective accounting
+            # Reconstruct electrical import for objective accounting so the reported
+            # objective has the same unit interpretation as the convex formulation.
             p_elec_k = float(us_ufh_arr[k]) / float(cop_ufh[k])
             if cop_dhw is not None:
                 p_elec_k += float(us_dhw_arr[k]) / float(cop_dhw[k])
@@ -654,6 +707,9 @@ class MPCController:
     ) -> MPCSolution:
         p_ufh = self._p_ufh
         p_dhw = self._p_dhw
+        # Evaluate comfort violations on predicted future temperatures only.
+        # x_val[0] is the fixed estimated current state, not something the current
+        # optimisation step can still influence.
         t_r_pred = x_val[1:, 0]
         ufh_viol = float(np.max(
             np.maximum(p_ufh.T_min - t_r_pred, 0.0).tolist()
@@ -662,6 +718,8 @@ class MPCController:
 
         dhw_viol, leg_viol = 0.0, 0.0
         if self._dhw_enabled and p_dhw is not None and dhw_forecast is not None:
+            # Top-layer DHW temperature is the relevant comfort / legionella signal
+            # because it represents the actually available tap temperature.
             t_top_pred = x_val[1:, 2]
             dhw_viol = float(np.max(np.maximum(p_dhw.T_dhw_min - t_top_pred, 0.0)))
             leg_viol = float(np.max(
