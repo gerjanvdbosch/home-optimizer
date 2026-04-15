@@ -296,6 +296,7 @@ class HomeAssistantBackend(SensorBackend):
             gti_w_per_m2=0.0,
             gti_pv_w_per_m2=0.0,
             t_mains_estimated_c=0.0,
+            t_out_forecast_c=0.0,
             timestamp=self.now_utc(),
         )
 

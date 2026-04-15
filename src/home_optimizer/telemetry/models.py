@@ -181,6 +181,12 @@ class TelemetryAggregate(Base):
     # Derived from SeasonalMainsModel (cosine seasonal model).
     t_mains_estimated_mean_c: Mapped[float] = mapped_column(Float)
     t_mains_estimated_last_c: Mapped[float] = mapped_column(Float)
+    # Forecast outdoor temperature for the current UTC hour [°C] (step 0 of
+    # the Open-Meteo forecast).  Compare with outdoor_temperature_last_c to
+    # compute forecast error per bucket (§16, training requirement 7):
+    #     error = outdoor_temperature_last_c − t_out_forecast_last_c
+    t_out_forecast_mean_c: Mapped[float] = mapped_column(Float)
+    t_out_forecast_last_c: Mapped[float] = mapped_column(Float)
 
     # Derived quantities (pre-computed at flush for training convenience) ---
     # HP thermal power Q_therm = V̇ × λ × ΔT [kW] (§15, hydraulic power formula).
@@ -199,6 +205,77 @@ class TelemetryAggregate(Base):
     )
 
 
+class ForecastSnapshot(Base):
+    """One hourly Open-Meteo forecast step — the backbone of forecast-error training.
+
+    Each row represents a single forecast step (step_k hours ahead) from a forecast
+    that was fetched at ``fetched_at_utc`` (rounded down to the current UTC hour).
+
+    Schema rationale
+    ----------------
+    Storing **one row per step** (normalised) rather than wide JSON arrays lets you:
+
+    * Query "what did the model predict for this specific hour?" with a simple WHERE.
+    * JOIN directly with ``telemetry_aggregates`` on ``valid_at_utc`` to compute
+      per-hour forecast errors without parsing JSON blobs.
+    * Efficiently train bias-correction models per lead time (e.g. 1-h, 6-h, 24-h).
+
+    Forecast-error JOIN example
+    ---------------------------
+    ::
+
+        SELECT
+            fs.valid_at_utc,
+            fs.step_k,
+            ta.outdoor_temperature_last_c        AS t_actual,
+            fs.t_out_c                           AS t_forecast,
+            ta.outdoor_temperature_last_c - fs.t_out_c AS error_k
+        FROM forecast_snapshots fs
+        JOIN telemetry_aggregates ta
+          ON ABS(JULIANDAY(ta.bucket_end_utc) - JULIANDAY(fs.valid_at_utc)) < (0.5/24.0)
+        ORDER BY fs.valid_at_utc, fs.step_k;
+
+    Attributes
+    ----------
+    fetched_at_utc:
+        UTC timestamp of the Open-Meteo API call, rounded down to the start
+        of the UTC hour (= ``WeatherForecast.valid_from``).  All steps of
+        one fetch share the same ``fetched_at_utc``.
+    valid_at_utc:
+        Real-world UTC time this step is valid for:
+            valid_at_utc = fetched_at_utc + step_k × dt_hours
+    step_k:
+        Forecast lead time in steps.  ``0`` = current hour, ``1`` = +1h, …
+    dt_hours:
+        Time step [h].  Always ``1.0`` for Open-Meteo hourly forecasts.
+    t_out_c:
+        Forecast outdoor temperature [°C].  Compare with
+        ``telemetry_aggregates.outdoor_temperature_last_c`` to compute error.
+    gti_w_per_m2:
+        Forecast GTI for south-facing windows [W/m²].  Always ≥ 0.
+    gti_pv_w_per_m2:
+        Forecast GTI for PV panels [W/m²].  0.0 if no PV configured.
+    """
+
+    __tablename__ = "forecast_snapshots"
+    __table_args__ = (
+        # Prevent duplicate rows from re-runs within the same UTC hour.
+        UniqueConstraint("fetched_at_utc", "step_k", name="uq_forecast_step"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fetched_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    valid_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    step_k: Mapped[int] = mapped_column(Integer)
+    dt_hours: Mapped[float] = mapped_column(Float)
+    t_out_c: Mapped[float] = mapped_column(Float)
+    gti_w_per_m2: Mapped[float] = mapped_column(Float)
+    gti_pv_w_per_m2: Mapped[float] = mapped_column(Float)
+
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=timezone.utc),
+    )
 class MPCLog(Base):
     """Persisted record of each MPC solve cycle.
 

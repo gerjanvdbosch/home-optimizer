@@ -10,8 +10,9 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import IntegrityError
 
-from .models import Base, MPCLog, TelemetryAggregate
+from .models import Base, ForecastSnapshot, MPCLog, TelemetryAggregate
 
 
 class TelemetryRepository:
@@ -82,6 +83,70 @@ class TelemetryRepository:
         """Return all MPC solve records ordered by solve time."""
         with self._session_factory() as session:
             stmt = select(MPCLog).order_by(MPCLog.solve_time_utc.asc())
+            return list(session.scalars(stmt).all())
+
+    def bulk_add_forecast_snapshots(self, rows: list[dict[str, Any]]) -> int:
+        """Insert a batch of forecast steps, silently skipping duplicates.
+
+        Each row must contain the exact :class:`ForecastSnapshot` constructor
+        fields: ``fetched_at_utc``, ``valid_at_utc``, ``step_k``, ``dt_hours``,
+        ``t_out_c``, ``gti_w_per_m2``, ``gti_pv_w_per_m2``.
+
+        Uniqueness is enforced by the ``uq_forecast_step`` constraint
+        (``fetched_at_utc``, ``step_k``).  Duplicate rows (e.g. from a restart
+        within the same UTC hour) are skipped via ``INSERT OR IGNORE`` emulation:
+        each row is attempted individually; :class:`~sqlalchemy.exc.IntegrityError`
+        is caught and the row is discarded without rolling back the whole batch.
+
+        Parameters
+        ----------
+        rows:
+            List of dicts, one per forecast step.
+
+        Returns
+        -------
+        int
+            Number of rows successfully inserted (0 if all were duplicates).
+        """
+        inserted = 0
+        for row in rows:
+            record = ForecastSnapshot(**row)
+            try:
+                with self._session_factory() as session:
+                    session.add(record)
+                    session.flush()
+                    session.commit()
+                    inserted += 1
+            except IntegrityError:
+                # Duplicate (fetched_at_utc, step_k) — silently skip.
+                pass
+        return inserted
+
+    def list_forecast_snapshots(
+        self,
+        *,
+        fetched_at_utc=None,
+    ) -> list[ForecastSnapshot]:
+        """Return forecast snapshot rows, optionally filtered by fetch time.
+
+        Parameters
+        ----------
+        fetched_at_utc:
+            If provided, return only steps from this specific fetch
+            (i.e. one complete forecast batch).  If ``None``, return all rows.
+
+        Returns
+        -------
+        list[ForecastSnapshot]
+            Rows ordered by ``(fetched_at_utc, step_k)``.
+        """
+        with self._session_factory() as session:
+            stmt = select(ForecastSnapshot).order_by(
+                ForecastSnapshot.fetched_at_utc.asc(),
+                ForecastSnapshot.step_k.asc(),
+            )
+            if fetched_at_utc is not None:
+                stmt = stmt.where(ForecastSnapshot.fetched_at_utc == fetched_at_utc)
             return list(session.scalars(stmt).all())
 
     def count(self) -> int:

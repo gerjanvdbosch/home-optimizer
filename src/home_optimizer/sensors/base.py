@@ -150,6 +150,20 @@ class LiveReadings:
     T_mains disturbance in the DHW energy balance (§9.1, §10.3).  Typical NL
     range: 7–14 °C.  WeatherAugmentedBackend computes this automatically.
     """
+    t_out_forecast_c: float
+    """Open-Meteo forecast of outdoor temperature for the current UTC hour [°C].
+
+    This is the *predicted* T_out (step 0 of the Open-Meteo forecast), not the
+    measured value from the HA sensor (``outdoor_temperature_c``).
+
+    Storing both enables forecast-error analysis:
+        error[k] = outdoor_temperature_c[k] − t_out_forecast_c[k]
+    These residuals are used to train bias-correction models and to evaluate
+    MPC forecast quality (§16, training requirement 7).
+
+    WeatherAugmentedBackend injects this field automatically.  The
+    HomeAssistantBackend placeholder is ``0.0`` — only meaningful when wrapped.
+    """
     timestamp: datetime
 
     def __post_init__(self) -> None:
@@ -173,6 +187,7 @@ class LiveReadings:
             "gti_w_per_m2",
             "gti_pv_w_per_m2",
             "t_mains_estimated_c",
+            "t_out_forecast_c",
         )
         for field_name in numeric_fields:
             _assert_finite(field_name, float(getattr(self, field_name)))

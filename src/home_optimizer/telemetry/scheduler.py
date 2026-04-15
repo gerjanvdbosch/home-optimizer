@@ -39,6 +39,8 @@ NUMERIC_READING_FIELD_NAMES: tuple[str, ...] = (
     "gti_w_per_m2",
     "gti_pv_w_per_m2",
     "t_mains_estimated_c",
+    # Forecast T_out step-0: compare with outdoor_temperature_* for forecast error (§16)
+    "t_out_forecast_c",
     # Derived quantities — accessed via LiveReadings properties (§15)
     # hp_thermal_power_kw  : V̇ × λ × ΔT  [kW]  (property, not a stored field)
     # household_elec_power_kw : P1 + PV − HP  [kW]  (property, not a stored field)

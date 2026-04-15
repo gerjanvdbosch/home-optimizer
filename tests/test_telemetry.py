@@ -66,6 +66,7 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         gti_w_per_m2=350.0,
         gti_pv_w_per_m2=280.0,
         t_mains_estimated_c=10.5,
+        t_out_forecast_c=7.8,
         timestamp=timestamp,
     )
 
@@ -98,6 +99,7 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "gti_w_per_m2": 500.0,
                 "gti_pv_w_per_m2": 400.0,
                 "t_mains_estimated_c": 10.5,
+                "t_out_forecast_c": 7.8,
             }
         ),
         encoding="utf-8",
@@ -290,6 +292,7 @@ def test_aggregate_includes_new_sensor_fields() -> None:
             gti_w_per_m2=400.0,
             gti_pv_w_per_m2=320.0,
             t_mains_estimated_c=11.0,
+            t_out_forecast_c=7.5,
             timestamp=t0 + timedelta(seconds=30),
         ),
     ]
@@ -380,4 +383,83 @@ def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
     assert row.hp_supply_target_temperature_mean_c == pytest.approx(33.0)
     assert row.hp_supply_target_temperature_last_c == pytest.approx(33.0)
 
+    # New weather fields
+    assert row.gti_mean_w_per_m2 == pytest.approx(350.0)
+    assert row.gti_last_w_per_m2 == pytest.approx(350.0)
+    assert row.gti_pv_mean_w_per_m2 == pytest.approx(280.0)
+    assert row.t_mains_estimated_mean_c == pytest.approx(10.5)
+    assert row.t_out_forecast_mean_c == pytest.approx(7.8)
+    assert row.t_out_forecast_last_c == pytest.approx(7.8)
 
+    # Derived quantities
+    # hp_thermal_power = 9 L/min × 0.06 × 1.1628 × (31-27) ≈ 2.5076 kW
+    assert row.hp_thermal_power_mean_kw == pytest.approx(9.0 * 0.06 * 1.1628 * 4.0, rel=1e-4)
+    # household_elec = p1 + pv - hp_elec = 1.4 + 0.6 - 2.0 = 0.0
+    assert row.household_elec_power_mean_kw == pytest.approx(0.0)
+
+
+def test_forecast_persister_inserts_all_steps(tmp_path: Path) -> None:
+    """ForecastPersister must persist all N forecast steps, skip duplicates."""
+    from datetime import timezone
+
+    import numpy as np
+
+    from home_optimizer.sensors.open_meteo import WeatherForecast
+    from home_optimizer.sensors.weather_backend import WeatherAugmentedBackend
+    from home_optimizer.sensors.base import SensorBackend
+    from home_optimizer.telemetry import ForecastPersister
+
+    _N = 4  # small horizon for speed
+
+    # Build a minimal fake WeatherForecast with 4 steps
+    valid_from = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
+    fake_forecast = WeatherForecast(
+        outdoor_temperature_c=np.array([8.0, 7.5, 7.0, 6.5]),
+        gti_w_per_m2=np.array([350.0, 200.0, 50.0, 0.0]),
+        gti_pv_w_per_m2=np.array([280.0, 160.0, 40.0, 0.0]),
+        horizon_steps=_N,
+        dt_hours=1.0,
+        valid_from=valid_from,
+    )
+
+    # Stub backend that exposes the fake forecast via latest_forecast
+    class _StubBackend(WeatherAugmentedBackend):
+        def __init__(self) -> None:  # type: ignore[override]
+            self._cached_forecast = fake_forecast
+            self._cached_current = None
+            self._lock = __import__("threading").Lock()
+
+        def read_all(self) -> "LiveReadings":  # type: ignore[override]
+            raise NotImplementedError
+
+        def close(self) -> None:
+            pass
+
+    stub = _StubBackend()
+    database_url = f"sqlite:///{tmp_path / 'forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    persister = ForecastPersister(stub, repository)
+
+    # First persist: should insert 4 rows
+    n_inserted = persister.persist_once()
+    assert n_inserted == _N
+
+    rows = repository.list_forecast_snapshots()
+    assert len(rows) == _N
+    assert rows[0].step_k == 0
+    # SQLite strips timezone info; compare the naive UTC value.
+    assert rows[0].fetched_at_utc.replace(tzinfo=None) == valid_from.replace(tzinfo=None)
+    assert rows[0].t_out_c == pytest.approx(8.0)
+    assert rows[3].step_k == 3
+    assert rows[3].gti_w_per_m2 == pytest.approx(0.0)
+
+    # valid_at_utc for step 2 = valid_from + 2h
+    expected_valid_at = valid_from + timedelta(hours=2)
+    assert rows[2].valid_at_utc.replace(tzinfo=None) == expected_valid_at.replace(tzinfo=None)
+
+    # Second persist with same forecast: all rows are duplicates → 0 inserted
+    n_dupes = persister.persist_once()
+    assert n_dupes == 0
+    assert len(repository.list_forecast_snapshots()) == _N  # still 4, not 8
