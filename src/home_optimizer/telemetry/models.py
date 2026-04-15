@@ -127,10 +127,8 @@ class TelemetryAggregate(Base):
     hp_flow_last_lpm: Mapped[float] = mapped_column(Float)
     hp_electric_power_mean_kw: Mapped[float] = mapped_column(Float)
     hp_electric_power_last_kw: Mapped[float] = mapped_column(Float)
-    grid_import_mean_kw: Mapped[float] = mapped_column(Float)
-    grid_import_last_kw: Mapped[float] = mapped_column(Float)
-    grid_export_mean_kw: Mapped[float] = mapped_column(Float)
-    grid_export_last_kw: Mapped[float] = mapped_column(Float)
+    p1_net_power_mean_kw: Mapped[float] = mapped_column(Float)
+    p1_net_power_last_kw: Mapped[float] = mapped_column(Float)
     pv_output_mean_kw: Mapped[float] = mapped_column(Float)
     pv_output_last_kw: Mapped[float] = mapped_column(Float)
 

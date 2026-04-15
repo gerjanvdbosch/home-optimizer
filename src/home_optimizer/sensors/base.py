@@ -41,10 +41,11 @@ class LiveReadings:
     hp_mode:
         Heat-pump operating mode (for example ``"off"``, ``"ufh"``,
         ``"dhw"``, ``"defrost"``).
-    grid_import_kw:
-        Grid import power [kW].
-    grid_export_kw:
-        Grid export power [kW].
+    p1_net_power_kw:
+        Net grid power from the P1 smart meter [kW].
+        Positive = importing from the grid; negative = exporting to the grid
+        (PV surplus).  The P1 port reports a single signed value; splitting
+        it into separate import/export columns is not needed.
     pv_output_kw:
         PV production [kW].
     thermostat_setpoint_c:
@@ -98,8 +99,7 @@ class LiveReadings:
     hp_flow_lpm: float
     hp_electric_power_kw: float
     hp_mode: str
-    grid_import_kw: float
-    grid_export_kw: float
+    p1_net_power_kw: float
     pv_output_kw: float
     thermostat_setpoint_c: float
     dhw_top_temperature_c: float
@@ -121,8 +121,7 @@ class LiveReadings:
             "hp_return_temperature_c",
             "hp_flow_lpm",
             "hp_electric_power_kw",
-            "grid_import_kw",
-            "grid_export_kw",
+            "p1_net_power_kw",
             "pv_output_kw",
             "thermostat_setpoint_c",
             "dhw_top_temperature_c",
@@ -135,11 +134,10 @@ class LiveReadings:
         for field_name in numeric_fields:
             _assert_finite(field_name, float(getattr(self, field_name)))
 
+        # p1_net_power_kw is signed (negative = export) — only hp/pv must be ≥ 0.
         non_negative_fields = (
             "hp_flow_lpm",
             "hp_electric_power_kw",
-            "grid_import_kw",
-            "grid_export_kw",
             "pv_output_kw",
         )
         for field_name in non_negative_fields:
@@ -166,8 +164,11 @@ class LiveReadings:
 
     @property
     def net_grid_power_kw(self) -> float:
-        """Net grid power [kW] = import − export."""
-        return self.grid_import_kw - self.grid_export_kw
+        """Net grid power [kW] from the P1 meter.
+
+        Positive = importing from the grid; negative = exporting (PV surplus).
+        """
+        return self.p1_net_power_kw
 
     @property
     def hp_delta_t_c(self) -> float:

@@ -81,7 +81,7 @@ class AddonOptions(BaseModel):
 
     # --- Telemetry storage ---
     database_path: str = Field(..., min_length=1,
-                               description="SQLite path, e.g. /data/telemetry.sqlite3")
+                               description="SQLite path, e.g. /data/home_optimizer/telemetry.sqlite3")
     sampling_interval_seconds: int = Field(30, gt=0,
                                            description="Sensor polling interval [s]")
     flush_interval_seconds: int = Field(300, gt=0,
@@ -112,10 +112,13 @@ class AddonOptions(BaseModel):
     sensor_hp_electric_power_scale: float = Field(
         1.0, description="Unit scale: 1.0 if already kW, 0.001 if W"
     )
-    sensor_grid_import: str = Field(..., min_length=1)
-    sensor_grid_import_scale: float = Field(1.0)
-    sensor_grid_export: str = Field(..., min_length=1)
-    sensor_grid_export_scale: float = Field(1.0)
+    sensor_p1_net_power: str = Field(
+        ..., min_length=1,
+        description="P1 smart-meter entity: positive = import [kW], negative = export [kW]"
+    )
+    sensor_p1_net_power_scale: float = Field(
+        1.0, description="Unit scale: 1.0 if already kW, 0.001 if W"
+    )
     sensor_pv_output: str = Field(..., min_length=1)
     sensor_pv_output_scale: float = Field(1.0)
 
@@ -138,8 +141,7 @@ class AddonOptions(BaseModel):
     @field_validator(
         "sensor_hp_flow_scale",
         "sensor_hp_electric_power_scale",
-        "sensor_grid_import_scale",
-        "sensor_grid_export_scale",
+        "sensor_p1_net_power_scale",
         "sensor_pv_output_scale",
     )
     @classmethod
@@ -218,10 +220,8 @@ def _build_backend(opts: AddonOptions) -> HomeAssistantBackend:
         hp_electric_power=HAEntityConfig(opts.sensor_hp_electric_power,
                                          scale=opts.sensor_hp_electric_power_scale),
         hp_mode_entity_id=opts.sensor_hp_mode,
-        grid_import=HAEntityConfig(opts.sensor_grid_import,
-                                   scale=opts.sensor_grid_import_scale),
-        grid_export=HAEntityConfig(opts.sensor_grid_export,
-                                   scale=opts.sensor_grid_export_scale),
+        p1_net_power=HAEntityConfig(opts.sensor_p1_net_power,
+                                    scale=opts.sensor_p1_net_power_scale),
         pv_output=HAEntityConfig(opts.sensor_pv_output,
                                  scale=opts.sensor_pv_output_scale),
         thermostat_setpoint=HAEntityConfig(opts.sensor_thermostat_setpoint),
@@ -281,6 +281,9 @@ def main() -> None:
     )
 
     # ── 2. Set up telemetry storage ────────────────────────────────────────
+    # Ensure the parent directory exists (e.g. /data/home_optimizer/).
+    # exist_ok=True is safe: no-op if directory is already present.
+    Path(opts.database_path).parent.mkdir(parents=True, exist_ok=True)
     database_url = f"sqlite:///{opts.database_path}"
     repository = TelemetryRepository(database_url=database_url)
     repository.create_schema()

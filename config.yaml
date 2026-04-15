@@ -37,14 +37,14 @@ map:
 # ---------------------------------------------------------------------------
 options:
   # --- Telemetry storage ---
-  database_path: "/data/telemetry.sqlite3"
+  database_path: "/data/home_optimizer/telemetry.sqlite3"
   sampling_interval_seconds: 30
   flush_interval_seconds: 300
   api_port: 8099
 
   # --- Sensor entity IDs ---
   # Temperatures (°C — no scaling needed)
-  sensor_room_temperature: "sensor.room_temperature"
+  sensor_room_temperature: "sensor.danfoss_15_temperature"
   sensor_outdoor_temperature: "sensor.outdoor_temperature"
   sensor_hp_supply_temperature: "sensor.hp_supply_temperature"
   sensor_hp_return_temperature: "sensor.hp_return_temperature"
@@ -62,10 +62,8 @@ options:
   # Power (kW; set scale=0.001 if HA reports W)
   sensor_hp_electric_power: "sensor.hp_electric_power"
   sensor_hp_electric_power_scale: 1.0
-  sensor_grid_import: "sensor.grid_import"
-  sensor_grid_import_scale: 1.0
-  sensor_grid_export: "sensor.grid_export"
-  sensor_grid_export_scale: 1.0
+  sensor_p1_net_power: "sensor.p1_net_power"
+  sensor_p1_net_power_scale: 1.0
   sensor_pv_output: "sensor.pv_output"
   sensor_pv_output_scale: 1.0
 
@@ -105,10 +103,8 @@ schema:
 
   sensor_hp_electric_power: str
   sensor_hp_electric_power_scale: float
-  sensor_grid_import: str
-  sensor_grid_import_scale: float
-  sensor_grid_export: str
-  sensor_grid_export_scale: float
+  sensor_p1_net_power: str
+  sensor_p1_net_power_scale: float
   sensor_pv_output: str
   sensor_pv_output_scale: float
 

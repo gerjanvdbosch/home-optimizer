@@ -106,8 +106,7 @@ class HomeAssistantBackend(SensorBackend):
             hp_flow_lpm=HAEntityConfig("sensor.heat_pump_flow_lpm"),
             hp_electric_power=HAEntityConfig("sensor.heat_pump_power_kw"),
             hp_mode_entity_id="sensor.heat_pump_mode",
-            grid_import=HAEntityConfig("sensor.grid_import_power_w", scale=0.001),
-            grid_export=HAEntityConfig("sensor.grid_export_power_w", scale=0.001),
+            p1_net_power=HAEntityConfig("sensor.p1_net_power_w", scale=0.001),
             pv_output=HAEntityConfig("sensor.pv_power_w", scale=0.001),
             thermostat_setpoint=HAEntityConfig("sensor.room_setpoint_temperature"),
             dhw_top_temperature=HAEntityConfig("sensor.dhw_top_temperature"),
@@ -134,8 +133,7 @@ class HomeAssistantBackend(SensorBackend):
         hp_flow_lpm: HAEntityConfig,
         hp_electric_power: HAEntityConfig,
         hp_mode_entity_id: str,
-        grid_import: HAEntityConfig,
-        grid_export: HAEntityConfig,
+        p1_net_power: HAEntityConfig,
         pv_output: HAEntityConfig,
         thermostat_setpoint: HAEntityConfig,
         dhw_top_temperature: HAEntityConfig,
@@ -157,8 +155,7 @@ class HomeAssistantBackend(SensorBackend):
         self._hp_flow_lpm = hp_flow_lpm
         self._hp_electric_power = hp_electric_power
         self._hp_mode_entity_id = hp_mode_entity_id
-        self._grid_import = grid_import
-        self._grid_export = grid_export
+        self._p1_net_power = p1_net_power
         self._pv_output = pv_output
         self._thermostat_setpoint = thermostat_setpoint
         self._dhw_top_temperature = dhw_top_temperature
@@ -266,8 +263,7 @@ class HomeAssistantBackend(SensorBackend):
             hp_flow_lpm=max(self._fetch_state(self._hp_flow_lpm), 0.0),
             hp_electric_power_kw=max(self._fetch_state(self._hp_electric_power), 0.0),
             hp_mode=self._fetch_text_state(self._hp_mode_entity_id),
-            grid_import_kw=max(self._fetch_state(self._grid_import), 0.0),
-            grid_export_kw=max(self._fetch_state(self._grid_export), 0.0),
+            p1_net_power_kw=self._fetch_state(self._p1_net_power),
             pv_output_kw=max(self._fetch_state(self._pv_output), 0.0),
             thermostat_setpoint_c=self._fetch_state(self._thermostat_setpoint),
             dhw_top_temperature_c=self._fetch_state(self._dhw_top_temperature),

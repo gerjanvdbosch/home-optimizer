@@ -25,8 +25,7 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     "hp_return_temperature_c",
     "hp_flow_lpm",
     "hp_electric_power_kw",
-    "grid_import_kw",
-    "grid_export_kw",
+    "p1_net_power_kw",
     "pv_output_kw",
     "thermostat_setpoint_c",
     "dhw_top_temperature_c",
@@ -76,8 +75,7 @@ class LocalBackend(SensorBackend):
     ENV_HP_FLOW_LPM = "HOME_OPT_HP_FLOW_LPM"
     ENV_HP_ELECTRIC_POWER_KW = "HOME_OPT_HP_ELECTRIC_POWER_KW"
     ENV_HP_MODE = "HOME_OPT_HP_MODE"
-    ENV_GRID_IMPORT_KW = "HOME_OPT_GRID_IMPORT_KW"
-    ENV_GRID_EXPORT_KW = "HOME_OPT_GRID_EXPORT_KW"
+    ENV_P1_NET_POWER_KW = "HOME_OPT_P1_NET_POWER_KW"
     ENV_PV_OUTPUT_KW = "HOME_OPT_PV_OUTPUT_KW"
     ENV_THERMOSTAT_SETPOINT_C = "HOME_OPT_THERMOSTAT_SETPOINT_C"
     ENV_DHW_TOP_TEMPERATURE_C = "HOME_OPT_DHW_TOP_TEMPERATURE_C"
@@ -99,8 +97,7 @@ class LocalBackend(SensorBackend):
         hp_flow_lpm: NumericValueSource,
         hp_electric_power_kw: NumericValueSource,
         hp_mode: TextValueSource,
-        grid_import_kw: NumericValueSource,
-        grid_export_kw: NumericValueSource,
+        p1_net_power_kw: NumericValueSource,
         pv_output_kw: NumericValueSource,
         thermostat_setpoint_c: NumericValueSource,
         dhw_top_temperature_c: NumericValueSource,
@@ -119,8 +116,7 @@ class LocalBackend(SensorBackend):
         self._hp_flow_lpm = hp_flow_lpm
         self._hp_electric_power_kw = hp_electric_power_kw
         self._hp_mode = hp_mode
-        self._grid_import_kw = grid_import_kw
-        self._grid_export_kw = grid_export_kw
+        self._p1_net_power_kw = p1_net_power_kw
         self._pv_output_kw = pv_output_kw
         self._thermostat_setpoint_c = thermostat_setpoint_c
         self._dhw_top_temperature_c = dhw_top_temperature_c
@@ -193,8 +189,7 @@ class LocalBackend(SensorBackend):
             hp_flow_lpm=lambda: _read_numeric("hp_flow_lpm"),
             hp_electric_power_kw=lambda: _read_numeric("hp_electric_power_kw"),
             hp_mode=lambda: _read_text("hp_mode"),
-            grid_import_kw=lambda: _read_numeric("grid_import_kw"),
-            grid_export_kw=lambda: _read_numeric("grid_export_kw"),
+            p1_net_power_kw=lambda: _read_numeric("p1_net_power_kw"),
             pv_output_kw=lambda: _read_numeric("pv_output_kw"),
             thermostat_setpoint_c=lambda: _read_numeric("thermostat_setpoint_c"),
             dhw_top_temperature_c=lambda: _read_numeric("dhw_top_temperature_c"),
@@ -235,8 +230,7 @@ class LocalBackend(SensorBackend):
             hp_flow_lpm=lambda: _env_numeric(cls.ENV_HP_FLOW_LPM),
             hp_electric_power_kw=lambda: _env_numeric(cls.ENV_HP_ELECTRIC_POWER_KW),
             hp_mode=lambda: _env_text(cls.ENV_HP_MODE),
-            grid_import_kw=lambda: _env_numeric(cls.ENV_GRID_IMPORT_KW),
-            grid_export_kw=lambda: _env_numeric(cls.ENV_GRID_EXPORT_KW),
+            p1_net_power_kw=lambda: _env_numeric(cls.ENV_P1_NET_POWER_KW),
             pv_output_kw=lambda: _env_numeric(cls.ENV_PV_OUTPUT_KW),
             thermostat_setpoint_c=lambda: _env_numeric(cls.ENV_THERMOSTAT_SETPOINT_C),
             dhw_top_temperature_c=lambda: _env_numeric(cls.ENV_DHW_TOP_TEMPERATURE_C),
@@ -268,8 +262,7 @@ class LocalBackend(SensorBackend):
             hp_flow_lpm=_resolve_numeric(self._hp_flow_lpm),
             hp_electric_power_kw=_resolve_numeric(self._hp_electric_power_kw),
             hp_mode=_resolve_text(self._hp_mode),
-            grid_import_kw=_resolve_numeric(self._grid_import_kw),
-            grid_export_kw=_resolve_numeric(self._grid_export_kw),
+            p1_net_power_kw=_resolve_numeric(self._p1_net_power_kw),
             pv_output_kw=_resolve_numeric(self._pv_output_kw),
             thermostat_setpoint_c=_resolve_numeric(self._thermostat_setpoint_c),
             dhw_top_temperature_c=_resolve_numeric(self._dhw_top_temperature_c),
