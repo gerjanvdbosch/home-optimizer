@@ -49,7 +49,7 @@ options:
   sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
   sensor_hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
   sensor_hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
-  sensor_thermostat_setpoint: "sensor.thermostat_setpoint"
+  sensor_thermostat_setpoint: "sensor.woonkamer_setpoint"
   sensor_dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
   sensor_dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
   sensor_boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
@@ -69,7 +69,7 @@ options:
   sensor_pv_output_scale: 1.0
 
   # Text / categorical
-  sensor_hp_mode: "sensor.hp_mode"
+  sensor_hp_mode: "sensor.warmtepomp_mode"
 
   # Shutter position (0–100 %)
   sensor_shutter_living_room: "sensor.woonkamer_rolluik"
