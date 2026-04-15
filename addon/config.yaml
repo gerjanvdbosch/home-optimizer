@@ -4,7 +4,7 @@ description: >-
   Slimme warmtepompregeling met MPC, Kalman-filter en telemetrie-opslag.
   Ondersteunt UFH (vloerverwarming) en DHW (tapwater) via een gedeelde warmtepomp.
   Bereikbaar via Ingress of direct op poort 8099.
-version: "0.1.0"
+version: "0.9"
 slug: "home_optimizer"
 url: "https://github.com/gerjanvandenbosch/home-optimizer"
 init: false
