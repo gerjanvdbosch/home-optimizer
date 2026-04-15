@@ -4,9 +4,14 @@
 # Build context: repo root (bevat src/, pyproject.toml én dit Dockerfile).
 # Het pakket wordt via COPY lokaal geïnstalleerd — geen GitHub-authenticatie
 # nodig tijdens de build.
+#
+# BUILD_FROM wordt door de HA supervisor automatisch ingesteld op de
+# correcte arch-specifieke Python base image (build.yaml is deprecated).
+# Lokaal bouwen: geef het argument mee, bijv.:
+#   docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.18 .
 # ---------------------------------------------------------------------------
 
-ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12-alpine3.18
+ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
 # Disable .pyc files and enable unbuffered logs (fail-fast visibility).
