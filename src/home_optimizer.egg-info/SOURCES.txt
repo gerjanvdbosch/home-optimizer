@@ -7,7 +7,9 @@ src/home_optimizer/api.py
 src/home_optimizer/cop_model.py
 src/home_optimizer/dhw_model.py
 src/home_optimizer/kalman.py
+src/home_optimizer/local_runner.py
 src/home_optimizer/mpc.py
+src/home_optimizer/settings.py
 src/home_optimizer/thermal_model.py
 src/home_optimizer/types.py
 src/home_optimizer.egg-info/PKG-INFO

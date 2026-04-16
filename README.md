@@ -1,11 +1,16 @@
 # Home Optimizer
 
-Python-implementatie van het 2-state thermische model voor vloerverwarming (UFH), inclusief:
-- fysisch consistente forward-Euler discretisatie;
+Python-implementatie van een gecombineerd thermisch model voor **vloerverwarming (UFH)** en **tapwater (DHW)**, inclusief:
+
+- fysisch consistente forward-Euler discretisatie (grey-box model);
 - state-space representatie met matrices `A`, `B` en `E`;
-- Kalman-filter voor schatting van ruimte- en vloertemperatuur;
-- convex MPC-regelaar met dynamische stroomprijs, comfortgrenzen en ramp-rate constraints;
-- **FastAPI webinterface met interactieve Plotly-grafieken**.
+- Kalman-filter (KF) voor UFH en Extended Kalman-filter (EKF) voor DHW;
+- convex MPC-regelaar (CVXPY/OSQP) met dynamische stroomprijs, comfortgrenzen, ramp-rate constraints en gedeeld warmtepompvermogen;
+- Carnot COP-model met stooklijn voor tijdsvariabele efficiëntie;
+- **FastAPI webinterface** met operationeel dashboard (Open-Meteo forecast) en MPC-simulator;
+- **telemetrylaag** (SQLite + SQLAlchemy + APScheduler) voor sensor- en forecastopslag.
+
+---
 
 ## Installeren
 
@@ -13,86 +18,142 @@ Python-implementatie van het 2-state thermische model voor vloerverwarming (UFH)
 python -m pip install -e '.[dev]'
 ```
 
-## Web-interface (FastAPI + Plotly)
+---
+
+## Lokale ontwikkeling starten
+
+De lokale runner combineert de **ForecastPersister** (haalt Open-Meteo op, slaat op in SQLite) en de **FastAPI/Uvicorn** server in één proces:
 
 ```bash
-uvicorn home_optimizer.api:app --reload
+python -m home_optimizer.local_runner
 ```
 
-Open daarna **http://localhost:8000** in de browser. Je ziet:
-- Live Plotly-grafiek van de voorspelde kamertemperatuur T_r
-- Comfort-band (T_min / T_max) en setpoint T_ref
-- UFH-vermogen P_UFH en dynamische stroomprijs
-- Instelbaar: alle huisparameters, horizon, comfort-grenzen, weersvoorspelling
-
-De standaardwaarden in de webinterface zijn afgestemd op een **redelijk goed geïsoleerde Nederlandse tussenwoning uit circa 2023** met:
-- vloerverwarming en warmtepomp;
-- ongeveer **7.5 m²** zuidgericht glas (bijv. openslaande deuren + zijlicht);
-- typische interne warmtelast van **0.30 kW**.
-
-> Let op: **zonnepanelen (bijv. 2 kWp PV)** worden op dit moment nog **niet** apart gemodelleerd in de energiekosten of thermische toestanden. Alleen **zonnewarmte door glas** (`A_glass`, `eta`, `alpha`) gaat het thermische model in.
-
-API-docs: **http://localhost:8000/docs**
-
-## CLI demo draaien
+Of met opties:
 
 ```bash
-python -m home_optimizer
+python -m home_optimizer.local_runner \
+    --lat 52.37 --lon 4.90 \
+    --database ./dev_data/local.db \
+    --port 8000 \
+    --horizon 48 \
+    --pv-tilt 35
 ```
 
-of:
+Of via het geïnstalleerde script:
 
 ```bash
-python examples/minimal_run.py
+home-optimizer-local --database ./dev.db --pv-tilt 35
 ```
 
-## Telemetry opslaan (SQLite + SQLAlchemy + APScheduler)
+**Alle opties:**
+
+| Optie | Standaard | Beschrijving |
+|---|---|---|
+| `--lat` | `52.37` | Breedtegraad site [°N] |
+| `--lon` | `4.90` | Lengtegraad site [°E] |
+| `--database` | zie DATABASE_URL | Pad naar SQLite-bestand, bijv. `./dev.db` |
+| `--host` | `127.0.0.1` | Uvicorn bind-adres |
+| `--port` | `8000` | Uvicorn poort |
+| `--reload` | uit | Uvicorn auto-reload (handig bij template-ontwikkeling) |
+| `--horizon` | `48` | Forecast horizon [h] |
+| `--window-tilt` | `90` | Glas-oppervlak helling [°] (90 = verticaal) |
+| `--pv-tilt` | uit | PV-paneel helling [°]; weglaten = geen PV GTI |
+| `--pv-azimuth` | `0` | PV-azimut [°] (0 = Zuid) |
+
+### Database-locatie configureren
+
+Prioriteit: `--database` CLI-arg > `DATABASE_URL` env-var > standaard (`sqlite:///database.sqlite3` in CWD).
+
+```bash
+# Via env-var (zonder --database flag)
+DATABASE_URL=sqlite:///mijn_lokale.db python -m home_optimizer.local_runner
+```
+
+---
+
+## Web-interface
+
+Open na het starten van de runner:
+
+| URL | Beschrijving |
+|---|---|
+| **http://localhost:8000** | Operationeel dashboard — laadt forecast uit de database, toont temperatuur, GTI en verwarmingsbehoefte |
+| **http://localhost:8000/simulator** | MPC-simulator — alle fysische parameters instelbaar, optimaliseert UFH + DHW + PV |
+| **http://localhost:8000/docs** | Automatische API-documentatie (OpenAPI/Swagger) |
+
+### Dashboard (`/`)
+
+- Laadt standaard de **meest recente forecast uit de database** (geen live API-call)
+- Vinkje **"Live Open-Meteo ophalen"** voor een directe API-call met instelbare locatie/horizon/PV
+- Grafieken: buitentemperatuurverwachting, GTI (ramen + PV), graaduren verwarming
+- KPI-cards: T nu, min/max, zonnepiek, geldigheid forecast
+
+### Simulator (`/simulator`)
+
+- Alle huisparameters instelbaar (C_r, C_b, R_br, R_ro, α, η, A_glass)
+- UFH + DHW + PV self-consumption
+- Carnot COP-model met stooklijn
+- Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
+
+De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederlandse tussenwoning (ca. 2023)** met vloerverwarming, warmtepomp en ~7,5 m² zuidgericht glas.
+
+---
+
+## API-endpoints
+
+| Methode | Pad | Beschrijving |
+|---|---|---|
+| `GET` | `/` | Operationeel dashboard (HTML) |
+| `GET` | `/simulator` | MPC-simulator (HTML) |
+| `GET` | `/api/defaults` | Standaard `RunRequest` als JSON |
+| `GET` | `/api/forecast` | Live Open-Meteo forecast (query params: lat, lon, horizon, pv_tilt, …) |
+| `GET` | `/api/forecast/latest` | Meest recente forecast uit de database |
+| `POST` | `/api/optimize` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
+
+---
+
+## Home Assistant Addon
+
+In een HA-omgeving start de addon automatisch:
+
+```bash
+home-optimizer-addon
+```
+
+De addon leest `/data/options.json` (geschreven door de HA Supervisor), bouwt de HA-sensorbackend, start de telemetrycollector + ForecastPersister en draait Uvicorn. De `DATABASE_URL` wordt automatisch ingesteld vanuit `options.json`.
+
+---
+
+## Telemetry
 
 De telemetrylaag samplet live sensoren vaker dan ze naar disk schrijft:
 
-- **sample** standaard elke `30 s`;
-- **flush / opslag** standaard elke `300 s` (= 5 minuten);
-- opslag in SQLite via SQLAlchemy ORM in tabel `telemetry_aggregates`.
-- bij een wijziging van `hp_mode` wordt de huidige bucket direct afgesloten,
-  zodat UFH- en DHW-hydrauliek nooit in dezelfde aggregatierij gemengd worden.
+- **sample** standaard elke `10 s`
+- **flush / opslag** standaard elke `300 s` (= 5 minuten)
+- opslag in SQLite via SQLAlchemy ORM in tabel `telemetry_aggregates`
+- bij een wijziging van `hp_mode` wordt de bucket direct afgesloten (UFH en DHW nooit gemengd)
 
-Zo hou je voldoende meetnauwkeurigheid voor latere training en kalibratie,
-zonder elke minuut of seconde permanent op te slaan.
+**Forecast persistentie** (`forecast_snapshots`):
 
-De lokale demo leest het volledige snapshot uit `sensors.json`:
+- de `ForecastPersister` haalt elk uur een nieuw Open-Meteo forecast op
+- elke stap wordt als aparte rij opgeslagen (normaalvorm: één rij per stap per fetch)
+- duplicaten worden stilzwijgend genegeerd (veilig bij herstart)
+- het dashboard leest altijd de meest recente batch via `GET /api/forecast/latest`
+
+Lokale demo (leest uit `sensors.json`):
 
 ```bash
 python examples/telemetry_collection.py
 ```
 
-Belangrijkste velden in het lokale sensorbestand:
-
-- `room_temperature_c`
-- `outdoor_temperature_c`
-- `hp_supply_temperature_c`
-- `hp_return_temperature_c`
-- `hp_flow_lpm`
-- `hp_electric_power_kw`
-- `hp_mode`
-- `grid_import_kw`
-- `grid_export_kw`
-- `pv_output_kw`
-- `thermostat_setpoint_c`
-- `dhw_top_temperature_c`
-- `dhw_bottom_temperature_c`
-
-De hydraulische sensoren worden dus **niet** dubbel opgeslagen voor UFH en DHW.
-Er is één canonieke ruwe set (`hp_supply_temperature_c`, `hp_return_temperature_c`,
-`hp_flow_lpm`) en de interpretatie loopt via `hp_mode`.
-
-Programmatic usage:
+Programmatisch gebruik:
 
 ```python
 from home_optimizer.sensors import LocalBackend
 from home_optimizer.telemetry import (
-	BufferedTelemetryCollector,
-	TelemetryCollectorSettings,
-	TelemetryRepository,
+    BufferedTelemetryCollector,
+    TelemetryCollectorSettings,
+    TelemetryRepository,
 )
 
 settings = TelemetryCollectorSettings(database_url="sqlite:///database.sqlite3")
@@ -105,6 +166,18 @@ collector.start()
 collector.shutdown(flush=True)
 ```
 
+---
+
+## CLI demo
+
+```bash
+python -m home_optimizer
+# of
+python examples/minimal_run.py
+```
+
+---
+
 ## Tests draaien
 
 ```bash
@@ -112,4 +185,3 @@ python -m pytest
 ruff check src tests examples
 black --check src tests examples
 ```
-
