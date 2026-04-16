@@ -653,14 +653,18 @@ class MPCController:
 
                     # The greedy score approximates the convex objective: room comfort,
                     # electricity cost, actuator regularisation and comfort slacks.
+                    # Use xn[0] (predicted next state) — not x[0] (current state) —
+                    # for the comfort term so that applying UFH power is rewarded when
+                    # the room is below the setpoint.  x[0] is fixed at step k and
+                    # identical for all candidates, making the comfort term zero-gradient
+                    # w.r.t. the action and causing the greedy to always choose P_UFH=0.
                     s_lo_ufh = max(p_ufh.T_min - xn[0], 0.0)
                     s_hi_ufh = max(xn[0] - p_ufh.T_max, 0.0)
                     score = (
-                        p_ufh.Q_c * (x[0] - refs[k]) ** 2
+                        p_ufh.Q_c * (xn[0] - refs[k + 1]) ** 2
                         + prices[k] * p_import_k * dt  # electrical energy cost [€]
                         + p_ufh.R_c * c_ufh**2
                         + rho_ufh * (s_lo_ufh**2 + s_hi_ufh**2)
-                        + g.lookahead_weight * p_ufh.Q_N * max(refs[k + 1] - xn[0], 0.0) ** 2
                     )
                     if self._dhw_enabled and p_dhw is not None:
                         s_dhw_k = max(p_dhw.T_dhw_min - xn[2], 0.0)
@@ -700,7 +704,7 @@ class MPCController:
                 p_elec_k += float(us_dhw_arr[k]) / float(cop_dhw[k])
             p_import_k = max(0.0, p_elec_k - float(pv[k]))
             objective += (
-                p_ufh.Q_c * (xs_arr[k, 0] - refs[k]) ** 2
+                p_ufh.Q_c * (xs_arr[k + 1, 0] - refs[k + 1]) ** 2
                 + prices[k] * p_import_k * dt
                 + p_ufh.R_c * us_ufh_arr[k] ** 2
             )
