@@ -76,10 +76,30 @@ from .types import (
 #: Typical Dutch day-ahead electricity price pattern [€/kWh], hours 00–23.
 _PRICES_24H = np.array(
     [
-        0.21, 0.20, 0.19, 0.18, 0.19, 0.22,   # 00–05 cheap night
-        0.28, 0.35, 0.38, 0.36, 0.32, 0.28,   # 06–11 morning peak
-        0.25, 0.24, 0.24, 0.25, 0.28, 0.35,   # 12–17 afternoon
-        0.42, 0.45, 0.40, 0.35, 0.28, 0.23,   # 18–23 evening peak
+        0.21,
+        0.20,
+        0.19,
+        0.18,
+        0.19,
+        0.22,  # 00–05 cheap night
+        0.28,
+        0.35,
+        0.38,
+        0.36,
+        0.32,
+        0.28,  # 06–11 morning peak
+        0.25,
+        0.24,
+        0.24,
+        0.25,
+        0.28,
+        0.35,  # 12–17 afternoon
+        0.42,
+        0.45,
+        0.40,
+        0.35,
+        0.28,
+        0.23,  # 18–23 evening peak
     ],
     dtype=float,
 )
@@ -107,9 +127,7 @@ def _solar_gti(hour: int) -> float:
         Global Tilted Irradiance proxy [W/m²], ≥ 0.
     """
     if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return _SOLAR_PEAK_W_PER_M2 * np.sin(
-            np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H
-        )
+        return _SOLAR_PEAK_W_PER_M2 * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
     return 0.0
 
 
@@ -124,9 +142,7 @@ def _pv_generation(hour: int, peak_kw: float) -> float:
         Estimated PV output [kW], ≥ 0.
     """
     if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return peak_kw * np.sin(
-            np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H
-        )
+        return peak_kw * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
     return 0.0
 
 
@@ -143,107 +159,133 @@ class RunRequest(BaseModel):
     """
 
     # ── UFH: two-zone house thermal model (§3–§5) ─────────────────────────
-    C_r: float = Field(6.0, ge=0.5, le=50.0,
-                       description="Room-air + furniture thermal capacity C_r [kWh/K]")
-    C_b: float = Field(10.0, ge=1.0, le=200.0,
-                       description="UFH floor / concrete slab thermal capacity C_b [kWh/K]")
-    R_br: float = Field(1.0, ge=0.1, le=20.0,
-                        description="Thermal resistance floor → room R_br [K/kW]")
-    R_ro: float = Field(10.0, ge=0.1, le=30.0,
-                        description="Thermal resistance room → outside R_ro [K/kW]")
-    alpha: float = Field(0.25, ge=0.0, le=1.0,
-                         description="Fraction of solar gain to room air α [-]")
-    eta: float = Field(0.55, ge=0.0, le=1.0,
-                       description="Window solar transmittance η [-]")
-    A_glass: float = Field(7.5, ge=0.5, le=40.0,
-                           description="South-facing glazing area A_glass [m²]")
+    C_r: float = Field(
+        6.0, ge=0.5, le=50.0, description="Room-air + furniture thermal capacity C_r [kWh/K]"
+    )
+    C_b: float = Field(
+        10.0, ge=1.0, le=200.0, description="UFH floor / concrete slab thermal capacity C_b [kWh/K]"
+    )
+    R_br: float = Field(
+        1.0, ge=0.1, le=20.0, description="Thermal resistance floor → room R_br [K/kW]"
+    )
+    R_ro: float = Field(
+        10.0, ge=0.1, le=30.0, description="Thermal resistance room → outside R_ro [K/kW]"
+    )
+    alpha: float = Field(
+        0.25, ge=0.0, le=1.0, description="Fraction of solar gain to room air α [-]"
+    )
+    eta: float = Field(0.55, ge=0.0, le=1.0, description="Window solar transmittance η [-]")
+    A_glass: float = Field(
+        7.5, ge=0.5, le=40.0, description="South-facing glazing area A_glass [m²]"
+    )
 
     # ── UFH: initial conditions ───────────────────────────────────────────
-    T_r_init: float = Field(20.5, ge=5.0, le=35.0,
-                            description="Initial room-air temperature T_r [°C]")
-    T_b_init: float = Field(22.5, ge=5.0, le=45.0,
-                            description="Initial floor/slab temperature T_b [°C]")
-    previous_power_kw: float = Field(0.8, ge=0.0, le=20.0,
-                                     description="UFH power applied in previous step [kW]")
+    T_r_init: float = Field(
+        20.5, ge=5.0, le=35.0, description="Initial room-air temperature T_r [°C]"
+    )
+    T_b_init: float = Field(
+        22.5, ge=5.0, le=45.0, description="Initial floor/slab temperature T_b [°C]"
+    )
+    previous_power_kw: float = Field(
+        0.8, ge=0.0, le=20.0, description="UFH power applied in previous step [kW]"
+    )
 
     # ── MPC settings (§14) ────────────────────────────────────────────────
-    horizon_hours: int = Field(24, ge=4, le=48,
-                               description="Horizon length N [steps]")
-    dt_hours: float = Field(1.0, ge=0.25, le=2.0,
-                            description="Forward-Euler time step Δt [h]")
+    horizon_hours: int = Field(24, ge=4, le=48, description="Horizon length N [steps]")
+    dt_hours: float = Field(1.0, ge=0.25, le=2.0, description="Forward-Euler time step Δt [h]")
     Q_c: float = Field(8.0, ge=0.0, description="Comfort weight Q_c [dimensionless]")
-    R_c: float = Field(0.05, ge=0.0,
-                       description="Regularisation weight R_c — damps power spikes")
+    R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c — damps power spikes")
     Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
-    P_max: float = Field(4.5, ge=0.5, le=20.0,
-                         description="Max UFH **thermal** power P_UFH,max [kW]")
-    delta_P_max: float = Field(1.0, ge=0.1, le=10.0,
-                               description="Max UFH ramp-rate ΔP_UFH,max [kW/step]")
-    T_min: float = Field(19.0, ge=10.0, le=25.0,
-                         description="Minimum comfort temperature T_min [°C]")
-    T_max: float = Field(22.5, ge=16.0, le=30.0,
-                         description="Maximum comfort temperature T_max [°C]")
-    T_ref: float = Field(20.5, ge=15.0, le=26.0,
-                         description="Comfort setpoint T_ref [°C]")
+    P_max: float = Field(
+        4.5, ge=0.5, le=20.0, description="Max UFH **thermal** power P_UFH,max [kW]"
+    )
+    delta_P_max: float = Field(
+        1.0, ge=0.1, le=10.0, description="Max UFH ramp-rate ΔP_UFH,max [kW/step]"
+    )
+    T_min: float = Field(
+        19.0, ge=10.0, le=25.0, description="Minimum comfort temperature T_min [°C]"
+    )
+    T_max: float = Field(
+        22.5, ge=16.0, le=30.0, description="Maximum comfort temperature T_max [°C]"
+    )
+    T_ref: float = Field(20.5, ge=15.0, le=26.0, description="Comfort setpoint T_ref [°C]")
 
     # ── UFH: disturbance forecast ─────────────────────────────────────────
-    outdoor_temperature_c: float = Field(6.0, ge=-20.0, le=35.0,
-                                         description="Outdoor temperature T_out [°C]")
-    dynamic_price: bool = Field(True,
-                                description="Use typical Dutch day-ahead price pattern")
-    flat_price: float = Field(0.25, ge=0.0, le=2.0,
-                              description="Flat electricity price p [€/kWh]")
+    outdoor_temperature_c: float = Field(
+        6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [°C]"
+    )
+    dynamic_price: bool = Field(True, description="Use typical Dutch day-ahead price pattern")
+    flat_price: float = Field(0.25, ge=0.0, le=2.0, description="Flat electricity price p [€/kWh]")
     solar_gain: bool = Field(True, description="Include solar irradiance profile")
-    internal_gains_kw: float = Field(0.30, ge=0.0, le=3.0,
-                                     description="Internal heat gains Q_int [kW]")
+    internal_gains_kw: float = Field(
+        0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]"
+    )
 
     # ── PV self-consumption ───────────────────────────────────────────────
-    pv_enabled: bool = Field(False,
-                             description="Enable PV self-consumption (reduces net grid cost)")
-    pv_peak_kw: float = Field(4.0, ge=0.0, le=20.0,
-                              description="PV system peak capacity [kW]")
+    pv_enabled: bool = Field(
+        False, description="Enable PV self-consumption (reduces net grid cost)"
+    )
+    pv_peak_kw: float = Field(4.0, ge=0.0, le=20.0, description="PV system peak capacity [kW]")
 
     # ── DHW: two-node stratification tank (§7–§11) ───────────────────────
-    dhw_enabled: bool = Field(False,
-                              description="Enable DHW (domestic hot water) control")
-    dhw_C_top: float = Field(0.5814, ge=0.01, le=5.0,
-                             description="DHW top-layer thermal capacity C_top [kWh/K]")
-    dhw_C_bot: float = Field(0.5814, ge=0.01, le=5.0,
-                             description="DHW bottom-layer thermal capacity C_bot [kWh/K]")
-    dhw_R_strat: float = Field(10.0, ge=1.0, le=100.0,
-                               description="Stratification resistance R_strat [K/kW]")
-    dhw_R_loss: float = Field(50.0, ge=5.0, le=200.0,
-                              description="Standby-loss resistance R_loss [K/kW]")
-    dhw_T_top_init: float = Field(55.0, ge=20.0, le=85.0,
-                                  description="Initial top-layer temperature T_top [°C]")
-    dhw_T_bot_init: float = Field(45.0, ge=15.0, le=80.0,
-                                  description="Initial bottom-layer temperature T_bot [°C]")
-    dhw_P_max: float = Field(3.0, ge=0.5, le=15.0,
-                             description="Max DHW **thermal** power P_dhw,max [kW]")
-    dhw_delta_P_max: float = Field(1.0, ge=0.1, le=10.0,
-                                   description="Max DHW ramp-rate ΔP_dhw,max [kW/step]")
-    dhw_T_min: float = Field(50.0, ge=35.0, le=70.0,
-                             description="Minimum tap (top-layer) temperature T_dhw,min [°C]")
-    dhw_T_legionella: float = Field(60.0, ge=55.0, le=85.0,
-                                    description="Legionella prevention temperature T_leg [°C]")
+    dhw_enabled: bool = Field(False, description="Enable DHW (domestic hot water) control")
+    dhw_C_top: float = Field(
+        0.5814, ge=0.01, le=5.0, description="DHW top-layer thermal capacity C_top [kWh/K]"
+    )
+    dhw_C_bot: float = Field(
+        0.5814, ge=0.01, le=5.0, description="DHW bottom-layer thermal capacity C_bot [kWh/K]"
+    )
+    dhw_R_strat: float = Field(
+        10.0, ge=1.0, le=100.0, description="Stratification resistance R_strat [K/kW]"
+    )
+    dhw_R_loss: float = Field(
+        50.0, ge=5.0, le=200.0, description="Standby-loss resistance R_loss [K/kW]"
+    )
+    dhw_T_top_init: float = Field(
+        55.0, ge=20.0, le=85.0, description="Initial top-layer temperature T_top [°C]"
+    )
+    dhw_T_bot_init: float = Field(
+        45.0, ge=15.0, le=80.0, description="Initial bottom-layer temperature T_bot [°C]"
+    )
+    dhw_P_max: float = Field(
+        3.0, ge=0.5, le=15.0, description="Max DHW **thermal** power P_dhw,max [kW]"
+    )
+    dhw_delta_P_max: float = Field(
+        1.0, ge=0.1, le=10.0, description="Max DHW ramp-rate ΔP_dhw,max [kW/step]"
+    )
+    dhw_T_min: float = Field(
+        50.0, ge=35.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [°C]"
+    )
+    dhw_T_legionella: float = Field(
+        60.0, ge=55.0, le=85.0, description="Legionella prevention temperature T_leg [°C]"
+    )
     dhw_legionella_period_steps: int = Field(
-        168, ge=24, le=336,
+        168,
+        ge=24,
+        le=336,
         description="Legionella cycle period n_leg [steps]",
     )
     dhw_legionella_duration_steps: int = Field(
-        1, ge=1, le=4,
+        1,
+        ge=1,
+        le=4,
         description="Min consecutive steps at T_legionella for legionella kill",
     )
-    dhw_v_tap_m3_per_h: float = Field(0.01, ge=0.0, le=0.2,
-                                      description="Average tap-water flow V̇_tap [m³/h]")
-    dhw_t_mains_c: float = Field(10.0, ge=0.0, le=25.0,
-                                 description="Cold mains-water temperature T_mains [°C]")
-    dhw_t_amb_c: float = Field(20.0, ge=5.0, le=35.0,
-                               description="Ambient temperature around the boiler T_amb [°C]")
+    dhw_v_tap_m3_per_h: float = Field(
+        0.01, ge=0.0, le=0.2, description="Average tap-water flow V̇_tap [m³/h]"
+    )
+    dhw_t_mains_c: float = Field(
+        10.0, ge=0.0, le=25.0, description="Cold mains-water temperature T_mains [°C]"
+    )
+    dhw_t_amb_c: float = Field(
+        20.0, ge=5.0, le=35.0, description="Ambient temperature around the boiler T_amb [°C]"
+    )
 
     # ── Shared heat-pump electrical budget ───────────────────────────────
     P_hp_max_elec: float = Field(
-        2.5, ge=0.5, le=30.0,
+        2.5,
+        ge=0.5,
+        le=30.0,
         description=(
             "Shared heat-pump **electrical** power budget P_hp,max,elec [kW]. "
             "Enforces P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec (§14)."
@@ -252,7 +294,9 @@ class RunRequest(BaseModel):
 
     # ── Warmtepomp – Carnot COP model (§14.1) ────────────────────────────
     eta_carnot: float = Field(
-        0.45, ge=0.1, le=0.99,
+        0.45,
+        ge=0.1,
+        le=0.99,
         description=(
             "Carnot efficiency factor η [-].  Relates actual COP to the "
             "theoretical maximum: COP = η · T_cond_K / (T_cond_K − T_evap_K).  "
@@ -260,46 +304,60 @@ class RunRequest(BaseModel):
         ),
     )
     delta_T_cond: float = Field(
-        5.0, ge=0.0, le=15.0,
+        5.0,
+        ge=0.0,
+        le=15.0,
         description=(
             "Condensing approach temperature Δ_cond [K].  The refrigerant "
             "condenses at T_aanvoer + Δ_cond.  Typical: 2–8 K."
         ),
     )
     delta_T_evap: float = Field(
-        5.0, ge=0.0, le=15.0,
+        5.0,
+        ge=0.0,
+        le=15.0,
         description=(
             "Evaporating approach temperature Δ_evap [K].  The refrigerant "
             "evaporates at T_buiten − Δ_evap.  Typical: 2–8 K."
         ),
     )
     T_supply_min: float = Field(
-        28.0, ge=15.0, le=60.0,
+        28.0,
+        ge=15.0,
+        le=60.0,
         description=(
             "Minimum UFH supply temperature T_aanvoer,min [°C].  "
             "Floor of the heating curve (when T_out ≥ T_ref_outdoor_curve)."
         ),
     )
     T_ref_outdoor_curve: float = Field(
-        18.0, ge=5.0, le=25.0,
+        18.0,
+        ge=5.0,
+        le=25.0,
         description=(
             "Balance-point outdoor temperature T_ref,buiten [°C].  "
             "At T_out = T_ref_outdoor_curve the heating curve equals T_supply_min."
         ),
     )
     heating_curve_slope: float = Field(
-        1.0, ge=0.0, le=3.0,
+        1.0,
+        ge=0.0,
+        le=3.0,
         description=(
             "Stooklijn slope [K/K].  How much the supply temperature rises "
             "per K drop in outdoor temperature.  Typical UFH: 0.5–1.5."
         ),
     )
     cop_min: float = Field(
-        1.5, ge=1.01, le=5.0,
+        1.5,
+        ge=1.01,
+        le=5.0,
         description="Physical lower bound on COP [-].  Must be > 1 (heat pump).",
     )
     cop_max: float = Field(
-        7.0, ge=2.0, le=15.0,
+        7.0,
+        ge=2.0,
+        le=15.0,
         description="Upper bound on COP for Fail-Fast validation [-].",
     )
 
@@ -316,15 +374,15 @@ class OptimizeResponse(BaseModel):
     objective: float
 
     # ── Energy and cost summaries ─────────────────────────────────────────
-    hp_total_energy_kwh: float         # thermal energy delivered [kWh therm]
-    total_cost_eur: float              # electricity cost based on net grid import [€]
-    ufh_total_energy_kwh: float        # UFH thermal energy [kWh therm]
+    hp_total_energy_kwh: float  # thermal energy delivered [kWh therm]
+    total_cost_eur: float  # electricity cost based on net grid import [€]
+    ufh_total_energy_kwh: float  # UFH thermal energy [kWh therm]
     dhw_total_energy_kwh: float = 0.0  # DHW thermal energy [kWh therm]
-    ufh_grid_cost_eur: float           # cost attributed to UFH by electrical share [€]
-    dhw_grid_cost_eur: float = 0.0     # cost attributed to DHW by electrical share [€]
-    first_ufh_power_kw: float          # first step UFH thermal power [kW]
-    first_dhw_power_kw: float = 0.0    # first step DHW thermal power [kW]
-    first_total_hp_power_kw: float     # first step total thermal power [kW]
+    ufh_grid_cost_eur: float  # cost attributed to UFH by electrical share [€]
+    dhw_grid_cost_eur: float = 0.0  # cost attributed to DHW by electrical share [€]
+    first_ufh_power_kw: float  # first step UFH thermal power [kW]
+    first_dhw_power_kw: float = 0.0  # first step DHW thermal power [kW]
+    first_total_hp_power_kw: float  # first step total thermal power [kW]
     max_ufh_comfort_violation_c: float
 
     # ── PV / grid summaries ───────────────────────────────────────────────
@@ -346,9 +404,9 @@ class OptimizeResponse(BaseModel):
     # ── Plotly chart JSON strings ─────────────────────────────────────────
     temperature_fig: str
     power_fig: str
-    cop_fig: str = ""          # Carnot COP profile chart
+    cop_fig: str = ""  # Carnot COP profile chart
     pv_forecast_fig: str = ""
-    dhw_fig: str = ""          # empty when DHW disabled
+    dhw_fig: str = ""  # empty when DHW disabled
 
 
 # ---------------------------------------------------------------------------
@@ -411,11 +469,7 @@ def _build_ufh_forecast(
         if req.dynamic_price
         else np.full(N, req.flat_price)
     )
-    gti = (
-        np.array([_solar_gti(h) for h in hours], dtype=float)
-        if req.solar_gain
-        else np.zeros(N)
-    )
+    gti = np.array([_solar_gti(h) for h in hours], dtype=float) if req.solar_gain else np.zeros(N)
     pv = (
         np.array([_pv_generation(h, req.pv_peak_kw) for h in hours], dtype=float)
         if req.pv_enabled
@@ -479,9 +533,7 @@ def _time_labels(start_hour: int, n_points: int) -> list[str]:
     Returns:
         List of ``"HH:MM"`` strings, one per time step.
     """
-    base = datetime.now(tz=timezone.utc).replace(
-        hour=start_hour, minute=0, second=0, microsecond=0
-    )
+    base = datetime.now(tz=timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
     return [(base + timedelta(hours=k)).strftime("%H:%M") for k in range(n_points)]
 
 
@@ -511,30 +563,53 @@ def _temperature_figure(
     """
     fig = go.Figure()
     n = len(labels)
-    fig.add_trace(go.Scatter(
-        x=labels + labels[::-1], y=[T_max] * n + [T_min] * n,
-        fill="toself", fillcolor="rgba(100,149,237,0.18)",
-        line=dict(color="rgba(0,0,0,0)"), name="Comfortband", hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=[T_out] * n, name="T<sub>buiten</sub>",
-        mode="lines", line=dict(color="#999", width=1.5, dash="dot"),
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=[T_ref] * n, name="T<sub>ref</sub>",
-        mode="lines", line=dict(color="#2ca02c", width=1.5, dash="dash"),
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=T_r, name="T<sub>r</sub> (kamer)",
-        mode="lines+markers", line=dict(color="#1e6bbf", width=2.5),
-        marker=dict(size=5),
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=labels + labels[::-1],
+            y=[T_max] * n + [T_min] * n,
+            fill="toself",
+            fillcolor="rgba(100,149,237,0.18)",
+            line=dict(color="rgba(0,0,0,0)"),
+            name="Comfortband",
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=[T_out] * n,
+            name="T<sub>buiten</sub>",
+            mode="lines",
+            line=dict(color="#999", width=1.5, dash="dot"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=[T_ref] * n,
+            name="T<sub>ref</sub>",
+            mode="lines",
+            line=dict(color="#2ca02c", width=1.5, dash="dash"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=T_r,
+            name="T<sub>r</sub> (kamer)",
+            mode="lines+markers",
+            line=dict(color="#1e6bbf", width=2.5),
+            marker=dict(size=5),
+        )
+    )
     fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
         yaxis=dict(title="Temperatuur [°C]", gridcolor="#f5f5f5", zeroline=False),
         xaxis=dict(gridcolor="#f5f5f5"),
         legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
     )
     return fig.to_json()
 
@@ -561,27 +636,45 @@ def _dhw_figure(
     """
     fig = go.Figure()
     n = len(labels)
-    fig.add_trace(go.Scatter(
-        x=labels + labels[::-1], y=[T_dhw_min] * n + [20.0] * n,
-        fill="toself", fillcolor="rgba(255,165,0,0.12)",
-        line=dict(color="rgba(0,0,0,0)"), name="Comfort min", hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=T_top, name="T<sub>top</sub>",
-        mode="lines+markers", line=dict(color="#e74c3c", width=2.5),
-        marker=dict(size=4),
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=T_bot, name="T<sub>bot</sub>",
-        mode="lines+markers", line=dict(color="#f39c12", width=2),
-        marker=dict(size=4),
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=labels + labels[::-1],
+            y=[T_dhw_min] * n + [20.0] * n,
+            fill="toself",
+            fillcolor="rgba(255,165,0,0.12)",
+            line=dict(color="rgba(0,0,0,0)"),
+            name="Comfort min",
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=T_top,
+            name="T<sub>top</sub>",
+            mode="lines+markers",
+            line=dict(color="#e74c3c", width=2.5),
+            marker=dict(size=4),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=T_bot,
+            name="T<sub>bot</sub>",
+            mode="lines+markers",
+            line=dict(color="#f39c12", width=2),
+            marker=dict(size=4),
+        )
+    )
     fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
         yaxis=dict(title="Temperatuur [°C]", gridcolor="#f5f5f5", zeroline=False),
         xaxis=dict(gridcolor="#f5f5f5"),
         legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
     )
     return fig.to_json()
 
@@ -611,39 +704,70 @@ def _power_figure(
         Plotly figure serialised to JSON string.
     """
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Bar(
-        x=labels, y=P_UFH, name="P<sub>UFH</sub> [kW therm]",
-        marker_color=[
-            f"rgba(30,107,191,{0.5 + 0.5 * v / max(P_max, 0.01)})"
-            for v in P_UFH
-        ],
-    ), secondary_y=False)
+    fig.add_trace(
+        go.Bar(
+            x=labels,
+            y=P_UFH,
+            name="P<sub>UFH</sub> [kW therm]",
+            marker_color=[f"rgba(30,107,191,{0.5 + 0.5 * v / max(P_max, 0.01)})" for v in P_UFH],
+        ),
+        secondary_y=False,
+    )
     if np.any(P_dhw > 0):
-        fig.add_trace(go.Bar(
-            x=labels, y=P_dhw, name="P<sub>DHW</sub> [kW therm]",
-            marker_color="rgba(231,76,60,0.65)",
-        ), secondary_y=False)
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=P_dhw,
+                name="P<sub>DHW</sub> [kW therm]",
+                marker_color="rgba(231,76,60,0.65)",
+            ),
+            secondary_y=False,
+        )
     if np.any(pv_kw > 0):
-        fig.add_trace(go.Scatter(
-            x=labels, y=pv_kw, name="P<sub>PV</sub> [kW]",
-            mode="lines", line=dict(color="#f1c40f", width=2, dash="dot"),
-        ), secondary_y=False)
-    fig.add_trace(go.Scatter(
-        x=labels, y=prices, name="Prijs [€/kWh]",
-        mode="lines+markers", line=dict(color="#e74c3c", width=2),
-        marker=dict(size=5),
-    ), secondary_y=True)
+        fig.add_trace(
+            go.Scatter(
+                x=labels,
+                y=pv_kw,
+                name="P<sub>PV</sub> [kW]",
+                mode="lines",
+                line=dict(color="#f1c40f", width=2, dash="dot"),
+            ),
+            secondary_y=False,
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=prices,
+            name="Prijs [€/kWh]",
+            mode="lines+markers",
+            line=dict(color="#e74c3c", width=2),
+            marker=dict(size=5),
+        ),
+        secondary_y=True,
+    )
     fig.update_layout(
-        margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor="white",
+        margin=dict(l=0, r=0, t=10, b=0),
+        plot_bgcolor="white",
         paper_bgcolor="white",
         legend=dict(orientation="h", y=-0.22, font=dict(size=11)),
-        hovermode="x unified", barmode="group",
+        hovermode="x unified",
+        barmode="group",
     )
-    fig.update_yaxes(title_text="Thermisch vermogen [kW]", secondary_y=False,
-                     range=[0, P_max * 1.1], gridcolor="#f5f5f5", zeroline=False)
-    fig.update_yaxes(title_text="Prijs [€/kWh]", secondary_y=True,
-                     range=[0, max(prices) * 1.5], gridcolor=None,
-                     zeroline=False, showgrid=False)
+    fig.update_yaxes(
+        title_text="Thermisch vermogen [kW]",
+        secondary_y=False,
+        range=[0, P_max * 1.1],
+        gridcolor="#f5f5f5",
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text="Prijs [€/kWh]",
+        secondary_y=True,
+        range=[0, max(prices) * 1.5],
+        gridcolor=None,
+        zeroline=False,
+        showgrid=False,
+    )
     return fig.to_json()
 
 
@@ -669,25 +793,31 @@ def _cop_figure(
         Plotly figure serialised to JSON string.
     """
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=labels, y=cop_ufh,
-        name="COP<sub>UFH</sub> (stooklijn + Carnot)",
-        mode="lines+markers",
-        line=dict(color="#1e6bbf", width=2.5),
-        marker=dict(size=5),
-        fill="tozeroy",
-        fillcolor="rgba(30,107,191,0.08)",
-    ))
-    if cop_dhw is not None:
-        fig.add_trace(go.Scatter(
-            x=labels, y=cop_dhw,
-            name="COP<sub>DHW</sub> (vaste aanvoertemp)",
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=cop_ufh,
+            name="COP<sub>UFH</sub> (stooklijn + Carnot)",
             mode="lines+markers",
-            line=dict(color="#e74c3c", width=2),
+            line=dict(color="#1e6bbf", width=2.5),
             marker=dict(size=5),
             fill="tozeroy",
-            fillcolor="rgba(231,76,60,0.06)",
-        ))
+            fillcolor="rgba(30,107,191,0.08)",
+        )
+    )
+    if cop_dhw is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=labels,
+                y=cop_dhw,
+                name="COP<sub>DHW</sub> (vaste aanvoertemp)",
+                mode="lines+markers",
+                line=dict(color="#e74c3c", width=2),
+                marker=dict(size=5),
+                fill="tozeroy",
+                fillcolor="rgba(231,76,60,0.06)",
+            )
+        )
     # Reference: COP = 1 represents a resistive heater (worst case)
     fig.add_hline(
         y=cop_min,
@@ -706,7 +836,9 @@ def _cop_figure(
         ),
         xaxis=dict(gridcolor="#f5f5f5"),
         legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
     )
     return fig.to_json()
 
@@ -722,21 +854,26 @@ def _pv_forecast_figure(labels: list[str], pv_kw: np.ndarray) -> str:
         Plotly figure serialised to JSON string.
     """
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=labels, y=pv_kw,
-        name="P<sub>PV</sub> forecast [kW]",
-        mode="lines+markers",
-        line=dict(color="#f1c40f", width=2.5),
-        marker=dict(size=5),
-        fill="tozeroy",
-        fillcolor="rgba(241,196,15,0.18)",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=pv_kw,
+            name="P<sub>PV</sub> forecast [kW]",
+            mode="lines+markers",
+            line=dict(color="#f1c40f", width=2.5),
+            marker=dict(size=5),
+            fill="tozeroy",
+            fillcolor="rgba(241,196,15,0.18)",
+        )
+    )
     fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
         yaxis=dict(title="PV forecast [kW]", gridcolor="#f5f5f5", zeroline=False),
         xaxis=dict(gridcolor="#f5f5f5"),
         legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
     )
     return fig.to_json()
 
@@ -783,11 +920,11 @@ class ForecastResponse(BaseModel):
 
     horizon_steps: int
     dt_hours: float
-    valid_from: str                          # ISO-8601 UTC string
-    labels: list[str]                        # HH:MM labels for charts
-    outdoor_temperature_c: list[float]       # T_out [C]
-    gti_w_per_m2: list[float]               # window GTI [W/m²]
-    gti_pv_w_per_m2: list[float]            # PV panel GTI [W/m²], 0 when not configured
+    valid_from: str  # ISO-8601 UTC string
+    labels: list[str]  # HH:MM labels for charts
+    outdoor_temperature_c: list[float]  # T_out [C]
+    gti_w_per_m2: list[float]  # window GTI [W/m²]
+    gti_pv_w_per_m2: list[float]  # PV panel GTI [W/m²], 0 when not configured
     # Plotly chart JSON strings
     temperature_forecast_fig: str
     solar_forecast_fig: str
@@ -812,71 +949,85 @@ def _build_forecast_figures(
     """
     # Temperature figure
     t_fig = go.Figure()
-    t_fig.add_trace(go.Scatter(
-        x=labels, y=temps,
-        name="T<sub>buiten</sub> [°C]",
-        mode="lines+markers",
-        line=dict(color="#1e6bbf", width=2.5),
-        marker=dict(size=5),
-        fill="tozeroy",
-        fillcolor="rgba(30,107,191,0.08)",
-    ))
+    t_fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=temps,
+            name="T<sub>buiten</sub> [°C]",
+            mode="lines+markers",
+            line=dict(color="#1e6bbf", width=2.5),
+            marker=dict(size=5),
+            fill="tozeroy",
+            fillcolor="rgba(30,107,191,0.08)",
+        )
+    )
     t_fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
-        yaxis=dict(title="Temperatuur [°C]", gridcolor="#f5f5f5", zeroline=True,
-                   zerolinecolor="#ccc"),
+        yaxis=dict(
+            title="Temperatuur [°C]", gridcolor="#f5f5f5", zeroline=True, zerolinecolor="#ccc"
+        ),
         xaxis=dict(gridcolor="#f5f5f5"),
         legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
     )
 
     # Solar / GTI figure
     s_fig = go.Figure()
-    s_fig.add_trace(go.Scatter(
-        x=labels, y=gti_window,
-        name="GTI ramen [W/m²]",
-        mode="lines",
-        line=dict(color="#f39c12", width=2),
-        fill="tozeroy",
-        fillcolor="rgba(243,156,18,0.15)",
-    ))
-    if any(v > 0 for v in gti_pv):
-        s_fig.add_trace(go.Scatter(
-            x=labels, y=gti_pv,
-            name="GTI PV-panelen [W/m²]",
+    s_fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=gti_window,
+            name="GTI ramen [W/m²]",
             mode="lines",
-            line=dict(color="#f1c40f", width=2, dash="dot"),
+            line=dict(color="#f39c12", width=2),
             fill="tozeroy",
-            fillcolor="rgba(241,196,15,0.10)",
-        ))
+            fillcolor="rgba(243,156,18,0.15)",
+        )
+    )
+    if any(v > 0 for v in gti_pv):
+        s_fig.add_trace(
+            go.Scatter(
+                x=labels,
+                y=gti_pv,
+                name="GTI PV-panelen [W/m²]",
+                mode="lines",
+                line=dict(color="#f1c40f", width=2, dash="dot"),
+                fill="tozeroy",
+                fillcolor="rgba(241,196,15,0.10)",
+            )
+        )
     s_fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
         yaxis=dict(title="Instraling [W/m²]", gridcolor="#f5f5f5", zeroline=False),
         xaxis=dict(gridcolor="#f5f5f5"),
         legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
     )
     return t_fig.to_json(), s_fig.to_json()
 
 
 @app.get("/api/forecast", response_model=ForecastResponse)
 async def get_forecast(
-    latitude: float = Query(52.37, ge=-90.0, le=90.0,
-                            description="Site latitude [°N]"),
-    longitude: float = Query(4.90, ge=-180.0, le=180.0,
-                             description="Site longitude [°E]"),
-    horizon_hours: int = Query(48, ge=4, le=168,
-                               description="Forecast horizon [h]"),
-    dt_hours: float = Query(1.0, ge=0.25, le=2.0,
-                            description="Time step [h]"),
-    window_tilt: float = Query(90.0, ge=0.0, le=90.0,
-                               description="Window surface tilt [°]; 90 = vertical wall"),
-    window_azimuth: float = Query(0.0, ge=-180.0, le=180.0,
-                                  description="Window azimuth [°]; 0 = South"),
-    pv_tilt: float | None = Query(None, ge=0.0, le=90.0,
-                                  description="PV panel tilt [°]; None = no PV forecast"),
-    pv_azimuth: float = Query(0.0, ge=-180.0, le=180.0,
-                              description="PV panel azimuth [°]; 0 = South"),
+    latitude: float = Query(52.37, ge=-90.0, le=90.0, description="Site latitude [°N]"),
+    longitude: float = Query(4.90, ge=-180.0, le=180.0, description="Site longitude [°E]"),
+    horizon_hours: int = Query(48, ge=4, le=168, description="Forecast horizon [h]"),
+    dt_hours: float = Query(1.0, ge=0.25, le=2.0, description="Time step [h]"),
+    window_tilt: float = Query(
+        90.0, ge=0.0, le=90.0, description="Window surface tilt [°]; 90 = vertical wall"
+    ),
+    window_azimuth: float = Query(
+        0.0, ge=-180.0, le=180.0, description="Window azimuth [°]; 0 = South"
+    ),
+    pv_tilt: float | None = Query(
+        None, ge=0.0, le=90.0, description="PV panel tilt [°]; None = no PV forecast"
+    ),
+    pv_azimuth: float = Query(
+        0.0, ge=-180.0, le=180.0, description="PV panel azimuth [°]; 0 = South"
+    ),
 ) -> ForecastResponse:
     """Fetch an OpenMeteo weather forecast and return structured JSON for the dashboard.
 
@@ -925,9 +1076,7 @@ async def get_forecast(
     temps = forecast.outdoor_temperature_c.tolist()
     gti_w = forecast.gti_w_per_m2.tolist()
     gti_pv = (
-        forecast.gti_pv_w_per_m2.tolist()
-        if forecast.gti_pv_w_per_m2 is not None
-        else [0.0] * n
+        forecast.gti_pv_w_per_m2.tolist() if forecast.gti_pv_w_per_m2 is not None else [0.0] * n
     )
 
     temp_fig_json, solar_fig_json = _build_forecast_figures(labels, temps, gti_w, gti_pv)
@@ -1018,9 +1167,7 @@ async def get_latest_forecast() -> ForecastResponse:
     n = len(rows)
 
     # Build time labels from valid_at_utc stored in each row
-    labels = [
-        row.valid_at_utc.strftime("%d-%m %H:%M") for row in rows
-    ]
+    labels = [row.valid_at_utc.strftime("%d-%m %H:%M") for row in rows]
     temps = [float(row.t_out_c) for row in rows]
     gti_w = [float(row.gti_w_per_m2) for row in rows]
     gti_pv = [float(row.gti_pv_w_per_m2) for row in rows]
@@ -1071,8 +1218,13 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     try:
         thermal_params = ThermalParameters(
             dt_hours=req.dt_hours,
-            C_r=req.C_r, C_b=req.C_b, R_br=req.R_br, R_ro=req.R_ro,
-            alpha=req.alpha, eta=req.eta, A_glass=req.A_glass,
+            C_r=req.C_r,
+            C_b=req.C_b,
+            R_br=req.R_br,
+            R_ro=req.R_ro,
+            alpha=req.alpha,
+            eta=req.eta,
+            A_glass=req.A_glass,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1092,10 +1244,15 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     cop_dhw_scalar = float(cop_model.cop_dhw(t_rep, req.dhw_T_min)[0])
 
     mpc_params = MPCParameters(
-        horizon_steps=N, Q_c=req.Q_c, R_c=req.R_c, Q_N=req.Q_N,
-        P_max=req.P_max, delta_P_max=req.delta_P_max,
-        T_min=req.T_min, T_max=req.T_max,
-        cop_ufh=cop_ufh_scalar,   # derived from Carnot model, not a magic number
+        horizon_steps=N,
+        Q_c=req.Q_c,
+        R_c=req.R_c,
+        Q_N=req.Q_N,
+        P_max=req.P_max,
+        delta_P_max=req.delta_P_max,
+        T_min=req.T_min,
+        T_max=req.T_max,
+        cop_ufh=cop_ufh_scalar,  # derived from Carnot model, not a magic number
         cop_max=req.cop_max,
     )
 
@@ -1116,15 +1273,19 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         if req.dhw_enabled:
             dhw_params = DHWParameters(
                 dt_hours=req.dt_hours,
-                C_top=req.dhw_C_top, C_bot=req.dhw_C_bot,
-                R_strat=req.dhw_R_strat, R_loss=req.dhw_R_loss,
+                C_top=req.dhw_C_top,
+                C_bot=req.dhw_C_bot,
+                R_strat=req.dhw_R_strat,
+                R_loss=req.dhw_R_loss,
             )
             dhw_mpc_params = DHWMPCParameters(
-                P_dhw_max=req.dhw_P_max, delta_P_dhw_max=req.dhw_delta_P_max,
-                T_dhw_min=req.dhw_T_min, T_legionella=req.dhw_T_legionella,
+                P_dhw_max=req.dhw_P_max,
+                delta_P_dhw_max=req.dhw_delta_P_max,
+                T_dhw_min=req.dhw_T_min,
+                T_legionella=req.dhw_T_legionella,
                 legionella_period_steps=req.dhw_legionella_period_steps,
                 legionella_duration_steps=req.dhw_legionella_duration_steps,
-                cop_dhw=cop_dhw_scalar,   # derived from Carnot model
+                cop_dhw=cop_dhw_scalar,  # derived from Carnot model
                 cop_max=req.cop_max,
             )
             controller_params = CombinedMPCParameters(
@@ -1171,14 +1332,14 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         else np.ones(N)
     )
 
-    P_UFH_elec = P_UFH / cop_ufh_arr          # electrical power UFH [kW]
-    P_dhw_elec = P_dhw / cop_dhw_arr          # electrical power DHW [kW]
-    P_hp_total_elec = P_UFH_elec + P_dhw_elec # total electrical demand [kW]
-    P_hp_total_therm = P_UFH + P_dhw          # total thermal output [kW]
+    P_UFH_elec = P_UFH / cop_ufh_arr  # electrical power UFH [kW]
+    P_dhw_elec = P_dhw / cop_dhw_arr  # electrical power DHW [kW]
+    P_hp_total_elec = P_UFH_elec + P_dhw_elec  # total electrical demand [kW]
+    P_hp_total_therm = P_UFH + P_dhw  # total thermal output [kW]
     P_import = np.maximum(P_hp_total_elec - pv_kw, 0.0)  # net grid import [kW]
 
-    total_energy = float(np.sum(P_hp_total_therm) * dt)   # [kWh therm]
-    total_cost_steps = P_import * prices * dt              # per-step cost [€]
+    total_energy = float(np.sum(P_hp_total_therm) * dt)  # [kWh therm]
+    total_cost_steps = P_import * prices * dt  # per-step cost [€]
     total_cost = float(np.sum(total_cost_steps))
     pv_total = float(np.sum(pv_kw) * dt)
     net_grid = float(np.sum(P_import) * dt)
@@ -1187,12 +1348,16 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
 
     # Cost attribution by electrical share (proportional to actual electricity drawn)
     ufh_cost_weights = np.divide(
-        P_UFH_elec, P_hp_total_elec,
-        out=np.zeros_like(P_UFH_elec), where=P_hp_total_elec > 0.0,
+        P_UFH_elec,
+        P_hp_total_elec,
+        out=np.zeros_like(P_UFH_elec),
+        where=P_hp_total_elec > 0.0,
     )
     dhw_cost_weights = np.divide(
-        P_dhw_elec, P_hp_total_elec,
-        out=np.zeros_like(P_dhw_elec), where=P_hp_total_elec > 0.0,
+        P_dhw_elec,
+        P_hp_total_elec,
+        out=np.zeros_like(P_dhw_elec),
+        where=P_hp_total_elec > 0.0,
     )
     ufh_grid_cost = float(np.sum(total_cost_steps * ufh_cost_weights))
     dhw_grid_cost = float(np.sum(total_cost_steps * dhw_cost_weights))
@@ -1203,7 +1368,11 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     T_r = states[:, 0]
 
     temp_fig = _temperature_figure(
-        labels_states, T_r, req.T_ref, req.T_min, req.T_max,
+        labels_states,
+        T_r,
+        req.T_ref,
+        req.T_min,
+        req.T_max,
         req.outdoor_temperature_c,
     )
     power_fig = _power_figure(labels_ctrl, P_UFH, P_dhw, pv_kw, prices, req.P_max)

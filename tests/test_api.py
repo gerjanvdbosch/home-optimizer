@@ -63,8 +63,8 @@ def test_simulate_supports_combined_mode_through_unified_mpc() -> None:
 
 
 def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
-    """The dashboard page must expose grouped DHW/PV UI elements for the unified controller."""
-    response = client.get("/")
+    """The simulator page must expose grouped DHW/PV UI elements for the unified controller."""
+    response = client.get("/simulator")
 
     assert response.status_code == 200
     html = response.text
@@ -72,5 +72,4 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-settings"' in html
     assert 'id="dhw-chart-card"' in html
     assert 'id="pv_enabled"' in html
-    assert 'UFH + DHW + PV MPC' in html
-
+    assert "UFH + DHW + PV MPC" in html
