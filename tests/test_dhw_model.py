@@ -5,10 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from home_optimizer.dhw_model import DHWModel, MEASUREMENT_MATRIX_DHW
+from home_optimizer.dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from home_optimizer.kalman import DHWKalmanFilter
 from home_optimizer.types import DHWParameters, KalmanNoiseParameters
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -24,10 +23,10 @@ def params() -> DHWParameters:
     """
     return DHWParameters(
         dt_hours=1.0,
-        C_top=0.5814,   # kWh/K  (λ · 0.5 m³; half of 1000 L)
+        C_top=0.5814,  # kWh/K  (λ · 0.5 m³; half of 1000 L)
         C_bot=0.5814,
-        R_strat=10.0,   # K/kW
-        R_loss=50.0,    # K/kW
+        R_strat=10.0,  # K/kW
+        R_loss=50.0,  # K/kW
         lambda_water=1.1628,
     )
 
@@ -53,10 +52,12 @@ def test_A_matrix_matches_specification(model: DHWModel, params: DHWParameters) 
     b_loss = dt / (params.C_bot * params.R_loss)
     a_tap = dt / params.C_top * params.lambda_water * v_tap
 
-    expected = np.array([
-        [1.0 - a_strat - a_loss - a_tap, a_strat],
-        [b_strat, 1.0 - b_strat - b_loss],
-    ])
+    expected = np.array(
+        [
+            [1.0 - a_strat - a_loss - a_tap, a_strat],
+            [b_strat, 1.0 - b_strat - b_loss],
+        ]
+    )
     np.testing.assert_allclose(A, expected)
 
 
@@ -77,10 +78,12 @@ def test_E_matrix_matches_specification(model: DHWModel, params: DHWParameters) 
     b_loss = dt / (params.C_bot * params.R_loss)
     b_tap = dt / params.C_bot * params.lambda_water * v_tap
 
-    expected = np.array([
-        [a_loss, 0.0],
-        [b_loss, b_tap],
-    ])
+    expected = np.array(
+        [
+            [a_loss, 0.0],
+            [b_loss, b_tap],
+        ]
+    )
     np.testing.assert_allclose(E, expected)
 
 
@@ -282,6 +285,6 @@ def test_dhw_kalman_uses_time_varying_A(model: DHWModel) -> None:
     kf1 = _make_kf(model)
     kf0.predict(0.0, 0.0, 10.0, 20.0)
     kf1.predict(0.0, 0.05, 10.0, 20.0)
-    assert not np.allclose(kf0.estimate.mean_c, kf1.estimate.mean_c), \
-        "Predict must use time-varying A_dhw[k] (different result for V_tap=0.05)."
-
+    assert not np.allclose(
+        kf0.estimate.mean_c, kf1.estimate.mean_c
+    ), "Predict must use time-varying A_dhw[k] (different result for V_tap=0.05)."

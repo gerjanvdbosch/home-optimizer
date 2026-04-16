@@ -240,9 +240,9 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
         sol.ufh_control_sequence_kw / MPC_PARAMS.cop_ufh
         + sol.dhw_control_sequence_kw / DHW_MPC_PARAMS.cop_dhw
     )
-    assert np.all(elec_combined <= 3.0 + 1e-5), (
-        f"Electrical budget violated: max={elec_combined.max():.4f} kW > 3.0 kW"
-    )
+    assert np.all(
+        elec_combined <= 3.0 + 1e-5
+    ), f"Electrical budget violated: max={elec_combined.max():.4f} kW > 3.0 kW"
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +254,15 @@ def test_cop_validation_ufh_rejects_cop_below_or_equal_one() -> None:
     """MPCParameters must raise ValueError when cop_ufh ≤ 1 (physically impossible)."""
     with pytest.raises(ValueError, match="cop_ufh"):
         MPCParameters(
-            horizon_steps=4, Q_c=1.0, R_c=0.01, Q_N=1.0,
-            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=23.0,
-            cop_ufh=1.0,   # exactly 1 is invalid (must be strictly > 1)
+            horizon_steps=4,
+            Q_c=1.0,
+            R_c=0.01,
+            Q_N=1.0,
+            P_max=4.0,
+            delta_P_max=1.0,
+            T_min=19.0,
+            T_max=23.0,
+            cop_ufh=1.0,  # exactly 1 is invalid (must be strictly > 1)
             cop_max=7.0,
         )
 
@@ -265,8 +271,14 @@ def test_cop_validation_ufh_rejects_cop_of_zero() -> None:
     """MPCParameters must raise ValueError when cop_ufh ≤ 0."""
     with pytest.raises(ValueError, match="cop_ufh"):
         MPCParameters(
-            horizon_steps=4, Q_c=1.0, R_c=0.01, Q_N=1.0,
-            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=23.0,
+            horizon_steps=4,
+            Q_c=1.0,
+            R_c=0.01,
+            Q_N=1.0,
+            P_max=4.0,
+            delta_P_max=1.0,
+            T_min=19.0,
+            T_max=23.0,
             cop_ufh=0.0,
             cop_max=7.0,
         )
@@ -276,9 +288,15 @@ def test_cop_validation_ufh_rejects_cop_above_max() -> None:
     """MPCParameters must raise ValueError when cop_ufh > cop_max."""
     with pytest.raises(ValueError, match="cop_max"):
         MPCParameters(
-            horizon_steps=4, Q_c=1.0, R_c=0.01, Q_N=1.0,
-            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=23.0,
-            cop_ufh=8.0,   # exceeds cop_max
+            horizon_steps=4,
+            Q_c=1.0,
+            R_c=0.01,
+            Q_N=1.0,
+            P_max=4.0,
+            delta_P_max=1.0,
+            T_min=19.0,
+            T_max=23.0,
+            cop_ufh=8.0,  # exceeds cop_max
             cop_max=7.0,
         )
 
@@ -287,9 +305,13 @@ def test_cop_validation_dhw_rejects_cop_below_or_equal_one() -> None:
     """DHWMPCParameters must raise ValueError when cop_dhw ≤ 1."""
     with pytest.raises(ValueError, match="cop_dhw"):
         DHWMPCParameters(
-            P_dhw_max=3.0, delta_P_dhw_max=1.0, T_dhw_min=50.0,
-            T_legionella=60.0, legionella_period_steps=168, legionella_duration_steps=1,
-            cop_dhw=0.5,   # physically impossible
+            P_dhw_max=3.0,
+            delta_P_dhw_max=1.0,
+            T_dhw_min=50.0,
+            T_legionella=60.0,
+            legionella_period_steps=168,
+            legionella_duration_steps=1,
+            cop_dhw=0.5,  # physically impossible
             cop_max=7.0,
         )
 
@@ -298,8 +320,12 @@ def test_cop_validation_dhw_rejects_cop_above_max() -> None:
     """DHWMPCParameters must raise ValueError when cop_dhw > cop_max."""
     with pytest.raises(ValueError, match="cop_max"):
         DHWMPCParameters(
-            P_dhw_max=3.0, delta_P_dhw_max=1.0, T_dhw_min=50.0,
-            T_legionella=60.0, legionella_period_steps=168, legionella_duration_steps=1,
+            P_dhw_max=3.0,
+            delta_P_dhw_max=1.0,
+            T_dhw_min=50.0,
+            T_legionella=60.0,
+            legionella_period_steps=168,
+            legionella_duration_steps=1,
             cop_dhw=9.0,
             cop_max=7.0,
         )
@@ -345,9 +371,16 @@ def test_mpc_cost_uses_electrical_power() -> None:
 
     def _solve_with_cop(cop: float) -> float:
         params = MPCParameters(
-            horizon_steps=8, Q_c=10.0, R_c=0.05, Q_N=15.0,
-            P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=22.5,
-            cop_ufh=cop, cop_max=8.0,
+            horizon_steps=8,
+            Q_c=10.0,
+            R_c=0.05,
+            Q_N=15.0,
+            P_max=4.0,
+            delta_P_max=1.0,
+            T_min=19.0,
+            T_max=22.5,
+            cop_ufh=cop,
+            cop_max=8.0,
         )
         sol = MPCController(ufh_model=model, params=params).solve(
             initial_ufh_state_c=np.array([20.8, 24.0]),
@@ -356,11 +389,11 @@ def test_mpc_cost_uses_electrical_power() -> None:
         )
         return sol.objective_value
 
-    cost_low_cop = _solve_with_cop(cop=2.0)   # low COP → expensive electricity
+    cost_low_cop = _solve_with_cop(cop=2.0)  # low COP → expensive electricity
     cost_high_cop = _solve_with_cop(cop=5.0)  # high COP → cheap electricity
-    assert cost_high_cop < cost_low_cop, (
-        "Higher COP must yield lower objective (cheaper electrical energy)."
-    )
+    assert (
+        cost_high_cop < cost_low_cop
+    ), "Higher COP must yield lower objective (cheaper electrical energy)."
 
 
 # ---------------------------------------------------------------------------
@@ -397,9 +430,9 @@ def test_combined_mpc_with_carnot_cop_arrays() -> None:
 
     # UFH COP > DHW COP: heating curve raises T_supply for UFH, but UFH supply is
     # still much lower than T_dhw_min.  Both should be well above cop_min.
-    assert np.all(cop_ufh_k > cop_dhw_k), (
-        "DHW requires higher T_supply → higher lift → lower COP than UFH at same T_out."
-    )
+    assert np.all(
+        cop_ufh_k > cop_dhw_k
+    ), "DHW requires higher T_supply → higher lift → lower COP than UFH at same T_out."
     assert np.all(cop_ufh_k >= COP_PARAMS.cop_min)
     assert np.all(cop_dhw_k >= COP_PARAMS.cop_min)
 
@@ -417,7 +450,7 @@ def test_combined_mpc_with_carnot_cop_arrays() -> None:
         delta_P_max=MPC_PARAMS.delta_P_max,
         T_min=MPC_PARAMS.T_min,
         T_max=MPC_PARAMS.T_max,
-        cop_ufh=cop_ufh_scalar,       # from Carnot model — no magic number
+        cop_ufh=cop_ufh_scalar,  # from Carnot model — no magic number
         cop_max=COP_PARAMS.cop_max,
     )
     dhw_mpc_params_with_cop = DHWMPCParameters(
@@ -427,7 +460,7 @@ def test_combined_mpc_with_carnot_cop_arrays() -> None:
         T_legionella=DHW_MPC_PARAMS.T_legionella,
         legionella_period_steps=DHW_MPC_PARAMS.legionella_period_steps,
         legionella_duration_steps=DHW_MPC_PARAMS.legionella_duration_steps,
-        cop_dhw=cop_dhw_scalar,       # from Carnot model — no magic number
+        cop_dhw=cop_dhw_scalar,  # from Carnot model — no magic number
         cop_max=COP_PARAMS.cop_max,
     )
 
@@ -453,14 +486,14 @@ def test_combined_mpc_with_carnot_cop_arrays() -> None:
         internal_gains_kw=np.full(n, 0.25),
         price_eur_per_kwh=np.full(n, 0.30),
         room_temperature_ref_c=np.full(n + 1, 21.0),
-        cop_ufh_k=cop_ufh_k,   # §14.1: time-varying COP from physical model
+        cop_ufh_k=cop_ufh_k,  # §14.1: time-varying COP from physical model
     )
     dhw_forecast = DHWForecastHorizon(
         v_tap_m3_per_h=np.full(n, 0.01),
         t_mains_c=np.full(n, 10.0),
         t_amb_c=np.full(n, 20.0),
         legionella_required=np.zeros(n, dtype=bool),
-        cop_dhw_k=cop_dhw_k,   # §14.1: time-varying COP from physical model
+        cop_dhw_k=cop_dhw_k,  # §14.1: time-varying COP from physical model
     )
 
     sol = controller.solve(
@@ -481,11 +514,10 @@ def test_combined_mpc_with_carnot_cop_arrays() -> None:
     # ── §14 Shared electrical budget constraint ───────────────────────
     # Verify using the *actual* time-varying COP arrays used by the MPC,
     # not the scalar stand-ins from MPCParameters.
-    elec_ufh = sol.ufh_control_sequence_kw / cop_ufh_k    # [kW elec], shape (N,)
-    elec_dhw = sol.dhw_control_sequence_kw / cop_dhw_k    # [kW elec], shape (N,)
-    elec_combined = elec_ufh + elec_dhw                    # total electrical demand
+    elec_ufh = sol.ufh_control_sequence_kw / cop_ufh_k  # [kW elec], shape (N,)
+    elec_dhw = sol.dhw_control_sequence_kw / cop_dhw_k  # [kW elec], shape (N,)
+    elec_combined = elec_ufh + elec_dhw  # total electrical demand
     assert np.all(elec_combined <= p_hp_max_elec + 1e-4), (
         f"Shared electrical budget violated: max={elec_combined.max():.4f} kW "
         f"> {p_hp_max_elec} kW (using time-varying Carnot COP arrays)"
     )
-

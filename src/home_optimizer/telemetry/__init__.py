@@ -22,4 +22,3 @@ __all__ = [
     "TelemetryRepository",
     "aggregate_readings",
 ]
-

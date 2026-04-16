@@ -28,10 +28,10 @@ _BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
 # Open-Meteo returns hourly data; these constants control how many raw hourly
 # points are fetched relative to the requested horizon.
-_HOURS_PER_DAY: int = 24          # universele tijdconstante
-_MIN_FETCH_DAYS: int = 2          # minimaal 2 dagen ophalen voor buffer
-_FETCH_BUFFER_HOURS: int = 2      # extra uur-buffer voor uitlijning op huidig uur
-_DT_FLOAT_TOLERANCE: float = 1e-9 # numerieke tolerantie voor dt ≈ 1 h vergelijking
+_HOURS_PER_DAY: int = 24  # universele tijdconstante
+_MIN_FETCH_DAYS: int = 2  # minimaal 2 dagen ophalen voor buffer
+_FETCH_BUFFER_HOURS: int = 2  # extra uur-buffer voor uitlijning op huidig uur
+_DT_FLOAT_TOLERANCE: float = 1e-9  # numerieke tolerantie voor dt ≈ 1 h vergelijking
 
 #: Days per year approximation used in the seasonal cosine model.
 #: Leap years introduce < 0.3 % error — within seasonal model uncertainty.
@@ -261,9 +261,15 @@ class OpenMeteoClient:
         if dt_hours <= 0:
             raise ValueError("dt_hours must be positive.")
 
-        fetch_days = max(_MIN_FETCH_DAYS, int(np.ceil((horizon_hours + _FETCH_BUFFER_HOURS) / _HOURS_PER_DAY)) + 1)
+        fetch_days = max(
+            _MIN_FETCH_DAYS,
+            int(np.ceil((horizon_hours + _FETCH_BUFFER_HOURS) / _HOURS_PER_DAY)) + 1,
+        )
         n_steps = int(np.ceil(horizon_hours / dt_hours))
-        need_h = max(int(np.ceil(n_steps * dt_hours)) + _FETCH_BUFFER_HOURS, horizon_hours + _FETCH_BUFFER_HOURS)
+        need_h = max(
+            int(np.ceil(n_steps * dt_hours)) + _FETCH_BUFFER_HOURS,
+            horizon_hours + _FETCH_BUFFER_HOURS,
+        )
 
         # --- call 1: temperature + window GTI ---
         params: dict[str, str | int | float | bool | None] = {
@@ -353,7 +359,7 @@ class OpenMeteoClient:
     @staticmethod
     def _extract(raw: list, start: int, n: int) -> np.ndarray:
         """Slice raw list, replace None with NaN, forward-fill NaN."""
-        chunk = raw[start: start + n]
+        chunk = raw[start : start + n]
         arr = np.array(
             [float(v) if v is not None else float("nan") for v in chunk],
             dtype=float,
@@ -378,4 +384,3 @@ class OpenMeteoClient:
         t_src = np.arange(len(a), dtype=float)
         t_tgt = np.arange(n_steps, dtype=float) * dt_hours
         return np.interp(t_tgt, t_src, a), np.interp(t_tgt, t_src, b)
-

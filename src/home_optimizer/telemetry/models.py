@@ -283,6 +283,8 @@ class ForecastSnapshot(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(tz=timezone.utc),
     )
+
+
 class MPCLog(Base):
     """Persisted record of each MPC solve cycle.
 
@@ -343,4 +345,3 @@ class MPCLog(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(tz=timezone.utc),
     )
-

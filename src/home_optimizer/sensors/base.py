@@ -199,11 +199,7 @@ class LiveReadings:
         # Shutter is a percentage [0, 100].
         shutter = float(self.shutter_living_room_pct)
         if not 0.0 <= shutter <= 100.0:
-            raise ValueError(
-                f"shutter_living_room_pct must be in [0, 100], got {shutter}."
-            )
-
-
+            raise ValueError(f"shutter_living_room_pct must be in [0, 100], got {shutter}.")
 
         # Coerce bool fields — JSON may deliver 0/1 integers.
         object.__setattr__(self, "defrost_active", bool(self.defrost_active))
@@ -305,4 +301,3 @@ class SensorBackend(ABC):
 
         Most backends are stateless and do not need explicit cleanup.
         """
-

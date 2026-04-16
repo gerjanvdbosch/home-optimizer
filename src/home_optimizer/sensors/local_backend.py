@@ -69,7 +69,6 @@ def _resolve_bool(source: BoolValueSource) -> bool:
     return bool(raw)
 
 
-
 class LocalBackend(SensorBackend):
     """Sensor backend for local / offline telemetry capture.
 
@@ -245,7 +244,9 @@ class LocalBackend(SensorBackend):
             defrost_active=lambda: _read_bool("defrost_active"),
             booster_heater_active=lambda: _read_bool("booster_heater_active"),
             boiler_ambient_temp_c=lambda: _read_numeric("boiler_ambient_temp_c"),
-            refrigerant_condensation_temp_c=lambda: _read_numeric("refrigerant_condensation_temp_c"),
+            refrigerant_condensation_temp_c=lambda: _read_numeric(
+                "refrigerant_condensation_temp_c"
+            ),
             refrigerant_liquid_line_temp_c=lambda: _read_numeric("refrigerant_liquid_line_temp_c"),
             discharge_temp_c=lambda: _read_numeric("discharge_temp_c"),
             t_mains_estimated_c=lambda: _read_numeric("t_mains_estimated_c"),
@@ -280,7 +281,9 @@ class LocalBackend(SensorBackend):
             room_temperature_c=lambda: _env_numeric(cls.ENV_ROOM_TEMPERATURE_C),
             outdoor_temperature_c=lambda: _env_numeric(cls.ENV_OUTDOOR_TEMPERATURE_C),
             hp_supply_temperature_c=lambda: _env_numeric(cls.ENV_HP_SUPPLY_TEMPERATURE_C),
-            hp_supply_target_temperature_c=lambda: _env_numeric(cls.ENV_HP_SUPPLY_TARGET_TEMPERATURE_C),
+            hp_supply_target_temperature_c=lambda: _env_numeric(
+                cls.ENV_HP_SUPPLY_TARGET_TEMPERATURE_C
+            ),
             hp_return_temperature_c=lambda: _env_numeric(cls.ENV_HP_RETURN_TEMPERATURE_C),
             hp_flow_lpm=lambda: _env_numeric(cls.ENV_HP_FLOW_LPM),
             hp_electric_power_kw=lambda: _env_numeric(cls.ENV_HP_ELECTRIC_POWER_KW),
@@ -294,8 +297,12 @@ class LocalBackend(SensorBackend):
             defrost_active=lambda: _env_bool(cls.ENV_DEFROST_ACTIVE),
             booster_heater_active=lambda: _env_bool(cls.ENV_BOOSTER_HEATER_ACTIVE),
             boiler_ambient_temp_c=lambda: _env_numeric(cls.ENV_BOILER_AMBIENT_TEMP_C),
-            refrigerant_condensation_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_CONDENSATION_TEMP_C),
-            refrigerant_liquid_line_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_LIQUID_LINE_TEMP_C),
+            refrigerant_condensation_temp_c=lambda: _env_numeric(
+                cls.ENV_REFRIGERANT_CONDENSATION_TEMP_C
+            ),
+            refrigerant_liquid_line_temp_c=lambda: _env_numeric(
+                cls.ENV_REFRIGERANT_LIQUID_LINE_TEMP_C
+            ),
             discharge_temp_c=lambda: _env_numeric(cls.ENV_DISCHARGE_TEMP_C),
             t_mains_estimated_c=lambda: _env_numeric(cls.ENV_T_MAINS_ESTIMATED_C),
             # Required energy counters — fail fast when env var is absent.
@@ -352,4 +359,3 @@ class LocalBackend(SensorBackend):
         The local backend has no external resources; the method exists to
         satisfy the common :class:`SensorBackend` lifecycle contract.
         """
-

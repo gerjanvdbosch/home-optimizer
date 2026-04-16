@@ -85,14 +85,14 @@ class AddonOptions(BaseModel):
     """
 
     # --- Telemetry storage ---
-    database_path: str = Field(..., min_length=1,
-                               description="SQLite path, e.g. /config/database.sqlite3")
-    sampling_interval_seconds: int = Field(10, gt=0,
-                                           description="Sensor polling interval [s]")
-    flush_interval_seconds: int = Field(300, gt=0,
-                                        description="Aggregation window written to DB [s]")
-    api_port: int = Field(8099, gt=0, lt=65536,
-                          description="Uvicorn listen port")
+    database_path: str = Field(
+        ..., min_length=1, description="SQLite path, e.g. /config/database.sqlite3"
+    )
+    sampling_interval_seconds: int = Field(10, gt=0, description="Sensor polling interval [s]")
+    flush_interval_seconds: int = Field(
+        300, gt=0, description="Aggregation window written to DB [s]"
+    )
+    api_port: int = Field(8099, gt=0, lt=65536, description="Uvicorn listen port")
 
     # --- Temperature sensors (°C — scale 1.0) ---
     sensor_room_temperature: str = Field(..., min_length=1)
@@ -105,10 +105,12 @@ class AddonOptions(BaseModel):
     sensor_dhw_bottom_temperature: str = Field(..., min_length=1)
     sensor_boiler_ambient_temperature: str = Field(..., min_length=1)
     sensor_refrigerant_condensation_temperature: str = Field(..., min_length=1)
-    sensor_refrigerant_liquid_line_temperature: str = Field(..., min_length=1,
-                                                            description="Buitenunit Vloeistofleiding [°C]")
-    sensor_discharge_temperature: str = Field(..., min_length=1,
-                                              description="Ontladingstemperatuur compressor [°C]")
+    sensor_refrigerant_liquid_line_temperature: str = Field(
+        ..., min_length=1, description="Buitenunit Vloeistofleiding [°C]"
+    )
+    sensor_discharge_temperature: str = Field(
+        ..., min_length=1, description="Ontladingstemperatuur compressor [°C]"
+    )
 
     # --- Flow sensor (L/min) ---
     sensor_hp_flow_lpm: str = Field(..., min_length=1)
@@ -122,8 +124,9 @@ class AddonOptions(BaseModel):
         1.0, description="Unit scale: 1.0 if already kW, 0.001 if W"
     )
     sensor_p1_net_power: str = Field(
-        ..., min_length=1,
-        description="P1 smart-meter entity: positive = import [kW], negative = export [kW]"
+        ...,
+        min_length=1,
+        description="P1 smart-meter entity: positive = import [kW], negative = export [kW]",
     )
     sensor_p1_net_power_scale: float = Field(
         1.0, description="Unit scale: 1.0 if already kW, 0.001 if W"
@@ -132,31 +135,37 @@ class AddonOptions(BaseModel):
     sensor_pv_output_scale: float = Field(1.0)
 
     # --- Categorical sensor ---
-    sensor_hp_mode: str = Field(..., min_length=1,
-                                description="Entity reporting ufh/dhw/defrost/off")
+    sensor_hp_mode: str = Field(
+        ..., min_length=1, description="Entity reporting ufh/dhw/defrost/off"
+    )
 
     # --- Shutter (0–100 %) ---
     sensor_shutter_living_room: str = Field(
-        ..., min_length=1,
-        description="Shutter/cover position entity (100 = fully open)"
+        ..., min_length=1, description="Shutter/cover position entity (100 = fully open)"
     )
 
     # --- Binary sensors (on/off) ---
-    sensor_defrost_active: str = Field(..., min_length=1,
-                                       description="binary_sensor for HP defrost cycle")
-    sensor_booster_heater_active: str = Field(..., min_length=1,
-                                              description="binary_sensor for DHW booster element")
+    sensor_defrost_active: str = Field(
+        ..., min_length=1, description="binary_sensor for HP defrost cycle"
+    )
+    sensor_booster_heater_active: str = Field(
+        ..., min_length=1, description="binary_sensor for DHW booster element"
+    )
 
     # --- PV panel orientation (Open-Meteo GTI forecast) ---
     pv_tilt: float = Field(
-        50.0, ge=0.0, le=90.0,
+        50.0,
+        ge=0.0,
+        le=90.0,
         description=(
             "PV panel tilt angle [°].  0 = horizontal surface, 90 = vertical wall.  "
             "Passed directly to Open-Meteo to compute irradiance on the PV surface."
         ),
     )
     pv_azimuth: float = Field(
-        148.0, ge=0.0, lt=360.0,
+        148.0,
+        ge=0.0,
+        lt=360.0,
         description=(
             "PV panel orientation as a compass bearing [°].  "
             "0 = North, 90 = East, 180 = South, 270 = West.  "
@@ -167,7 +176,8 @@ class AddonOptions(BaseModel):
 
     # --- DHW boiler geometry ---
     boiler_tank_liters: int = Field(
-        200, gt=0,
+        200,
+        gt=0,
         description=(
             "Total DHW boiler tank volume [L].  "
             "Used to derive DHW thermal capacities C_top and C_bot via λ·V_tank."
@@ -178,19 +188,23 @@ class AddonOptions(BaseModel):
     # These counters enable accurate COP validation (§14.1), grid-cost
     # back-testing (§14.2), and PV self-consumption analysis.
     sensor_pv_total_kwh: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="HA entity ID for cumulative PV energy counter [kWh].",
     )
     sensor_hp_electric_total_kwh: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="HA entity ID for cumulative HP electrical energy counter [kWh].",
     )
     sensor_p1_import_total_kwh: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="HA entity ID for cumulative P1 import energy counter [kWh].",
     )
     sensor_p1_export_total_kwh: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="HA entity ID for cumulative P1 export energy counter [kWh].",
     )
 
@@ -211,9 +225,7 @@ class AddonOptions(BaseModel):
     def _flush_multiple_of_sample(self) -> "AddonOptions":
         """Enforce that the flush window contains a whole number of sample periods."""
         if self.flush_interval_seconds < self.sampling_interval_seconds:
-            raise ValueError(
-                "flush_interval_seconds must be >= sampling_interval_seconds."
-            )
+            raise ValueError("flush_interval_seconds must be >= sampling_interval_seconds.")
         if self.flush_interval_seconds % self.sampling_interval_seconds != 0:
             raise ValueError(
                 "flush_interval_seconds must be an integer multiple of "
@@ -272,15 +284,13 @@ def _build_backend(opts: AddonOptions) -> HomeAssistantBackend:
         hp_supply_temperature=HAEntityConfig(opts.sensor_hp_supply_temperature),
         hp_supply_target_temperature=HAEntityConfig(opts.sensor_hp_supply_target_temperature),
         hp_return_temperature=HAEntityConfig(opts.sensor_hp_return_temperature),
-        hp_flow_lpm=HAEntityConfig(opts.sensor_hp_flow_lpm,
-                                   scale=opts.sensor_hp_flow_scale),
-        hp_electric_power=HAEntityConfig(opts.sensor_hp_electric_power,
-                                         scale=opts.sensor_hp_electric_power_scale),
+        hp_flow_lpm=HAEntityConfig(opts.sensor_hp_flow_lpm, scale=opts.sensor_hp_flow_scale),
+        hp_electric_power=HAEntityConfig(
+            opts.sensor_hp_electric_power, scale=opts.sensor_hp_electric_power_scale
+        ),
         hp_mode_entity_id=opts.sensor_hp_mode,
-        p1_net_power=HAEntityConfig(opts.sensor_p1_net_power,
-                                    scale=opts.sensor_p1_net_power_scale),
-        pv_output=HAEntityConfig(opts.sensor_pv_output,
-                                 scale=opts.sensor_pv_output_scale),
+        p1_net_power=HAEntityConfig(opts.sensor_p1_net_power, scale=opts.sensor_p1_net_power_scale),
+        pv_output=HAEntityConfig(opts.sensor_pv_output, scale=opts.sensor_pv_output_scale),
         thermostat_setpoint=HAEntityConfig(opts.sensor_thermostat_setpoint),
         dhw_top_temperature=HAEntityConfig(opts.sensor_dhw_top_temperature),
         dhw_bottom_temperature=HAEntityConfig(opts.sensor_dhw_bottom_temperature),
@@ -388,7 +398,11 @@ def main() -> None:
     log.info(
         "OpenMeteoClient: lat=%.5f  lon=%.5f  pv_tilt=%.1f°  pv_azimuth_compass=%.1f°  "
         "pv_azimuth_om=%.1f°",
-        latitude, longitude, opts.pv_tilt, opts.pv_azimuth, open_meteo_pv_azimuth,
+        latitude,
+        longitude,
+        opts.pv_tilt,
+        opts.pv_azimuth,
+        open_meteo_pv_azimuth,
     )
 
     forecast_persister = ForecastPersister(
@@ -429,7 +443,10 @@ def main() -> None:
     # the `finally` block below performs the definitive flush + close once
     # Uvicorn has exited.
     def _handle_sigterm(signum: int, frame: object) -> None:  # noqa: ANN001
-        log.info("Signal %d received — stopping scheduler (Uvicorn handles its own shutdown).", signum)
+        log.info(
+            "Signal %d received — stopping scheduler (Uvicorn handles its own shutdown).",
+            signum,
+        )
         try:
             collector.shutdown(flush=False)
         except Exception:  # noqa: BLE001
@@ -475,4 +492,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

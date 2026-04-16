@@ -36,10 +36,10 @@ def build_demo() -> tuple[
     """
     params = ThermalParameters(
         dt_hours=1.0,
-        C_r=6.0,   # kWh/K  – room air + light interior mass
+        C_r=6.0,  # kWh/K  – room air + light interior mass
         C_b=10.0,  # kWh/K  – thermally active UFH floor zone
         R_br=1.0,  # K/kW   – floor → room
-        R_ro=10.0, # K/kW   – room → outside
+        R_ro=10.0,  # K/kW   – room → outside
         alpha=0.25,
         eta=0.55,
         A_glass=7.5,
@@ -52,14 +52,14 @@ def build_demo() -> tuple[
     # ── Carnot COP model — no magic numbers; all parameters named (§14.1) ─
     # These parameters should come from a config file in production use.
     cop_params = HeatPumpCOPParameters(
-        eta_carnot=0.45,            # Carnot efficiency factor η [-]
-        delta_T_cond=5.0,           # condensing approach temperature Δ_cond [K]
-        delta_T_evap=5.0,           # evaporating approach temperature Δ_evap [K]
-        T_supply_min=28.0,          # minimum UFH supply temperature [°C]
-        T_ref_outdoor=18.0,         # heating-curve balance point [°C]
-        heating_curve_slope=1.0,    # heating-curve slope [K/K]
-        cop_min=1.5,                # physical floor on COP (Fail-Fast lower bound)
-        cop_max=7.0,                # Fail-Fast upper bound on COP
+        eta_carnot=0.45,  # Carnot efficiency factor η [-]
+        delta_T_cond=5.0,  # condensing approach temperature Δ_cond [K]
+        delta_T_evap=5.0,  # evaporating approach temperature Δ_evap [K]
+        T_supply_min=28.0,  # minimum UFH supply temperature [°C]
+        T_ref_outdoor=18.0,  # heating-curve balance point [°C]
+        heating_curve_slope=1.0,  # heating-curve slope [K/K]
+        cop_min=1.5,  # physical floor on COP (Fail-Fast lower bound)
+        cop_max=7.0,  # Fail-Fast upper bound on COP
     )
     cop_model = HeatPumpCOPModel(cop_params)
 
@@ -125,8 +125,10 @@ def main() -> None:
     # ── COP profile (from physical Carnot model) ───────────────────────
     assert forecast.cop_ufh_k is not None  # always set by build_demo()
     cop_arr = forecast.cop_ufh_k
-    print(f"\nCOP_UFH profile (Carnot): min={cop_arr.min():.3f}  "
-          f"max={cop_arr.max():.3f}  mean={cop_arr.mean():.3f}")
+    print(
+        f"\nCOP_UFH profile (Carnot): min={cop_arr.min():.3f}  "
+        f"max={cop_arr.max():.3f}  mean={cop_arr.mean():.3f}"
+    )
     print(f"  per step: {np.round(cop_arr, 3).tolist()}")
 
     # ── MPC solve ─────────────────────────────────────────────────────

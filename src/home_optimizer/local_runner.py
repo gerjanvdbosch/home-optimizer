@@ -106,19 +106,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # ── Location ───────────────────────────────────────────────────────────
     parser.add_argument(
-        "--lat", type=float, default=_DEFAULT_LATITUDE,
+        "--lat",
+        type=float,
+        default=_DEFAULT_LATITUDE,
         metavar="DEGREES",
         help="Site latitude [°N].",
     )
     parser.add_argument(
-        "--lon", type=float, default=_DEFAULT_LONGITUDE,
+        "--lon",
+        type=float,
+        default=_DEFAULT_LONGITUDE,
         metavar="DEGREES",
         help="Site longitude [°E].",
     )
 
     # ── Database ───────────────────────────────────────────────────────────
     parser.add_argument(
-        "--database", type=str, default=None,
+        "--database",
+        type=str,
+        default=None,
         metavar="PATH",
         help=(
             "Path to the SQLite database file, e.g. './dev_data/local.db'. "
@@ -129,41 +135,57 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # ── Server ────────────────────────────────────────────────────────────
     parser.add_argument(
-        "--host", type=str, default=_DEFAULT_HOST,
+        "--host",
+        type=str,
+        default=_DEFAULT_HOST,
         help="Uvicorn bind host.",
     )
     parser.add_argument(
-        "--port", type=int, default=_DEFAULT_PORT,
+        "--port",
+        type=int,
+        default=_DEFAULT_PORT,
         help="Uvicorn bind port.",
     )
     parser.add_argument(
-        "--reload", action="store_true", default=False,
+        "--reload",
+        action="store_true",
+        default=False,
         help="Enable Uvicorn auto-reload (useful during template development).",
     )
 
     # ── Forecast ──────────────────────────────────────────────────────────
     parser.add_argument(
-        "--horizon", type=int, default=_DEFAULT_HORIZON_HOURS,
+        "--horizon",
+        type=int,
+        default=_DEFAULT_HORIZON_HOURS,
         metavar="HOURS",
         help="Open-Meteo forecast horizon [h] to fetch and persist.",
     )
     parser.add_argument(
-        "--window-tilt", type=float, default=_DEFAULT_WINDOW_TILT,
+        "--window-tilt",
+        type=float,
+        default=_DEFAULT_WINDOW_TILT,
         metavar="DEGREES",
         help="South-facing window tilt [°] for solar-gain GTI (90 = vertical).",
     )
     parser.add_argument(
-        "--window-azimuth", type=float, default=_DEFAULT_WINDOW_AZIMUTH,
+        "--window-azimuth",
+        type=float,
+        default=_DEFAULT_WINDOW_AZIMUTH,
         metavar="DEGREES",
         help="Window surface azimuth [°] (0 = South, Open-Meteo convention).",
     )
     parser.add_argument(
-        "--pv-tilt", type=float, default=None,
+        "--pv-tilt",
+        type=float,
+        default=None,
         metavar="DEGREES",
         help="PV panel tilt [°]. Omit to disable PV GTI forecast.",
     )
     parser.add_argument(
-        "--pv-azimuth", type=float, default=_DEFAULT_WINDOW_AZIMUTH,
+        "--pv-azimuth",
+        type=float,
+        default=_DEFAULT_WINDOW_AZIMUTH,
         metavar="DEGREES",
         help="PV panel azimuth [°] (0 = South).",
     )
@@ -232,8 +254,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     log.info(
         "OpenMeteoClient: lat=%.4f lon=%.4f  window=%.0f°/%.0f°  pv=%s",
-        args.lat, args.lon,
-        args.window_tilt, args.window_azimuth,
+        args.lat,
+        args.lon,
+        args.window_tilt,
+        args.window_azimuth,
         f"{args.pv_tilt}°/{args.pv_azimuth}°" if args.pv_tilt is not None else "disabled",
     )
 
@@ -274,7 +298,9 @@ def main(argv: list[str] | None = None) -> None:
     # ── 6. Start Uvicorn (blocking) ────────────────────────────────────────
     log.info(
         "Starting Uvicorn on http://%s:%d  (reload=%s)",
-        args.host, args.port, args.reload,
+        args.host,
+        args.port,
+        args.reload,
     )
     try:
         uvicorn.run(
@@ -296,4 +322,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

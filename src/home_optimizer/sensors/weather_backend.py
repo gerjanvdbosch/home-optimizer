@@ -68,9 +68,7 @@ class WeatherAugmentedBackend(SensorBackend):
         mains_model: SeasonalMainsModel,
     ) -> None:
         if not isinstance(inner, SensorBackend):
-            raise TypeError(
-                f"inner must be a SensorBackend instance, got {type(inner).__name__}."
-            )
+            raise TypeError(f"inner must be a SensorBackend instance, got {type(inner).__name__}.")
         self._inner = inner
         self._mains = mains_model
 

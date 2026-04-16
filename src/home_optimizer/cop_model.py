@@ -210,9 +210,7 @@ class HeatPumpCOPModel:
         """
         p = self.params
         t_out_arr = np.asarray(t_out, dtype=float)
-        return p.T_supply_min + p.heating_curve_slope * np.maximum(
-            p.T_ref_outdoor - t_out_arr, 0.0
-        )
+        return p.T_supply_min + p.heating_curve_slope * np.maximum(p.T_ref_outdoor - t_out_arr, 0.0)
 
     def cop_from_temperatures(
         self,
@@ -369,4 +367,3 @@ class HeatPumpCOPModel:
         cop_carnot = t_cond_k / lift_k
         cop_actual = p.eta_carnot * cop_carnot
         return np.clip(cop_actual, p.cop_min, p.cop_max)
-

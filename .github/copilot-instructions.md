@@ -22,7 +22,7 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > 3. **EKF clamp:** Na elke EKF-updatestap moet $\hat{\dot{V}}_{tap}[k]$ worden geclampt op $\max(0,\ \hat{\dot{V}}_{tap}[k])$. Een negatief debiet is fysisch onmogelijk en mag de solver nooit bereiken.
 
 > ### 🧹 Kwaliteitseis: CI/CD Pipeline Compliance
-> **Alle code moet 100% foutloos door de gedefinieerde GitHub Actions pipeline (`python-lint.yml`) komen.** Dit betekent onvoorwaardelijke naleving van strakke code-standaarden. De code wordt automatisch getoetst op syntax (`pyflakes`), best-practices en linting (`ruff`), strikte formattering (`black --check`), en het slagen van alle unit tests (`pytest`). Code die de pipeline breekt, is per definitie ongeldig.
+> **Alle code moet 100% foutloos door de gedefinieerde GitHub Actions pipeline (`./.github/workflows/python-lint.yml`) komen.** Dit betekent onvoorwaardelijke naleving van strakke code-standaarden. De code wordt automatisch getoetst op syntax (`pyflakes`), best-practices en linting (`ruff`), strikte formattering (`black --check`), en het slagen van alle unit tests (`pytest`). Code die de pipeline breekt, is per definitie ongeldig.
 
 > ### 📝 Documentatie-eis: Transparantie & Traceerbaarheid
 > **Alle code (klassen, functies, variabelen) moet voorzien zijn van uitputtende, gestructureerde documentatie en type-hints.**

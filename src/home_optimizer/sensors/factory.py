@@ -176,4 +176,3 @@ def build_forecast(
         price_eur_per_kwh=prices,
         room_temperature_ref_c=t_ref,
     )
-

@@ -274,9 +274,7 @@ class MPCController:
         if forecast.cop_ufh_k is not None:
             cop = np.asarray(forecast.cop_ufh_k, dtype=float)
             if np.any(cop > p_ufh.cop_max):
-                raise ValueError(
-                    f"cop_ufh_k contains values > cop_max={p_ufh.cop_max}."
-                )
+                raise ValueError(f"cop_ufh_k contains values > cop_max={p_ufh.cop_max}.")
             return cop
         # Expand scalar COP to a constant array (already validated > 1 in MPCParameters)
         return np.full(N, p_ufh.cop_ufh)
@@ -304,9 +302,7 @@ class MPCController:
         if forecast.cop_dhw_k is not None:
             cop = np.asarray(forecast.cop_dhw_k, dtype=float)
             if np.any(cop > p_dhw.cop_max):
-                raise ValueError(
-                    f"cop_dhw_k contains values > cop_max={p_dhw.cop_max}."
-                )
+                raise ValueError(f"cop_dhw_k contains values > cop_max={p_dhw.cop_max}.")
             return cop
         return np.full(N, p_dhw.cop_dhw)
 
@@ -332,12 +328,16 @@ class MPCController:
             # Combined mode extends the state to x0 = [T_r, T_b, T_top, T_bot] [°C],
             # so both the DHW state and the DHW forecast horizon are mandatory.
             if initial_dhw_state_c is None or dhw_forecast is None:
-                raise ValueError("initial_dhw_state_c and dhw_forecast are required when DHW is active.")
+                raise ValueError(
+                    "initial_dhw_state_c and dhw_forecast are required when DHW is active."
+                )
             x_dhw0 = np.asarray(initial_dhw_state_c, dtype=float)
             if x_dhw0.shape != (2,):
                 raise ValueError("initial_dhw_state_c must be [T_top, T_bot].")
             if dhw_forecast.horizon_steps != N:
-                raise ValueError("dhw_forecast.horizon_steps must equal MPCParameters.horizon_steps.")
+                raise ValueError(
+                    "dhw_forecast.horizon_steps must equal MPCParameters.horizon_steps."
+                )
             x0 = np.concatenate([x_ufh0, x_dhw0])
         else:
             x0 = x_ufh0
@@ -433,7 +433,11 @@ class MPCController:
         # §14.1 Resolve COP arrays over the horizon [dimensionless].
         # Thermal power is the decision variable; electrical = thermal / COP.
         cop_ufh = self._resolve_cop_ufh(ufh_forecast)
-        cop_dhw = self._resolve_cop_dhw(dhw_forecast) if self._dhw_enabled and dhw_forecast is not None else None
+        cop_dhw = (
+            self._resolve_cop_dhw(dhw_forecast)
+            if self._dhw_enabled and dhw_forecast is not None
+            else None
+        )
 
         A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
         n_states = A_list[0].shape[0]
@@ -459,9 +463,14 @@ class MPCController:
         leg_req = dhw_forecast.legionella_required if dhw_forecast is not None else None
 
         for k in range(N):
-            u_k = cp.hstack([u_ufh[k:k + 1], u_dhw[k:k + 1]]) if self._dhw_enabled else u_ufh[k:k + 1]  # type: ignore[index]
+            if self._dhw_enabled:
+                u_k = cp.hstack([u_ufh[k : k + 1], u_dhw[k : k + 1]])  # type: ignore[index]
+            else:
+                u_k = u_ufh[k : k + 1]
             # Discrete thermal dynamics: x[k+1] = A[k] x[k] + B u[k] + E[k] d[k].
-            constraints.append(x[:, k + 1] == A_list[k] @ x[:, k] + B_mat @ u_k + E_list[k] @ D_tot[k])
+            constraints.append(
+                x[:, k + 1] == A_list[k] @ x[:, k] + B_mat @ u_k + E_list[k] @ D_tot[k]
+            )
 
             # §14.1: Electrical power = thermal / COP.  COP values are known floats,
             # so these are affine CVXPY expressions (linear in the decision variables).
@@ -499,10 +508,12 @@ class MPCController:
             # UFH comfort (soft constraints via slack variables)
             # Soft constraints keep the QP feasible under thermal inertia; violating
             # comfort is allowed but penalised quadratically in the objective.
-            constraints.extend([
-                x[0, k + 1] >= p_ufh.T_min - s_lo_ufh[k],
-                x[0, k + 1] <= p_ufh.T_max + s_hi_ufh[k],
-            ])
+            constraints.extend(
+                [
+                    x[0, k + 1] >= p_ufh.T_min - s_lo_ufh[k],
+                    x[0, k + 1] <= p_ufh.T_max + s_hi_ufh[k],
+                ]
+            )
 
             if self._dhw_enabled:
                 assert s_dhw is not None and s_leg is not None and p_dhw is not None
@@ -548,9 +559,11 @@ class MPCController:
         return self._package_solution(
             x_val=np.asarray(x.value, dtype=float).T,
             u_ufh_val=np.asarray(u_ufh.value, dtype=float).reshape(N),
-            u_dhw_val=(np.asarray(u_dhw.value, dtype=float).reshape(N)
-                       if (self._dhw_enabled and u_dhw is not None and u_dhw.value is not None)
-                       else np.zeros(N)),
+            u_dhw_val=(
+                np.asarray(u_dhw.value, dtype=float).reshape(N)
+                if (self._dhw_enabled and u_dhw is not None and u_dhw.value is not None)
+                else np.zeros(N)
+            ),
             objective=float(problem.value),
             status=str(problem.status),
             ufh_forecast=ufh_forecast,
@@ -597,10 +610,17 @@ class MPCController:
             # Candidate UFH powers are clipped by actuator bounds and ramp-rate limits.
             lo_ufh = max(0.0, u_prev_ufh - p_ufh.delta_P_max)
             hi_ufh = min(p_ufh.P_max, u_prev_ufh + p_ufh.delta_P_max)
-            n_cand = min(g.max_candidates, max(
-                g.min_candidates,
-                int((hi_ufh - lo_ufh) / max(p_ufh.delta_P_max / g.grid_divisor, g.min_grid_step_kw)) + 1,
-            ))
+            n_cand = min(
+                g.max_candidates,
+                max(
+                    g.min_candidates,
+                    int(
+                        (hi_ufh - lo_ufh)
+                        / max(p_ufh.delta_P_max / g.grid_divisor, g.min_grid_step_kw)
+                    )
+                    + 1,
+                ),
+            )
             cands_ufh = np.linspace(lo_ufh, hi_ufh, n_cand)
 
             if self._dhw_enabled and p_dhw is not None:
@@ -637,23 +657,26 @@ class MPCController:
                     s_hi_ufh = max(xn[0] - p_ufh.T_max, 0.0)
                     score = (
                         p_ufh.Q_c * (x[0] - refs[k]) ** 2
-                        + prices[k] * p_import_k * dt   # electrical energy cost [€]
-                        + p_ufh.R_c * c_ufh ** 2
-                        + rho_ufh * (s_lo_ufh ** 2 + s_hi_ufh ** 2)
+                        + prices[k] * p_import_k * dt  # electrical energy cost [€]
+                        + p_ufh.R_c * c_ufh**2
+                        + rho_ufh * (s_lo_ufh**2 + s_hi_ufh**2)
                         + g.lookahead_weight * p_ufh.Q_N * max(refs[k + 1] - xn[0], 0.0) ** 2
                     )
                     if self._dhw_enabled and p_dhw is not None:
                         s_dhw_k = max(p_dhw.T_dhw_min - xn[2], 0.0)
-                        s_leg_k = max(p_dhw.T_legionella - xn[2], 0.0) if (leg_req is not None and leg_req[k]) else 0.0
+                        leg_active = leg_req is not None and leg_req[k]
+                        s_leg_k = max(p_dhw.T_legionella - xn[2], 0.0) if leg_active else 0.0
                         score += (
-                            p_dhw.comfort_rho_factor * s_dhw_k ** 2
-                            + p_dhw.legionella_rho_factor * s_leg_k ** 2
+                            p_dhw.comfort_rho_factor * s_dhw_k**2
+                            + p_dhw.legionella_rho_factor * s_leg_k**2
                         )
                     if k == N - 1:
                         score += p_ufh.Q_N * (xn[0] - refs[N]) ** 2
 
                     if score < best_score:
-                        best_score, best_u_ufh, best_u_dhw, best_xn = score, float(c_ufh), float(c_dhw), xn
+                        best_score = score
+                        best_u_ufh, best_u_dhw = float(c_ufh), float(c_dhw)
+                        best_xn = xn
 
             # Because at least one candidate always respects the local actuator bounds,
             # the greedy loop should always select a next state.
@@ -711,10 +734,12 @@ class MPCController:
         # x_val[0] is the fixed estimated current state, not something the current
         # optimisation step can still influence.
         t_r_pred = x_val[1:, 0]
-        ufh_viol = float(np.max(
-            np.maximum(p_ufh.T_min - t_r_pred, 0.0).tolist()
-            + np.maximum(t_r_pred - p_ufh.T_max, 0.0).tolist()
-        ))
+        ufh_viol = float(
+            np.max(
+                np.maximum(p_ufh.T_min - t_r_pred, 0.0).tolist()
+                + np.maximum(t_r_pred - p_ufh.T_max, 0.0).tolist()
+            )
+        )
 
         dhw_viol, leg_viol = 0.0, 0.0
         if self._dhw_enabled and p_dhw is not None and dhw_forecast is not None:
@@ -722,13 +747,15 @@ class MPCController:
             # because it represents the actually available tap temperature.
             t_top_pred = x_val[1:, 2]
             dhw_viol = float(np.max(np.maximum(p_dhw.T_dhw_min - t_top_pred, 0.0)))
-            leg_viol = float(np.max(
-                np.where(
-                    dhw_forecast.legionella_required,
-                    np.maximum(p_dhw.T_legionella - t_top_pred, 0.0),
-                    0.0,
+            leg_viol = float(
+                np.max(
+                    np.where(
+                        dhw_forecast.legionella_required,
+                        np.maximum(p_dhw.T_legionella - t_top_pred, 0.0),
+                        0.0,
+                    )
                 )
-            ))
+            )
 
         return MPCSolution(
             ufh_control_sequence_kw=u_ufh_val,
@@ -741,5 +768,3 @@ class MPCController:
             max_legionella_violation_c=leg_viol,
             used_fallback=used_fallback,
         )
-
-

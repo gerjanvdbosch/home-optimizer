@@ -182,4 +182,3 @@ class ForecastPersister:
     def job_id(self) -> str:
         """APScheduler job identifier for this persister."""
         return self._job_id
-

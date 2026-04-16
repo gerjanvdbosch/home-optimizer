@@ -159,15 +159,15 @@ class HomeAssistantBackend(SensorBackend):
         boiler_ambient_temperature: HAEntityConfig,
         refrigerant_condensation_temperature: HAEntityConfig,
         refrigerant_liquid_line_temperature: HAEntityConfig,
-    discharge_temperature: HAEntityConfig,
-    base_url: str | None = None,
-    token: str | None = None,
-    timeout: float = 10.0,
-    pv_total_energy: HAEntityConfig,
-    hp_electric_total_energy: HAEntityConfig,
-    p1_import_total_energy: HAEntityConfig,
-    p1_export_total_energy: HAEntityConfig,
-) -> None:
+        discharge_temperature: HAEntityConfig,
+        base_url: str | None = None,
+        token: str | None = None,
+        timeout: float = 10.0,
+        pv_total_energy: HAEntityConfig,
+        hp_electric_total_energy: HAEntityConfig,
+        p1_import_total_energy: HAEntityConfig,
+        p1_export_total_energy: HAEntityConfig,
+    ) -> None:
         self._room_temperature = room_temperature
         self._outdoor_temperature = outdoor_temperature
         self._hp_supply_temperature = hp_supply_temperature
@@ -204,10 +204,7 @@ class HomeAssistantBackend(SensorBackend):
         self._base_url = resolved_url.rstrip("/")
 
         resolved_token = (
-            token
-            or os.environ.get("HA_TOKEN")
-            or os.environ.get("SUPERVISOR_TOKEN")
-            or ""
+            token or os.environ.get("HA_TOKEN") or os.environ.get("SUPERVISOR_TOKEN") or ""
         )
         self._client = httpx.Client(
             headers={
@@ -357,8 +354,12 @@ class HomeAssistantBackend(SensorBackend):
             defrost_active=self._fetch_bool_state(self._defrost_active_entity_id),
             booster_heater_active=self._fetch_bool_state(self._booster_heater_active_entity_id),
             boiler_ambient_temp_c=self._fetch_state(self._boiler_ambient_temperature),
-            refrigerant_condensation_temp_c=self._fetch_state(self._refrigerant_condensation_temperature),
-            refrigerant_liquid_line_temp_c=self._fetch_state(self._refrigerant_liquid_line_temperature),
+            refrigerant_condensation_temp_c=self._fetch_state(
+                self._refrigerant_condensation_temperature
+            ),
+            refrigerant_liquid_line_temp_c=self._fetch_state(
+                self._refrigerant_liquid_line_temperature
+            ),
             discharge_temp_c=self._fetch_state(self._discharge_temperature),
             # Weather field: placeholder 0.0 — must be overridden by WeatherAugmentedBackend.
             # T_mains = 0.0 is a sentinel indicating the wrapper is not in use.
@@ -384,4 +385,3 @@ class HomeAssistantBackend(SensorBackend):
 
     def __exit__(self, *_: object) -> None:
         self.close()
-

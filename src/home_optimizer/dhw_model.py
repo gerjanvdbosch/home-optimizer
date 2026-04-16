@@ -196,4 +196,3 @@ class DHWModel:
     def observability_rank(self, v_tap_m3_per_h: float = 0.0) -> int:
         """rank(O) must equal 2 for full observability (requires a_strat ≠ 0)."""
         return int(np.linalg.matrix_rank(self.observability_matrix(v_tap_m3_per_h)))
-

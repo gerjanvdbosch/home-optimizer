@@ -16,11 +16,10 @@ import numpy as np
 import pytest
 
 from home_optimizer.cop_model import (
+    T_CELSIUS_TO_KELVIN,
     HeatPumpCOPModel,
     HeatPumpCOPParameters,
-    T_CELSIUS_TO_KELVIN,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixture parameters
@@ -66,9 +65,9 @@ def test_heating_curve_above_balance_point_clamped() -> None:
     """Above T_ref_outdoor the supply temperature must stay at T_supply_min."""
     t_warm = np.array([20.0, 25.0, 30.0])
     t_supply = MODEL.heating_curve(t_warm)
-    assert np.all(t_supply == COP_PARAMS.T_supply_min), (
-        "Heating curve must be flat at T_supply_min when T_out > T_ref_outdoor."
-    )
+    assert np.all(
+        t_supply == COP_PARAMS.T_supply_min
+    ), "Heating curve must be flat at T_supply_min when T_out > T_ref_outdoor."
 
 
 def test_heating_curve_is_monotonically_decreasing_with_rising_t_out() -> None:
@@ -100,23 +99,23 @@ def test_cop_decreases_with_colder_outdoor_temperature() -> None:
     cop_warm = MODEL.cop_from_temperatures(t_supply_fixed, np.array([10.0]))
     cop_cold = MODEL.cop_from_temperatures(t_supply_fixed, np.array([-5.0]))
 
-    assert cop_cold.item() < cop_warm.item(), (
-        "COP must be lower at -5°C than at 10°C (colder evaporator)."
-    )
+    assert (
+        cop_cold.item() < cop_warm.item()
+    ), "COP must be lower at -5°C than at 10°C (colder evaporator)."
 
 
 def test_cop_decreases_with_higher_supply_temperature() -> None:
     """Higher supply temperature → higher temperature lift → lower COP."""
     t_out_fixed = np.array([5.0])
-    t_supply_low = 30.0    # low-temperature UFH
-    t_supply_high = 55.0   # high-temperature DHW
+    t_supply_low = 30.0  # low-temperature UFH
+    t_supply_high = 55.0  # high-temperature DHW
 
     cop_low = MODEL.cop_from_temperatures(t_supply_low, t_out_fixed)
     cop_high = MODEL.cop_from_temperatures(t_supply_high, t_out_fixed)
 
-    assert cop_high.item() < cop_low.item(), (
-        "Higher supply temperature must yield lower COP (greater temperature lift)."
-    )
+    assert (
+        cop_high.item() < cop_low.item()
+    ), "Higher supply temperature must yield lower COP (greater temperature lift)."
 
 
 def test_cop_ufh_double_penalty_vs_dhw_in_cold_weather() -> None:
@@ -148,9 +147,9 @@ def test_cop_clipped_to_cop_min() -> None:
     """Extremely cold outdoor temperatures must be clipped to cop_min, not go below."""
     t_out_extreme_cold = np.array([-30.0, -40.0])
     cop = MODEL.cop_ufh(t_out_extreme_cold)
-    assert np.all(cop >= COP_PARAMS.cop_min), (
-        f"COP must never fall below cop_min={COP_PARAMS.cop_min}."
-    )
+    assert np.all(
+        cop >= COP_PARAMS.cop_min
+    ), f"COP must never fall below cop_min={COP_PARAMS.cop_min}."
 
 
 def test_cop_clipped_to_cop_max() -> None:
@@ -158,9 +157,7 @@ def test_cop_clipped_to_cop_max() -> None:
     t_out_warm = np.array([30.0, 40.0])
     t_supply_low = COP_PARAMS.T_supply_min + 1.0  # just above minimum
     cop = MODEL.cop_from_temperatures(t_supply_low, t_out_warm)
-    assert np.all(cop <= COP_PARAMS.cop_max), (
-        f"COP must never exceed cop_max={COP_PARAMS.cop_max}."
-    )
+    assert np.all(cop <= COP_PARAMS.cop_max), f"COP must never exceed cop_max={COP_PARAMS.cop_max}."
 
 
 def test_cop_output_shape_matches_input() -> None:
@@ -192,9 +189,14 @@ def test_cop_parameters_rejects_eta_carnot_zero() -> None:
     """eta_carnot = 0 is physically meaningless (zero efficiency)."""
     with pytest.raises(ValueError, match="eta_carnot"):
         HeatPumpCOPParameters(
-            eta_carnot=0.0, delta_T_cond=5.0, delta_T_evap=5.0,
-            T_supply_min=25.0, T_ref_outdoor=18.0, heating_curve_slope=1.0,
-            cop_min=1.5, cop_max=7.0,
+            eta_carnot=0.0,
+            delta_T_cond=5.0,
+            delta_T_evap=5.0,
+            T_supply_min=25.0,
+            T_ref_outdoor=18.0,
+            heating_curve_slope=1.0,
+            cop_min=1.5,
+            cop_max=7.0,
         )
 
 
@@ -202,18 +204,28 @@ def test_cop_parameters_rejects_eta_carnot_above_one() -> None:
     """eta_carnot > 1 violates the second law of thermodynamics."""
     with pytest.raises(ValueError, match="eta_carnot"):
         HeatPumpCOPParameters(
-            eta_carnot=1.1, delta_T_cond=5.0, delta_T_evap=5.0,
-            T_supply_min=25.0, T_ref_outdoor=18.0, heating_curve_slope=1.0,
-            cop_min=1.5, cop_max=7.0,
+            eta_carnot=1.1,
+            delta_T_cond=5.0,
+            delta_T_evap=5.0,
+            T_supply_min=25.0,
+            T_ref_outdoor=18.0,
+            heating_curve_slope=1.0,
+            cop_min=1.5,
+            cop_max=7.0,
         )
 
 
 def test_cop_parameters_rejects_negative_delta_t_cond() -> None:
     with pytest.raises(ValueError, match="delta_T_cond"):
         HeatPumpCOPParameters(
-            eta_carnot=0.45, delta_T_cond=-1.0, delta_T_evap=5.0,
-            T_supply_min=25.0, T_ref_outdoor=18.0, heating_curve_slope=1.0,
-            cop_min=1.5, cop_max=7.0,
+            eta_carnot=0.45,
+            delta_T_cond=-1.0,
+            delta_T_evap=5.0,
+            T_supply_min=25.0,
+            T_ref_outdoor=18.0,
+            heating_curve_slope=1.0,
+            cop_min=1.5,
+            cop_max=7.0,
         )
 
 
@@ -221,18 +233,28 @@ def test_cop_parameters_rejects_cop_min_below_one() -> None:
     """cop_min ≤ 1 would represent a resistive heater, not a heat pump."""
     with pytest.raises(ValueError, match="cop_min"):
         HeatPumpCOPParameters(
-            eta_carnot=0.45, delta_T_cond=5.0, delta_T_evap=5.0,
-            T_supply_min=25.0, T_ref_outdoor=18.0, heating_curve_slope=1.0,
-            cop_min=1.0, cop_max=7.0,
+            eta_carnot=0.45,
+            delta_T_cond=5.0,
+            delta_T_evap=5.0,
+            T_supply_min=25.0,
+            T_ref_outdoor=18.0,
+            heating_curve_slope=1.0,
+            cop_min=1.0,
+            cop_max=7.0,
         )
 
 
 def test_cop_parameters_rejects_cop_max_not_greater_than_cop_min() -> None:
     with pytest.raises(ValueError, match="cop_max"):
         HeatPumpCOPParameters(
-            eta_carnot=0.45, delta_T_cond=5.0, delta_T_evap=5.0,
-            T_supply_min=25.0, T_ref_outdoor=18.0, heating_curve_slope=1.0,
-            cop_min=5.0, cop_max=4.0,
+            eta_carnot=0.45,
+            delta_T_cond=5.0,
+            delta_T_evap=5.0,
+            T_supply_min=25.0,
+            T_ref_outdoor=18.0,
+            heating_curve_slope=1.0,
+            cop_min=5.0,
+            cop_max=4.0,
         )
 
 
@@ -289,13 +311,25 @@ def test_full_mpc_solve_with_physical_cop_model() -> None:
     t_out = np.full(n, 10.0)
 
     thermal_params = ThermalParameters(
-        dt_hours=1.0, C_r=3.0, C_b=18.0, R_br=2.5, R_ro=4.0,
-        alpha=0.35, eta=0.62, A_glass=12.0,
+        dt_hours=1.0,
+        C_r=3.0,
+        C_b=18.0,
+        R_br=2.5,
+        R_ro=4.0,
+        alpha=0.35,
+        eta=0.62,
+        A_glass=12.0,
     )
     cop_arr = MODEL.cop_ufh(t_out)
     mpc_params = MPCParameters(
-        horizon_steps=n, Q_c=10.0, R_c=0.05, Q_N=15.0,
-        P_max=4.0, delta_P_max=1.0, T_min=19.0, T_max=22.5,
+        horizon_steps=n,
+        Q_c=10.0,
+        R_c=0.05,
+        Q_N=15.0,
+        P_max=4.0,
+        delta_P_max=1.0,
+        T_min=19.0,
+        T_max=22.5,
         cop_ufh=float(np.mean(cop_arr)),
         cop_max=COP_PARAMS.cop_max,
     )
@@ -318,4 +352,3 @@ def test_full_mpc_solve_with_physical_cop_model() -> None:
     assert np.all(sol.ufh_control_sequence_kw <= mpc_params.P_max + 1e-6)
     # The physical COP must have been used: cop_ufh_k is non-trivial (not all equal)
     assert forecast.cop_ufh_k is not None and forecast.cop_ufh_k.shape == (n,)
-

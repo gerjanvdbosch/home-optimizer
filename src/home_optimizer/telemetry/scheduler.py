@@ -280,4 +280,3 @@ class BufferedTelemetryCollector:
     def job_ids(self) -> tuple[str, str]:
         """Return ``(sample_job_id, flush_job_id)`` for diagnostics."""
         return self._sample_job_id, self._flush_job_id
-

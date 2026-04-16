@@ -89,4 +89,3 @@ __all__ = [
     "build_forecast",
     "effective_price",
 ]
-

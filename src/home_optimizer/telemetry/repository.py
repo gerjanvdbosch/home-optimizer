@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, select
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from .models import Base, ForecastSnapshot, MPCLog, TelemetryAggregate
 
@@ -186,4 +186,3 @@ class TelemetryRepository:
     def count(self) -> int:
         """Return the number of persisted telemetry buckets."""
         return len(self.list_aggregates())
-

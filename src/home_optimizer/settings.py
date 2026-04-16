@@ -54,4 +54,3 @@ def get_database_url() -> str:
         ``"sqlite:////data/optimizer.db"`` or ``"sqlite:///database.sqlite3"``.
     """
     return os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT)
-
