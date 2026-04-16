@@ -81,8 +81,10 @@ class HomeAssistantBackend(SensorBackend):
         Ambient temperature sensor inside the boiler cupboard [°C] (T_amb, §8.3).
     refrigerant_condensation_temperature:
         Measured refrigerant condensation temperature T_cond [°C] (§14.1).
-    refrigerant_temperature:
-        Measured refrigerant evaporator / suction temperature T_evap [°C] (§14.1).
+    refrigerant_liquid_line_temperature:
+        Measured refrigerant liquid-line temperature [°C] (Buitenunit Vloeistofleiding).
+    discharge_temperature:
+        Measured compressor discharge temperature [°C] (Ontladingstemperatuur).
     base_url:
         HA base URL.  Falls back to ``HA_BASE_URL`` env var, then the
         supervisor addon endpoint ``http://supervisor/core``.
@@ -127,7 +129,8 @@ class HomeAssistantBackend(SensorBackend):
             booster_heater_active_entity_id="binary_sensor.dhw_booster_heater",
             boiler_ambient_temperature=HAEntityConfig("sensor.boiler_ambient_temp"),
             refrigerant_condensation_temperature=HAEntityConfig("sensor.refrigerant_condensation_temp"),
-            refrigerant_temperature=HAEntityConfig("sensor.refrigerant_temp"),
+            refrigerant_liquid_line_temperature=HAEntityConfig("sensor.refrigerant_liquid_line_temp"),
+            discharge_temperature=HAEntityConfig("sensor.discharge_temp"),
             base_url="http://homeassistant.local:8123",
             token="YOUR_LONG_LIVED_TOKEN",
         )
@@ -155,7 +158,8 @@ class HomeAssistantBackend(SensorBackend):
         booster_heater_active_entity_id: str,
         boiler_ambient_temperature: HAEntityConfig,
         refrigerant_condensation_temperature: HAEntityConfig,
-        refrigerant_temperature: HAEntityConfig,
+        refrigerant_liquid_line_temperature: HAEntityConfig,
+        discharge_temperature: HAEntityConfig,
         base_url: str | None = None,
         token: str | None = None,
         timeout: float = 10.0,
@@ -178,7 +182,8 @@ class HomeAssistantBackend(SensorBackend):
         self._booster_heater_active_entity_id = booster_heater_active_entity_id
         self._boiler_ambient_temperature = boiler_ambient_temperature
         self._refrigerant_condensation_temperature = refrigerant_condensation_temperature
-        self._refrigerant_temperature = refrigerant_temperature
+        self._refrigerant_liquid_line_temperature = refrigerant_liquid_line_temperature
+        self._discharge_temperature = discharge_temperature
         if not self._hp_mode_entity_id:
             raise ValueError("hp_mode_entity_id must not be empty.")
         if not self._defrost_active_entity_id:
@@ -344,7 +349,8 @@ class HomeAssistantBackend(SensorBackend):
             booster_heater_active=self._fetch_bool_state(self._booster_heater_active_entity_id),
             boiler_ambient_temp_c=self._fetch_state(self._boiler_ambient_temperature),
             refrigerant_condensation_temp_c=self._fetch_state(self._refrigerant_condensation_temperature),
-            refrigerant_temp_c=self._fetch_state(self._refrigerant_temperature),
+            refrigerant_liquid_line_temp_c=self._fetch_state(self._refrigerant_liquid_line_temperature),
+            discharge_temp_c=self._fetch_state(self._discharge_temperature),
             # Weather field: placeholder 0.0 — must be overridden by WeatherAugmentedBackend.
             # T_mains = 0.0 is a sentinel indicating the wrapper is not in use.
             t_mains_estimated_c=0.0,

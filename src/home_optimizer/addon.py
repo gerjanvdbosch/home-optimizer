@@ -103,7 +103,10 @@ class AddonOptions(BaseModel):
     sensor_dhw_bottom_temperature: str = Field(..., min_length=1)
     sensor_boiler_ambient_temperature: str = Field(..., min_length=1)
     sensor_refrigerant_condensation_temperature: str = Field(..., min_length=1)
-    sensor_refrigerant_temperature: str = Field(..., min_length=1)
+    sensor_refrigerant_liquid_line_temperature: str = Field(..., min_length=1,
+                                                            description="Buitenunit Vloeistofleiding [°C]")
+    sensor_discharge_temperature: str = Field(..., min_length=1,
+                                              description="Ontladingstemperatuur compressor [°C]")
 
     # --- Flow sensor (L/min) ---
     sensor_hp_flow_lpm: str = Field(..., min_length=1)
@@ -266,7 +269,10 @@ def _build_backend(opts: AddonOptions) -> HomeAssistantBackend:
         refrigerant_condensation_temperature=HAEntityConfig(
             opts.sensor_refrigerant_condensation_temperature
         ),
-        refrigerant_temperature=HAEntityConfig(opts.sensor_refrigerant_temperature),
+        refrigerant_liquid_line_temperature=HAEntityConfig(
+            opts.sensor_refrigerant_liquid_line_temperature
+        ),
+        discharge_temperature=HAEntityConfig(opts.sensor_discharge_temperature),
         # base_url and token are resolved automatically from the environment.
     )
 

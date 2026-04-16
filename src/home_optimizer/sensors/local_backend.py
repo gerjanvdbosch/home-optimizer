@@ -34,7 +34,8 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     "shutter_living_room_pct",
     "boiler_ambient_temp_c",
     "refrigerant_condensation_temp_c",
-    "refrigerant_temp_c",
+    "refrigerant_liquid_line_temp_c",
+    "discharge_temp_c",
     # Seasonal DHW parameter — injected by WeatherAugmentedBackend in production (§9.1).
     # LocalBackend accepts it directly so tests can supply an explicit value.
     "t_mains_estimated_c",
@@ -90,7 +91,8 @@ class LocalBackend(SensorBackend):
     ENV_BOOSTER_HEATER_ACTIVE = "HOME_OPT_BOOSTER_HEATER_ACTIVE"
     ENV_BOILER_AMBIENT_TEMP_C = "HOME_OPT_BOILER_AMBIENT_TEMP_C"
     ENV_REFRIGERANT_CONDENSATION_TEMP_C = "HOME_OPT_REFRIGERANT_CONDENSATION_TEMP_C"
-    ENV_REFRIGERANT_TEMP_C = "HOME_OPT_REFRIGERANT_TEMP_C"
+    ENV_REFRIGERANT_LIQUID_LINE_TEMP_C = "HOME_OPT_REFRIGERANT_LIQUID_LINE_TEMP_C"
+    ENV_DISCHARGE_TEMP_C = "HOME_OPT_DISCHARGE_TEMP_C"
     ENV_T_MAINS_ESTIMATED_C = "HOME_OPT_T_MAINS_ESTIMATED_C"
 
     def __init__(
@@ -114,7 +116,8 @@ class LocalBackend(SensorBackend):
         booster_heater_active: BoolValueSource,
         boiler_ambient_temp_c: NumericValueSource,
         refrigerant_condensation_temp_c: NumericValueSource,
-        refrigerant_temp_c: NumericValueSource,
+        refrigerant_liquid_line_temp_c: NumericValueSource,
+        discharge_temp_c: NumericValueSource,
         t_mains_estimated_c: NumericValueSource,
     ) -> None:
         self._room_temperature_c = room_temperature_c
@@ -135,7 +138,8 @@ class LocalBackend(SensorBackend):
         self._booster_heater_active = booster_heater_active
         self._boiler_ambient_temp_c = boiler_ambient_temp_c
         self._refrigerant_condensation_temp_c = refrigerant_condensation_temp_c
-        self._refrigerant_temp_c = refrigerant_temp_c
+        self._refrigerant_liquid_line_temp_c = refrigerant_liquid_line_temp_c
+        self._discharge_temp_c = discharge_temp_c
         self._t_mains_estimated_c = t_mains_estimated_c
 
     # ------------------------------------------------------------------
@@ -210,7 +214,8 @@ class LocalBackend(SensorBackend):
             booster_heater_active=lambda: _read_bool("booster_heater_active"),
             boiler_ambient_temp_c=lambda: _read_numeric("boiler_ambient_temp_c"),
             refrigerant_condensation_temp_c=lambda: _read_numeric("refrigerant_condensation_temp_c"),
-            refrigerant_temp_c=lambda: _read_numeric("refrigerant_temp_c"),
+            refrigerant_liquid_line_temp_c=lambda: _read_numeric("refrigerant_liquid_line_temp_c"),
+            discharge_temp_c=lambda: _read_numeric("discharge_temp_c"),
             t_mains_estimated_c=lambda: _read_numeric("t_mains_estimated_c"),
         )
 
@@ -253,7 +258,8 @@ class LocalBackend(SensorBackend):
             booster_heater_active=lambda: _env_bool(cls.ENV_BOOSTER_HEATER_ACTIVE),
             boiler_ambient_temp_c=lambda: _env_numeric(cls.ENV_BOILER_AMBIENT_TEMP_C),
             refrigerant_condensation_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_CONDENSATION_TEMP_C),
-            refrigerant_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_TEMP_C),
+            refrigerant_liquid_line_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_LIQUID_LINE_TEMP_C),
+            discharge_temp_c=lambda: _env_numeric(cls.ENV_DISCHARGE_TEMP_C),
             t_mains_estimated_c=lambda: _env_numeric(cls.ENV_T_MAINS_ESTIMATED_C),
         )
 
@@ -287,7 +293,8 @@ class LocalBackend(SensorBackend):
             booster_heater_active=_resolve_bool(self._booster_heater_active),
             boiler_ambient_temp_c=_resolve_numeric(self._boiler_ambient_temp_c),
             refrigerant_condensation_temp_c=_resolve_numeric(self._refrigerant_condensation_temp_c),
-            refrigerant_temp_c=_resolve_numeric(self._refrigerant_temp_c),
+            refrigerant_liquid_line_temp_c=_resolve_numeric(self._refrigerant_liquid_line_temp_c),
+            discharge_temp_c=_resolve_numeric(self._discharge_temp_c),
             t_mains_estimated_c=_resolve_numeric(self._t_mains_estimated_c),
             timestamp=self.now_utc(),
         )

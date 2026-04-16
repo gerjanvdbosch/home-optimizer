@@ -100,10 +100,15 @@ class LiveReadings:
             COP = η_Carnot × T_cond_K / (T_cond_K − T_evap_K)
         Replaces the approximation T_cond ≈ T_supply + Δ_cond when this
         sensor is available.
-    refrigerant_temp_c:
-        Measured refrigerant evaporator (suction) temperature T_evap [°C].
-        Used directly in the Carnot COP formula (§14.1).  Replaces the
-        approximation T_evap ≈ T_out − Δ_evap when this sensor is available.
+    refrigerant_liquid_line_temp_c:
+        Measured refrigerant liquid-line temperature [°C] (Buitenunit Vloeistofleiding).
+        Represents the sub-cooled liquid leaving the condenser towards the expansion
+        valve.  Useful for sub-cooling degree calculation and COP diagnostics.
+    discharge_temp_c:
+        Measured compressor discharge temperature [°C] (Ontladingstemperatuur).
+        High-pressure vapour temperature leaving the compressor.  Elevated values
+        indicate reduced efficiency or refrigerant charge issues; logged for
+        long-term heat-pump health monitoring.
     t_mains_estimated_c:
         Seasonal estimate of cold mains water temperature [°C].  Derived from
         a cosine seasonal model (:class:`~home_optimizer.sensors.SeasonalMainsModel`).
@@ -133,7 +138,8 @@ class LiveReadings:
     booster_heater_active: bool
     boiler_ambient_temp_c: float
     refrigerant_condensation_temp_c: float
-    refrigerant_temp_c: float
+    refrigerant_liquid_line_temp_c: float
+    discharge_temp_c: float
     # --- Seasonal DHW parameter (injected by WeatherAugmentedBackend, §9.1) ---
     t_mains_estimated_c: float
     timestamp: datetime
@@ -155,7 +161,8 @@ class LiveReadings:
             "shutter_living_room_pct",
             "boiler_ambient_temp_c",
             "refrigerant_condensation_temp_c",
-            "refrigerant_temp_c",
+            "refrigerant_liquid_line_temp_c",
+            "discharge_temp_c",
             "t_mains_estimated_c",
         )
         for field_name in numeric_fields:

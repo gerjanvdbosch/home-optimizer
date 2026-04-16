@@ -30,7 +30,8 @@ Quick-start (Home Assistant addon / standalone)
         booster_heater_active_entity_id="binary_sensor.dhw_booster_heater",
         boiler_ambient_temperature=HAEntityConfig("sensor.boiler_ambient_temp"),
         refrigerant_condensation_temperature=HAEntityConfig("sensor.refrigerant_cond_temp"),
-        refrigerant_temperature=HAEntityConfig("sensor.refrigerant_evap_temp"),
+        refrigerant_liquid_line_temperature=HAEntityConfig("sensor.refrigerant_liquid_line_temp"),
+        discharge_temperature=HAEntityConfig("sensor.discharge_temp"),
         base_url="http://homeassistant.local:8123",   # omit in addon mode
         token="YOUR_LONG_LIVED_TOKEN",                # omit in addon mode
     )

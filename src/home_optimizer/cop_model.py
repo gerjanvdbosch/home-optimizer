@@ -316,7 +316,7 @@ class HeatPumpCOPModel:
         """Compute COP directly from **measured** refrigerant temperatures.
 
         When the heat pump exposes ``refrigerant_condensation_temp_c`` and
-        ``refrigerant_temp_c`` (evaporator/suction side) as live sensor
+        ``refrigerant_liquid_line_temp_c`` (liquid-line / sub-cooled side) as live sensor
         readings (see :class:`~home_optimizer.sensors.base.LiveReadings`),
         this method bypasses the approximations
 
@@ -350,7 +350,7 @@ class HeatPumpCOPModel:
         >>> readings = backend.read_all()
         >>> cop_now = model.cop_from_measured_refrigerant(
         ...     t_cond_c=readings.refrigerant_condensation_temp_c,
-        ...     t_evap_c=readings.refrigerant_temp_c,
+        ...     t_evap_c=readings.discharge_temp_c,
         ... )
         """
         p = self.params

@@ -62,7 +62,8 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         booster_heater_active=False,
         boiler_ambient_temp_c=18.0,
         refrigerant_condensation_temp_c=38.0,
-        refrigerant_temp_c=2.0,
+        refrigerant_liquid_line_temp_c=28.0,
+        discharge_temp_c=65.0,
         t_mains_estimated_c=10.5,
         timestamp=timestamp,
     )
@@ -92,7 +93,8 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "booster_heater_active": 0,
                 "boiler_ambient_temp_c": 18.5,
                 "refrigerant_condensation_temp_c": 37.5,
-                "refrigerant_temp_c": 1.5,
+                "refrigerant_liquid_line_temp_c": 27.5,
+                "discharge_temp_c": 63.0,
                 "t_mains_estimated_c": 10.5,
             }
         ),
@@ -113,7 +115,8 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
     assert reading.booster_heater_active is False
     assert reading.boiler_ambient_temp_c == pytest.approx(18.5)
     assert reading.refrigerant_condensation_temp_c == pytest.approx(37.5)
-    assert reading.refrigerant_temp_c == pytest.approx(1.5)
+    assert reading.refrigerant_liquid_line_temp_c == pytest.approx(27.5)
+    assert reading.discharge_temp_c == pytest.approx(63.0)
 
 
 def test_aggregate_readings_computes_mean_and_last() -> None:
@@ -282,7 +285,8 @@ def test_aggregate_includes_new_sensor_fields() -> None:
             booster_heater_active=False,
             boiler_ambient_temp_c=19.0,
             refrigerant_condensation_temp_c=40.0,
-            refrigerant_temp_c=3.0,
+            refrigerant_liquid_line_temp_c=30.0,
+            discharge_temp_c=68.0,
             t_mains_estimated_c=11.0,
             timestamp=t0 + timedelta(seconds=30),
         ),
@@ -310,9 +314,13 @@ def test_aggregate_includes_new_sensor_fields() -> None:
     assert agg["refrigerant_condensation_temp_mean_c"] == pytest.approx(39.0)
     assert agg["refrigerant_condensation_temp_last_c"] == pytest.approx(40.0)
 
-    # Refrigerant evap: mean of [2, 3] = 2.5, last = 3
-    assert agg["refrigerant_temp_mean_c"] == pytest.approx(2.5)
-    assert agg["refrigerant_temp_last_c"] == pytest.approx(3.0)
+    # Refrigerant liquid line: mean of [28, 30] = 29, last = 30
+    assert agg["refrigerant_liquid_line_temp_mean_c"] == pytest.approx(29.0)
+    assert agg["refrigerant_liquid_line_temp_last_c"] == pytest.approx(30.0)
+
+    # Discharge temperature: mean of [65, 68] = 66.5, last = 68
+    assert agg["discharge_temp_mean_c"] == pytest.approx(66.5)
+    assert agg["discharge_temp_last_c"] == pytest.approx(68.0)
 
     # HP supply target: mean of [33, 35] = 34, last = 35
     assert agg["hp_supply_target_temperature_mean_c"] == pytest.approx(34.0)
@@ -367,8 +375,10 @@ def test_new_sensor_fields_persist_to_database(tmp_path: Path) -> None:
     # Refrigerant temperatures
     assert row.refrigerant_condensation_temp_mean_c == pytest.approx(38.0)
     assert row.refrigerant_condensation_temp_last_c == pytest.approx(38.0)
-    assert row.refrigerant_temp_mean_c == pytest.approx(2.0)
-    assert row.refrigerant_temp_last_c == pytest.approx(2.0)
+    assert row.refrigerant_liquid_line_temp_mean_c == pytest.approx(28.0)
+    assert row.refrigerant_liquid_line_temp_last_c == pytest.approx(28.0)
+    assert row.discharge_temp_mean_c == pytest.approx(65.0)
+    assert row.discharge_temp_last_c == pytest.approx(65.0)
 
     # HP supply target temperature
     assert row.hp_supply_target_temperature_mean_c == pytest.approx(33.0)

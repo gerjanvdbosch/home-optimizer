@@ -34,7 +34,8 @@ NUMERIC_READING_FIELD_NAMES: tuple[str, ...] = (
     "shutter_living_room_pct",
     "boiler_ambient_temp_c",
     "refrigerant_condensation_temp_c",
-    "refrigerant_temp_c",
+    "refrigerant_liquid_line_temp_c",
+    "discharge_temp_c",
     # Seasonal DHW parameter (WeatherAugmentedBackend, §9.1)
     "t_mains_estimated_c",
     # Derived quantities — accessed via LiveReadings properties (§15)

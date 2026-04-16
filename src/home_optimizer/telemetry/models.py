@@ -165,8 +165,12 @@ class TelemetryAggregate(Base):
     boiler_ambient_temp_last_c: Mapped[float] = mapped_column(Float)
     refrigerant_condensation_temp_mean_c: Mapped[float] = mapped_column(Float)
     refrigerant_condensation_temp_last_c: Mapped[float] = mapped_column(Float)
-    refrigerant_temp_mean_c: Mapped[float] = mapped_column(Float)
-    refrigerant_temp_last_c: Mapped[float] = mapped_column(Float)
+    # Liquid-line temperature (Buitenunit Vloeistofleiding) — sub-cooling diagnostics.
+    refrigerant_liquid_line_temp_mean_c: Mapped[float] = mapped_column(Float)
+    refrigerant_liquid_line_temp_last_c: Mapped[float] = mapped_column(Float)
+    # Compressor discharge temperature (Ontladingstemperatuur) — heat-pump health.
+    discharge_temp_mean_c: Mapped[float] = mapped_column(Float)
+    discharge_temp_last_c: Mapped[float] = mapped_column(Float)
 
     # Weather / seasonal DHW parameter (injected by WeatherAugmentedBackend) ------
     # Cold mains water temperature estimate [°C] — DHW disturbance T_mains (§9.1).
