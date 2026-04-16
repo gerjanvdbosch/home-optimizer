@@ -421,10 +421,19 @@ def main() -> None:
     log.info("ForecastPersister started (hourly Open-Meteo updates)")
 
     # ── 5. SIGTERM handler — graceful shutdown from `docker stop` ──────────
+    # Only stop the APScheduler here so no new jobs are accepted.
+    # Do NOT call sys.exit() or backend.close() from the signal handler:
+    # that would race with an in-flight APScheduler thread that still holds
+    # the httpx connection, causing [Errno 9] Bad file descriptor.
+    # Uvicorn installs its own SIGTERM handler that cleanly stops the server;
+    # the `finally` block below performs the definitive flush + close once
+    # Uvicorn has exited.
     def _handle_sigterm(signum: int, frame: object) -> None:  # noqa: ANN001
-        log.info("SIGTERM received — flushing telemetry and shutting down.")
-        collector.shutdown(flush=True)
-        sys.exit(0)
+        log.info("Signal %d received — stopping scheduler (Uvicorn handles its own shutdown).", signum)
+        try:
+            collector.shutdown(flush=False)
+        except Exception:  # noqa: BLE001
+            pass  # already stopped — safe to ignore
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
@@ -456,7 +465,10 @@ def main() -> None:
         )
     finally:
         log.info("Uvicorn stopped — performing final telemetry flush.")
-        collector.shutdown(flush=True)
+        try:
+            collector.shutdown(flush=True)
+        except Exception:  # noqa: BLE001
+            pass  # already stopped by SIGTERM handler — safe to ignore
         backend.close()
         log.info("Home Optimizer addon stopped cleanly.")
 
