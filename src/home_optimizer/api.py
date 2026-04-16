@@ -56,6 +56,8 @@ from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import DHWModel
 from .mpc import MPCController
 from .sensors.open_meteo import OpenMeteoClient
+from .settings import get_database_url
+from .telemetry import TelemetryRepository
 from .thermal_model import ThermalModel
 from .types import (
     CombinedMPCParameters,
@@ -934,6 +936,101 @@ async def get_forecast(
         horizon_steps=n,
         dt_hours=dt_hours,
         valid_from=forecast.valid_from.isoformat(),
+        labels=labels,
+        outdoor_temperature_c=temps,
+        gti_w_per_m2=gti_w,
+        gti_pv_w_per_m2=gti_pv,
+        temperature_forecast_fig=temp_fig_json,
+        solar_forecast_fig=solar_fig_json,
+    )
+
+
+#: Environment variable that the addon sets so the API knows where the DB is.
+#: Falls back to a local SQLite file in the current working directory.
+#: Both constant and default are defined in ``settings.py`` — do not repeat here.
+
+
+def _get_repository() -> TelemetryRepository:
+    """Construct a :class:`TelemetryRepository` from the active database URL.
+
+    The URL is resolved by :func:`~home_optimizer.settings.get_database_url`:
+    it reads the ``DATABASE_URL`` environment variable (set by the addon from
+    ``AddonOptions.database_path``) and falls back to the default SQLite path
+    for local development.
+
+    ``create_schema()`` is called to ensure tables exist on a fresh database,
+    so a missing table never causes a 502 — only an empty result (404).
+
+    Returns
+    -------
+    TelemetryRepository
+        Ready-to-use repository pointing at the configured database.
+    """
+    repo = TelemetryRepository(database_url=get_database_url())
+    repo.create_schema()
+    return repo
+
+
+@app.get("/api/forecast/latest", response_model=ForecastResponse)
+async def get_latest_forecast() -> ForecastResponse:
+    """Return the most recently persisted Open-Meteo forecast from the database.
+
+    Reads the latest batch from ``forecast_snapshots`` (highest
+    ``fetched_at_utc``), builds Plotly chart JSON, and returns a
+    :class:`ForecastResponse` — the same shape as ``GET /api/forecast``.
+
+    The database is located via the ``DATABASE_URL`` environment variable
+    (set by the HA addon supervisor).  Local default:
+    ``sqlite:///database.sqlite3`` relative to the current working directory.
+
+    Returns
+    -------
+    ForecastResponse
+        Latest forecast from the database.
+
+    Raises
+    ------
+    HTTPException 404
+        When the ``forecast_snapshots`` table is empty (no forecast has been
+        persisted yet — run the addon or ``ForecastPersister.persist_once()``
+        first).
+    HTTPException 502
+        When the database cannot be reached.
+    """
+    try:
+        repo = _get_repository()
+        rows = repo.get_latest_forecast_batch()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Database error: {exc}") from exc
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Geen forecast gevonden in de database. "
+                "Start de addon of roep ForecastPersister.persist_once() aan "
+                "om de eerste forecast op te slaan."
+            ),
+        )
+
+    fetched_at = rows[0].fetched_at_utc
+    dt_hours = float(rows[0].dt_hours)
+    n = len(rows)
+
+    # Build time labels from valid_at_utc stored in each row
+    labels = [
+        row.valid_at_utc.strftime("%d-%m %H:%M") for row in rows
+    ]
+    temps = [float(row.t_out_c) for row in rows]
+    gti_w = [float(row.gti_w_per_m2) for row in rows]
+    gti_pv = [float(row.gti_pv_w_per_m2) for row in rows]
+
+    temp_fig_json, solar_fig_json = _build_forecast_figures(labels, temps, gti_w, gti_pv)
+
+    return ForecastResponse(
+        horizon_steps=n,
+        dt_hours=dt_hours,
+        valid_from=fetched_at.isoformat(),
         labels=labels,
         outdoor_temperature_c=temps,
         gti_w_per_m2=gti_w,

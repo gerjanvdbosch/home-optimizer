@@ -149,6 +149,40 @@ class TelemetryRepository:
                 stmt = stmt.where(ForecastSnapshot.fetched_at_utc == fetched_at_utc)
             return list(session.scalars(stmt).all())
 
+    def get_latest_forecast_fetched_at(self):
+        """Return the most recent ``fetched_at_utc`` value in ``forecast_snapshots``.
+
+        Returns
+        -------
+        datetime | None
+            The UTC timestamp of the most recent forecast batch, or ``None``
+            when the table is empty.
+        """
+        with self._session_factory() as session:
+            stmt = (
+                select(ForecastSnapshot.fetched_at_utc)
+                .order_by(ForecastSnapshot.fetched_at_utc.desc())
+                .limit(1)
+            )
+            result = session.scalars(stmt).first()
+            return result
+
+    def get_latest_forecast_batch(self) -> list[ForecastSnapshot]:
+        """Return all steps of the most recently persisted forecast.
+
+        Fetches the latest ``fetched_at_utc`` and returns every step from that
+        batch, ordered by ``step_k``.
+
+        Returns
+        -------
+        list[ForecastSnapshot]
+            Steps ordered by ``step_k``.  Empty list when the table is empty.
+        """
+        fetched_at = self.get_latest_forecast_fetched_at()
+        if fetched_at is None:
+            return []
+        return self.list_forecast_snapshots(fetched_at_utc=fetched_at)
+
     def count(self) -> int:
         """Return the number of persisted telemetry buckets."""
         return len(self.list_aggregates())

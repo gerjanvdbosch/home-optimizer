@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -38,6 +39,7 @@ from .api import app
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
+from .settings import DATABASE_URL_ENV
 from .telemetry import (
     BufferedTelemetryCollector,
     ForecastPersister,
@@ -427,6 +429,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
     # ── 6. Run FastAPI via Uvicorn (blocking) ──────────────────────────────
+    # Inject DATABASE_URL (defined in settings.py) so the API's
+    # /api/forecast/latest endpoint resolves the same database that the addon
+    # uses for telemetry and forecast persistence.
+    os.environ[DATABASE_URL_ENV] = f"sqlite:///{opts.database_path}"
+
     log.info("Starting Uvicorn on %s:%d", _BIND_HOST, opts.api_port)
     try:
         uvicorn.run(

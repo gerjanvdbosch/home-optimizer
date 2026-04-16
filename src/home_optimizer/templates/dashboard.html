@@ -164,6 +164,11 @@
   <input type="number" id="pv-tilt" value="35" min="0" max="90" step="1" />
   <span class="separator">|</span>
   <button class="btn-sm" onclick="loadForecast()">🌤 Forecast laden</button>
+  <span class="separator">|</span>
+  <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
+    <input type="checkbox" id="use-live" style="accent-color:#3b82f6;" />
+    <span>Live Open-Meteo ophalen</span>
+  </label>
 </div>
 
 <main class="main">
@@ -215,7 +220,7 @@
     <span>📍 <strong id="meta-location"></strong></span>
     <span>⏱ geldig: <strong id="meta-valid"></strong></span>
     <span>📏 stappen: <strong id="meta-steps"></strong></span>
-    <span>🌍 bron: <strong>Open-Meteo (gratis, geen API-sleutel)</strong></span>
+    <span>🌍 bron: <strong id="meta-source">–</strong></span>
   </div>
 
   <!-- Temperature forecast -->
@@ -324,31 +329,44 @@
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span>Laden&hellip;';
     hideAllBanners();
-    showBanner('banner-info', 'Open-Meteo forecast wordt opgehaald…');
     setBadge('laden…', '');
 
+    const useLive = document.getElementById('use-live').checked;
+
     try {
-      const lat = parseFloat(document.getElementById('loc-lat').value);
-      const lon = parseFloat(document.getElementById('loc-lon').value);
-      const hor = parseInt(document.getElementById('loc-horizon').value, 10);
-      const pvT = parseFloat(document.getElementById('pv-tilt').value);
+      let url, source;
 
-      const params = new URLSearchParams({
-        latitude: lat, longitude: lon,
-        horizon_hours: hor, dt_hours: 1,
-        window_tilt: 90, window_azimuth: 0, pv_azimuth: 0,
-      });
-      if (!isNaN(pvT) && pvT >= 0) params.set('pv_tilt', pvT);
+      if (useLive) {
+        // ── Live: Open-Meteo API call ─────────────────────────────────
+        showBanner('banner-info', 'Open-Meteo forecast wordt live opgehaald…');
+        const lat = parseFloat(document.getElementById('loc-lat').value);
+        const lon = parseFloat(document.getElementById('loc-lon').value);
+        const hor = parseInt(document.getElementById('loc-horizon').value, 10);
+        const pvT = parseFloat(document.getElementById('pv-tilt').value);
+        const params = new URLSearchParams({
+          latitude: lat, longitude: lon,
+          horizon_hours: hor, dt_hours: 1,
+          window_tilt: 90, window_azimuth: 0, pv_azimuth: 0,
+        });
+        if (!isNaN(pvT) && pvT >= 0) params.set('pv_tilt', pvT);
+        url = '/api/forecast?' + params.toString();
+        source = 'Open-Meteo (live API)';
+      } else {
+        // ── Database: meest recente opgeslagen forecast ────────────────
+        showBanner('banner-info', 'Meest recente forecast uit database laden…');
+        url = '/api/forecast/latest';
+        source = 'Database (meest recente opgeslagen forecast)';
+      }
 
-      const resp = await fetch('/api/forecast?' + params.toString());
+      const resp = await fetch(url);
       if (!resp.ok) {
-        const detail = (await resp.json()).detail || resp.statusText;
-        throw new Error(detail);
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail || resp.statusText);
       }
       const d = await resp.json();
 
       hideBanner('banner-info');
-      setBadge('✓ Live', 'ok');
+      setBadge('✓ ' + (useLive ? 'Live' : 'DB'), 'ok');
 
       // ── KPI ──────────────────────────────────────────────────────────
       const temps = d.outdoor_temperature_c;
@@ -380,9 +398,16 @@
 
       // ── Forecast meta ─────────────────────────────────────────────────
       document.getElementById('forecast-meta').style.display = 'flex';
-      document.getElementById('meta-location').textContent = lat.toFixed(2) + '°N, ' + lon.toFixed(2) + '°E';
-      document.getElementById('meta-valid').textContent    = vf.toLocaleString('nl-NL');
-      document.getElementById('meta-steps').textContent    = d.horizon_steps;
+      if (useLive) {
+        const lat = parseFloat(document.getElementById('loc-lat').value);
+        const lon = parseFloat(document.getElementById('loc-lon').value);
+        document.getElementById('meta-location').textContent = lat.toFixed(2) + '°N, ' + lon.toFixed(2) + '°E';
+      } else {
+        document.getElementById('meta-location').textContent = '(locatie uit database)';
+      }
+      document.getElementById('meta-valid').textContent  = vf.toLocaleString('nl-NL');
+      document.getElementById('meta-steps').textContent  = d.horizon_steps;
+      document.getElementById('meta-source').textContent = source;
 
       // ── Temperature chart ─────────────────────────────────────────────
       const tFig = JSON.parse(d.temperature_forecast_fig);
