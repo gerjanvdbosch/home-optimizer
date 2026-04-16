@@ -6,6 +6,7 @@ plotly>=5.20
 httpx>=0.27
 SQLAlchemy<3.0,>=2.0
 APScheduler<4.0,>=3.10
+pydantic<3.0,>=2.0
 
 [dev]
 black>=24.0

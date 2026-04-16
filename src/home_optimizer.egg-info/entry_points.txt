@@ -1,2 +1,3 @@
 [console_scripts]
+home-optimizer-addon = home_optimizer.addon:main
 home-optimizer-demo = home_optimizer.__main__:main

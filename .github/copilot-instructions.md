@@ -10,7 +10,7 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 
 > ### ♻️ Architectuureis: DRY (Don't Repeat Yourself) / Geen Dubbele Code
 > **Het dupliceren van code of logica is ten strengste verboden.** Hoewel UFH en DHW fysisch andere systemen zijn, delen ze exact dezelfde wiskundige fundamenten (State-Space representaties, Kalman Filters, Forward Euler discretisatie en MPC).
-> Schrijf generieke, herbruikbare functies of klassen (bijv. een algemene `KalmanFilter`-klasse die $A, B, E, C, Q, R$ matrices accepteert en de Joseph-vorm update uitvoert) in plaats van aparte hardcoded implementaties (`KalmanUFH` en `KalmanDHW`). Gebruik object-oriëntatie, compositie of afgeleide klassen om specifieke eigenschappen (zoals de tijdsvariabele $A$-matrix voor DHW) af te handelen zonder de kern-wiskunde te kopiëren.
+> Schrijf generieke, herbruikbare functies of klassen (bijv. een algemene `KalmanFilter`-klasse die $A, B, E, C, Q, R$ matrices accepteert en de Joseph-vorm update uitvoert, en een afgeleide `ExtendedKalmanFilter`-klasse die een Jacobiaan-callback accepteert) in plaats van aparte hardcoded implementaties. Gebruik object-oriëntatie, compositie of afgeleide klassen om specifieke eigenschappen (zoals de tijdsvariabele $A$-matrix voor DHW of de EKF-linearisatie) af te handelen zonder de kern-wiskunde te kopiëren.
 
 > ### 🚀 Ontwerpeis: Geen Backwards Compatibility
 > **De code hoeft nergens backwards compatible te zijn met eerdere versies.** Focus uitsluitend op het bouwen van de meest robuuste, wiskundig zuivere en efficiënte architectuur zoals beschreven in dit document. Oude API's, legacy datastructuren, of eerdere (suboptimale) implementaties mogen zonder pardon worden gebroken, overschreven of verwijderd. Sleep geen technische schuld of workarounds mee om oudere systemen in de lucht te houden: de fysica en de nieuwe DRY-architectuur krijgen absolute voorrang.
@@ -19,6 +19,7 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > **De software moet de fysische theorie actief bewaken.**
 > 1. **Geen verborgen fallbacks:** Ontbreekt er een variabele of parameter? Verzin géén default waarde (zoals `T = 20.0` of `V = 0`), maar laat de code direct crashen met een expliciete foutmelding (Fail-Fast).
 > 2. **Assertions:** Gebruik validatie in de code om fysische onmogelijkheden (zoals negatieve warmtecapaciteit $C$, negatief volume $\dot{V}$, of temperatuur onder het absolute nulpunt) te blokkeren voordat ze de wiskundige solver bereiken.
+> 3. **EKF clamp:** Na elke EKF-updatestap moet $\hat{\dot{V}}_{tap}[k]$ worden geclampt op $\max(0,\ \hat{\dot{V}}_{tap}[k])$. Een negatief debiet is fysisch onmogelijk en mag de solver nooit bereiken.
 
 > ### 🧹 Kwaliteitseis: CI/CD Pipeline Compliance
 > **Alle code moet 100% foutloos door de gedefinieerde GitHub Actions pipeline (`python-lint.yml`) komen.** Dit betekent onvoorwaardelijke naleving van strakke code-standaarden. De code wordt automatisch getoetst op syntax (`pyflakes`), best-practices en linting (`ruff`), strikte formattering (`black --check`), en het slagen van alle unit tests (`pytest`). Code die de pipeline breekt, is per definitie ongeldig.
@@ -26,8 +27,8 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > ### 📝 Documentatie-eis: Transparantie & Traceerbaarheid
 > **Alle code (klassen, functies, variabelen) moet voorzien zijn van uitputtende, gestructureerde documentatie en type-hints.**
 > 1. **Docstrings & Eenheden:** Gebruik een vaste docstring-standaard (bijv. Google of NumPy style) voor élke functie. Benoem in de docstring niet alleen de argumenten, maar expliciet de **fysische eenheid** en verwachte datatypes (via Type Hints in de code).
-> 2. **Traceerbaarheid naar theorie:** Koppel wiskundige bewerkingen in de code direct terug aan dit document. Gebruik inline comments zoals: `# Implementeert Update (Joseph-vorm) uit sectie 6`.
-> 3. **Het 'Waarom', niet het 'Wat':** Code vertelt *wat* de computer doet; comments vertellen *waarom*. Documenteer expliciet matrixdimensies, gemaakte aannames bij linearisatie, en afhandeling van edge-cases (bijv. deling door nul bij $R_{strat}$).
+> 2. **Traceerbaarheid naar theorie:** Koppel wiskundige bewerkingen in de code direct terug aan dit document. Gebruik inline comments zoals: `# Implementeert EKF Predictie (Jacobiaan) uit sectie 12`.
+> 3. **Het 'Waarom', niet het 'Wat':** Code vertelt *wat* de computer doet; comments vertellen *waarom*. Documenteer expliciet matrixdimensies, gemaakte aannames bij linearisatie, en afhandeling van edge-cases (bijv. deling door nul bij $R_{strat}$, of negatieve EKF-schatting van $\dot{V}_{tap}$).
 
 ---
 
@@ -46,8 +47,8 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 8. Variabelendefinities DHW
 9. Continue Fysica DHW
 10. Discrete Vorm DHW
-11. State-Space Representatie DHW
-12. Kalman Filter DHW
+11. State-Space Representatie DHW (MPC)
+12. Extended Kalman Filter DHW (EKF met augmented state)
 
 **Deel C — Gecombineerd Systeem & MPC**
 13. Gecombineerd State-Vector
@@ -182,10 +183,11 @@ Het DHW-systeem wordt gemodelleerd als een **2-node stratificatietank** (boven- 
 |---|---|---|
 | A1 | Elke laag is perfect gemengd (wel-roerd) | Binnen een laag is $T$ uniform |
 | A2 | Warmtetransport tussen lagen alleen via interne conductie/menging | Geen convectief transport anders dan via tapstroom |
-| A3 | Tapstroom is plug-flow: warm water verlaat bovenaan, koud water komt onderaan | Tapterm is bilineair (state × disturbance); linearisatie via bekende $\dot{V}_{tap}[k]$ |
+| A3 | Tapstroom is plug-flow: warm water verlaat bovenaan, koud water komt onderaan | Tapterm is bilineair (state × state); afgehandeld via EKF-linearisatie |
 | A4 | Standby-verlies evenredig met $(T_{laag} - T_{amb})$ (Newton) | Verlies aanwezig zolang $T > T_{amb}$ |
 | A5 | Warmtepomp-warmtewisselaar zit **onderin** de tank (industriestandaard) | $P_{dhw}$ gaat volledig naar de onderlaag |
 | A6 | $T_{dhw}$ (gemiddelde tanktemperatuur) is een **afgeleid** signaal, geen extra state | Geen overspecificatie; $T_{dhw} = (C_{top}T_{top} + C_{bot}T_{bot})/(C_{top}+C_{bot})$ |
+| A7 | **Er is geen flowmeter aanwezig.** $\dot{V}_{tap}[k]$ is een onbekende grootheid die online wordt geschat | $\dot{V}_{tap}$ wordt behandeld als **augmented state** in de EKF (zie §12). Beide temperatuursensoren ($T_{top}$ en $T_{bot}$) zijn beschikbaar als meting en maken de augmented state observeerbaar |
 
 ---
 
@@ -193,10 +195,13 @@ Het DHW-systeem wordt gemodelleerd als een **2-node stratificatietank** (boven- 
 
 ### 8.1 States
 
-| Variabele | Eenheid | Betekenis |
-|---|---|---|
-| $T_{top}$ | °C | Temperatuur bovenlaag (tapwater uitgang) |
-| $T_{bot}$ | °C | Temperatuur onderlaag (koude instroombuffer, WP-kant) |
+| Variabele | Eenheid | Herkomst | Betekenis |
+|---|---|---|---|
+| $T_{top}$ | °C | Sensor | Temperatuur bovenlaag (tapwater uitgang) |
+| $T_{bot}$ | °C | Sensor | Temperatuur onderlaag (koude instroombuffer, WP-kant) |
+| $\dot{V}_{tap}$ | m³/h | EKF (geschat) | Tapwaterdebiet — **geen flowmeter**, geschat als augmented state |
+
+> **Architectuurscheiding:** De EKF werkt intern met de 3-dimensionale augmented state $x_{dhw,aug} = [T_{top},\ T_{bot},\ \dot{V}_{tap}]^T$. De MPC werkt met de 2-dimensionale state $x_{dhw} = [T_{top},\ T_{bot}]^T$, waarbij $\hat{\dot{V}}_{tap}[k]$ na de EKF-updatestap als **bekende verstoring** aan de MPC wordt doorgegeven. Zie §11 en §12 voor de respectievelijke formuleringen.
 
 **Afgeleid (geen state):**
 $$T_{dhw}[k] = \frac{C_{top}\,T_{top}[k] + C_{bot}\,T_{bot}[k]}{C_{top} + C_{bot}}$$
@@ -207,13 +212,13 @@ $$T_{dhw}[k] = \frac{C_{top}\,T_{top}[k] + C_{bot}\,T_{bot}[k]}{C_{top} + C_{bot
 |---|---|---|
 | $P_{dhw}$ | kW | Thermisch vermogen naar de onderlaag (warmtepompuitgang) |
 
-### 8.3 Verstoringen
+### 8.3 Verstoringen (voor MPC, na EKF)
 
-| Variabele | Eenheid | Betekenis |
-|---|---|---|
-| $\dot{V}_{tap}[k]$ | m³/h | Tapwaterdebiet (gebruikersvraag) |
-| $T_{mains}[k]$ | °C | Temperatuur inkomend koud leidingwater |
-| $T_{amb}[k]$ | °C | Omgevingstemperatuur rond de boiler (bijv. meterkast) |
+| Variabele | Eenheid | Herkomst | Betekenis |
+|---|---|---|---|
+| $\hat{\dot{V}}_{tap}[k]$ | m³/h | EKF-uitvoer (geclampt $\geq 0$) | Geschat tapwaterdebiet, doorgegeven aan MPC als bekende LTV-parameter |
+| $T_{mains}[k]$ | °C | Extern (seizoensmodel of meting) | Temperatuur inkomend koud leidingwater |
+| $T_{amb}[k]$ | °C | Sensor of schatting | Omgevingstemperatuur rond de boiler (bijv. meterkast) |
 
 ### 8.4 Eenheidsconversie (éénmalig vastgelegd)
 
@@ -270,11 +275,17 @@ De $\dot{Q}_{strat}$-term valt weg (intern transport, netto nul). Dit is de eers
 
 ## 10. Discrete Vorm DHW
 
-### 10.1 Bilineariteit & Linearisatie
+### 10.1 Bilineariteit & Behandeling
 
-De termen $\lambda\dot{V}_{tap}[k]\cdot T_{top}[k]$ zijn bilineair (state × disturbance). Omdat $\dot{V}_{tap}[k]$ op elk tijdstip $k$ **bekend** is (gemeten of voorspeld), behandelen we het systeem als **lineair tijdsvariabel (LTV)**. Definieer:
+De termen $\lambda\dot{V}_{tap}[k]\cdot T_{top}[k]$ en $\lambda\dot{V}_{tap}[k]\cdot T_{mains}[k]$ zijn bilineair. Omdat $\dot{V}_{tap}[k]$ niet direct gemeten wordt, kan de LTV-aanname (§10 origineel) niet rechtstreeks worden toegepast.
 
-$$a_{tap}[k] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \dot{V}_{tap}[k], \qquad b_{tap}[k] = \frac{\Delta t}{C_{bot}} \cdot \lambda \cdot \dot{V}_{tap}[k]$$
+**Oplossing (tweestaps architectuur):**
+
+1. **EKF-stap** (§12): Schat $\hat{\dot{V}}_{tap}[k]$ via linearisatie rondom de vorige schatting. De EKF werkt met de 3-dimensionale augmented state en beide temperatuurmetingen.
+2. **MPC-stap** (§11 en §14): Behandel $\hat{\dot{V}}_{tap}[k]$ als **bekende LTV-parameter** voor de horizon. De MPC ontvangt een array $\hat{\dot{V}}_{tap}[k],\ k=0,\ldots,N-1$ en construeert daarmee de tijdsvariabele matrices $A_{dhw}[k]$ en $E_{dhw}[k]$ precies zoals in het originele LTV-schema.
+
+Definieer (zoals voorheen, nu gebaseerd op EKF-schatting):
+$$a_{tap}[k] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k], \qquad b_{tap}[k] = \frac{\Delta t}{C_{bot}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k]$$
 
 ### 10.2 Stabiliteitseis
 
@@ -283,14 +294,16 @@ $$\Delta t \ll \min\!\left(C_{top}\cdot R_{strat},\ C_{bot}\cdot R_{strat},\ C_{
 ### 10.3 Vergelijkingen
 
 **Bovenlaag:**
-$$\boxed{T_{top}[k+1] = T_{top}[k] + \frac{\Delta t}{C_{top}}\!\left( -\frac{T_{top}[k]-T_{bot}[k]}{R_{strat}} - \lambda\dot{V}_{tap}[k]\,T_{top}[k] - \frac{T_{top}[k]-T_{amb}[k]}{R_{loss}} \right)}$$
+$$\boxed{T_{top}[k+1] = T_{top}[k] + \frac{\Delta t}{C_{top}}\!\left( -\frac{T_{top}[k]-T_{bot}[k]}{R_{strat}} - \lambda\hat{\dot{V}}_{tap}[k]\,T_{top}[k] - \frac{T_{top}[k]-T_{amb}[k]}{R_{loss}} \right)}$$
 
 **Onderlaag:**
-$$\boxed{T_{bot}[k+1] = T_{bot}[k] + \frac{\Delta t}{C_{bot}}\!\left( \frac{T_{top}[k]-T_{bot}[k]}{R_{strat}} + P_{dhw}[k] + \lambda\dot{V}_{tap}[k]\,T_{mains}[k] - \frac{T_{bot}[k]-T_{amb}[k]}{R_{loss}} \right)}$$
+$$\boxed{T_{bot}[k+1] = T_{bot}[k] + \frac{\Delta t}{C_{bot}}\!\left( \frac{T_{top}[k]-T_{bot}[k]}{R_{strat}} + P_{dhw}[k] + \lambda\hat{\dot{V}}_{tap}[k]\,T_{mains}[k] - \frac{T_{bot}[k]-T_{amb}[k]}{R_{loss}} \right)}$$
 
 ---
 
-## 11. State-Space Representatie DHW
+## 11. State-Space Representatie DHW (voor MPC)
+
+> **Scope:** Deze sectie beschrijft de 2-dimensionale state-space die de MPC gebruikt. $\hat{\dot{V}}_{tap}[k]$ is op dit punt al beschikbaar als uitvoer van de EKF (zie §12) en wordt als bekende LTV-parameter behandeld.
 
 $$x_{dhw}[k+1] = A_{dhw}[k]\,x_{dhw}[k] + B_{dhw}\,u_{dhw}[k] + E_{dhw}[k]\,d_{dhw}[k]$$
 
@@ -301,7 +314,7 @@ $$x_{dhw}[k+1] = A_{dhw}[k]\,x_{dhw}[k] + B_{dhw}\,u_{dhw}[k] + E_{dhw}[k]\,d_{d
 **Hulpgrootheden (constant):**
 $$a_{strat} = \frac{\Delta t}{C_{top}\cdot R_{strat}}, \quad b_{strat} = \frac{\Delta t}{C_{bot}\cdot R_{strat}}, \quad a_{loss} = \frac{\Delta t}{C_{top}\cdot R_{loss}}, \quad b_{loss} = \frac{\Delta t}{C_{bot}\cdot R_{loss}}$$
 
-**State-transitiematrix (tijdsvariabel via $\dot{V}_{tap}[k]$):**
+**State-transitiematrix (tijdsvariabel via $\hat{\dot{V}}_{tap}[k]$ uit EKF):**
 $$A_{dhw}[k] = \begin{bmatrix} 1 - a_{strat} - a_{loss} - a_{tap}[k] & a_{strat} \\ b_{strat} & 1 - b_{strat} - b_{loss} \end{bmatrix}$$
 
 **Inputmatrix (constant):**
@@ -309,32 +322,107 @@ $$B_{dhw} = \begin{bmatrix} 0 \\ \dfrac{\Delta t}{C_{bot}} \end{bmatrix}$$
 
 > $P_{dhw}$ gaat naar de onderlaag (aanname A5). Bij een elektrisch verwarmingselement bovenaan: vervang door $[\Delta t/C_{top},\ 0]^T$ en documenteer dit als configuratiekeuze.
 
-**Verstoringenmatrix (tijdsvariabel via $\dot{V}_{tap}[k]$):**
+**Verstoringenmatrix (tijdsvariabel via $\hat{\dot{V}}_{tap}[k]$):**
 $$E_{dhw}[k] = \begin{bmatrix} a_{loss} & 0 \\ b_{loss} & b_{tap}[k] \end{bmatrix}$$
 
 > Kolom 1 = $T_{amb}$ (standby-verlies beide lagen). Kolom 2 = $T_{mains}$ (koud instromend water, alleen onderlaag).
 
-**Observeerbaarheid** (alleen $T_{top}$ gemeten, $C_{obs,dhw} = [1,\ 0]$):
+**Observeerbaarheid (MPC-model, 2 states, $C_{obs,dhw} = [1,\ 0]$):**
 $$\mathcal{O}_{dhw} = \begin{bmatrix} 1 & 0 \\ 1 - a_{strat} - a_{loss} - a_{tap}[k] & a_{strat} \end{bmatrix}$$
 
 $\text{rang}(\mathcal{O}_{dhw}) = 2 \iff a_{strat} \neq 0$, wat altijd geldt voor een reële tank met eindige $R_{strat}$.
 
 ---
 
-## 12. Kalman Filter DHW
+## 12. Extended Kalman Filter DHW (EKF met augmented state)
 
-Het DHW-submodel wordt onafhankelijk van het UFH-model gefilterd (eigen covariantiematrix).
+### 12.1 Motivatie & Architectuur
 
-> **Let op:** $A_{dhw}$ is tijdsvariabel — gebruik altijd $A_{dhw}[k-1]$ (waarde op het vorige tijdstip) in de predictie.
+Omdat er geen flowmeter aanwezig is (aanname A7), wordt $\dot{V}_{tap}$ geschat als **augmented state**. De combinatie van $T_{top}$-sensor én $T_{bot}$-sensor levert voldoende informatie om het 3-dimensionale systeem observeerbaar te maken.
 
-**Predictie:**
-$$\hat{x}^-_{dhw}[k] = A_{dhw}[k-1]\,\hat{x}_{dhw}[k-1] + B_{dhw}\,u_{dhw}[k-1] + E_{dhw}[k-1]\,d_{dhw}[k-1]$$
-$$P^-_{dhw}[k] = A_{dhw}[k-1]\,P_{dhw}[k-1]\,A_{dhw}[k-1]^T + Q_{n,dhw}$$
+De tapsysteemfysica is **nonlineair** in de augmented state (product $\dot{V}_{tap} \times T_{top}$ en $\dot{V}_{tap} \times T_{mains}$). Daarom wordt een **Extended Kalman Filter (EKF)** toegepast, dat bij elke tijdstap lineariseert rondom de vorige schatting.
 
-**Update (Joseph-vorm):**
-$$K_{dhw}[k] = P^-_{dhw}[k]\,C_{obs,dhw}^T \cdot \left(C_{obs,dhw}\,P^-_{dhw}[k]\,C_{obs,dhw}^T + R_{n,dhw}\right)^{-1}$$
-$$\hat{x}_{dhw}[k] = \hat{x}^-_{dhw}[k] + K_{dhw}[k]\cdot\left(y_{dhw}[k] - C_{obs,dhw}\,\hat{x}^-_{dhw}[k]\right)$$
-$$P_{dhw}[k] = \left(I - K_{dhw}C_{obs,dhw}\right)P^-_{dhw}[k]\left(I - K_{dhw}C_{obs,dhw}\right)^T + R_{n,dhw}\,K_{dhw}K_{dhw}^T$$
+**Architectuureis DRY:** De EKF is een afgeleide klasse van de generieke `KalmanFilter`-klasse, waarbij de vaste matrix $A$ vervangen wordt door een Jacobiaan-callback $F(x, d)$, en de propagatiestap vervangen wordt door de nonlineaire functie $f(x, u, d)$.
+
+### 12.2 Augmented State & Meetmodel
+
+**Augmented state (intern in EKF):**
+$$x_{aug}[k] = \begin{bmatrix} T_{top}[k] \\ T_{bot}[k] \\ \dot{V}_{tap}[k] \end{bmatrix}$$
+
+**Random walk model voor $\dot{V}_{tap}$:**
+$$\dot{V}_{tap}[k+1] = \dot{V}_{tap}[k] + w_{\dot{V}}[k], \qquad w_{\dot{V}} \sim \mathcal{N}(0,\ Q_{n,\dot{V}})$$
+
+> De procesruis $Q_{n,\dot{V}}$ bepaalt hoe snel de EKF kan reageren op veranderende tapgebeurtenissen. Hogere waarde → sneller aanpassen, meer ruis in schatting. Lagere waarde → trage respons, maar gladder signaal. Dit is een tuning-parameter in de configuratie.
+
+**Meetmodel (beide sensoren beschikbaar):**
+$$y_{dhw}[k] = \begin{bmatrix} T_{top}^{meas}[k] \\ T_{bot}^{meas}[k] \end{bmatrix} = C_{obs,dhw}\, x_{aug}[k] + v[k]$$
+
+$$C_{obs,dhw} = \begin{bmatrix} 1 & 0 & 0 \\ 0 & 1 & 0 \end{bmatrix} \in \mathbb{R}^{2 \times 3}$$
+
+$R_{n,dhw}$ is nu een **2×2 diagonaalmatrix**:
+$$R_{n,dhw} = \begin{bmatrix} \sigma^2_{T_{top}} & 0 \\ 0 & \sigma^2_{T_{bot}} \end{bmatrix}$$
+
+### 12.3 Nonlineaire Propagatiefunctie
+
+De volledige nonlineaire propagatie van de augmented state is:
+
+$$f(x_{aug}, u_{dhw}, d_{dhw}) = \begin{bmatrix}
+T_{top} + \dfrac{\Delta t}{C_{top}}\!\left( -\dfrac{T_{top}-T_{bot}}{R_{strat}} - \lambda\,\dot{V}_{tap}\,T_{top} - \dfrac{T_{top}-T_{amb}}{R_{loss}} \right) \\[8pt]
+T_{bot} + \dfrac{\Delta t}{C_{bot}}\!\left( \dfrac{T_{top}-T_{bot}}{R_{strat}} + P_{dhw} + \lambda\,\dot{V}_{tap}\,T_{mains} - \dfrac{T_{bot}-T_{amb}}{R_{loss}} \right) \\[8pt]
+\dot{V}_{tap}
+\end{bmatrix}$$
+
+### 12.4 Jacobiaan (Linearisatie rondom schatting)
+
+De Jacobiaan $F[k] = \left.\dfrac{\partial f}{\partial x_{aug}}\right|_{\hat{x}_{aug}[k]}$ wordt bij elke tijdstap geëvalueerd:
+
+$$F[k] = \begin{bmatrix}
+1 - a_{strat} - a_{loss} - \hat{a}_{tap}[k] & a_{strat} & -\dfrac{\Delta t}{C_{top}}\,\lambda\,\hat{T}_{top}[k] \\[6pt]
+b_{strat} & 1 - b_{strat} - b_{loss} & \dfrac{\Delta t}{C_{bot}}\,\lambda\,T_{mains}[k] \\[6pt]
+0 & 0 & 1
+\end{bmatrix}$$
+
+Waarbij:
+$$\hat{a}_{tap}[k] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k]$$
+
+> De derde kolom van $F[k]$ is de kern van de EKF: hij drukt uit hoe gevoelig $T_{top}$ en $T_{bot}$ zijn voor een verandering in $\dot{V}_{tap}$. Bij een hoge $\hat{T}_{top}[k]$ (groot temperatuurverschil met koud water) is de schatting van $\dot{V}_{tap}$ beter geconditioneerd. Bij $T_{top} \approx T_{mains}$ — geen tapegebeurtenis — is de gevoeligheid laag en domineert de procesruis; de EKF zal $\dot{V}_{tap} \approx 0$ behouden.
+
+### 12.5 Observeerbaarheid van het augmented systeem
+
+De linearisatie $F[k]$ is rank-3 observeerbaar voor $C_{obs,dhw}$ zolang $a_{strat} \neq 0$ **en** $\hat{T}_{top}[k] \neq T_{mains}[k]$. De observeerbaarheidsmatrix van de linearisatie is:
+
+$$\mathcal{O}_{aug}[k] = \begin{bmatrix} C_{obs,dhw} \\ C_{obs,dhw}\,F[k] \end{bmatrix} \in \mathbb{R}^{4 \times 3}$$
+
+$\text{rang}(\mathcal{O}_{aug}[k]) = 3$ mits $a_{strat} \neq 0$ en $\hat{T}_{top}[k] \neq T_{mains}[k]$.
+
+> **Rand-conditie:** Als de tank volledig is afgekoeld tot $T_{top} \approx T_{mains}$ (bijv. bij een langdurig ongebruikte installatie), is $\dot{V}_{tap}$ niet observeerbaar via de temperatuursensoren. In dat geval geldt: de EKF divergeert niet (de procesruis houdt $P$ begrensd), maar de schatting van $\dot{V}_{tap}$ wordt onzeker. Dit is fysisch correct gedrag — je kunt immers geen tap detecteren als er toch al geen temperatuurverschil is.
+
+### 12.6 EKF Algoritme
+
+**Stap 1 — Predictie:**
+$$\hat{x}^-_{aug}[k] = f\!\left(\hat{x}_{aug}[k-1],\ u_{dhw}[k-1],\ d_{dhw}[k-1]\right)$$
+$$P^-_{aug}[k] = F[k-1]\,P_{aug}[k-1]\,F[k-1]^T + Q_{n,dhw,aug}$$
+
+Met:
+$$Q_{n,dhw,aug} = \begin{bmatrix} Q_{n,dhw} & 0 \\ 0 & Q_{n,\dot{V}} \end{bmatrix} \in \mathbb{R}^{3 \times 3}$$
+
+waarbij $Q_{n,dhw}$ de 2×2 procesruiscovariantie is voor de temperatuurstates en $Q_{n,\dot{V}}$ de scalaire procesruis voor de flowschatting.
+
+**Stap 2 — Kalman Gain:**
+$$K_{aug}[k] = P^-_{aug}[k]\,C_{obs,dhw}^T \cdot \left(C_{obs,dhw}\,P^-_{aug}[k]\,C_{obs,dhw}^T + R_{n,dhw}\right)^{-1}$$
+
+**Stap 3 — Update (Joseph-vorm voor numerieke stabiliteit):**
+$$\hat{x}_{aug}[k] = \hat{x}^-_{aug}[k] + K_{aug}[k]\cdot\left(y_{dhw}[k] - C_{obs,dhw}\,\hat{x}^-_{aug}[k]\right)$$
+
+$$P_{aug}[k] = \left(I - K_{aug}C_{obs,dhw}\right)P^-_{aug}[k]\left(I - K_{aug}C_{obs,dhw}\right)^T + R_{n,dhw}\,K_{aug}K_{aug}^T$$
+
+**Stap 4 — Fail-Fast clamp (fysische eis):**
+$$\hat{\dot{V}}_{tap}[k] \leftarrow \max\!\left(0,\ \hat{x}_{aug}[k]_3\right)$$
+
+> Een negatief debiet is fysisch onmogelijk. De clamp is een harde post-processing stap na elke update — géén workaround maar een formele projectie op de fysisch haalbare verzameling $\dot{V}_{tap} \geq 0$.
+
+**Stap 5 — Doorgeven aan MPC:**
+$$\hat{\dot{V}}_{tap}[k] \rightarrow \text{MPC als LTV-parameter voor stap } k \text{ in de horizon}$$
 
 ---
 
@@ -344,7 +432,7 @@ $$P_{dhw}[k] = \left(I - K_{dhw}C_{obs,dhw}\right)P^-_{dhw}[k]\left(I - K_{dhw}C
 
 ## 13. Gecombineerd State-Vector
 
-De twee subsystemen zijn thermisch ontkoppeld. Het gecombineerde state-vector is:
+De twee subsystemen zijn thermisch ontkoppeld. Het gecombineerde state-vector (voor MPC) is:
 
 $$x_{tot}[k] = \begin{bmatrix} T_r \\ T_b \\ T_{top} \\ T_{bot} \end{bmatrix}, \qquad u_{tot}[k] = \begin{bmatrix} P_{UFH} \\ P_{dhw} \end{bmatrix}$$
 
@@ -352,7 +440,7 @@ De gecombineerde state-space heeft blokdiagonale structuur (geen cross-termen):
 
 $$x_{tot}[k+1] = \underbrace{\begin{bmatrix} A_{UFH} & 0 \\ 0 & A_{dhw}[k] \end{bmatrix}}_{A_{tot}[k]} x_{tot}[k] + \underbrace{\begin{bmatrix} B_{UFH} & 0 \\ 0 & B_{dhw} \end{bmatrix}}_{B_{tot}} u_{tot}[k] + \begin{bmatrix} E_{UFH} & 0 \\ 0 & E_{dhw}[k] \end{bmatrix} \begin{bmatrix} d_{UFH}[k] \\ d_{dhw}[k] \end{bmatrix}$$
 
-> De koppeling tussen UFH en DHW loopt **uitsluitend** via de gedeelde warmtepomp-vermogensconstraint (zie §14).
+> De koppeling tussen UFH en DHW loopt **uitsluitend** via de gedeelde warmtepomp-vermogensconstraint (zie §14). De EKF (§12) levert $\hat{\dot{V}}_{tap}[k]$ waarmee $A_{dhw}[k]$ en $E_{dhw}[k]$ voor de MPC-horizon worden geconstrueerd.
 
 ---
 
@@ -371,7 +459,7 @@ Waarbij (in Kelvin):
 $$T_{cond}[k] = (T_{aanvoer} + \Delta T_{cond}) + 273.15$$
 $$T_{evap}[k]  = (T_{out}[k]  - \Delta T_{evap}) + 273.15$$
 
-**Implementatie-eis:** 
+**Implementatie-eis:**
 - Voor **UFH** wordt een weersafhankelijke stooklijn of vaste ontwerptemperatuur gebruikt voor $T_{aanvoer}$ (bijv. 30–35 °C).
 - Voor **DHW** wordt de doeltemperatuur van de tank gebruikt voor $T_{aanvoer}$ (bijv. 55 °C of $T_{leg}$).
 - De parameters $\eta_{Carnot}$ (typisch 0.4–0.6), $\Delta T_{cond}$ (typisch 2–5 K) en $\Delta T_{evap}$ (typisch 2–5 K) moeten in de configuratie (Pydantic) als benoemde variabelen aanwezig zijn.
@@ -483,13 +571,12 @@ $$\frac{P_{UFH}[k]}{COP_{UFH}[k]} + \frac{P_{dhw}[k]}{COP_{dhw}[k]} \leq P_{hp,m
 
 > $C_{top} + C_{bot} = \lambda \cdot V_{tank}$, met $V_{tank}$ het totale tankvolume [m³].
 
-### DHW — Verstoringen
+### DHW — Verstoringen (invoer EKF en MPC)
 
-| Parameter | Eenheid | Betekenis |
-|---|---|---|
-| $\dot{V}_{tap}[k]$ | m³/h | Tapwaterdebiet op tijdstip $k$ |
-| $T_{mains}[k]$ | °C | Koud leidingwater (~10–12 °C NL gemiddeld) |
-| $T_{amb}[k]$ | °C | Omgevingstemperatuur rond de boiler |
+| Parameter | Eenheid | Herkomst | Betekenis |
+|---|---|---|---|
+| $T_{mains}[k]$ | °C | Extern seizoensmodel of meting | Koud leidingwater (~10–12 °C NL gemiddeld) |
+| $T_{amb}[k]$ | °C | Sensor of schatting | Omgevingstemperatuur rond de boiler |
 
 ### DHW — MPC
 
@@ -510,13 +597,17 @@ $$\frac{P_{UFH}[k]}{COP_{UFH}[k]} + \frac{P_{dhw}[k]}{COP_{dhw}[k]} \leq P_{hp,m
 | $t_{leg,min}$ | h | Minimale aanhoudtijd bij $T_{leg}$ (bijv. 1 h) |
 | $n_{leg}$ | stappen | Max. interval tussen twee legionella-runs (bijv. $7 \times 24 / \Delta t$) |
 
-### DHW — Kalman Filter
+### DHW — Extended Kalman Filter (EKF)
 
 | Parameter | Eenheid | Betekenis |
 |---|---|---|
-| $Q_{n,dhw}$ | K² | Procesruis covariantie (2×2, symmetrisch PD) |
-| $R_{n,dhw}$ | K² | Meetruis variantie taptemperatuursensor |
-| $C_{obs,dhw}$ | Matrix | $[1,\ 0]$ — alleen $T_{top}$ gemeten |
+| $Q_{n,dhw}$ | K² | Procesruis covariantie voor temperatuurstates (2×2, symmetrisch PD) |
+| $Q_{n,\dot{V}}$ | (m³/h)² | Procesruis variantie voor de $\dot{V}_{tap}$-state (scalair, tuning-parameter) |
+| $Q_{n,dhw,aug}$ | gemengd | Gecombineerde 3×3 procesruiscovariantie: $\text{diag}(Q_{n,dhw},\ Q_{n,\dot{V}})$ |
+| $R_{n,dhw}$ | K² | Meetruis covariantie (2×2 diagonaal): $\text{diag}(\sigma^2_{T_{top}},\ \sigma^2_{T_{bot}})$ |
+| $C_{obs,dhw}$ | Matrix | $[I_{2\times2}\ \|\ 0]$ — beide temperaturen gemeten, $\dot{V}_{tap}$ niet direct gemeten |
+| $\hat{\dot{V}}_{tap,init}$ | m³/h | Initiële schatting van tapwaterdebiet (typisch 0.0 bij opstart) |
+| $P_{aug,init}$ | gemengd | Initiële covariantie 3×3 van augmented state (hoge onzekerheid op $\dot{V}_{tap}$ bij opstart) |
 
 ### Gedeeld
 
@@ -537,7 +628,7 @@ $$\frac{P_{UFH}[k]}{COP_{UFH}[k]} + \frac{P_{dhw}[k]}{COP_{dhw}[k]} \leq P_{hp,m
 | Matrix-algebra | `numpy` / `scipy.sparse` | Standaard; gebruik sparse matrices voor grote horizons |
 | Data-validatie (Fail-Fast) | `Pydantic v2` | Automatische type- en waardechecks bij laden van config; alle fysische onmogelijkheden (bijv. $C \leq 0$, $COP \leq 0$) worden hier onderschept vóór de solver |
 | MPC-solver | **CVXPY** | Declaratieve QP/SOCP-formulering; compatibel met LTV-systemen; ondersteunt OSQP-backend voor snelheid |
-| Kalman Filter | Eigen generieke klasse (zie architectuureis DRY) | Geen externe library; klasse accepteert $A, B, E, C, Q, R$ en voert Joseph-vorm update uit |
+| Kalman Filter | Generieke `KalmanFilter`-klasse + afgeleide `ExtendedKalmanFilter`-klasse (zie architectuureis DRY) | Geen externe library; basisklasse accepteert $A, B, E, C, Q, R$ en voert Joseph-vorm update uit; EKF-subklasse vervangt $A$ door Jacobiaan-callback $F(x, d)$ en de lineaire propagatie door $f(x, u, d)$ |
 
 > **Solverkeuze is bindend.** De MPC-formulering moet expliciet als CVXPY-probleem worden geschreven (`cp.Problem`, `cp.Variable`, `cp.Minimize`). Het is verboden de MPC als handmatig uitgeschreven lus in numpy te implementeren.
 
@@ -546,12 +637,15 @@ $$\frac{P_{UFH}[k]}{COP_{UFH}[k]} + \frac{P_{dhw}[k]}{COP_{dhw}[k]} \leq P_{hp,m
 Alle parameters (zie §15) worden geladen vanuit een extern configuratiebestand (JSON of YAML). Het configuratieschema wordt gevalideerd via een `Pydantic`-model. Voorbeeld van verplichte validatieregels:
 
 ```
-C_r > 0, C_b > 0          # Warmtecapaciteiten zijn positief
-R_br > 0, R_ro > 0        # Thermische weerstanden zijn positief
-0 < alpha <= 1            # Zonlichtfractie is een kans
-1 < COP_ufh <= COP_max    # COP is fysisch groter dan 1
-V_tank > 0                # Tankvolume is positief
-C_top + C_bot ≈ lambda * V_tank  # Capaciteitsconservatie (tolerantie: 1e-4)
+C_r > 0, C_b > 0                     # Warmtecapaciteiten zijn positief
+R_br > 0, R_ro > 0                   # Thermische weerstanden zijn positief
+0 < alpha <= 1                       # Zonlichtfractie is een kans
+1 < COP_ufh <= COP_max               # COP is fysisch groter dan 1
+V_tank > 0                           # Tankvolume is positief
+C_top + C_bot ≈ lambda * V_tank      # Capaciteitsconservatie (tolerantie: 1e-4)
+Q_n_Vtap > 0                         # Procesruis flowschatting is positief
+sigma_T_top > 0, sigma_T_bot > 0     # Meetruisvarianties zijn positief
+V_tap_init >= 0                      # Initieel debiet is niet-negatief
 ```
 
 ### 16.3 Test-eisen (pytest)
@@ -562,8 +656,13 @@ Bij de implementatie moet een `pytest`-suite worden gegenereerd die de **Fysisch
 |---|---|---|
 | `test_ufh_energy_balance` | $\Delta(C_r T_r + C_b T_b)/\Delta t = P_{UFH} - (T_r-T_{out})/R_{ro} + Q_{solar} + Q_{int}$ voor 10 tijdstappen | `np.testing.assert_allclose(..., rtol=1e-6)` |
 | `test_dhw_energy_balance` | $\Delta(C_{top}T_{top}+C_{bot}T_{bot})/\Delta t = P_{dhw} - \dot{Q}_{tap} - \dot{Q}_{loss}$ voor 10 tijdstappen | `np.testing.assert_allclose(..., rtol=1e-6)` |
-| `test_kalman_covariance_pd` | $P$ blijft symmetrisch positief-definiet na 50 Kalman-stappen | Kleinste eigenwaarde $> 0$ |
-| `test_observability_rank` | Rang observeerbaarheidsmatrix = 2 voor beide subsystemen | `np.linalg.matrix_rank(...) == 2` |
+| `test_kalman_covariance_pd` | $P$ blijft symmetrisch positief-definiet na 50 Kalman-stappen (UFH) | Kleinste eigenwaarde $> 0$ |
+| `test_ekf_covariance_pd` | $P_{aug}$ blijft symmetrisch positief-definiet na 50 EKF-stappen (DHW) | Kleinste eigenwaarde $> 0$ |
+| `test_ekf_vtap_nonnegative` | $\hat{\dot{V}}_{tap}[k] \geq 0$ na elke EKF-updatestap, ook bij initialisatie met negatieve procesruis-realisatie | `assert all(v_tap_estimates >= 0)` |
+| `test_ekf_vtap_detection` | Bij gesimuleerde tapgebeurtenis (stap in $\dot{V}_{tap}$) convergeert EKF-schatting binnen $n_{conv}$ stappen tot werkelijke waarde (binnen tolerantie $\delta_{V}$) | `assert_allclose(..., atol=delta_V)` na $n_{conv}$ stappen |
+| `test_ekf_no_tap_zero` | Zonder tapgebeurtenis ($\dot{V}_{tap} = 0$, constante temperaturen): EKF-schatting convergeert naar 0 | `assert_allclose(v_tap_est, 0, atol=delta_V)` |
+| `test_observability_rank` | Rang observeerbaarheidsmatrix = 2 voor UFH en 2-state DHW (MPC-model) | `np.linalg.matrix_rank(...) == 2` |
+| `test_ekf_observability_rank` | Rang augmented observeerbaarheidsmatrix = 3 voor DHW-EKF bij $T_{top} \neq T_{mains}$ | `np.linalg.matrix_rank(...) == 3` |
 | `test_cop_validation` | Pydantic gooit `ValidationError` bij $COP \leq 1$ of $COP > COP_{max}$ | `pytest.raises(ValidationError)` |
 | `test_mpc_feasibility` | MPC-probleem is `OPTIMAL` (niet `INFEASIBLE`) voor standaardscenario | `problem.status == "optimal"` |
 | `test_lambda_constant` | $\lambda$ berekend vanuit $\rho$ en $c_p$ uit config = 1.1628 binnen tolerantie | `assert_allclose(lambda_calc, 1.1628, rtol=1e-4)` |
@@ -583,9 +682,12 @@ Bij elke implementatie of parameterwijziging verifiëren:
 | $P_{dhw}$ locatie | WP-wisselaar onderin → $B_{dhw}[0]=0$; elektrisch element boverin → $B_{dhw}[1]=0$ |
 | $T_{dhw}$ afgeleid | Nooit als onafhankelijke state; altijd gewogen gemiddelde van $T_{top}$ en $T_{bot}$ |
 | Stabiliteit Euler | $\Delta t \ll$ kleinste tijdconstante van elk subsysteem afzonderlijk |
-| LTV matrices | $A_{dhw}[k]$ en $E_{dhw}[k]$ herberekenen bij elke $k$ met actuele $\dot{V}_{tap}[k]$ |
-| Observeerbaarheid | Rang observeerbaarheidsmatrix = 2 voor beide subsystemen na parametrisatie |
-| Kalman covariantie | $P$ blijft symmetrisch PD dankzij Joseph-vorm update |
+| EKF Jacobiaan | $F[k]$ herberekenen bij elke $k$ op basis van $\hat{x}_{aug}[k]$ en $T_{mains}[k]$ |
+| EKF clamp | $\hat{\dot{V}}_{tap}[k] \leftarrow \max(0,\ \hat{\dot{V}}_{tap}[k])$ na elke updatestap — harde fysische eis |
+| LTV matrices (MPC) | $A_{dhw}[k]$ en $E_{dhw}[k]$ herberekenen met $\hat{\dot{V}}_{tap}[k]$ uit EKF bij elke MPC-aanroep |
+| Observeerbaarheid (2-state) | Rang observeerbaarheidsmatrix = 2 voor UFH en DHW MPC-model na parametrisatie |
+| Observeerbaarheid (EKF 3-state) | Rang augmented observeerbaarheidsmatrix = 3 mits $a_{strat} \neq 0$ en $T_{top} \neq T_{mains}$ |
+| Kalman covariantie | $P$ en $P_{aug}$ blijven symmetrisch PD dankzij Joseph-vorm update |
 | COP > 1 | Fail-Fast validatie bij laden config; kostfunctie gebruikt elektrisch vermogen = thermisch / COP |
 | Soft constraints | $\epsilon_{UFH}[k] \geq 0$ en $\epsilon_{dhw}[k] \geq 0$ in QP; straffactor $M$ uit config |
 | Legionella State Machine | Bovenliggende schil forceert $T_{leg}$-run binnen horizon; niet als blinde permanente QP-constraint |
