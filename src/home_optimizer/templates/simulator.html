@@ -589,7 +589,7 @@
     document.getElementById('warn').style.display = 'none';
 
     try {
-      const resp = await fetch(apiUrl('/api/optimize'), {
+      const resp = await fetch(apiUrl('/api/simulate'), {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(getReq()),

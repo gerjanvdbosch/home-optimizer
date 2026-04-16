@@ -3,7 +3,7 @@
 Architecture
 ------------
 The API acts as the **integration layer** between the dashboard UI and the
-thermal/MPC core.  A single ``POST /api/optimize`` endpoint:
+thermal/MPC core.  A single ``POST /api/simulate`` endpoint:
 
 1. Validates the user request via Pydantic (fail-fast on invalid physics).
 2. Builds the Carnot COP model from the user's heat-pump parameters.
@@ -37,7 +37,7 @@ GET  /                  Home Assistant operational dashboard (HTML)
 GET  /simulator         MPC parameter simulator (HTML)
 GET  /api/defaults      Default ``RunRequest`` as JSON
 GET  /api/forecast      Fetch OpenMeteo weather forecast as JSON
-POST /api/optimize      Run one MPC step, return charts + numerical summaries
+POST /api/simulate      Run one MPC step, return charts + numerical summaries
 """
 
 from __future__ import annotations
@@ -1040,7 +1040,7 @@ async def get_latest_forecast() -> ForecastResponse:
     )
 
 
-@app.post("/api/optimize", response_model=OptimizeResponse)
+@app.post("/api/simulate", response_model=OptimizeResponse)
 async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     """Run one MPC optimisation step and return charts + numerical summaries.
 

@@ -11,10 +11,10 @@ from home_optimizer.api import app
 client = TestClient(app)
 
 
-def test_optimize_exposes_pv_forecast_in_api_response() -> None:
-    """The optimize endpoint must return explicit PV forecast data and chart JSON."""
+def test_simulate_exposes_pv_forecast_in_api_response() -> None:
+    """The simulate endpoint must return explicit PV forecast data and chart JSON."""
     response = client.post(
-        "/api/optimize",
+        "/api/simulate",
         json={
             "pv_enabled": True,
             "pv_peak_kw": 4.0,
@@ -37,10 +37,10 @@ def test_optimize_exposes_pv_forecast_in_api_response() -> None:
     assert pv_fig["data"][0]["name"] == "P<sub>PV</sub> forecast [kW]"
 
 
-def test_optimize_supports_combined_mode_through_unified_mpc() -> None:
-    """The same optimize endpoint must solve UFH + DHW via the unified MPC controller."""
+def test_simulate_supports_combined_mode_through_unified_mpc() -> None:
+    """The same simulate endpoint must solve UFH + DHW via the unified MPC controller."""
     response = client.post(
-        "/api/optimize",
+        "/api/simulate",
         json={
             "dhw_enabled": True,
             "pv_enabled": True,
@@ -73,5 +73,4 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-chart-card"' in html
     assert 'id="pv_enabled"' in html
     assert 'UFH + DHW + PV MPC' in html
-
 

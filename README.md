@@ -108,7 +108,7 @@ De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederland
 | `GET` | `/api/defaults` | Standaard `RunRequest` als JSON |
 | `GET` | `/api/forecast` | Live Open-Meteo forecast (query params: lat, lon, horizon, pv_tilt, …) |
 | `GET` | `/api/forecast/latest` | Meest recente forecast uit de database |
-| `POST` | `/api/optimize` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
+| `POST` | `/api/simulate` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
 
 ---
 
