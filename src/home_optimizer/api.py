@@ -33,9 +33,11 @@ For DHW the supply temperature is approximately the comfort setpoint T_dhw_min.
 
 Endpoints
 ---------
-GET  /               Single-page dashboard (HTML)
-GET  /api/defaults   Default ``RunRequest`` as JSON
-POST /api/optimize   Run one MPC step, return charts + numerical summaries
+GET  /                  Home Assistant operational dashboard (HTML)
+GET  /simulator         MPC parameter simulator (HTML)
+GET  /api/defaults      Default ``RunRequest`` as JSON
+GET  /api/forecast      Fetch OpenMeteo weather forecast as JSON
+POST /api/optimize      Run one MPC step, return charts + numerical summaries
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ from pathlib import Path
 
 import numpy as np
 import plotly.graph_objects as go
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field
@@ -53,6 +55,7 @@ from pydantic import BaseModel, Field
 from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import DHWModel
 from .mpc import MPCController
+from .sensors.open_meteo import OpenMeteoClient
 from .thermal_model import ThermalModel
 from .types import (
     CombinedMPCParameters,
@@ -748,19 +751,196 @@ app = FastAPI(
     ),
     version="0.3.0",
 )
-_TEMPLATE = Path(__file__).parent / "templates" / "dashboard.html"
+_TEMPLATE_DASHBOARD = Path(__file__).parent / "templates" / "dashboard.html"
+_TEMPLATE_SIMULATOR = Path(__file__).parent / "templates" / "simulator.html"
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index() -> HTMLResponse:
-    """Serve the single-page dashboard HTML."""
-    return HTMLResponse(_TEMPLATE.read_text(encoding="utf-8"))
+    """Serve the Home Assistant operational dashboard HTML."""
+    return HTMLResponse(_TEMPLATE_DASHBOARD.read_text(encoding="utf-8"))
+
+
+@app.get("/simulator", response_class=HTMLResponse, include_in_schema=False)
+async def simulator() -> HTMLResponse:
+    """Serve the MPC parameter simulator HTML."""
+    return HTMLResponse(_TEMPLATE_SIMULATOR.read_text(encoding="utf-8"))
 
 
 @app.get("/api/defaults")
 async def defaults() -> RunRequest:
     """Return the default ``RunRequest`` as JSON (useful for UI initialisation)."""
     return RunRequest()
+
+
+class ForecastResponse(BaseModel):
+    """OpenMeteo forecast response for the Home Assistant dashboard.
+
+    All arrays have length ``horizon_steps``.  Time labels are ISO-8601 UTC strings.
+    """
+
+    horizon_steps: int
+    dt_hours: float
+    valid_from: str                          # ISO-8601 UTC string
+    labels: list[str]                        # HH:MM labels for charts
+    outdoor_temperature_c: list[float]       # T_out [C]
+    gti_w_per_m2: list[float]               # window GTI [W/m²]
+    gti_pv_w_per_m2: list[float]            # PV panel GTI [W/m²], 0 when not configured
+    # Plotly chart JSON strings
+    temperature_forecast_fig: str
+    solar_forecast_fig: str
+
+
+def _build_forecast_figures(
+    labels: list[str],
+    temps: list[float],
+    gti_window: list[float],
+    gti_pv: list[float],
+) -> tuple[str, str]:
+    """Build Plotly figures for the weather forecast dashboard.
+
+    Args:
+        labels:     HH:MM time labels.
+        temps:      Outdoor temperature [C] per step.
+        gti_window: South-facing window GTI [W/m²] per step.
+        gti_pv:     PV panel GTI [W/m²] per step.
+
+    Returns:
+        Tuple (temperature_fig_json, solar_fig_json).
+    """
+    # Temperature figure
+    t_fig = go.Figure()
+    t_fig.add_trace(go.Scatter(
+        x=labels, y=temps,
+        name="T<sub>buiten</sub> [°C]",
+        mode="lines+markers",
+        line=dict(color="#1e6bbf", width=2.5),
+        marker=dict(size=5),
+        fill="tozeroy",
+        fillcolor="rgba(30,107,191,0.08)",
+    ))
+    t_fig.update_layout(
+        margin=dict(l=0, r=0, t=10, b=0),
+        yaxis=dict(title="Temperatuur [°C]", gridcolor="#f5f5f5", zeroline=True,
+                   zerolinecolor="#ccc"),
+        xaxis=dict(gridcolor="#f5f5f5"),
+        legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
+        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+    )
+
+    # Solar / GTI figure
+    s_fig = go.Figure()
+    s_fig.add_trace(go.Scatter(
+        x=labels, y=gti_window,
+        name="GTI ramen [W/m²]",
+        mode="lines",
+        line=dict(color="#f39c12", width=2),
+        fill="tozeroy",
+        fillcolor="rgba(243,156,18,0.15)",
+    ))
+    if any(v > 0 for v in gti_pv):
+        s_fig.add_trace(go.Scatter(
+            x=labels, y=gti_pv,
+            name="GTI PV-panelen [W/m²]",
+            mode="lines",
+            line=dict(color="#f1c40f", width=2, dash="dot"),
+            fill="tozeroy",
+            fillcolor="rgba(241,196,15,0.10)",
+        ))
+    s_fig.update_layout(
+        margin=dict(l=0, r=0, t=10, b=0),
+        yaxis=dict(title="Instraling [W/m²]", gridcolor="#f5f5f5", zeroline=False),
+        xaxis=dict(gridcolor="#f5f5f5"),
+        legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
+        plot_bgcolor="white", paper_bgcolor="white", hovermode="x unified",
+    )
+    return t_fig.to_json(), s_fig.to_json()
+
+
+@app.get("/api/forecast", response_model=ForecastResponse)
+async def get_forecast(
+    latitude: float = Query(52.37, ge=-90.0, le=90.0,
+                            description="Site latitude [°N]"),
+    longitude: float = Query(4.90, ge=-180.0, le=180.0,
+                             description="Site longitude [°E]"),
+    horizon_hours: int = Query(48, ge=4, le=168,
+                               description="Forecast horizon [h]"),
+    dt_hours: float = Query(1.0, ge=0.25, le=2.0,
+                            description="Time step [h]"),
+    window_tilt: float = Query(90.0, ge=0.0, le=90.0,
+                               description="Window surface tilt [°]; 90 = vertical wall"),
+    window_azimuth: float = Query(0.0, ge=-180.0, le=180.0,
+                                  description="Window azimuth [°]; 0 = South"),
+    pv_tilt: float | None = Query(None, ge=0.0, le=90.0,
+                                  description="PV panel tilt [°]; None = no PV forecast"),
+    pv_azimuth: float = Query(0.0, ge=-180.0, le=180.0,
+                              description="PV panel azimuth [°]; 0 = South"),
+) -> ForecastResponse:
+    """Fetch an OpenMeteo weather forecast and return structured JSON for the dashboard.
+
+    Makes one or two HTTP calls to the Open-Meteo free API (no API key required).
+    Returns temperature and solar irradiance arrays plus Plotly chart JSON.
+
+    Args:
+        latitude:       Site latitude [°N].
+        longitude:      Site longitude [°E].
+        horizon_hours:  Total forecast window [h].
+        dt_hours:       Time step [h].
+        window_tilt:    South-facing window tilt [°].
+        window_azimuth: Window azimuth [°] (0 = South).
+        pv_tilt:        PV panel tilt [°]; ``None`` disables the PV GTI fetch.
+        pv_azimuth:     PV panel azimuth [°].
+
+    Returns:
+        ``ForecastResponse`` with arrays and Plotly chart JSON.
+
+    Raises:
+        HTTPException 502: When the Open-Meteo API call fails.
+    """
+    client = OpenMeteoClient(
+        latitude=latitude,
+        longitude=longitude,
+        tilt=window_tilt,
+        azimuth=window_azimuth,
+        pv_tilt=pv_tilt,
+        pv_azimuth=pv_azimuth,
+    )
+    try:
+        forecast = client.get_forecast(
+            horizon_hours=horizon_hours,
+            dt_hours=dt_hours,
+        )
+    except (ConnectionError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    n = forecast.horizon_steps
+    # Build HH:MM labels from valid_from UTC datetime
+    base = forecast.valid_from
+    labels = [
+        (base + __import__("datetime").timedelta(hours=k * dt_hours)).strftime("%d-%m %H:%M")
+        for k in range(n)
+    ]
+    temps = forecast.outdoor_temperature_c.tolist()
+    gti_w = forecast.gti_w_per_m2.tolist()
+    gti_pv = (
+        forecast.gti_pv_w_per_m2.tolist()
+        if forecast.gti_pv_w_per_m2 is not None
+        else [0.0] * n
+    )
+
+    temp_fig_json, solar_fig_json = _build_forecast_figures(labels, temps, gti_w, gti_pv)
+
+    return ForecastResponse(
+        horizon_steps=n,
+        dt_hours=dt_hours,
+        valid_from=forecast.valid_from.isoformat(),
+        labels=labels,
+        outdoor_temperature_c=temps,
+        gti_w_per_m2=gti_w,
+        gti_pv_w_per_m2=gti_pv,
+        temperature_forecast_fig=temp_fig_json,
+        solar_forecast_fig=solar_fig_json,
+    )
 
 
 @app.post("/api/optimize", response_model=OptimizeResponse)

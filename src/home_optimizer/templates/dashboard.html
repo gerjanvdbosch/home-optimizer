@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Home Optimizer</title>
+  <title>Home Optimizer – Dashboard</title>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -11,647 +11,409 @@
 
     body {
       font-family: system-ui, -apple-system, sans-serif;
-      background: #f0f2f5;
-      color: #333;
+      background: #111827;
+      color: #e5e7eb;
       font-size: 14px;
     }
 
     header {
-      background: #1e3a5f;
-      color: #fff;
+      background: #1f2937;
+      border-bottom: 1px solid #374151;
       padding: .9rem 1.4rem;
-    }
-    header h1 { font-size: 1.1rem; font-weight: 700; }
-    header p  { font-size: .82rem; opacity: .82; margin-top: .15rem; }
-
-    .layout {
-      display: grid;
-      grid-template-columns: 340px 1fr;
-      min-height: calc(100vh - 64px);
-    }
-
-    .sidebar {
-      background: #fff;
-      border-right: 1px solid #e0e0e0;
-      padding: .9rem;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: .8rem;
-    }
-
-    .panel {
-      border: 1px solid #edf0f3;
-      border-radius: 8px;
-      padding: .8rem;
-      background: #fcfdff;
-    }
-    .panel-title {
-      font-size: .74rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      color: #6b7280;
-      margin-bottom: .55rem;
-    }
-
-    .field { margin: .38rem 0; }
-    .field label {
-      display: flex;
-      justify-content: space-between;
-      gap: .6rem;
-      color: #555;
-      margin-bottom: .2rem;
-    }
-    .field label span {
-      font-weight: 700;
-      color: #1e3a5f;
-      min-width: 3rem;
-      text-align: right;
-    }
-    .field input[type="number"] {
-      width: 100%;
-      padding: .38rem .5rem;
-      border: 1px solid #d8dde3;
-      border-radius: 4px;
-      font-size: .82rem;
-      background: #fff;
-    }
-    .field input[type="number"]:focus {
-      outline: none;
-      border-color: #1e6bbf;
-    }
-
-    .toggle {
       display: flex;
       align-items: center;
-      gap: .5rem;
-      margin: .42rem 0;
+      justify-content: space-between;
+      gap: 1rem;
     }
-    .toggle label { color: #555; }
-    .toggle input {
-      width: 16px;
-      height: 16px;
-      accent-color: #1e3a5f;
-      cursor: pointer;
+    header h1 { font-size: 1.1rem; font-weight: 700; color: #f9fafb; }
+    header p  { font-size: .8rem; color: #9ca3af; margin-top: .1rem; }
+    .header-actions { display: flex; align-items: center; gap: .8rem; flex-shrink: 0; }
+    .badge {
+      background: #374151; color: #9ca3af;
+      border-radius: 999px; padding: .2rem .65rem;
+      font-size: .72rem; font-weight: 600; letter-spacing: .04em;
     }
+    .badge.ok   { background: #064e3b; color: #6ee7b7; }
+    .badge.warn { background: #78350f; color: #fcd34d; }
+    .badge.err  { background: #7f1d1d; color: #fca5a5; }
 
-    .hint {
-      font-size: .76rem;
-      color: #6b7280;
-      line-height: 1.35;
-      margin-top: .35rem;
-    }
-
-    .btn {
-      width: 100%;
-      padding: .7rem;
-      background: #1e3a5f;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      font-size: .9rem;
-      font-weight: 700;
-      cursor: pointer;
-      letter-spacing: .02em;
+    .btn-sm {
+      padding: .35rem .75rem;
+      border-radius: 6px; border: none; cursor: pointer;
+      font-size: .8rem; font-weight: 600;
+      background: #3b82f6; color: #fff;
       transition: background .15s;
     }
-    .btn:hover { background: #2a5491; }
-    .btn:disabled { background: #a3a3a3; cursor: not-allowed; }
+    .btn-sm:hover { background: #2563eb; }
+    .btn-sm:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
+    .btn-sm.secondary { background: #374151; color: #d1d5db; }
+    .btn-sm.secondary:hover { background: #4b5563; }
 
     .spin {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid #fff;
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: spin .6s linear infinite;
-      vertical-align: middle;
-      margin-right: .4rem;
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid #fff; border-top-color: transparent;
+      border-radius: 50%; animation: spin .6s linear infinite;
+      vertical-align: middle; margin-right: .3rem;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .main {
-      padding: .95rem;
-      display: flex;
-      flex-direction: column;
-      gap: .8rem;
+    .location-bar {
+      background: #1f2937;
+      border-bottom: 1px solid #374151;
+      padding: .55rem 1.4rem;
+      display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
     }
+    .location-bar label { font-size: .78rem; color: #9ca3af; }
+    .location-bar input[type="number"] {
+      width: 90px; padding: .28rem .45rem;
+      background: #111827; border: 1px solid #374151;
+      border-radius: 4px; color: #e5e7eb; font-size: .78rem;
+    }
+    .location-bar input[type="number"]:focus { outline: none; border-color: #3b82f6; }
+    .location-bar select {
+      padding: .28rem .45rem;
+      background: #111827; border: 1px solid #374151;
+      border-radius: 4px; color: #e5e7eb; font-size: .78rem;
+    }
+    .separator { color: #374151; }
 
-    .stats {
+    .main { padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: .85rem; }
+
+    .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
-      gap: .6rem;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: .65rem;
     }
+    .kpi-card {
+      background: #1f2937; border: 1px solid #374151;
+      border-radius: 10px; padding: .8rem 1rem;
+    }
+    .kpi-label { font-size: .67rem; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; }
+    .kpi-value { font-size: 1.25rem; font-weight: 700; color: #f9fafb; margin-top: .15rem; }
+    .kpi-unit  { font-size: .72rem; color: #9ca3af; margin-left: .2rem; }
+    .kpi-trend { font-size: .7rem; color: #6b7280; margin-top: .12rem; }
+    .kpi-card.highlight { border-color: #3b82f6; }
 
-    .stat-card {
-      background: #fff;
-      border-radius: 8px;
-      padding: .7rem .9rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    .chart-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: .85rem;
     }
-    .stat-label {
-      font-size: .68rem;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      color: #888;
-    }
-    .stat-value {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: #1e3a5f;
-      margin-top: .12rem;
-    }
-    .stat-unit { font-size: .75rem; color: #888; margin-left: .2rem; }
+    @media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
 
-    /* ── All chart cards: full-width, uniform height ── */
     .chart-card {
-      background: #fff;
-      border-radius: 8px;
-      padding: .9rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      background: #1f2937; border: 1px solid #374151;
+      border-radius: 10px; padding: .9rem 1rem;
     }
+    .chart-card.full { grid-column: 1 / -1; }
     .chart-card h3 {
-      font-size: .8rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      color: #888;
-      margin-bottom: .6rem;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; color: #6b7280; margin-bottom: .55rem;
     }
-    /* Single canonical chart height — all charts the same size */
-    .chart-inner { height: 280px; }
+    .chart-inner { height: 240px; }
 
-    .error-banner,
-    .warn-banner {
-      border-radius: 6px;
-      padding: .7rem .9rem;
-      font-size: .82rem;
-      display: none;
+    .section-header { display: flex; align-items: center; gap: .6rem; margin-bottom: .05rem; }
+    .section-header h2 {
+      font-size: .78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: #4b5563; white-space: nowrap;
     }
-    .error-banner { background: #fde; color: #a00; }
-    .warn-banner  { background: #fff3cd; color: #856404; }
+    .section-header hr { flex: 1; border: none; border-top: 1px solid #374151; }
 
-    .hidden { display: none !important; }
+    .banner { border-radius: 8px; padding: .65rem .9rem; font-size: .82rem; display: none; }
+    .banner.err  { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
+    .banner.warn { background: #451a03; color: #fcd34d; border: 1px solid #78350f; }
+    .banner.info { background: #0c4a6e; color: #7dd3fc; border: 1px solid #0369a1; }
 
-    @media (max-width: 1100px) {
-      .layout { grid-template-columns: 1fr; }
-      .sidebar { border-right: none; border-bottom: 1px solid #e0e0e0; }
+    .forecast-meta {
+      font-size: .72rem; color: #6b7280;
+      display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
     }
+    .forecast-meta strong { color: #9ca3af; }
+
+    .sim-link { font-size: .75rem; color: #60a5fa; text-decoration: none; }
+    .sim-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
+
 <header>
   <div>
-    <h1>🏠 Home Optimizer &mdash; UFH + DHW + PV MPC</h1>
-    <p>Gecombineerd thermisch model &middot; MPC-optimalisatie &middot; Carnot COP-model (stooklijn) &middot; Kalman-filter &middot; PV self-consumption</p>
+    <h1>🏠 Home Optimizer &mdash; Dashboard</h1>
+    <p>Open-Meteo weersvoorspelling &middot; UFH + DHW + PV MPC &middot; Home Assistant</p>
+  </div>
+  <div class="header-actions">
+    <span class="badge" id="badge-status">–</span>
+    <a href="/simulator" class="btn-sm secondary">🧪 Simulator</a>
+    <button class="btn-sm" id="refresh-btn" onclick="loadAll()">↻ Vernieuwen</button>
   </div>
 </header>
 
-<div class="layout">
-  <!-- ═══════════════════════════════ SIDEBAR ═══════════════════════════════ -->
-  <aside class="sidebar">
-
-    <div class="panel">
-      <div class="panel-title">Systeem</div>
-      <div class="field">
-        <label>Horizon N [stappen] <span id="vN">24</span></label>
-        <input type="number" id="horizon_hours" value="24" min="4" max="48" step="1" oninput="upd('vN', this.value)" />
-      </div>
-      <div class="field">
-        <label>&Delta;t [h] <span id="vDt">1.0</span></label>
-        <input type="number" id="dt_hours" value="1.0" min="0.25" max="2.0" step="0.25" oninput="upd('vDt', this.value)" />
-      </div>
-      <div class="toggle">
-        <input type="checkbox" id="dhw_enabled" />
-        <label for="dhw_enabled">DHW-regeling actief</label>
-      </div>
-      <div class="toggle">
-        <input type="checkbox" id="pv_enabled" />
-        <label for="pv_enabled">PV-self-consumption actief</label>
-      </div>
-      <div class="toggle">
-        <input type="checkbox" id="dynamic_price" checked />
-        <label for="dynamic_price">Dynamische stroomprijs</label>
-      </div>
-      <div class="toggle">
-        <input type="checkbox" id="solar_gain" checked />
-        <label for="solar_gain">Zoninstraling meenemen</label>
-      </div>
-      <div class="hint">DHW alleen actief als dezelfde warmtepomp zowel UFH als tapwater voedt. Dan geldt de gedeelde elektrische vermogensconstraint.</div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">UFH &mdash; thermisch model</div>
-      <div class="field">
-        <label>C_r [kWh/K] <span id="vCr">6.0</span></label>
-        <input type="number" id="C_r" value="6.0" min="0.5" max="50" step="0.5" oninput="upd('vCr', this.value)" />
-      </div>
-      <div class="field">
-        <label>C_b [kWh/K] <span id="vCb">10.0</span></label>
-        <input type="number" id="C_b" value="10.0" min="1" max="200" step="0.5" oninput="upd('vCb', this.value)" />
-      </div>
-      <div class="field">
-        <label>R_br [K/kW] <span id="vRbr">1.0</span></label>
-        <input type="number" id="R_br" value="1.0" min="0.1" max="20" step="0.1" oninput="upd('vRbr', this.value)" />
-      </div>
-      <div class="field">
-        <label>R_ro [K/kW] <span id="vRro">10.0</span></label>
-        <input type="number" id="R_ro" value="10.0" min="0.1" max="30" step="0.5" oninput="upd('vRro', this.value)" />
-      </div>
-      <div class="field">
-        <label>&alpha; [-] <span id="vAlpha">0.25</span></label>
-        <input type="number" id="alpha" value="0.25" min="0" max="1" step="0.05" oninput="upd('vAlpha', this.value)" />
-      </div>
-      <div class="field">
-        <label>&eta; [-] <span id="vEta">0.55</span></label>
-        <input type="number" id="eta" value="0.55" min="0" max="1" step="0.05" oninput="upd('vEta', this.value)" />
-      </div>
-      <div class="field">
-        <label>A_glass [m&sup2;] <span id="vAglass">7.5</span></label>
-        <input type="number" id="A_glass" value="7.5" min="0.5" max="40" step="0.5" oninput="upd('vAglass', this.value)" />
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">UFH &mdash; comfort en actuator</div>
-      <div class="field">
-        <label>T_r init [&deg;C] <span id="vTri">20.5</span></label>
-        <input type="number" id="T_r_init" value="20.5" min="5" max="35" step="0.1" oninput="upd('vTri', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_b init [&deg;C] <span id="vTbi">22.5</span></label>
-        <input type="number" id="T_b_init" value="22.5" min="5" max="45" step="0.5" oninput="upd('vTbi', this.value)" />
-      </div>
-      <div class="field">
-        <label>P_UFH vorige stap [kW] <span id="vPprev">0.8</span></label>
-        <input type="number" id="previous_power_kw" value="0.8" min="0" max="20" step="0.1" oninput="upd('vPprev', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_ref [&deg;C] <span id="vTref">20.5</span></label>
-        <input type="number" id="T_ref" value="20.5" min="15" max="26" step="0.5" oninput="upd('vTref', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_min [&deg;C] <span id="vTmin">19.0</span></label>
-        <input type="number" id="T_min" value="19.0" min="10" max="25" step="0.5" oninput="upd('vTmin', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_max [&deg;C] <span id="vTmax">22.5</span></label>
-        <input type="number" id="T_max" value="22.5" min="16" max="30" step="0.5" oninput="upd('vTmax', this.value)" />
-      </div>
-      <div class="field">
-        <label>P_UFH,max [kW therm] <span id="vPmax">4.5</span></label>
-        <input type="number" id="P_max" value="4.5" min="0.5" max="20" step="0.5" oninput="upd('vPmax', this.value)" />
-      </div>
-      <div class="field">
-        <label>&Delta;P_UFH,max [kW/stap] <span id="vDPmax">1.0</span></label>
-        <input type="number" id="delta_P_max" value="1.0" min="0.1" max="10" step="0.1" oninput="upd('vDPmax', this.value)" />
-      </div>
-      <div class="field">
-        <label>Q_c <span id="vQc">8.0</span></label>
-        <input type="number" id="Q_c" value="8.0" min="0" max="100" step="1" oninput="upd('vQc', this.value)" />
-      </div>
-      <div class="field">
-        <label>R_c <span id="vRc">0.05</span></label>
-        <input type="number" id="R_c" value="0.05" min="0" max="5" step="0.01" oninput="upd('vRc', this.value)" />
-      </div>
-      <div class="field">
-        <label>Q_N <span id="vQn">12.0</span></label>
-        <input type="number" id="Q_N" value="12.0" min="0" max="100" step="1" oninput="upd('vQn', this.value)" />
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">Forecast, prijs en PV</div>
-      <div class="field">
-        <label>T_buiten [&deg;C] <span id="vTout">6.0</span></label>
-        <input type="number" id="outdoor_temperature_c" value="6.0" min="-20" max="35" step="1" oninput="upd('vTout', this.value)" />
-      </div>
-      <div class="field">
-        <label>Interne warmte [kW] <span id="vQint">0.3</span></label>
-        <input type="number" id="internal_gains_kw" value="0.30" min="0" max="3" step="0.05" oninput="upd('vQint', this.value)" />
-      </div>
-      <div class="field" id="flat_price_field">
-        <label>Vaste prijs [&euro;/kWh] <span id="vFlatP">0.25</span></label>
-        <input type="number" id="flat_price" value="0.25" min="0" max="2" step="0.01" oninput="upd('vFlatP', this.value)" />
-      </div>
-      <div class="field">
-        <label>PV piekvermogen [kW] <span id="vPvPeak">4.0</span></label>
-        <input type="number" id="pv_peak_kw" value="4.0" min="0" max="20" step="0.5" oninput="upd('vPvPeak', this.value)" />
-      </div>
-    </div>
-
-    <!-- Carnot COP model panel -->
-    <div class="panel">
-      <div class="panel-title">Warmtepomp &mdash; COP model (Carnot + stooklijn)</div>
-      <div class="field">
-        <label>&eta;<sub>Carnot</sub> [-] <span id="vEtaCarnot">0.45</span></label>
-        <input type="number" id="eta_carnot" value="0.45" min="0.1" max="0.99" step="0.01" oninput="upd('vEtaCarnot', this.value)" />
-      </div>
-      <div class="field">
-        <label>&Delta;T_cond [K] <span id="vDTcond">5.0</span></label>
-        <input type="number" id="delta_T_cond" value="5.0" min="0" max="15" step="0.5" oninput="upd('vDTcond', this.value)" />
-      </div>
-      <div class="field">
-        <label>&Delta;T_evap [K] <span id="vDTevap">5.0</span></label>
-        <input type="number" id="delta_T_evap" value="5.0" min="0" max="15" step="0.5" oninput="upd('vDTevap', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_aanvoer,min [&deg;C] <span id="vTsupMin">28.0</span></label>
-        <input type="number" id="T_supply_min" value="28.0" min="15" max="60" step="1" oninput="upd('vTsupMin', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_buiten,ref stooklijn [&deg;C] <span id="vTrefCurve">18.0</span></label>
-        <input type="number" id="T_ref_outdoor_curve" value="18.0" min="5" max="25" step="1" oninput="upd('vTrefCurve', this.value)" />
-      </div>
-      <div class="field">
-        <label>Stooklijnhelling [K/K] <span id="vHcSlope">1.0</span></label>
-        <input type="number" id="heating_curve_slope" value="1.0" min="0" max="3" step="0.1" oninput="upd('vHcSlope', this.value)" />
-      </div>
-      <div class="field">
-        <label>COP_min [-] <span id="vCopMin">1.5</span></label>
-        <input type="number" id="cop_min" value="1.5" min="1.01" max="5" step="0.1" oninput="upd('vCopMin', this.value)" />
-      </div>
-      <div class="field">
-        <label>COP_max [-] <span id="vCopMax">7.0</span></label>
-        <input type="number" id="cop_max" value="7.0" min="2" max="15" step="0.5" oninput="upd('vCopMax', this.value)" />
-      </div>
-    </div>
-
-    <!-- DHW tank panel -->
-    <div class="panel" id="dhw-settings">
-      <div class="panel-title">DHW &mdash; tank en constraints</div>
-      <div class="field">
-        <label>C_top [kWh/K] <span id="vDhwCtop">0.58</span></label>
-        <input type="number" id="dhw_C_top" value="0.5814" min="0.01" max="5" step="0.01" oninput="upd('vDhwCtop', this.value)" />
-      </div>
-      <div class="field">
-        <label>C_bot [kWh/K] <span id="vDhwCbot">0.58</span></label>
-        <input type="number" id="dhw_C_bot" value="0.5814" min="0.01" max="5" step="0.01" oninput="upd('vDhwCbot', this.value)" />
-      </div>
-      <div class="field">
-        <label>R_strat [K/kW] <span id="vDhwRstrat">10.0</span></label>
-        <input type="number" id="dhw_R_strat" value="10.0" min="1" max="100" step="1" oninput="upd('vDhwRstrat', this.value)" />
-      </div>
-      <div class="field">
-        <label>R_loss [K/kW] <span id="vDhwRloss">50.0</span></label>
-        <input type="number" id="dhw_R_loss" value="50.0" min="5" max="200" step="1" oninput="upd('vDhwRloss', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_top init [&deg;C] <span id="vDhwTtop">55.0</span></label>
-        <input type="number" id="dhw_T_top_init" value="55.0" min="20" max="85" step="0.5" oninput="upd('vDhwTtop', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_bot init [&deg;C] <span id="vDhwTbot">45.0</span></label>
-        <input type="number" id="dhw_T_bot_init" value="45.0" min="15" max="80" step="0.5" oninput="upd('vDhwTbot', this.value)" />
-      </div>
-      <div class="field">
-        <label>P_DHW,max [kW therm] <span id="vDhwPmax">3.0</span></label>
-        <input type="number" id="dhw_P_max" value="3.0" min="0.5" max="15" step="0.5" oninput="upd('vDhwPmax', this.value)" />
-      </div>
-      <div class="field">
-        <label>&Delta;P_DHW,max [kW/stap] <span id="vDhwDPmax">1.0</span></label>
-        <input type="number" id="dhw_delta_P_max" value="1.0" min="0.1" max="10" step="0.1" oninput="upd('vDhwDPmax', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_DHW,min [&deg;C] <span id="vDhwTmin">50.0</span></label>
-        <input type="number" id="dhw_T_min" value="50.0" min="35" max="70" step="0.5" oninput="upd('vDhwTmin', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_legionella [&deg;C] <span id="vDhwTleg">60.0</span></label>
-        <input type="number" id="dhw_T_legionella" value="60.0" min="55" max="85" step="0.5" oninput="upd('vDhwTleg', this.value)" />
-      </div>
-      <div class="field">
-        <label>Legionella periode [stappen] <span id="vDhwLegP">168</span></label>
-        <input type="number" id="dhw_legionella_period_steps" value="168" min="24" max="336" step="1" oninput="upd('vDhwLegP', this.value)" />
-      </div>
-      <div class="field">
-        <label>Legionella duur [stappen] <span id="vDhwLegD">1</span></label>
-        <input type="number" id="dhw_legionella_duration_steps" value="1" min="1" max="4" step="1" oninput="upd('vDhwLegD', this.value)" />
-      </div>
-      <div class="field">
-        <label>V&#775;_tap [m&sup3;/h] <span id="vDhwVtap">0.01</span></label>
-        <input type="number" id="dhw_v_tap_m3_per_h" value="0.01" min="0" max="0.2" step="0.005" oninput="upd('vDhwVtap', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_mains [&deg;C] <span id="vDhwTmains">10.0</span></label>
-        <input type="number" id="dhw_t_mains_c" value="10.0" min="0" max="25" step="0.5" oninput="upd('vDhwTmains', this.value)" />
-      </div>
-      <div class="field">
-        <label>T_amb [&deg;C] <span id="vDhwTamb">20.0</span></label>
-        <input type="number" id="dhw_t_amb_c" value="20.0" min="5" max="35" step="0.5" oninput="upd('vDhwTamb', this.value)" />
-      </div>
-      <div class="field">
-        <label>P_HP,max <strong>elektrisch</strong> [kW] <span id="vPhpMaxElec">2.5</span></label>
-        <input type="number" id="P_hp_max_elec" value="2.5" min="0.5" max="30" step="0.5" oninput="upd('vPhpMaxElec', this.value)" />
-      </div>
-      <div class="hint">Begrenst gedeeld elektrisch WP-vermogen: P_UFH/COP_UFH + P_dhw/COP_dhw &le; P_HP,max,elec</div>
-    </div>
-
-    <button class="btn" id="run-btn" onclick="runOptimize()">&#9654; Optimaliseer</button>
-  </aside>
-
-  <!-- ═══════════════════════════════ MAIN ════════════════════════════════ -->
-  <main class="main">
-    <div class="error-banner" id="err"></div>
-    <div class="warn-banner"  id="warn"></div>
-
-    <div class="stats">
-      <div class="stat-card"><div class="stat-label">Solver status</div><div class="stat-value" id="s-status">&ndash;</div></div>
-      <div class="stat-card"><div class="stat-label">P_UFH stap 1</div><div class="stat-value" id="s-pufh">&ndash;<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">P_DHW stap 1</div><div class="stat-value" id="s-pdhw">&ndash;<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">P_HP totaal stap 1</div><div class="stat-value" id="s-php">&ndash;<span class="stat-unit">kW</span></div></div>
-      <div class="stat-card"><div class="stat-label">COP<sub>UFH</sub> stap 1</div><div class="stat-value" id="s-cop-ufh">&ndash;</div></div>
-      <div class="stat-card"><div class="stat-label">COP<sub>DHW</sub> stap 1</div><div class="stat-value" id="s-cop-dhw">&ndash;</div></div>
-      <div class="stat-card"><div class="stat-label">HP thermische energie</div><div class="stat-value" id="s-energy">&ndash;<span class="stat-unit">kWh</span></div></div>
-      <div class="stat-card"><div class="stat-label">Netto gridimport</div><div class="stat-value" id="s-grid">&ndash;<span class="stat-unit">kWh</span></div></div>
-      <div class="stat-card"><div class="stat-label">Totale gridkosten</div><div class="stat-value" id="s-cost">&ndash;<span class="stat-unit">&euro;</span></div></div>
-      <div class="stat-card"><div class="stat-label">UFH comfortviolation</div><div class="stat-value" id="s-ufh-viol">&ndash;<span class="stat-unit">K</span></div></div>
-      <div class="stat-card"><div class="stat-label">DHW comfortviolation</div><div class="stat-value" id="s-dhw-viol">&ndash;<span class="stat-unit">K</span></div></div>
-      <div class="stat-card"><div class="stat-label">PV forecast totaal</div><div class="stat-value" id="s-pv">&ndash;<span class="stat-unit">kWh</span></div></div>
-    </div>
-
-    <!-- All charts: full-width, same height (280 px via .chart-inner) -->
-
-    <div class="chart-card">
-      <h3>UFH &mdash; kamertemperatuur</h3>
-      <div id="temp-chart" class="chart-inner"></div>
-    </div>
-
-    <div class="chart-card">
-      <h3>Warmtepompvermogen (thermisch), PV en stroomprijs</h3>
-      <div id="power-chart" class="chart-inner"></div>
-    </div>
-
-    <div class="chart-card">
-      <h3>Warmtepomp COP profiel &mdash; Carnot model (stooklijn + buitentemperatuur)</h3>
-      <div id="cop-chart" class="chart-inner"></div>
-    </div>
-
-    <div class="chart-card" id="dhw-chart-card">
-      <h3>DHW &mdash; tanktemperaturen</h3>
-      <div id="dhw-chart" class="chart-inner"></div>
-    </div>
-
-    <div class="chart-card">
-      <h3>PV forecast</h3>
-      <div id="pv-chart" class="chart-inner"></div>
-    </div>
-
-  </main>
+<div class="location-bar">
+  <label>Latitude</label>
+  <input type="number" id="loc-lat" value="52.37" step="0.01" />
+  <label>Longitude</label>
+  <input type="number" id="loc-lon" value="4.90" step="0.01" />
+  <span class="separator">|</span>
+  <label>Horizon</label>
+  <select id="loc-horizon">
+    <option value="24">24 h</option>
+    <option value="48" selected>48 h</option>
+    <option value="72">72 h</option>
+    <option value="120">5 dagen</option>
+    <option value="168">7 dagen</option>
+  </select>
+  <label>PV helling (°)</label>
+  <input type="number" id="pv-tilt" value="35" min="0" max="90" step="1" />
+  <span class="separator">|</span>
+  <button class="btn-sm" onclick="loadForecast()">🌤 Forecast laden</button>
 </div>
 
+<main class="main">
+
+  <div class="banner err"  id="banner-err"></div>
+  <div class="banner warn" id="banner-warn"></div>
+  <div class="banner info" id="banner-info">Forecast wordt geladen&hellip;</div>
+
+  <!-- KPI cards -->
+  <div class="section-header"><h2>Forecast KPI&rsquo;s</h2><hr /></div>
+  <div class="kpi-grid">
+    <div class="kpi-card highlight">
+      <div class="kpi-label">Buitentemperatuur nu</div>
+      <div class="kpi-value" id="kpi-t-now">&ndash;<span class="kpi-unit">°C</span></div>
+      <div class="kpi-trend" id="kpi-t-trend"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Min. temp (horizon)</div>
+      <div class="kpi-value" id="kpi-t-min">&ndash;<span class="kpi-unit">°C</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Max. temp (horizon)</div>
+      <div class="kpi-value" id="kpi-t-max">&ndash;<span class="kpi-unit">°C</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Zonnepiek ramen</div>
+      <div class="kpi-value" id="kpi-gti-peak">&ndash;<span class="kpi-unit">W/m²</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Zonnepiek PV-panelen</div>
+      <div class="kpi-value" id="kpi-pv-peak">&ndash;<span class="kpi-unit">W/m²</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Geldig vanaf</div>
+      <div class="kpi-value" style="font-size:.85rem;" id="kpi-valid-from">&ndash;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Horizon stappen</div>
+      <div class="kpi-value" id="kpi-steps">&ndash;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Tijdstap</div>
+      <div class="kpi-value" id="kpi-dt">&ndash;<span class="kpi-unit">h</span></div>
+    </div>
+  </div>
+
+  <!-- Forecast meta -->
+  <div class="forecast-meta" id="forecast-meta" style="display:none;">
+    <span>📍 <strong id="meta-location"></strong></span>
+    <span>⏱ geldig: <strong id="meta-valid"></strong></span>
+    <span>📏 stappen: <strong id="meta-steps"></strong></span>
+    <span>🌍 bron: <strong>Open-Meteo (gratis, geen API-sleutel)</strong></span>
+  </div>
+
+  <!-- Temperature forecast -->
+  <div class="section-header"><h2>Temperatuurverwachting</h2><hr /></div>
+  <div class="chart-row">
+    <div class="chart-card full">
+      <h3>Buitentemperatuur [°C] — Open-Meteo forecast</h3>
+      <div id="chart-temp" class="chart-inner"></div>
+    </div>
+  </div>
+
+  <!-- Solar forecast -->
+  <div class="section-header"><h2>Zoninstraling (GTI)</h2><hr /></div>
+  <div class="chart-row">
+    <div class="chart-card full">
+      <h3>Global Tilted Irradiance [W/m²] — ramen (90°, Zuid) en PV-panelen</h3>
+      <div id="chart-solar" class="chart-inner"></div>
+    </div>
+  </div>
+
+  <!-- Heating degree hours -->
+  <div class="section-header"><h2>Verwarmingsbehoefte</h2><hr /></div>
+  <div class="chart-row">
+    <div class="chart-card full">
+      <h3>Graaduren verwarming [K·h] — proxy UFH-vraag (18 °C referentie)</h3>
+      <div id="chart-hdd" class="chart-inner"></div>
+    </div>
+  </div>
+
+  <div style="text-align:right; padding:.4rem 0; font-size:.72rem; color:#4b5563;">
+    Home Optimizer v0.3 &middot;
+    <a href="/simulator" class="sim-link">Simulator</a> &middot;
+    <a href="/docs" class="sim-link">API docs</a>
+  </div>
+
+</main>
+
 <script>
-  function upd(id, val) {
-    const v = parseFloat(val);
-    if (Number.isNaN(v)) return;
-    document.getElementById(id).textContent = v.toFixed(v < 1 && val !== '0' ? 2 : 1);
+  // ─── Dark Plotly layout template ────────────────────────────────────────
+  const DARK = {
+    plot_bgcolor:  '#111827',
+    paper_bgcolor: '#1f2937',
+    font: { color: '#9ca3af', size: 11 },
+    xaxis: { gridcolor: '#374151', linecolor: '#374151', zerolinecolor: '#374151' },
+    yaxis: { gridcolor: '#374151', linecolor: '#374151', zerolinecolor: '#374151' },
+    legend: { bgcolor: 'rgba(0,0,0,0)', font: { size: 11 }, orientation: 'h', y: -0.22 },
+    margin: { l: 0, r: 0, t: 10, b: 0 },
+    hovermode: 'x unified',
+  };
+  const CFG = { responsive: true, displayModeBar: false };
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+  function setBadge(text, type) {
+    const el = document.getElementById('badge-status');
+    el.textContent = text;
+    el.className = 'badge ' + (type || '');
+  }
+  function showBanner(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+  function hideBanner(id) { document.getElementById(id).style.display = 'none'; }
+  function hideAllBanners() { ['banner-err','banner-warn','banner-info'].forEach(hideBanner); }
+
+  function setKpi(id, value, decimals) {
+    const el = document.getElementById(id);
+    if (value === null || value === undefined) return;
+    const unit = el.querySelector('.kpi-unit');
+    el.innerHTML = Number(value).toFixed(decimals ?? 1)
+      + (unit ? unit.outerHTML : '');
   }
 
-  function setVisible(id, isVisible) {
-    document.getElementById(id).classList.toggle('hidden', !isVisible);
-  }
+  // ─── Heating degree hours chart ──────────────────────────────────────────
+  const T_REF_HEATING = 18.0;  // NL stooklijn referentiepunt [°C]
 
-  function syncVisibility() {
-    setVisible('flat_price_field', !document.getElementById('dynamic_price').checked);
-    setVisible('dhw-settings',     document.getElementById('dhw_enabled').checked);
-    setVisible('dhw-chart-card',   document.getElementById('dhw_enabled').checked);
-  }
-
-  document.getElementById('dynamic_price').addEventListener('change', syncVisibility);
-  document.getElementById('dhw_enabled').addEventListener('change', syncVisibility);
-
-  function getReq() {
-    const n = (id) => parseFloat(document.getElementById(id).value);
-    const i = (id) => parseInt(document.getElementById(id).value, 10);
-    const b = (id) => document.getElementById(id).checked;
+  function buildHddFig(labels, temps) {
+    const hdh = temps.map(t => Math.max(0, T_REF_HEATING - t));
+    const maxHdh = Math.max(...hdh, 1);
     return {
-      C_r: n('C_r'), C_b: n('C_b'), R_br: n('R_br'), R_ro: n('R_ro'),
-      alpha: n('alpha'), eta: n('eta'), A_glass: n('A_glass'),
-      T_r_init: n('T_r_init'), T_b_init: n('T_b_init'),
-      previous_power_kw: n('previous_power_kw'),
-      horizon_hours: i('horizon_hours'), dt_hours: n('dt_hours'),
-      Q_c: n('Q_c'), R_c: n('R_c'), Q_N: n('Q_N'),
-      P_max: n('P_max'), delta_P_max: n('delta_P_max'),
-      T_min: n('T_min'), T_max: n('T_max'), T_ref: n('T_ref'),
-      outdoor_temperature_c: n('outdoor_temperature_c'),
-      dynamic_price: b('dynamic_price'), flat_price: n('flat_price'),
-      solar_gain: b('solar_gain'), internal_gains_kw: n('internal_gains_kw'),
-      pv_enabled: b('pv_enabled'), pv_peak_kw: n('pv_peak_kw'),
-      dhw_enabled: b('dhw_enabled'),
-      dhw_C_top: n('dhw_C_top'), dhw_C_bot: n('dhw_C_bot'),
-      dhw_R_strat: n('dhw_R_strat'), dhw_R_loss: n('dhw_R_loss'),
-      dhw_T_top_init: n('dhw_T_top_init'), dhw_T_bot_init: n('dhw_T_bot_init'),
-      dhw_P_max: n('dhw_P_max'), dhw_delta_P_max: n('dhw_delta_P_max'),
-      dhw_T_min: n('dhw_T_min'), dhw_T_legionella: n('dhw_T_legionella'),
-      dhw_legionella_period_steps: i('dhw_legionella_period_steps'),
-      dhw_legionella_duration_steps: i('dhw_legionella_duration_steps'),
-      dhw_v_tap_m3_per_h: n('dhw_v_tap_m3_per_h'),
-      dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),
-      P_hp_max_elec: n('P_hp_max_elec'),          // elektrisch budget
-      eta_carnot: n('eta_carnot'),
-      delta_T_cond: n('delta_T_cond'), delta_T_evap: n('delta_T_evap'),
-      T_supply_min: n('T_supply_min'),
-      T_ref_outdoor_curve: n('T_ref_outdoor_curve'),
-      heating_curve_slope: n('heating_curve_slope'),
-      cop_min: n('cop_min'), cop_max: n('cop_max'),
+      data: [{
+        type: 'bar',
+        x: labels,
+        y: hdh,
+        name: 'Graaduren [K·h]',
+        marker: {
+          color: hdh.map(v => {
+            const norm = Math.min(v / maxHdh, 1);
+            const r = Math.round(30 + norm * 200);
+            const g = Math.round(107 - norm * 80);
+            const b = Math.round(191 - norm * 140);
+            return `rgba(${r},${g},${b},0.85)`;
+          }),
+        },
+      }],
+      layout: {
+        ...DARK,
+        yaxis: { ...DARK.yaxis, title: 'Graaduren [K·h]' },
+      },
     };
   }
 
-  function setMetric(id, value, unit = '', decimals = 2, okThreshold = null) {
-    const el = document.getElementById(id);
-    if (value === null || value === undefined) {
-      el.innerHTML = '&ndash;' + (unit ? '<span class="stat-unit">' + unit + '</span>' : '');
-      return;
-    }
-    const prefix = okThreshold !== null ? (value > okThreshold ? '⚠ ' : '✓ ') : '';
-    const color  = okThreshold !== null ? (value > okThreshold ? '#c0392b' : '#27ae60') : '#1e3a5f';
-    el.style.color = color;
-    el.innerHTML = prefix + Number(value).toFixed(decimals)
-      + (unit ? '<span class="stat-unit">' + unit + '</span>' : '');
-  }
-
-  async function runOptimize() {
-    const btn = document.getElementById('run-btn');
+  // ─── Forecast loader ─────────────────────────────────────────────────────
+  async function loadForecast() {
+    const btn = document.getElementById('refresh-btn');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spin"></span>Bezig&hellip;';
-    document.getElementById('err').style.display  = 'none';
-    document.getElementById('warn').style.display = 'none';
+    btn.innerHTML = '<span class="spin"></span>Laden&hellip;';
+    hideAllBanners();
+    showBanner('banner-info', 'Open-Meteo forecast wordt opgehaald…');
+    setBadge('laden…', '');
 
     try {
-      const resp = await fetch('/api/optimize', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(getReq()),
+      const lat = parseFloat(document.getElementById('loc-lat').value);
+      const lon = parseFloat(document.getElementById('loc-lon').value);
+      const hor = parseInt(document.getElementById('loc-horizon').value, 10);
+      const pvT = parseFloat(document.getElementById('pv-tilt').value);
+
+      const params = new URLSearchParams({
+        latitude: lat, longitude: lon,
+        horizon_hours: hor, dt_hours: 1,
+        window_tilt: 90, window_azimuth: 0, pv_azimuth: 0,
       });
+      if (!isNaN(pvT) && pvT >= 0) params.set('pv_tilt', pvT);
+
+      const resp = await fetch('/api/forecast?' + params.toString());
       if (!resp.ok) {
-        const msg = (await resp.json()).detail || resp.statusText;
-        throw new Error(msg);
+        const detail = (await resp.json()).detail || resp.statusText;
+        throw new Error(detail);
       }
       const d = await resp.json();
 
-      document.getElementById('s-status').textContent = d.status;
-      setMetric('s-pufh',    d.first_ufh_power_kw,    'kW');
-      setMetric('s-pdhw',    d.first_dhw_power_kw,    'kW');
-      setMetric('s-php',     d.first_total_hp_power_kw,'kW');
-      setMetric('s-energy',  d.hp_total_energy_kwh,   'kWh');
-      setMetric('s-grid',    d.net_grid_energy_kwh,   'kWh');
-      setMetric('s-cost',    d.total_cost_eur,         '€', 3);
-      setMetric('s-pv',      d.pv_total_kwh,           'kWh');
-      setMetric('s-ufh-viol',d.max_ufh_comfort_violation_c, 'K', 2, 0.01);
-      setMetric('s-dhw-viol',d.max_dhw_comfort_violation_c, 'K', 2, 0.01);
+      hideBanner('banner-info');
+      setBadge('✓ Live', 'ok');
 
-      if (d.cop_ufh_profile && d.cop_ufh_profile.length > 0)
-        setMetric('s-cop-ufh', d.cop_ufh_profile[0], '', 2);
-      if (d.dhw_enabled && d.cop_dhw_profile && d.cop_dhw_profile.length > 0)
-        setMetric('s-cop-dhw', d.cop_dhw_profile[0], '', 2);
+      // ── KPI ──────────────────────────────────────────────────────────
+      const temps = d.outdoor_temperature_c;
+      const gtis  = d.gti_w_per_m2;
+      const gtipv = d.gti_pv_w_per_m2;
 
-      const warn = document.getElementById('warn');
-      const warnings = [];
-      if (d.max_ufh_comfort_violation_c > 0.01)
-        warnings.push('UFH comfort +' + d.max_ufh_comfort_violation_c.toFixed(2) + ' K');
-      if (d.max_dhw_comfort_violation_c > 0.01)
-        warnings.push('DHW comfort +' + d.max_dhw_comfort_violation_c.toFixed(2) + ' K');
-      if (d.max_legionella_violation_c  > 0.01)
-        warnings.push('Legionella gemist +' + d.max_legionella_violation_c.toFixed(2) + ' K');
-      if (warnings.length > 0) {
-        warn.textContent = '⚠ ' + warnings.join(' · ');
-        warn.style.display = 'block';
+      setKpi('kpi-t-now',    temps[0]);
+      setKpi('kpi-t-min',    Math.min(...temps));
+      setKpi('kpi-t-max',    Math.max(...temps));
+      setKpi('kpi-gti-peak', Math.max(...gtis), 0);
+      setKpi('kpi-pv-peak',  Math.max(...gtipv), 0);
+      setKpi('kpi-steps',    d.horizon_steps, 0);
+      setKpi('kpi-dt',       d.dt_hours);
+
+      const vf = new Date(d.valid_from);
+      document.getElementById('kpi-valid-from').innerHTML =
+        vf.toLocaleString('nl-NL', { hour:'2-digit', minute:'2-digit',
+          day:'2-digit', month:'short' });
+
+      const trend6 = temps.length > 6 ? temps[6] - temps[0] : 0;
+      const trendEl = document.getElementById('kpi-t-trend');
+      if (Math.abs(trend6) < 0.5) {
+        trendEl.textContent = '→ stabiel (6h)'; trendEl.style.color = '#6b7280';
+      } else if (trend6 > 0) {
+        trendEl.textContent = '↑ +' + trend6.toFixed(1) + ' °C (6h)'; trendEl.style.color = '#f87171';
+      } else {
+        trendEl.textContent = '↓ ' + trend6.toFixed(1) + ' °C (6h)'; trendEl.style.color = '#34d399';
       }
 
-      const cfg = { responsive: true, displayModeBar: false };
-      const tf  = JSON.parse(d.temperature_fig);
-      const pf  = JSON.parse(d.power_fig);
-      const pvf = JSON.parse(d.pv_forecast_fig);
-      Plotly.react('temp-chart',  tf.data,  tf.layout,  cfg);
-      Plotly.react('power-chart', pf.data,  pf.layout,  cfg);
-      Plotly.react('pv-chart',    pvf.data, pvf.layout, cfg);
+      // ── Forecast meta ─────────────────────────────────────────────────
+      document.getElementById('forecast-meta').style.display = 'flex';
+      document.getElementById('meta-location').textContent = lat.toFixed(2) + '°N, ' + lon.toFixed(2) + '°E';
+      document.getElementById('meta-valid').textContent    = vf.toLocaleString('nl-NL');
+      document.getElementById('meta-steps').textContent    = d.horizon_steps;
 
-      if (d.cop_fig) {
-        const cf = JSON.parse(d.cop_fig);
-        Plotly.react('cop-chart', cf.data, cf.layout, cfg);
-      }
+      // ── Temperature chart ─────────────────────────────────────────────
+      const tFig = JSON.parse(d.temperature_forecast_fig);
+      tFig.layout = { ...tFig.layout, ...DARK,
+        yaxis: { ...DARK.yaxis, title: 'Temperatuur [°C]', zeroline: true, zerolinecolor: '#4b5563' },
+      };
+      Plotly.react('chart-temp', tFig.data, tFig.layout, CFG);
 
-      setVisible('dhw-chart-card', d.dhw_enabled);
-      if (d.dhw_enabled && d.dhw_fig) {
-        const dhwf = JSON.parse(d.dhw_fig);
-        Plotly.react('dhw-chart', dhwf.data, dhwf.layout, cfg);
-      }
+      // ── Solar chart ────────────────────────────────────────────────────
+      const sFig = JSON.parse(d.solar_forecast_fig);
+      sFig.layout = { ...sFig.layout, ...DARK,
+        yaxis: { ...DARK.yaxis, title: 'GTI [W/m²]' },
+      };
+      Plotly.react('chart-solar', sFig.data, sFig.layout, CFG);
+
+      // ── Heating degree hours chart ─────────────────────────────────────
+      const hddFig = buildHddFig(d.labels, temps);
+      Plotly.react('chart-hdd', hddFig.data, hddFig.layout, CFG);
+
     } catch (e) {
-      const el = document.getElementById('err');
-      el.textContent = '⚠ ' + e.message;
-      el.style.display = 'block';
+      setBadge('⚠ Fout', 'err');
+      showBanner('banner-err', '⚠ Forecast laden mislukt: ' + e.message);
+      hideBanner('banner-info');
     } finally {
       btn.disabled = false;
-      btn.innerHTML = '&#9654; Optimaliseer';
+      btn.innerHTML = '↻ Vernieuwen';
     }
   }
 
-  window.addEventListener('load', () => {
-    syncVisibility();
-    runOptimize();
-  });
+  function loadAll() { loadForecast(); }
+  window.addEventListener('load', loadAll);
 </script>
 </body>
 </html>
