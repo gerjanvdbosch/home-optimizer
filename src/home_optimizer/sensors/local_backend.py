@@ -112,6 +112,8 @@ class LocalBackend(SensorBackend):
     ENV_T_MAINS_ESTIMATED_C = "HOME_OPT_T_MAINS_ESTIMATED_C"
     ENV_PV_TOTAL_KWH = "HOME_OPT_PV_TOTAL_KWH"
     ENV_HP_ELECTRIC_TOTAL_KWH = "HOME_OPT_HP_ELECTRIC_TOTAL_KWH"
+    ENV_P1_IMPORT_TOTAL_KWH = "HOME_OPT_P1_IMPORT_TOTAL_KWH"
+    ENV_P1_EXPORT_TOTAL_KWH = "HOME_OPT_P1_EXPORT_TOTAL_KWH"
 
     def __init__(
         self,
@@ -139,6 +141,8 @@ class LocalBackend(SensorBackend):
         t_mains_estimated_c: NumericValueSource,
         pv_total_kwh: NumericValueSource | None = None,
         hp_electric_total_kwh: NumericValueSource | None = None,
+        p1_import_total_kwh: NumericValueSource | None = None,
+        p1_export_total_kwh: NumericValueSource | None = None,
     ) -> None:
         self._room_temperature_c = room_temperature_c
         self._outdoor_temperature_c = outdoor_temperature_c
@@ -164,6 +168,8 @@ class LocalBackend(SensorBackend):
         # Optional energy counter sources — None when sensor is not installed.
         self._pv_total_kwh = pv_total_kwh
         self._hp_electric_total_kwh = hp_electric_total_kwh
+        self._p1_import_total_kwh = p1_import_total_kwh
+        self._p1_export_total_kwh = p1_export_total_kwh
 
     # ------------------------------------------------------------------
     # Factory constructors
@@ -256,6 +262,8 @@ class LocalBackend(SensorBackend):
             # Optional energy counters — None when key is absent from the JSON file.
             pv_total_kwh=lambda: _read_optional_numeric("pv_total_kwh"),
             hp_electric_total_kwh=lambda: _read_optional_numeric("hp_electric_total_kwh"),
+            p1_import_total_kwh=lambda: _read_optional_numeric("p1_import_total_kwh"),
+            p1_export_total_kwh=lambda: _read_optional_numeric("p1_export_total_kwh"),
         )
 
     @classmethod
@@ -311,6 +319,16 @@ class LocalBackend(SensorBackend):
                 if cls.ENV_HP_ELECTRIC_TOTAL_KWH in os.environ
                 else None
             ),
+            p1_import_total_kwh=(
+                (lambda: _env_numeric(cls.ENV_P1_IMPORT_TOTAL_KWH))
+                if cls.ENV_P1_IMPORT_TOTAL_KWH in os.environ
+                else None
+            ),
+            p1_export_total_kwh=(
+                (lambda: _env_numeric(cls.ENV_P1_EXPORT_TOTAL_KWH))
+                if cls.ENV_P1_EXPORT_TOTAL_KWH in os.environ
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -350,6 +368,8 @@ class LocalBackend(SensorBackend):
             # Optional energy counters — None when source is not configured.
             pv_total_kwh=_resolve_optional_numeric(self._pv_total_kwh),
             hp_electric_total_kwh=_resolve_optional_numeric(self._hp_electric_total_kwh),
+            p1_import_total_kwh=_resolve_optional_numeric(self._p1_import_total_kwh),
+            p1_export_total_kwh=_resolve_optional_numeric(self._p1_export_total_kwh),
         )
 
     def close(self) -> None:

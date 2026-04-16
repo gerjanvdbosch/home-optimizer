@@ -95,6 +95,14 @@ options:
   # PV self-consumption tracking.
   sensor_pv_total_kwh: "sensor.pv_energie_totaal"
   sensor_hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
+  # P1 smart-meter energy counters — two separate monotonically-increasing totals
+  # because the P1 net-power signal is signed (import > 0, export < 0).
+  # ΔE_import and ΔE_export per flush window enable:
+  #   • Actual grid cost = Δimport_kwh × price [€]
+  #   • PV self-consumption ratio = (ΔPV − Δexport) / ΔPV
+  #   • MPC cost-function validation (§14.2): predicted vs. actual grid cost.
+  sensor_p1_import_total_kwh: "sensor.p1_meter_energy_import"
+  sensor_p1_export_total_kwh: "sensor.p1_meter_energy_export"
 
 # ---------------------------------------------------------------------------
 # Schema — types validated by the HA supervisor before the addon starts.
@@ -138,6 +146,9 @@ schema:
   pv_tilt: float
   pv_azimuth: float
   boiler_tank_liters: int
+
   sensor_pv_total_kwh: str
   sensor_hp_electric_total_kwh: str
+  sensor_p1_import_total_kwh: str
+  sensor_p1_export_total_kwh: str
 

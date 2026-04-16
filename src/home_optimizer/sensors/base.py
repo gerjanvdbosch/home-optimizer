@@ -151,6 +151,12 @@ class LiveReadings:
     # ``None`` means the sensor is not installed; the telemetry column is then NULL.
     pv_total_kwh: float | None = None
     hp_electric_total_kwh: float | None = None
+    # P1 smart-meter counters — split into import and export because the net-power
+    # signal p1_net_power_kw is signed and a single net counter does not exist on
+    # all Dutch smart meters.  Both are monotonically increasing [kWh].
+    # ΔE_import − ΔE_export ≈ Δ(p1_net_power) × Δt  (energy-balance cross-check).
+    p1_import_total_kwh: float | None = None
+    p1_export_total_kwh: float | None = None
 
     def __post_init__(self) -> None:
         numeric_fields = (
@@ -195,7 +201,7 @@ class LiveReadings:
 
 
         # Optional counter fields: validate when present.
-        for counter_name in ("pv_total_kwh", "hp_electric_total_kwh"):
+        for counter_name in ("pv_total_kwh", "hp_electric_total_kwh", "p1_import_total_kwh", "p1_export_total_kwh"):
             value = getattr(self, counter_name)
             if value is not None:
                 _assert_finite(counter_name, float(value))

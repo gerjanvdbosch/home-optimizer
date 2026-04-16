@@ -165,6 +165,8 @@ class HomeAssistantBackend(SensorBackend):
     timeout: float = 10.0,
     pv_total_energy: HAEntityConfig | None = None,
     hp_electric_total_energy: HAEntityConfig | None = None,
+    p1_import_total_energy: HAEntityConfig | None = None,
+    p1_export_total_energy: HAEntityConfig | None = None,
 ) -> None:
         self._room_temperature = room_temperature
         self._outdoor_temperature = outdoor_temperature
@@ -189,6 +191,8 @@ class HomeAssistantBackend(SensorBackend):
         # Optional energy counter entity configs (None = sensor not installed).
         self._pv_total_energy = pv_total_energy
         self._hp_electric_total_energy = hp_electric_total_energy
+        self._p1_import_total_energy = p1_import_total_energy
+        self._p1_export_total_energy = p1_export_total_energy
         if not self._hp_mode_entity_id:
             raise ValueError("hp_mode_entity_id must not be empty.")
         if not self._defrost_active_entity_id:
@@ -369,6 +373,16 @@ class HomeAssistantBackend(SensorBackend):
             hp_electric_total_kwh=(
                 self._fetch_state(self._hp_electric_total_energy)
                 if self._hp_electric_total_energy is not None
+                else None
+            ),
+            p1_import_total_kwh=(
+                self._fetch_state(self._p1_import_total_energy)
+                if self._p1_import_total_energy is not None
+                else None
+            ),
+            p1_export_total_kwh=(
+                self._fetch_state(self._p1_export_total_energy)
+                if self._p1_export_total_energy is not None
                 else None
             ),
         )

@@ -60,6 +60,8 @@ BOOL_READING_FIELD_NAMES: tuple[str, ...] = (
 COUNTER_READING_FIELD_NAMES: tuple[str, ...] = (
     "pv_total_kwh",
     "hp_electric_total_kwh",
+    "p1_import_total_kwh",
+    "p1_export_total_kwh",
 )
 
 #: Mapping from LiveReadings counter field name → TelemetryAggregate column name.
@@ -67,6 +69,8 @@ COUNTER_READING_FIELD_NAMES: tuple[str, ...] = (
 _COUNTER_COLUMN_MAP: dict[str, str] = {
     "pv_total_kwh": "pv_energy_delta_kwh",
     "hp_electric_total_kwh": "hp_electric_energy_delta_kwh",
+    "p1_import_total_kwh": "p1_import_energy_delta_kwh",
+    "p1_export_total_kwh": "p1_export_energy_delta_kwh",
 }
 
 
