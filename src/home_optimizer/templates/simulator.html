@@ -503,6 +503,15 @@
 </div>
 
 <script>
+  // ── Base URL helper (HA Ingress compatible) ───────────────────────────────
+  // See dashboard.html for full explanation.
+  const _BASE = (() => {
+    const p = window.location.pathname;
+    const dir = p.endsWith('/') ? p.slice(0, -1) : p.substring(0, p.lastIndexOf('/'));
+    return dir;
+  })();
+  function apiUrl(path) { return _BASE + path; }
+
   function upd(id, val) {
     const v = parseFloat(val);
     if (Number.isNaN(v)) return;
@@ -580,7 +589,7 @@
     document.getElementById('warn').style.display = 'none';
 
     try {
-      const resp = await fetch('/api/optimize', {
+      const resp = await fetch(apiUrl('/api/optimize'), {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(getReq()),

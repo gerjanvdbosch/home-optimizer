@@ -294,6 +294,24 @@
       + (unit ? unit.outerHTML : '');
   }
 
+  // ─── Base URL helper ─────────────────────────────────────────────────────
+  // In Home Assistant Ingress the app is mounted at a proxy path such as
+  // /api/hassio_ingress/<token>/.  Absolute paths like "/api/forecast" would
+  // resolve to HA's own API instead of the addon.  We derive the base from
+  // the current page URL so fetch calls always reach the correct endpoint,
+  // both in local dev (base = "") and behind HA Ingress (base = ingress prefix).
+  const _BASE = (() => {
+    const p = window.location.pathname;
+    // Strip a trailing segment that looks like a page route (e.g. "/", "/simulator")
+    // to obtain the directory prefix the addon is mounted at.
+    const dir = p.endsWith('/') ? p.slice(0, -1) : p.substring(0, p.lastIndexOf('/'));
+    return dir;
+  })();
+  function apiUrl(path) {
+    // path must start with "/" e.g. "/api/forecast"
+    return _BASE + path;
+  }
+
   // ─── Heating degree hours chart ──────────────────────────────────────────
   const T_REF_HEATING = 18.0;  // NL stooklijn referentiepunt [°C]
 
@@ -349,12 +367,12 @@
           window_tilt: 90, window_azimuth: 0, pv_azimuth: 0,
         });
         if (!isNaN(pvT) && pvT >= 0) params.set('pv_tilt', pvT);
-        url = '/api/forecast?' + params.toString();
+        url = apiUrl('/api/forecast') + '?' + params.toString();
         source = 'Open-Meteo (live API)';
       } else {
         // ── Database: meest recente opgeslagen forecast ────────────────
         showBanner('banner-info', 'Meest recente forecast uit database laden…');
-        url = '/api/forecast/latest';
+        url = apiUrl('/api/forecast/latest');
         source = 'Database (meest recente opgeslagen forecast)';
       }
 

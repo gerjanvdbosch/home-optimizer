@@ -434,13 +434,20 @@ def main() -> None:
     # uses for telemetry and forecast persistence.
     os.environ[DATABASE_URL_ENV] = f"sqlite:///{opts.database_path}"
 
-    log.info("Starting Uvicorn on %s:%d", _BIND_HOST, opts.api_port)
+    # HA Ingress proxies requests via /api/hassio_ingress/<token>/.
+    # Setting root_path tells FastAPI/Uvicorn the effective mount prefix so
+    # that generated OpenAPI docs and redirects use the correct base path.
+    # The supervisor injects the ingress path via the X-Ingress-Path header;
+    # we read it at start-up so it is available before any request arrives.
+    ingress_path: str = os.environ.get("INGRESS_PATH", "")
+    log.info("Starting Uvicorn on %s:%d  root_path=%r", _BIND_HOST, opts.api_port, ingress_path)
     try:
         uvicorn.run(
             app,
             host=_BIND_HOST,
             port=opts.api_port,
             log_level="info",
+            root_path=ingress_path,
             # Disable Uvicorn's default signal handlers so our SIGTERM handler
             # above controls the shutdown sequence.
             # (install_signal_handlers is False when not in the main thread;
