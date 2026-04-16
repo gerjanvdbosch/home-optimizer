@@ -143,20 +143,14 @@ class LiveReadings:
     # --- Seasonal DHW parameter (injected by WeatherAugmentedBackend, §9.1) ---
     t_mains_estimated_c: float
     timestamp: datetime
-    # --- Optional energy counters (monotonically increasing totals) ---
-    # When present, the telemetry layer derives ΔkWh per flush window from these
-    # counters instead of integrating instantaneous power.  This avoids sampling-gap
-    # errors and enables accurate COP validation (§14.1):
-    #   actual_COP = ΔE_hp_thermal_kwh / ΔE_hp_electric_kwh.
-    # ``None`` means the sensor is not installed; the telemetry column is then NULL.
-    pv_total_kwh: float | None = None
-    hp_electric_total_kwh: float | None = None
-    # P1 smart-meter counters — split into import and export because the net-power
-    # signal p1_net_power_kw is signed and a single net counter does not exist on
-    # all Dutch smart meters.  Both are monotonically increasing [kWh].
-    # ΔE_import − ΔE_export ≈ Δ(p1_net_power) × Δt  (energy-balance cross-check).
-    p1_import_total_kwh: float | None = None
-    p1_export_total_kwh: float | None = None
+    # --- Monotonically-increasing energy counters (required) ---
+    # These fields are always present because the sensors are mandatory in AddonOptions.
+    # The telemetry layer derives ΔkWh = counter_last − counter_first per flush window.
+    # A delta of 0.0 signals a counter reset (HA restart) during the window.
+    pv_total_kwh: float
+    hp_electric_total_kwh: float
+    p1_import_total_kwh: float
+    p1_export_total_kwh: float
 
     def __post_init__(self) -> None:
         numeric_fields = (
@@ -178,6 +172,11 @@ class LiveReadings:
             "refrigerant_liquid_line_temp_c",
             "discharge_temp_c",
             "t_mains_estimated_c",
+            # Required energy counters — always finite, always non-negative.
+            "pv_total_kwh",
+            "hp_electric_total_kwh",
+            "p1_import_total_kwh",
+            "p1_export_total_kwh",
         )
         for field_name in numeric_fields:
             _assert_finite(field_name, float(getattr(self, field_name)))
@@ -187,6 +186,11 @@ class LiveReadings:
             "hp_flow_lpm",
             "hp_electric_power_kw",
             "pv_output_kw",
+            # Energy counters are cumulative totals — always non-negative.
+            "pv_total_kwh",
+            "hp_electric_total_kwh",
+            "p1_import_total_kwh",
+            "p1_export_total_kwh",
         )
         for field_name in non_negative_fields:
             if float(getattr(self, field_name)) < 0.0:
@@ -200,13 +204,6 @@ class LiveReadings:
             )
 
 
-        # Optional counter fields: validate when present.
-        for counter_name in ("pv_total_kwh", "hp_electric_total_kwh", "p1_import_total_kwh", "p1_export_total_kwh"):
-            value = getattr(self, counter_name)
-            if value is not None:
-                _assert_finite(counter_name, float(value))
-                if float(value) < 0.0:
-                    raise ValueError(f"{counter_name} must be non-negative (it is a cumulative total).")
 
         # Coerce bool fields — JSON may deliver 0/1 integers.
         object.__setattr__(self, "defrost_active", bool(self.defrost_active))

@@ -172,24 +172,24 @@ class AddonOptions(BaseModel):
         ),
     )
 
-    # --- Optional monotonically-increasing energy counters [kWh] ---
-    # Empty string ("") means the sensor is not installed → counter field is None
-    # in LiveReadings and NULL in TelemetryAggregate.
+    # --- Monotonically-increasing energy counters [kWh] (required) ---
+    # These counters enable accurate COP validation (§14.1), grid-cost
+    # back-testing (§14.2), and PV self-consumption analysis.
     sensor_pv_total_kwh: str = Field(
-        default="",
-        description="HA entity ID for cumulative PV energy counter [kWh].  Leave blank to disable.",
+        ..., min_length=1,
+        description="HA entity ID for cumulative PV energy counter [kWh].",
     )
     sensor_hp_electric_total_kwh: str = Field(
-        default="",
-        description="HA entity ID for cumulative HP electrical energy counter [kWh].  Leave blank to disable.",
+        ..., min_length=1,
+        description="HA entity ID for cumulative HP electrical energy counter [kWh].",
     )
     sensor_p1_import_total_kwh: str = Field(
-        default="",
-        description="HA entity ID for cumulative P1 import energy counter [kWh].  Leave blank to disable.",
+        ..., min_length=1,
+        description="HA entity ID for cumulative P1 import energy counter [kWh].",
     )
     sensor_p1_export_total_kwh: str = Field(
-        default="",
-        description="HA entity ID for cumulative P1 export energy counter [kWh].  Leave blank to disable.",
+        ..., min_length=1,
+        description="HA entity ID for cumulative P1 export energy counter [kWh].",
     )
 
     @field_validator(
@@ -293,28 +293,11 @@ def _build_backend(opts: AddonOptions) -> HomeAssistantBackend:
             opts.sensor_refrigerant_liquid_line_temperature
         ),
         discharge_temperature=HAEntityConfig(opts.sensor_discharge_temperature),
-        # Optional energy counters — only wire up when a non-blank entity ID is configured.
-        # An empty string in options means the sensor is absent; the backend returns None.
-        pv_total_energy=(
-            HAEntityConfig(opts.sensor_pv_total_kwh)
-            if opts.sensor_pv_total_kwh.strip()
-            else None
-        ),
-        hp_electric_total_energy=(
-            HAEntityConfig(opts.sensor_hp_electric_total_kwh)
-            if opts.sensor_hp_electric_total_kwh.strip()
-            else None
-        ),
-        p1_import_total_energy=(
-            HAEntityConfig(opts.sensor_p1_import_total_kwh)
-            if opts.sensor_p1_import_total_kwh.strip()
-            else None
-        ),
-        p1_export_total_energy=(
-            HAEntityConfig(opts.sensor_p1_export_total_kwh)
-            if opts.sensor_p1_export_total_kwh.strip()
-            else None
-        ),
+        # Required energy counters — entity IDs are validated non-blank by AddonOptions.
+        pv_total_energy=HAEntityConfig(opts.sensor_pv_total_kwh),
+        hp_electric_total_energy=HAEntityConfig(opts.sensor_hp_electric_total_kwh),
+        p1_import_total_energy=HAEntityConfig(opts.sensor_p1_import_total_kwh),
+        p1_export_total_energy=HAEntityConfig(opts.sensor_p1_export_total_kwh),
         # base_url and token are resolved automatically from the environment.
     )
 

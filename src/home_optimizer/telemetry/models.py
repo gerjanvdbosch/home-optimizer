@@ -190,22 +190,21 @@ class TelemetryAggregate(Base):
     household_elec_power_mean_kw: Mapped[float] = mapped_column(Float)
     household_elec_power_last_kw: Mapped[float] = mapped_column(Float)
 
-    # Optional energy counter deltas (NULL when sensor is not installed) ------
+    # Energy counter deltas (always present — sensors are required in AddonOptions) ----
     # ΔkWh = counter_last − counter_first over the flush window.
     # More accurate than integrating mean_power × Δt because counter reads are
     # immune to sampling gaps.  Primary use cases:
     #   • COP validation: actual_COP = hp_thermal_power_mean_kw × Δt / hp_electric_energy_delta_kwh
     #   • PV self-consumption tracking per flush window.
-    # Source: LiveReadings.pv_total_kwh and LiveReadings.hp_electric_total_kwh.
-    pv_energy_delta_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
-    hp_electric_energy_delta_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # A value of 0.0 indicates a counter reset (HA restart) during the window.
+    pv_energy_delta_kwh: Mapped[float] = mapped_column(Float)
+    hp_electric_energy_delta_kwh: Mapped[float] = mapped_column(Float)
     # P1 smart-meter import/export deltas — split because the net-power sensor is
     # signed and a single net counter is unavailable on all Dutch smart meters.
     # Δimport × price[k] = actual grid cost per window (MPC cost-function validation §14.2).
-    # PV self-consumption ratio = (ΔPV − Δexport) / ΔPV when both counters are present.
-    # Source: LiveReadings.p1_import_total_kwh and LiveReadings.p1_export_total_kwh.
-    p1_import_energy_delta_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
-    p1_export_energy_delta_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # PV self-consumption ratio = (ΔPV − Δexport) / ΔPV.
+    p1_import_energy_delta_kwh: Mapped[float] = mapped_column(Float)
+    p1_export_energy_delta_kwh: Mapped[float] = mapped_column(Float)
 
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

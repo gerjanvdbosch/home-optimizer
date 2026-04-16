@@ -39,11 +39,11 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     # Seasonal DHW parameter — injected by WeatherAugmentedBackend in production (§9.1).
     # LocalBackend accepts it directly so tests can supply an explicit value.
     "t_mains_estimated_c",
-)
-#: Optional counter keys — present in JSON/env only when the sensor is installed.
-_OPTIONAL_COUNTER_KEYS: tuple[str, ...] = (
+    # Required energy counters — monotonically increasing totals [kWh].
     "pv_total_kwh",
     "hp_electric_total_kwh",
+    "p1_import_total_kwh",
+    "p1_export_total_kwh",
 )
 _TEXT_SENSOR_KEYS: tuple[str, ...] = ("hp_mode",)
 _BOOL_SENSOR_KEYS: tuple[str, ...] = ("defrost_active", "booster_heater_active")
@@ -68,16 +68,6 @@ def _resolve_bool(source: BoolValueSource) -> bool:
     raw = source() if callable(source) else source
     return bool(raw)
 
-
-def _resolve_optional_numeric(source: NumericValueSource | None) -> float | None:
-    """Evaluate an optional numeric source; return None when source is None or yields None.
-
-    Used for optional energy counter fields that may be absent from the configuration.
-    """
-    if source is None:
-        return None
-    result = source() if callable(source) else source
-    return None if result is None else float(result)
 
 
 class LocalBackend(SensorBackend):
@@ -139,10 +129,10 @@ class LocalBackend(SensorBackend):
         refrigerant_liquid_line_temp_c: NumericValueSource,
         discharge_temp_c: NumericValueSource,
         t_mains_estimated_c: NumericValueSource,
-        pv_total_kwh: NumericValueSource | None = None,
-        hp_electric_total_kwh: NumericValueSource | None = None,
-        p1_import_total_kwh: NumericValueSource | None = None,
-        p1_export_total_kwh: NumericValueSource | None = None,
+        pv_total_kwh: NumericValueSource,
+        hp_electric_total_kwh: NumericValueSource,
+        p1_import_total_kwh: NumericValueSource,
+        p1_export_total_kwh: NumericValueSource,
     ) -> None:
         self._room_temperature_c = room_temperature_c
         self._outdoor_temperature_c = outdoor_temperature_c
@@ -165,7 +155,7 @@ class LocalBackend(SensorBackend):
         self._refrigerant_liquid_line_temp_c = refrigerant_liquid_line_temp_c
         self._discharge_temp_c = discharge_temp_c
         self._t_mains_estimated_c = t_mains_estimated_c
-        # Optional energy counter sources — None when sensor is not installed.
+        # Required energy counter sources.
         self._pv_total_kwh = pv_total_kwh
         self._hp_electric_total_kwh = hp_electric_total_kwh
         self._p1_import_total_kwh = p1_import_total_kwh
@@ -259,11 +249,11 @@ class LocalBackend(SensorBackend):
             refrigerant_liquid_line_temp_c=lambda: _read_numeric("refrigerant_liquid_line_temp_c"),
             discharge_temp_c=lambda: _read_numeric("discharge_temp_c"),
             t_mains_estimated_c=lambda: _read_numeric("t_mains_estimated_c"),
-            # Optional energy counters — None when key is absent from the JSON file.
-            pv_total_kwh=lambda: _read_optional_numeric("pv_total_kwh"),
-            hp_electric_total_kwh=lambda: _read_optional_numeric("hp_electric_total_kwh"),
-            p1_import_total_kwh=lambda: _read_optional_numeric("p1_import_total_kwh"),
-            p1_export_total_kwh=lambda: _read_optional_numeric("p1_export_total_kwh"),
+            # Required energy counters — fail fast when key is absent from the JSON file.
+            pv_total_kwh=lambda: _read_numeric("pv_total_kwh"),
+            hp_electric_total_kwh=lambda: _read_numeric("hp_electric_total_kwh"),
+            p1_import_total_kwh=lambda: _read_numeric("p1_import_total_kwh"),
+            p1_export_total_kwh=lambda: _read_numeric("p1_export_total_kwh"),
         )
 
     @classmethod
@@ -308,27 +298,11 @@ class LocalBackend(SensorBackend):
             refrigerant_liquid_line_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_LIQUID_LINE_TEMP_C),
             discharge_temp_c=lambda: _env_numeric(cls.ENV_DISCHARGE_TEMP_C),
             t_mains_estimated_c=lambda: _env_numeric(cls.ENV_T_MAINS_ESTIMATED_C),
-            # Optional energy counters — None when env var is absent.
-            pv_total_kwh=(
-                (lambda: _env_numeric(cls.ENV_PV_TOTAL_KWH))
-                if cls.ENV_PV_TOTAL_KWH in os.environ
-                else None
-            ),
-            hp_electric_total_kwh=(
-                (lambda: _env_numeric(cls.ENV_HP_ELECTRIC_TOTAL_KWH))
-                if cls.ENV_HP_ELECTRIC_TOTAL_KWH in os.environ
-                else None
-            ),
-            p1_import_total_kwh=(
-                (lambda: _env_numeric(cls.ENV_P1_IMPORT_TOTAL_KWH))
-                if cls.ENV_P1_IMPORT_TOTAL_KWH in os.environ
-                else None
-            ),
-            p1_export_total_kwh=(
-                (lambda: _env_numeric(cls.ENV_P1_EXPORT_TOTAL_KWH))
-                if cls.ENV_P1_EXPORT_TOTAL_KWH in os.environ
-                else None
-            ),
+            # Required energy counters — fail fast when env var is absent.
+            pv_total_kwh=lambda: _env_numeric(cls.ENV_PV_TOTAL_KWH),
+            hp_electric_total_kwh=lambda: _env_numeric(cls.ENV_HP_ELECTRIC_TOTAL_KWH),
+            p1_import_total_kwh=lambda: _env_numeric(cls.ENV_P1_IMPORT_TOTAL_KWH),
+            p1_export_total_kwh=lambda: _env_numeric(cls.ENV_P1_EXPORT_TOTAL_KWH),
         )
 
     # ------------------------------------------------------------------
@@ -365,11 +339,11 @@ class LocalBackend(SensorBackend):
             discharge_temp_c=_resolve_numeric(self._discharge_temp_c),
             t_mains_estimated_c=_resolve_numeric(self._t_mains_estimated_c),
             timestamp=self.now_utc(),
-            # Optional energy counters — None when source is not configured.
-            pv_total_kwh=_resolve_optional_numeric(self._pv_total_kwh),
-            hp_electric_total_kwh=_resolve_optional_numeric(self._hp_electric_total_kwh),
-            p1_import_total_kwh=_resolve_optional_numeric(self._p1_import_total_kwh),
-            p1_export_total_kwh=_resolve_optional_numeric(self._p1_export_total_kwh),
+            # Required energy counters.
+            pv_total_kwh=_resolve_numeric(self._pv_total_kwh),
+            hp_electric_total_kwh=_resolve_numeric(self._hp_electric_total_kwh),
+            p1_import_total_kwh=_resolve_numeric(self._p1_import_total_kwh),
+            p1_export_total_kwh=_resolve_numeric(self._p1_export_total_kwh),
         )
 
     def close(self) -> None:

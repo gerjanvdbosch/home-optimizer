@@ -163,10 +163,10 @@ class HomeAssistantBackend(SensorBackend):
     base_url: str | None = None,
     token: str | None = None,
     timeout: float = 10.0,
-    pv_total_energy: HAEntityConfig | None = None,
-    hp_electric_total_energy: HAEntityConfig | None = None,
-    p1_import_total_energy: HAEntityConfig | None = None,
-    p1_export_total_energy: HAEntityConfig | None = None,
+    pv_total_energy: HAEntityConfig,
+    hp_electric_total_energy: HAEntityConfig,
+    p1_import_total_energy: HAEntityConfig,
+    p1_export_total_energy: HAEntityConfig,
 ) -> None:
         self._room_temperature = room_temperature
         self._outdoor_temperature = outdoor_temperature
@@ -364,27 +364,11 @@ class HomeAssistantBackend(SensorBackend):
             # T_mains = 0.0 is a sentinel indicating the wrapper is not in use.
             t_mains_estimated_c=0.0,
             timestamp=self.now_utc(),
-            # Optional energy counters — None when entity config is not supplied.
-            pv_total_kwh=(
-                self._fetch_state(self._pv_total_energy)
-                if self._pv_total_energy is not None
-                else None
-            ),
-            hp_electric_total_kwh=(
-                self._fetch_state(self._hp_electric_total_energy)
-                if self._hp_electric_total_energy is not None
-                else None
-            ),
-            p1_import_total_kwh=(
-                self._fetch_state(self._p1_import_total_energy)
-                if self._p1_import_total_energy is not None
-                else None
-            ),
-            p1_export_total_kwh=(
-                self._fetch_state(self._p1_export_total_energy)
-                if self._p1_export_total_energy is not None
-                else None
-            ),
+            # Required energy counters — always fetched; entity IDs validated non-blank.
+            pv_total_kwh=self._fetch_state(self._pv_total_energy),
+            hp_electric_total_kwh=self._fetch_state(self._hp_electric_total_energy),
+            p1_import_total_kwh=self._fetch_state(self._p1_import_total_energy),
+            p1_export_total_kwh=self._fetch_state(self._p1_export_total_energy),
         )
 
     # ------------------------------------------------------------------

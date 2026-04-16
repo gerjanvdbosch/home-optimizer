@@ -41,7 +41,16 @@ class SequenceBackend(SensorBackend):
         """
 
 
-def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) -> LiveReadings:
+def _reading(
+    timestamp: datetime,
+    *,
+    room_temperature_c: float,
+    hp_mode: str,
+    pv_total_kwh: float = 1000.0,
+    hp_electric_total_kwh: float = 500.0,
+    p1_import_total_kwh: float = 800.0,
+    p1_export_total_kwh: float = 200.0,
+) -> LiveReadings:
     """Create one fully populated telemetry snapshot for tests."""
     return LiveReadings(
         room_temperature_c=room_temperature_c,
@@ -66,6 +75,10 @@ def _reading(timestamp: datetime, *, room_temperature_c: float, hp_mode: str) ->
         discharge_temp_c=65.0,
         t_mains_estimated_c=10.5,
         timestamp=timestamp,
+        pv_total_kwh=pv_total_kwh,
+        hp_electric_total_kwh=hp_electric_total_kwh,
+        p1_import_total_kwh=p1_import_total_kwh,
+        p1_export_total_kwh=p1_export_total_kwh,
     )
 
 
@@ -96,6 +109,10 @@ def test_local_backend_reads_full_snapshot_from_json(tmp_path: Path) -> None:
                 "refrigerant_liquid_line_temp_c": 27.5,
                 "discharge_temp_c": 63.0,
                 "t_mains_estimated_c": 10.5,
+                "pv_total_kwh": 1234.5,
+                "hp_electric_total_kwh": 567.8,
+                "p1_import_total_kwh": 900.0,
+                "p1_export_total_kwh": 300.0,
             }
         ),
         encoding="utf-8",
@@ -289,6 +306,10 @@ def test_aggregate_includes_new_sensor_fields() -> None:
             discharge_temp_c=68.0,
             t_mains_estimated_c=11.0,
             timestamp=t0 + timedelta(seconds=30),
+            pv_total_kwh=1001.0,
+            hp_electric_total_kwh=500.5,
+            p1_import_total_kwh=800.5,
+            p1_export_total_kwh=200.2,
         ),
     ]
 

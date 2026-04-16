@@ -53,10 +53,9 @@ BOOL_READING_FIELD_NAMES: tuple[str, ...] = (
     "booster_heater_active",
 )
 
-#: Optional monotonically-increasing energy counter fields [kWh].
-#: These are aggregated as (last − first) delta over the flush window.
-#: The corresponding TelemetryAggregate columns are nullable (NULL when the
-#: sensor is absent, i.e. LiveReadings.<field> is None for all samples).
+#: Monotonically-increasing energy counter fields [kWh] — always present (required sensors).
+#: Aggregated as (last − first) delta over the flush window.
+#: 0.0 signals a counter reset (HA restart) rather than zero energy consumption.
 COUNTER_READING_FIELD_NAMES: tuple[str, ...] = (
     "pv_total_kwh",
     "hp_electric_total_kwh",
@@ -65,7 +64,6 @@ COUNTER_READING_FIELD_NAMES: tuple[str, ...] = (
 )
 
 #: Mapping from LiveReadings counter field name → TelemetryAggregate column name.
-#: The counter delta is the energy consumed/produced over the flush window.
 _COUNTER_COLUMN_MAP: dict[str, str] = {
     "pv_total_kwh": "pv_energy_delta_kwh",
     "hp_electric_total_kwh": "hp_electric_energy_delta_kwh",
@@ -147,20 +145,20 @@ def aggregate_readings(samples: Sequence[LiveReadings]) -> dict[str, Any]:
         aggregate[f"{field_name}_last"] = bool(ordered_samples[-1].__getattribute__(field_name))
 
     # Counter fields: persist (last − first) delta over the flush window.
-    # A counter reading of None means the sensor is absent; the column is NULL.
-    # Delta can be zero (no energy consumed) but must never be negative — a
-    # negative delta indicates a counter reset, which is stored as NULL to
-    # prevent corrupt training data.
+    # All four counters are required, so values are always present.
+    # A negative delta means a counter reset (HA restart); store 0.0 to
+    # preserve NOT NULL and flag the anomaly without crashing the collector.
     for field_name, column_name in _COUNTER_COLUMN_MAP.items():
-        first_val = getattr(first_sample, field_name)
-        last_val = getattr(last_sample, field_name)
-        if first_val is None or last_val is None:
-            # Sensor not installed for at least one boundary sample → NULL.
-            aggregate[column_name] = None
+        first_val = float(getattr(first_sample, field_name))
+        last_val = float(getattr(last_sample, field_name))
+        delta = last_val - first_val
+        if delta < 0.0:
+            # Counter reset detected — energy during this window is unknown.
+            # Store 0.0 as a sentinel; downstream queries should filter or flag
+            # windows where a counter reset occurred.
+            aggregate[column_name] = 0.0
         else:
-            delta = float(last_val) - float(first_val)
-            # Guard against counter resets (e.g. HA restart resets utility_meter).
-            aggregate[column_name] = delta if delta >= 0.0 else None
+            aggregate[column_name] = delta
 
     return aggregate
 
