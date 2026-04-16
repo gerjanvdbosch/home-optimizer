@@ -245,13 +245,9 @@ class MPCParameters:
         if self.cop_max <= 1.0:
             raise ValueError("cop_max must be strictly greater than 1.")
         if self.cop_ufh <= 1.0:
-            raise ValueError(
-                f"cop_ufh={self.cop_ufh} is physically impossible: COP must be > 1."
-            )
+            raise ValueError(f"cop_ufh={self.cop_ufh} is physically impossible: COP must be > 1.")
         if self.cop_ufh > self.cop_max:
-            raise ValueError(
-                f"cop_ufh={self.cop_ufh} exceeds cop_max={self.cop_max}."
-            )
+            raise ValueError(f"cop_ufh={self.cop_ufh} exceeds cop_max={self.cop_max}.")
 
 
 # ---------------------------------------------------------------------------
@@ -310,13 +306,9 @@ class DHWMPCParameters:
         if self.cop_max <= 1.0:
             raise ValueError("cop_max must be strictly greater than 1.")
         if self.cop_dhw <= 1.0:
-            raise ValueError(
-                f"cop_dhw={self.cop_dhw} is physically impossible: COP must be > 1."
-            )
+            raise ValueError(f"cop_dhw={self.cop_dhw} is physically impossible: COP must be > 1.")
         if self.cop_dhw > self.cop_max:
-            raise ValueError(
-                f"cop_dhw={self.cop_dhw} exceeds cop_max={self.cop_max}."
-            )
+            raise ValueError(f"cop_dhw={self.cop_dhw} exceeds cop_max={self.cop_max}.")
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +372,80 @@ class KalmanNoiseParameters:
         if self.measurement_variance <= 0.0:
             raise ValueError("measurement_variance must be strictly positive.")
         object.__setattr__(self, "process_covariance", q)
+
+
+# ---------------------------------------------------------------------------
+# EKF noise parameters — DHW augmented state (§12 of spec)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class EKFNoiseParameters:
+    """Noise covariance parameters for the DHW Extended Kalman Filter.
+
+    The augmented state is x_aug = [T_top, T_bot, V_tap]ᵀ.  The combined
+    3×3 process-noise covariance is block-diagonal:
+
+        Q_aug = diag(Q_n_dhw, Q_n_Vtap)   ∈ ℝ³ˣ³
+
+    where Q_n_dhw is a 2×2 matrix for the temperature states and Q_n_Vtap
+    is a scalar for the flow-rate state (random-walk model, §12.2).
+
+    Both temperature sensors are available, so R_n_dhw is a 2×2 diagonal
+    matrix.
+
+    Parameters
+    ----------
+    process_cov_temperatures:
+        2×2 process noise covariance Q_n_dhw for [T_top, T_bot] [K²].
+        May also be given as a length-2 diagonal vector.
+    process_var_vtap:
+        Scalar process noise variance Q_n_Vtap for V_tap [(m³/h)²].
+        Controls how quickly the EKF tracks tap events (higher → faster,
+        noisier; lower → slower, smoother).  Must be strictly positive.
+    measurement_var_t_top:
+        Scalar measurement noise variance σ²_T_top [K²].
+    measurement_var_t_bot:
+        Scalar measurement noise variance σ²_T_bot [K²].
+    """
+
+    process_cov_temperatures: np.ndarray
+    process_var_vtap: float
+    measurement_var_t_top: float
+    measurement_var_t_bot: float
+
+    def __post_init__(self) -> None:
+        q = np.asarray(self.process_cov_temperatures, dtype=float)
+        if q.shape == (2,):
+            q = np.diag(q)
+        if q.shape != (2, 2):
+            raise ValueError("process_cov_temperatures must be 2×2 or a length-2 diagonal.")
+        if not np.allclose(q, q.T):
+            raise ValueError("process_cov_temperatures must be symmetric.")
+        if np.min(np.linalg.eigvalsh(q)) < -1e-10:
+            raise ValueError("process_cov_temperatures must be positive semi-definite.")
+        if self.process_var_vtap <= 0.0:
+            raise ValueError("process_var_vtap must be strictly positive.")
+        if self.measurement_var_t_top <= 0.0:
+            raise ValueError("measurement_var_t_top must be strictly positive.")
+        if self.measurement_var_t_bot <= 0.0:
+            raise ValueError("measurement_var_t_bot must be strictly positive.")
+        object.__setattr__(self, "process_cov_temperatures", q)
+
+    @property
+    def Q_aug(self) -> np.ndarray:
+        """3×3 block-diagonal process noise covariance Q_aug = diag(Q_n_dhw, Q_n_Vtap)."""
+        q = np.zeros((3, 3), dtype=float)
+        q[:2, :2] = self.process_cov_temperatures
+        q[2, 2] = self.process_var_vtap
+        return q
+
+    @property
+    def R_n(self) -> np.ndarray:
+        """2×2 diagonal measurement noise covariance diag(σ²_T_top, σ²_T_bot) [K²]."""
+        return np.diag(
+            np.array([self.measurement_var_t_top, self.measurement_var_t_bot], dtype=float)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -638,4 +704,3 @@ class DHWForecastHorizon:
             t_amb_c=np.full(n, t_amb_c),
             legionella_required=np.full(n, legionella_required, dtype=bool),
         )
-
