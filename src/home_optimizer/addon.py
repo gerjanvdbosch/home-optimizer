@@ -84,7 +84,7 @@ class AddonOptions(BaseModel):
     # --- Telemetry storage ---
     database_path: str = Field(..., min_length=1,
                                description="SQLite path, e.g. /data/home_optimizer/telemetry.sqlite3")
-    sampling_interval_seconds: int = Field(30, gt=0,
+    sampling_interval_seconds: int = Field(10, gt=0,
                                            description="Sensor polling interval [s]")
     flush_interval_seconds: int = Field(300, gt=0,
                                         description="Aggregation window written to DB [s]")

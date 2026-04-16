@@ -21,7 +21,7 @@ from sqlalchemy import Boolean, DateTime, Float, Integer, String, UniqueConstrai
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DEFAULT_TELEMETRY_TIMEZONE_NAME: str = "UTC"
-DEFAULT_SAMPLING_INTERVAL_SECONDS: int = 30
+DEFAULT_SAMPLING_INTERVAL_SECONDS: int = 10
 DEFAULT_FLUSH_INTERVAL_SECONDS: int = 300
 DEFAULT_TELEMETRY_JOB_ID_PREFIX: str = "telemetry"
 MAX_HP_MODE_LENGTH: int = 64
