@@ -36,7 +36,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
-from .sensors.open_meteo import OpenMeteoClient
+from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
+from .sensors.weather_backend import WeatherAugmentedBackend
 from .telemetry import (
     BufferedTelemetryCollector,
     ForecastPersister,
@@ -321,15 +322,20 @@ def main() -> None:
     log.info("Telemetry database ready at %s", opts.database_path)
 
     # ── 3. Build HA sensor backend ─────────────────────────────────────────
-    backend = _build_backend(opts)
+    ha_backend = _build_backend(opts)
     log.info("HomeAssistantBackend configured with %d entity IDs", 20)
+
+    # Wrap with WeatherAugmentedBackend so t_mains_estimated_c is populated
+    # via the SeasonalMainsModel (date-only function, no network I/O).
+    mains_model = SeasonalMainsModel.for_netherlands()
+    backend = WeatherAugmentedBackend(ha_backend, mains_model)
 
     # ── 3b. Fetch home location from zone.home ─────────────────────────────
     # The latitude/longitude are stored as zone entity *attributes*, not as
     # config options, so they are fetched automatically at startup.
     log.info("Fetching home location from zone.home …")
     try:
-        latitude, longitude = backend.fetch_zone_location("zone.home")
+        latitude, longitude = ha_backend.fetch_zone_location("zone.home")
     except (ConnectionError, ValueError) as exc:
         log.critical("Could not fetch lat/lon from zone.home: %s", exc)
         sys.exit(1)
