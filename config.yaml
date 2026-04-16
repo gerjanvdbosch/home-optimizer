@@ -38,7 +38,7 @@ map:
 # ---------------------------------------------------------------------------
 options:
   # --- Telemetry storage ---
-  database_path: "/config/telemetry.sqlite3"
+  database_path: "/config/database.sqlite3"
   sampling_interval_seconds: 10
   flush_interval_seconds: 300
   api_port: 8099

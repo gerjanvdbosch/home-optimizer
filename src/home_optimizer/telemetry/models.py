@@ -35,7 +35,7 @@ class TelemetryCollectorSettings(BaseModel):
     ----------
     database_url:
         SQLAlchemy database URL for telemetry storage, for example
-        ``"sqlite:///telemetry.sqlite3"``.
+        ``"sqlite:///database.sqlite3"``.
     sampling_interval_seconds:
         APScheduler polling interval for live sensors [s].
     flush_interval_seconds:

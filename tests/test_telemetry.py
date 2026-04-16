@@ -159,7 +159,7 @@ def test_repository_and_collector_flush_round_trip(tmp_path: Path) -> None:
             _reading(t0 + timedelta(seconds=30), room_temperature_c=20.4, hp_mode="ufh"),
         ]
     )
-    database_url = f"sqlite:///{tmp_path / 'telemetry.sqlite3'}"
+    database_url = f"sqlite:///{tmp_path / 'database.sqlite3'}"
     repository = TelemetryRepository(database_url=database_url)
     settings = TelemetryCollectorSettings(
         database_url=database_url,
@@ -255,7 +255,7 @@ def test_settings_fail_when_flush_interval_is_not_a_multiple() -> None:
     """Aggregation windows must contain a whole number of sample periods."""
     with pytest.raises(ValidationError):
         TelemetryCollectorSettings(
-            database_url="sqlite:///telemetry.sqlite3",
+            database_url="sqlite:///database.sqlite3",
             sampling_interval_seconds=45,
             flush_interval_seconds=300,
         )

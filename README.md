@@ -95,7 +95,7 @@ from home_optimizer.telemetry import (
 	TelemetryRepository,
 )
 
-settings = TelemetryCollectorSettings(database_url="sqlite:///telemetry.sqlite3")
+settings = TelemetryCollectorSettings(database_url="sqlite:///database.sqlite3")
 repository = TelemetryRepository(database_url=settings.database_url)
 backend = LocalBackend.from_json_file("sensors.json")
 collector = BufferedTelemetryCollector(backend=backend, repository=repository, settings=settings)

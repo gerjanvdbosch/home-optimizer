@@ -18,7 +18,7 @@ from home_optimizer.telemetry import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SENSORS_JSON = PROJECT_ROOT / "sensors.json"
-TELEMETRY_SQLITE = PROJECT_ROOT / "telemetry.sqlite3"
+TELEMETRY_SQLITE = PROJECT_ROOT / "database.sqlite3"
 RUN_DURATION_SECONDS: int = 20
 
 
