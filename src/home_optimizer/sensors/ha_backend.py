@@ -159,11 +159,13 @@ class HomeAssistantBackend(SensorBackend):
         boiler_ambient_temperature: HAEntityConfig,
         refrigerant_condensation_temperature: HAEntityConfig,
         refrigerant_liquid_line_temperature: HAEntityConfig,
-        discharge_temperature: HAEntityConfig,
-        base_url: str | None = None,
-        token: str | None = None,
-        timeout: float = 10.0,
-    ) -> None:
+    discharge_temperature: HAEntityConfig,
+    base_url: str | None = None,
+    token: str | None = None,
+    timeout: float = 10.0,
+    pv_total_energy: HAEntityConfig | None = None,
+    hp_electric_total_energy: HAEntityConfig | None = None,
+) -> None:
         self._room_temperature = room_temperature
         self._outdoor_temperature = outdoor_temperature
         self._hp_supply_temperature = hp_supply_temperature
@@ -184,6 +186,9 @@ class HomeAssistantBackend(SensorBackend):
         self._refrigerant_condensation_temperature = refrigerant_condensation_temperature
         self._refrigerant_liquid_line_temperature = refrigerant_liquid_line_temperature
         self._discharge_temperature = discharge_temperature
+        # Optional energy counter entity configs (None = sensor not installed).
+        self._pv_total_energy = pv_total_energy
+        self._hp_electric_total_energy = hp_electric_total_energy
         if not self._hp_mode_entity_id:
             raise ValueError("hp_mode_entity_id must not be empty.")
         if not self._defrost_active_entity_id:
@@ -355,6 +360,17 @@ class HomeAssistantBackend(SensorBackend):
             # T_mains = 0.0 is a sentinel indicating the wrapper is not in use.
             t_mains_estimated_c=0.0,
             timestamp=self.now_utc(),
+            # Optional energy counters — None when entity config is not supplied.
+            pv_total_kwh=(
+                self._fetch_state(self._pv_total_energy)
+                if self._pv_total_energy is not None
+                else None
+            ),
+            hp_electric_total_kwh=(
+                self._fetch_state(self._hp_electric_total_energy)
+                if self._hp_electric_total_energy is not None
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------

@@ -53,6 +53,23 @@ BOOL_READING_FIELD_NAMES: tuple[str, ...] = (
     "booster_heater_active",
 )
 
+#: Optional monotonically-increasing energy counter fields [kWh].
+#: These are aggregated as (last − first) delta over the flush window.
+#: The corresponding TelemetryAggregate columns are nullable (NULL when the
+#: sensor is absent, i.e. LiveReadings.<field> is None for all samples).
+COUNTER_READING_FIELD_NAMES: tuple[str, ...] = (
+    "pv_total_kwh",
+    "hp_electric_total_kwh",
+)
+
+#: Mapping from LiveReadings counter field name → TelemetryAggregate column name.
+#: The counter delta is the energy consumed/produced over the flush window.
+_COUNTER_COLUMN_MAP: dict[str, str] = {
+    "pv_total_kwh": "pv_energy_delta_kwh",
+    "hp_electric_total_kwh": "hp_electric_energy_delta_kwh",
+}
+
+
 _UNIT_SUFFIXES: tuple[str, ...] = ("_c", "_kw", "_lpm", "_pct")
 
 
@@ -124,6 +141,22 @@ def aggregate_readings(samples: Sequence[LiveReadings]) -> dict[str, Any]:
         )
         aggregate[f"{field_name}_fraction"] = float(np.mean(values))
         aggregate[f"{field_name}_last"] = bool(ordered_samples[-1].__getattribute__(field_name))
+
+    # Counter fields: persist (last − first) delta over the flush window.
+    # A counter reading of None means the sensor is absent; the column is NULL.
+    # Delta can be zero (no energy consumed) but must never be negative — a
+    # negative delta indicates a counter reset, which is stored as NULL to
+    # prevent corrupt training data.
+    for field_name, column_name in _COUNTER_COLUMN_MAP.items():
+        first_val = getattr(first_sample, field_name)
+        last_val = getattr(last_sample, field_name)
+        if first_val is None or last_val is None:
+            # Sensor not installed for at least one boundary sample → NULL.
+            aggregate[column_name] = None
+        else:
+            delta = float(last_val) - float(first_val)
+            # Guard against counter resets (e.g. HA restart resets utility_meter).
+            aggregate[column_name] = delta if delta >= 0.0 else None
 
     return aggregate
 

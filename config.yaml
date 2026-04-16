@@ -89,6 +89,13 @@ options:
   # DHW boiler tank volume [litres]
   boiler_tank_liters: 200
 
+  # Optional monotonically-increasing energy counters [kWh].
+  # Leave blank ("") or omit to disable.  When present, the telemetry layer
+  # records ΔkWh per flush window for accurate COP validation (§14.1) and
+  # PV self-consumption tracking.
+  sensor_pv_total_kwh: "sensor.pv_energie_totaal"
+  sensor_hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
+
 # ---------------------------------------------------------------------------
 # Schema — types validated by the HA supervisor before the addon starts.
 # Use "type?" for optional fields that have a sensible default in options:.
@@ -131,4 +138,6 @@ schema:
   pv_tilt: float
   pv_azimuth: float
   boiler_tank_liters: int
+  sensor_pv_total_kwh: str
+  sensor_hp_electric_total_kwh: str
 

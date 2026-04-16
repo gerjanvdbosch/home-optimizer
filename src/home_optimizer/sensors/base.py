@@ -143,6 +143,14 @@ class LiveReadings:
     # --- Seasonal DHW parameter (injected by WeatherAugmentedBackend, §9.1) ---
     t_mains_estimated_c: float
     timestamp: datetime
+    # --- Optional energy counters (monotonically increasing totals) ---
+    # When present, the telemetry layer derives ΔkWh per flush window from these
+    # counters instead of integrating instantaneous power.  This avoids sampling-gap
+    # errors and enables accurate COP validation (§14.1):
+    #   actual_COP = ΔE_hp_thermal_kwh / ΔE_hp_electric_kwh.
+    # ``None`` means the sensor is not installed; the telemetry column is then NULL.
+    pv_total_kwh: float | None = None
+    hp_electric_total_kwh: float | None = None
 
     def __post_init__(self) -> None:
         numeric_fields = (
@@ -185,6 +193,14 @@ class LiveReadings:
                 f"shutter_living_room_pct must be in [0, 100], got {shutter}."
             )
 
+
+        # Optional counter fields: validate when present.
+        for counter_name in ("pv_total_kwh", "hp_electric_total_kwh"):
+            value = getattr(self, counter_name)
+            if value is not None:
+                _assert_finite(counter_name, float(value))
+                if float(value) < 0.0:
+                    raise ValueError(f"{counter_name} must be non-negative (it is a cumulative total).")
 
         # Coerce bool fields — JSON may deliver 0/1 integers.
         object.__setattr__(self, "defrost_active", bool(self.defrost_active))

@@ -190,6 +190,16 @@ class TelemetryAggregate(Base):
     household_elec_power_mean_kw: Mapped[float] = mapped_column(Float)
     household_elec_power_last_kw: Mapped[float] = mapped_column(Float)
 
+    # Optional energy counter deltas (NULL when sensor is not installed) ------
+    # ΔkWh = counter_last − counter_first over the flush window.
+    # More accurate than integrating mean_power × Δt because counter reads are
+    # immune to sampling gaps.  Primary use cases:
+    #   • COP validation: actual_COP = hp_thermal_power_mean_kw × Δt / hp_electric_energy_delta_kwh
+    #   • PV self-consumption tracking per flush window.
+    # Source: LiveReadings.pv_total_kwh and LiveReadings.hp_electric_total_kwh.
+    pv_energy_delta_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hp_electric_energy_delta_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(tz=timezone.utc),

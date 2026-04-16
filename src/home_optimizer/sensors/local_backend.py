@@ -40,6 +40,11 @@ _NUMERIC_SENSOR_KEYS: tuple[str, ...] = (
     # LocalBackend accepts it directly so tests can supply an explicit value.
     "t_mains_estimated_c",
 )
+#: Optional counter keys — present in JSON/env only when the sensor is installed.
+_OPTIONAL_COUNTER_KEYS: tuple[str, ...] = (
+    "pv_total_kwh",
+    "hp_electric_total_kwh",
+)
 _TEXT_SENSOR_KEYS: tuple[str, ...] = ("hp_mode",)
 _BOOL_SENSOR_KEYS: tuple[str, ...] = ("defrost_active", "booster_heater_active")
 _ALL_SENSOR_KEYS: tuple[str, ...] = _NUMERIC_SENSOR_KEYS + _TEXT_SENSOR_KEYS + _BOOL_SENSOR_KEYS
@@ -62,6 +67,17 @@ def _resolve_bool(source: BoolValueSource) -> bool:
     """
     raw = source() if callable(source) else source
     return bool(raw)
+
+
+def _resolve_optional_numeric(source: NumericValueSource | None) -> float | None:
+    """Evaluate an optional numeric source; return None when source is None or yields None.
+
+    Used for optional energy counter fields that may be absent from the configuration.
+    """
+    if source is None:
+        return None
+    result = source() if callable(source) else source
+    return None if result is None else float(result)
 
 
 class LocalBackend(SensorBackend):
@@ -94,6 +110,8 @@ class LocalBackend(SensorBackend):
     ENV_REFRIGERANT_LIQUID_LINE_TEMP_C = "HOME_OPT_REFRIGERANT_LIQUID_LINE_TEMP_C"
     ENV_DISCHARGE_TEMP_C = "HOME_OPT_DISCHARGE_TEMP_C"
     ENV_T_MAINS_ESTIMATED_C = "HOME_OPT_T_MAINS_ESTIMATED_C"
+    ENV_PV_TOTAL_KWH = "HOME_OPT_PV_TOTAL_KWH"
+    ENV_HP_ELECTRIC_TOTAL_KWH = "HOME_OPT_HP_ELECTRIC_TOTAL_KWH"
 
     def __init__(
         self,
@@ -119,6 +137,8 @@ class LocalBackend(SensorBackend):
         refrigerant_liquid_line_temp_c: NumericValueSource,
         discharge_temp_c: NumericValueSource,
         t_mains_estimated_c: NumericValueSource,
+        pv_total_kwh: NumericValueSource | None = None,
+        hp_electric_total_kwh: NumericValueSource | None = None,
     ) -> None:
         self._room_temperature_c = room_temperature_c
         self._outdoor_temperature_c = outdoor_temperature_c
@@ -141,6 +161,9 @@ class LocalBackend(SensorBackend):
         self._refrigerant_liquid_line_temp_c = refrigerant_liquid_line_temp_c
         self._discharge_temp_c = discharge_temp_c
         self._t_mains_estimated_c = t_mains_estimated_c
+        # Optional energy counter sources — None when sensor is not installed.
+        self._pv_total_kwh = pv_total_kwh
+        self._hp_electric_total_kwh = hp_electric_total_kwh
 
     # ------------------------------------------------------------------
     # Factory constructors
@@ -195,6 +218,19 @@ class LocalBackend(SensorBackend):
                 raise ValueError(f"Key {key!r} in {resolved_path} must not be empty.")
             return value
 
+        def _read_optional_numeric(key: str) -> float | None:
+            """Return float value for key, or None if the key is absent."""
+            data = _read_json_object()
+            if key not in data:
+                return None
+            value = data[key]
+            try:
+                return float(str(value))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Key {key!r} in {resolved_path} is not numeric: {value!r}"
+                ) from exc
+
         return cls(
             room_temperature_c=lambda: _read_numeric("room_temperature_c"),
             outdoor_temperature_c=lambda: _read_numeric("outdoor_temperature_c"),
@@ -217,6 +253,9 @@ class LocalBackend(SensorBackend):
             refrigerant_liquid_line_temp_c=lambda: _read_numeric("refrigerant_liquid_line_temp_c"),
             discharge_temp_c=lambda: _read_numeric("discharge_temp_c"),
             t_mains_estimated_c=lambda: _read_numeric("t_mains_estimated_c"),
+            # Optional energy counters — None when key is absent from the JSON file.
+            pv_total_kwh=lambda: _read_optional_numeric("pv_total_kwh"),
+            hp_electric_total_kwh=lambda: _read_optional_numeric("hp_electric_total_kwh"),
         )
 
     @classmethod
@@ -261,6 +300,17 @@ class LocalBackend(SensorBackend):
             refrigerant_liquid_line_temp_c=lambda: _env_numeric(cls.ENV_REFRIGERANT_LIQUID_LINE_TEMP_C),
             discharge_temp_c=lambda: _env_numeric(cls.ENV_DISCHARGE_TEMP_C),
             t_mains_estimated_c=lambda: _env_numeric(cls.ENV_T_MAINS_ESTIMATED_C),
+            # Optional energy counters — None when env var is absent.
+            pv_total_kwh=(
+                (lambda: _env_numeric(cls.ENV_PV_TOTAL_KWH))
+                if cls.ENV_PV_TOTAL_KWH in os.environ
+                else None
+            ),
+            hp_electric_total_kwh=(
+                (lambda: _env_numeric(cls.ENV_HP_ELECTRIC_TOTAL_KWH))
+                if cls.ENV_HP_ELECTRIC_TOTAL_KWH in os.environ
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -297,6 +347,9 @@ class LocalBackend(SensorBackend):
             discharge_temp_c=_resolve_numeric(self._discharge_temp_c),
             t_mains_estimated_c=_resolve_numeric(self._t_mains_estimated_c),
             timestamp=self.now_utc(),
+            # Optional energy counters — None when source is not configured.
+            pv_total_kwh=_resolve_optional_numeric(self._pv_total_kwh),
+            hp_electric_total_kwh=_resolve_optional_numeric(self._hp_electric_total_kwh),
         )
 
     def close(self) -> None:
