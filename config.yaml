@@ -30,14 +30,15 @@ ports_description:
   8099/tcp: "Home Optimizer dashboard & REST API"
 
 map:
-  - data:rw   # /data is writable — used for the SQLite telemetry database
+  - addon_config:rw  # /config → /addon_configs/home_optimizer/ on host
+                     # Accessible via SSH and Samba: \\homeassistant\addon_configs\home_optimizer\
 
 # ---------------------------------------------------------------------------
 # Default option values — user can override via the addon Configuration tab.
 # ---------------------------------------------------------------------------
 options:
   # --- Telemetry storage ---
-  database_path: "/data/home_optimizer/telemetry.sqlite3"
+  database_path: "/config/telemetry.sqlite3"
   sampling_interval_seconds: 30
   flush_interval_seconds: 300
   api_port: 8099
