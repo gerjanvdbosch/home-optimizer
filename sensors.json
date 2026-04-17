@@ -19,5 +19,9 @@
     "refrigerant_condensation_temp_c": 38.0,
     "refrigerant_liquid_line_temp_c": 28.0,
     "discharge_temp_c": 65.0,
-    "t_mains_estimated_c": 10.5
+    "t_mains_estimated_c": 10.5,
+    "pv_total_kwh": 0.0,
+    "hp_electric_total_kwh": 0.0,
+    "p1_import_total_kwh": 0.0,
+    "p1_export_total_kwh": 0.0
 }

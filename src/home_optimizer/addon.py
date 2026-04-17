@@ -36,6 +36,7 @@ import uvicorn
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
+from .mpc_scheduler import MPCRunner, schedule_mpc
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
@@ -93,6 +94,59 @@ class AddonOptions(BaseModel):
         300, gt=0, description="Aggregation window written to DB [s]"
     )
     api_port: int = Field(8099, gt=0, lt=65536, description="Uvicorn listen port")
+
+    # --- MPC scheduling ---
+    mpc_interval_seconds: int = Field(
+        3600,
+        gt=0,
+        description=(
+            "How often the MPC optimisation runs [s].  "
+            "3600 = once per hour, 1800 = every 30 min.  "
+            "Set to 0 in options.json to disable MPC scheduling entirely "
+            "(simulator-only mode).  Must be > 0 when non-zero."
+        ),
+    )
+    mpc_enabled: bool = Field(
+        True,
+        description=(
+            "Enable periodic MPC scheduling.  When False the MPC is only "
+            "available via the POST /api/simulate endpoint (simulator mode)."
+        ),
+    )
+
+    # --- MPC physical parameters (§15 of the theory document) ---
+    # These are the house / heat-pump parameters used by the periodic runner.
+    # The simulator uses its own values from the browser form.
+    mpc_C_r: float = Field(6.0, gt=0.0, description="Room thermal capacity C_r [kWh/K]")
+    mpc_C_b: float = Field(10.0, gt=0.0, description="Slab thermal capacity C_b [kWh/K]")
+    mpc_R_br: float = Field(1.0, gt=0.0, description="Floor-to-room resistance R_br [K/kW]")
+    mpc_R_ro: float = Field(10.0, gt=0.0, description="Room-to-outside resistance R_ro [K/kW]")
+    mpc_alpha: float = Field(0.25, ge=0.0, le=1.0, description="Solar fraction to room air α [-]")
+    mpc_eta: float = Field(0.55, ge=0.0, le=1.0, description="Window transmittance η [-]")
+    mpc_A_glass: float = Field(7.5, gt=0.0, description="South-facing glazing area [m²]")
+    mpc_P_max: float = Field(4.5, gt=0.0, description="Max UFH thermal power P_UFH,max [kW]")
+    mpc_delta_P_max: float = Field(1.0, gt=0.0, description="Max UFH ramp-rate [kW/step]")
+    mpc_T_min: float = Field(19.0, description="Min comfort temperature [°C]")
+    mpc_T_max: float = Field(22.5, description="Max comfort temperature [°C]")
+    mpc_T_ref: float = Field(20.5, description="Comfort setpoint T_ref [°C]")
+    mpc_horizon_hours: int = Field(24, ge=4, le=48, description="MPC horizon N [steps]")
+    mpc_dt_hours: float = Field(1.0, ge=0.25, le=2.0, description="MPC time step Δt [h]")
+    mpc_Q_c: float = Field(8.0, ge=0.0, description="Comfort weight Q_c")
+    mpc_R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
+    mpc_Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
+    mpc_P_hp_max_elec: float = Field(2.5, gt=0.0, description="Max HP electrical power [kW]")
+    mpc_eta_carnot: float = Field(0.45, ge=0.1, le=0.99, description="Carnot efficiency η [-]")
+    mpc_delta_T_cond: float = Field(5.0, ge=0.0, le=15.0, description="Condensing approach ΔT [K]")
+    mpc_delta_T_evap: float = Field(5.0, ge=0.0, le=15.0, description="Evaporating approach ΔT [K]")
+    mpc_cop_min: float = Field(1.5, ge=1.01, le=5.0, description="COP lower bound [-]")
+    mpc_cop_max: float = Field(7.0, ge=2.0, le=15.0, description="COP upper bound [-]")
+    mpc_dhw_enabled: bool = Field(True, description="Include DHW in periodic MPC")
+    mpc_dhw_P_max: float = Field(3.0, gt=0.0, description="Max DHW thermal power [kW]")
+    mpc_dhw_delta_P_max: float = Field(1.0, gt=0.0, description="Max DHW ramp-rate [kW/step]")
+    mpc_dhw_T_min: float = Field(50.0, description="Min DHW tap temperature [°C]")
+    mpc_dhw_T_legionella: float = Field(60.0, description="Legionella target temperature [°C]")
+    mpc_dhw_R_strat: float = Field(10.0, gt=0.0, description="DHW stratification resistance [K/kW]")
+    mpc_dhw_R_loss: float = Field(50.0, gt=0.0, description="DHW standby-loss resistance [K/kW]")
 
     # --- Temperature sensors (°C — scale 1.0) ---
     sensor_room_temperature: str = Field(..., min_length=1)
@@ -433,6 +487,59 @@ def main() -> None:
     # data is available from the first second rather than waiting one full hour.
     forecast_persister.start(collector.scheduler, run_immediately=True)
     log.info("ForecastPersister started (hourly Open-Meteo updates)")
+
+    # ── 4c. Start periodic MPC (optional) ─────────────────────────────────
+    if opts.mpc_enabled:
+        from .api import RunRequest  # noqa: PLC0415 – deferred to avoid circular import
+
+        mpc_base_request = RunRequest(
+            C_r=opts.mpc_C_r,
+            C_b=opts.mpc_C_b,
+            R_br=opts.mpc_R_br,
+            R_ro=opts.mpc_R_ro,
+            alpha=opts.mpc_alpha,
+            eta=opts.mpc_eta,
+            A_glass=opts.mpc_A_glass,
+            P_max=opts.mpc_P_max,
+            delta_P_max=opts.mpc_delta_P_max,
+            T_min=opts.mpc_T_min,
+            T_max=opts.mpc_T_max,
+            T_ref=opts.mpc_T_ref,
+            horizon_hours=opts.mpc_horizon_hours,
+            dt_hours=opts.mpc_dt_hours,
+            Q_c=opts.mpc_Q_c,
+            R_c=opts.mpc_R_c,
+            Q_N=opts.mpc_Q_N,
+            P_hp_max_elec=opts.mpc_P_hp_max_elec,
+            eta_carnot=opts.mpc_eta_carnot,
+            delta_T_cond=opts.mpc_delta_T_cond,
+            delta_T_evap=opts.mpc_delta_T_evap,
+            cop_min=opts.mpc_cop_min,
+            cop_max=opts.mpc_cop_max,
+            dhw_enabled=opts.mpc_dhw_enabled,
+            dhw_P_max=opts.mpc_dhw_P_max,
+            dhw_delta_P_max=opts.mpc_dhw_delta_P_max,
+            dhw_T_min=opts.mpc_dhw_T_min,
+            dhw_T_legionella=opts.mpc_dhw_T_legionella,
+            dhw_C_top=opts.boiler_tank_liters * 1.1628e-3 / 2.0,  # λ·V_tank/2
+            dhw_C_bot=opts.boiler_tank_liters * 1.1628e-3 / 2.0,
+            dhw_R_strat=opts.mpc_dhw_R_strat,
+            dhw_R_loss=opts.mpc_dhw_R_loss,
+        )
+        mpc_runner = MPCRunner(base_request=mpc_base_request, backend=backend)
+        schedule_mpc(
+            runner=mpc_runner,
+            scheduler=collector.scheduler,
+            interval_seconds=opts.mpc_interval_seconds,
+            run_immediately=True,
+        )
+        log.info(
+            "MPC periodic runner started (every %d s / %d min)",
+            opts.mpc_interval_seconds,
+            opts.mpc_interval_seconds // 60,
+        )
+    else:
+        log.info("MPC periodic scheduling disabled (mpc_enabled=false).")
 
     # ── 5. SIGTERM handler — graceful shutdown from `docker stop` ──────────
     # Only stop the APScheduler here so no new jobs are accepted.

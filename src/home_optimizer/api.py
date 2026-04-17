@@ -42,6 +42,7 @@ POST /api/simulate      Run one MPC step, return charts + numerical summaries
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -54,7 +55,7 @@ from pydantic import BaseModel, Field
 
 from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import DHWModel
-from .mpc import MPCController
+from .mpc import MPCController, MPCSolution
 from .sensors.open_meteo import OpenMeteoClient
 from .settings import get_database_url
 from .telemetry import TelemetryRepository
@@ -1187,58 +1188,87 @@ async def get_latest_forecast() -> ForecastResponse:
     )
 
 
-@app.post("/api/simulate", response_model=OptimizeResponse)
-async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
-    """Run one MPC optimisation step and return charts + numerical summaries.
+@dataclass(frozen=True, slots=True)
+class MPCStepResult:
+    """Numerical result of one MPC solve step (no charts).
 
-    Processing pipeline:
+    Returned by :func:`solve_mpc_step` so that both the HTTP endpoint and
+    the scheduled :class:`~home_optimizer.mpc_scheduler.MPCRunner` can reuse
+    the same core solver without duplicating logic.
 
-    1. Validate physical parameters (Pydantic + custom assertions).
-    2. Build Carnot COP model from heat-pump parameters.
-    3. Compute time-varying COP arrays: UFH via heating curve, DHW via
-       fixed supply temperature (≈ T_dhw_min).
-    4. Construct UFH and DHW forecast horizons with COP arrays embedded.
-    5. Solve the QP (CVXPY / OSQP) or fall back to greedy heuristic.
-    6. Compute electrical energy and cost summaries (on electrical basis).
-    7. Serialise all Plotly charts to JSON for the browser.
+    Attributes:
+        solution:       Raw CVXPY/greedy solution with full control sequences.
+        ufh_forecast:   Forecast horizon used for UFH (contains COP array).
+        dhw_forecast:   Forecast horizon used for DHW, or ``None`` when disabled.
+        p_ufh_kw:       Clipped UFH thermal power array [kW], length N.
+        p_dhw_kw:       Clipped DHW thermal power array [kW], length N (zeros if DHW off).
+        cop_ufh_arr:    UFH COP array used in the solve, length N.
+        cop_dhw_arr:    DHW COP array used in the solve, length N.
+        pv_kw:          PV generation array [kW], length N.
+        total_cost_eur: Total electricity cost over horizon [€].
+        ufh_energy_kwh: UFH thermal energy [kWh].
+        dhw_energy_kwh: DHW thermal energy [kWh].
+        start_hour:     UTC hour the solve was triggered (0–23).
+    """
+
+    solution: MPCSolution
+    ufh_forecast: "ForecastHorizon"
+    dhw_forecast: "DHWForecastHorizon | None"
+    p_ufh_kw: "np.ndarray"
+    p_dhw_kw: "np.ndarray"
+    cop_ufh_arr: "np.ndarray"
+    cop_dhw_arr: "np.ndarray"
+    pv_kw: "np.ndarray"
+    total_cost_eur: float
+    ufh_energy_kwh: float
+    dhw_energy_kwh: float
+    start_hour: int
+
+
+def solve_mpc_step(req: RunRequest) -> MPCStepResult:
+    """Core MPC solve step — reusable by both the HTTP endpoint and the scheduler.
+
+    Implements steps 1–6 of the optimisation pipeline (see §14):
+
+    1. Build UFH thermal model from physical parameters.
+    2. Build Carnot COP model (§14.1).
+    3. Compute time-varying COP arrays over the horizon.
+    4. Construct UFH and DHW forecast horizons.
+    5. Solve the QP (CVXPY / greedy fallback).
+    6. Compute energy and cost summaries.
+
+    No charts are generated here — chart construction remains in the HTTP
+    endpoint so the scheduler does not pay the Plotly serialisation cost.
 
     Args:
-        req: Validated request with all physical and MPC parameters.
+        req: Validated :class:`RunRequest` with all physical and MPC parameters.
 
     Returns:
-        ``OptimizeResponse`` with numerical results and Plotly chart JSON.
+        :class:`MPCStepResult` with the full solution and numerical summaries.
 
     Raises:
-        HTTPException 422: If any parameter is physically invalid.
+        ValueError: If any parameter is physically invalid (re-raised from
+            Pydantic / the MPC controller).
     """
-    start_hour = datetime.now().hour
+    start_hour = datetime.now(tz=timezone.utc).hour
     N = req.horizon_hours
 
     # ── 1. Build UFH thermal model ──────────────────────────────────────
-    try:
-        thermal_params = ThermalParameters(
-            dt_hours=req.dt_hours,
-            C_r=req.C_r,
-            C_b=req.C_b,
-            R_br=req.R_br,
-            R_ro=req.R_ro,
-            alpha=req.alpha,
-            eta=req.eta,
-            A_glass=req.A_glass,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    thermal_params = ThermalParameters(
+        dt_hours=req.dt_hours,
+        C_r=req.C_r,
+        C_b=req.C_b,
+        R_br=req.R_br,
+        R_ro=req.R_ro,
+        alpha=req.alpha,
+        eta=req.eta,
+        A_glass=req.A_glass,
+    )
 
-    # ── 2. Build Carnot COP model (§14.1) ──────────────────────────────
-    try:
-        cop_model = _build_cop_model(req)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # ── 2. Build Carnot COP model (14.1) ──────────────────────────────
+    cop_model = _build_cop_model(req)
 
-    # ── 3. Compute representative scalar COPs for MPCParameters validation
-    # The MPC will override these with the time-varying arrays from the
-    # forecast (cop_ufh_k), but MPCParameters still requires a scalar for
-    # the Fail-Fast bounds check.  Use the COP at the configured outdoor temp.
+    # ── 3. Compute representative scalar COPs for MPCParameters validation ─
     t_rep = np.array([req.outdoor_temperature_c])
     cop_ufh_scalar = float(cop_model.cop_ufh(t_rep)[0])
     cop_dhw_scalar = float(cop_model.cop_dhw(t_rep, req.dhw_T_min)[0])
@@ -1252,7 +1282,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         delta_P_max=req.delta_P_max,
         T_min=req.T_min,
         T_max=req.T_max,
-        cop_ufh=cop_ufh_scalar,  # derived from Carnot model, not a magic number
+        cop_ufh=cop_ufh_scalar,
         cop_max=req.cop_max,
     )
 
@@ -1264,89 +1294,139 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     pv_kw = ufh_forecast.pv_kw
 
     # ── 5. Solve MPC ────────────────────────────────────────────────────
-    try:
-        dhw_model: DHWModel | None = None
-        dhw_forecast: DHWForecastHorizon | None = None
-        controller_params: MPCParameters | CombinedMPCParameters = mpc_params
-        initial_dhw_state: np.ndarray | None = None
+    dhw_model: DHWModel | None = None
+    dhw_forecast: DHWForecastHorizon | None = None
+    controller_params: MPCParameters | CombinedMPCParameters = mpc_params
+    initial_dhw_state: np.ndarray | None = None
 
-        if req.dhw_enabled:
-            dhw_params = DHWParameters(
-                dt_hours=req.dt_hours,
-                C_top=req.dhw_C_top,
-                C_bot=req.dhw_C_bot,
-                R_strat=req.dhw_R_strat,
-                R_loss=req.dhw_R_loss,
-            )
-            dhw_mpc_params = DHWMPCParameters(
-                P_dhw_max=req.dhw_P_max,
-                delta_P_dhw_max=req.dhw_delta_P_max,
-                T_dhw_min=req.dhw_T_min,
-                T_legionella=req.dhw_T_legionella,
-                legionella_period_steps=req.dhw_legionella_period_steps,
-                legionella_duration_steps=req.dhw_legionella_duration_steps,
-                cop_dhw=cop_dhw_scalar,  # derived from Carnot model
-                cop_max=req.cop_max,
-            )
-            controller_params = CombinedMPCParameters(
-                ufh=mpc_params,
-                dhw=dhw_mpc_params,
-                P_hp_max_elec=req.P_hp_max_elec,
-            )
-            dhw_model = DHWModel(dhw_params)
-            dhw_forecast = _build_dhw_forecast(req, N, cop_model)
-            initial_dhw_state = np.array([req.dhw_T_top_init, req.dhw_T_bot_init])
-
-        controller = MPCController(
-            ufh_model=ufh_model,
-            params=controller_params,
-            dhw_model=dhw_model,
+    if req.dhw_enabled:
+        dhw_params = DHWParameters(
+            dt_hours=req.dt_hours,
+            C_top=req.dhw_C_top,
+            C_bot=req.dhw_C_bot,
+            R_strat=req.dhw_R_strat,
+            R_loss=req.dhw_R_loss,
         )
-        solution = controller.solve(
-            initial_ufh_state_c=np.array([req.T_r_init, req.T_b_init]),
-            ufh_forecast=ufh_forecast,
-            initial_dhw_state_c=initial_dhw_state,
-            dhw_forecast=dhw_forecast,
-            previous_p_ufh_kw=req.previous_power_kw,
+        dhw_mpc_params = DHWMPCParameters(
+            P_dhw_max=req.dhw_P_max,
+            delta_P_dhw_max=req.dhw_delta_P_max,
+            T_dhw_min=req.dhw_T_min,
+            T_legionella=req.dhw_T_legionella,
+            legionella_period_steps=req.dhw_legionella_period_steps,
+            legionella_duration_steps=req.dhw_legionella_duration_steps,
+            cop_dhw=cop_dhw_scalar,
+            cop_max=req.cop_max,
         )
-        P_UFH = np.maximum(solution.ufh_control_sequence_kw, 0.0)
-        P_dhw = np.maximum(solution.dhw_control_sequence_kw, 0.0)
-        states = solution.predicted_states_c
-        solver_status = solution.solver_status
-        objective = solution.objective_value
-        max_comfort_viol = solution.max_ufh_comfort_violation_c
-        max_dhw_viol = solution.max_dhw_comfort_violation_c
-        max_leg_viol = solution.max_legionella_violation_c
+        controller_params = CombinedMPCParameters(
+            ufh=mpc_params,
+            dhw=dhw_mpc_params,
+            P_hp_max_elec=req.P_hp_max_elec,
+        )
+        dhw_model = DHWModel(dhw_params)
+        dhw_forecast = _build_dhw_forecast(req, N, cop_model)
+        initial_dhw_state = np.array([req.dhw_T_top_init, req.dhw_T_bot_init])
 
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    controller = MPCController(
+        ufh_model=ufh_model,
+        params=controller_params,
+        dhw_model=dhw_model,
+    )
+    solution = controller.solve(
+        initial_ufh_state_c=np.array([req.T_r_init, req.T_b_init]),
+        ufh_forecast=ufh_forecast,
+        initial_dhw_state_c=initial_dhw_state,
+        dhw_forecast=dhw_forecast,
+        previous_p_ufh_kw=req.previous_power_kw,
+    )
+    p_ufh = np.maximum(solution.ufh_control_sequence_kw, 0.0)
+    p_dhw = np.maximum(solution.dhw_control_sequence_kw, 0.0)
 
-    # ── 6. Compute energy / cost summaries (electrical basis) ───────────
-    # §14.1: costs are always on electrical basis (thermal / COP).
-    # Retrieve the COP arrays that the MPC actually used.
-    assert ufh_forecast.cop_ufh_k is not None  # always set by _build_ufh_forecast
+    # ── 6. Energy / cost summaries (electrical basis, §14.1) ─────────────
+    assert ufh_forecast.cop_ufh_k is not None
     cop_ufh_arr = ufh_forecast.cop_ufh_k
     cop_dhw_arr = (
         dhw_forecast.cop_dhw_k
         if dhw_forecast is not None and dhw_forecast.cop_dhw_k is not None
         else np.ones(N)
     )
+    p_ufh_elec = p_ufh / cop_ufh_arr
+    p_dhw_elec = p_dhw / cop_dhw_arr
+    p_total_elec = p_ufh_elec + p_dhw_elec
+    p_import = np.maximum(p_total_elec - pv_kw, 0.0)
+    total_cost = float(np.sum(p_import * prices * dt))
+    ufh_energy = float(np.sum(p_ufh) * dt)
+    dhw_energy = float(np.sum(p_dhw) * dt)
 
-    P_UFH_elec = P_UFH / cop_ufh_arr  # electrical power UFH [kW]
-    P_dhw_elec = P_dhw / cop_dhw_arr  # electrical power DHW [kW]
-    P_hp_total_elec = P_UFH_elec + P_dhw_elec  # total electrical demand [kW]
-    P_hp_total_therm = P_UFH + P_dhw  # total thermal output [kW]
-    P_import = np.maximum(P_hp_total_elec - pv_kw, 0.0)  # net grid import [kW]
+    return MPCStepResult(
+        solution=solution,
+        ufh_forecast=ufh_forecast,
+        dhw_forecast=dhw_forecast,
+        p_ufh_kw=p_ufh,
+        p_dhw_kw=p_dhw,
+        cop_ufh_arr=cop_ufh_arr,
+        cop_dhw_arr=cop_dhw_arr,
+        pv_kw=pv_kw,
+        total_cost_eur=total_cost,
+        ufh_energy_kwh=ufh_energy,
+        dhw_energy_kwh=dhw_energy,
+        start_hour=start_hour,
+    )
 
-    total_energy = float(np.sum(P_hp_total_therm) * dt)  # [kWh therm]
-    total_cost_steps = P_import * prices * dt  # per-step cost [€]
+
+@app.post("/api/simulate", response_model=OptimizeResponse)
+async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
+    """Run one MPC optimisation step and return charts + numerical summaries.
+
+    Processing pipeline:
+
+    1. Delegate numerical solve to :func:`solve_mpc_step`.
+    2. Compute cost-attribution summaries.
+    3. Serialise all Plotly charts to JSON for the browser.
+
+    Args:
+        req: Validated request with all physical and MPC parameters.
+
+    Returns:
+        ``OptimizeResponse`` with numerical results and Plotly chart JSON.
+
+    Raises:
+        HTTPException 422: If any parameter is physically invalid.
+    """
+    try:
+        result = solve_mpc_step(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    N = req.horizon_hours
+    start_hour = result.start_hour
+    P_UFH = result.p_ufh_kw
+    P_dhw = result.p_dhw_kw
+    cop_ufh_arr = result.cop_ufh_arr
+    cop_dhw_arr = result.cop_dhw_arr
+    pv_kw = result.pv_kw
+    solution = result.solution
+    states = solution.predicted_states_c
+    prices = result.ufh_forecast.price_eur_per_kwh
+    dt = req.dt_hours
+
+    # ── Cost / energy attribution (electrical basis, §14.1) ──────────────
+    P_UFH_elec = P_UFH / cop_ufh_arr
+    P_dhw_elec = P_dhw / cop_dhw_arr
+    P_hp_total_elec = P_UFH_elec + P_dhw_elec
+    P_hp_total_therm = P_UFH + P_dhw
+    P_import = np.maximum(P_hp_total_elec - pv_kw, 0.0)
+    total_energy = float(np.sum(P_hp_total_therm) * dt)
+    total_cost_steps = P_import * prices * dt
     total_cost = float(np.sum(total_cost_steps))
     pv_total = float(np.sum(pv_kw) * dt)
     net_grid = float(np.sum(P_import) * dt)
-    ufh_energy = float(np.sum(P_UFH) * dt)
-    dhw_energy = float(np.sum(P_dhw) * dt)
-
-    # Cost attribution by electrical share (proportional to actual electricity drawn)
+    ufh_energy = result.ufh_energy_kwh
+    dhw_energy = result.dhw_energy_kwh
+    solver_status = solution.solver_status
+    objective = solution.objective_value
+    max_comfort_viol = solution.max_ufh_comfort_violation_c
+    max_dhw_viol = solution.max_dhw_comfort_violation_c
+    max_leg_viol = solution.max_legionella_violation_c
     ufh_cost_weights = np.divide(
         P_UFH_elec,
         P_hp_total_elec,

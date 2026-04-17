@@ -250,7 +250,6 @@ class LocalBackend(SensorBackend):
             refrigerant_liquid_line_temp_c=lambda: _read_numeric("refrigerant_liquid_line_temp_c"),
             discharge_temp_c=lambda: _read_numeric("discharge_temp_c"),
             t_mains_estimated_c=lambda: _read_numeric("t_mains_estimated_c"),
-            # Required energy counters — fail fast when key is absent from the JSON file.
             pv_total_kwh=lambda: _read_numeric("pv_total_kwh"),
             hp_electric_total_kwh=lambda: _read_numeric("hp_electric_total_kwh"),
             p1_import_total_kwh=lambda: _read_numeric("p1_import_total_kwh"),

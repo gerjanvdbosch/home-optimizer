@@ -32,6 +32,12 @@ With options::
         --horizon 48 \\
         --pv-tilt 35 --pv-azimuth 0
 
+Run the MPC every hour using ``sensors.json`` for live initial conditions::
+
+    python -m home_optimizer.local_runner \\
+        --mpc-interval 3600 \\
+        --sensors-json ./sensors.json
+
 Environment variable override (alternative to CLI)::
 
     DATABASE_URL=sqlite:///my_local.db python -m home_optimizer.local_runner
@@ -52,6 +58,8 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import app
+from .mpc_scheduler import MPCRunner, schedule_mpc
+from .sensors.local_backend import LocalBackend
 from .sensors.open_meteo import OpenMeteoClient
 from .settings import DATABASE_URL_DEFAULT, DATABASE_URL_ENV
 from .telemetry import ForecastPersister, TelemetryRepository
@@ -187,7 +195,65 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=_DEFAULT_WINDOW_AZIMUTH,
         metavar="DEGREES",
-        help="PV panel azimuth [°] (0 = South).",
+        help="PV panel azimuth [] (0 = South).",
+    )
+
+    # ── MPC scheduling ────────────────────────────────────────────────
+    parser.add_argument(
+        "--mpc-interval",
+        type=int,
+        default=10,
+        metavar="SECONDS",
+        help=(
+            "How often the MPC runs [s].  0 (default) disables scheduling — "
+            "the MPC is then only available via POST /api/simulate.  "
+            "Example: --mpc-interval 3600 runs the MPC every hour."
+        ),
+    )
+    parser.add_argument(
+        "--mpc-t-ref",
+        type=float,
+        default=20.5,
+        metavar="CELSIUS",
+        help="MPC comfort setpoint T_ref [°C].",
+    )
+    parser.add_argument(
+        "--mpc-t-min",
+        type=float,
+        default=19.0,
+        metavar="CELSIUS",
+        help="MPC minimum comfort temperature [°C].",
+    )
+    parser.add_argument(
+        "--mpc-t-max",
+        type=float,
+        default=22.5,
+        metavar="CELSIUS",
+        help="MPC maximum comfort temperature [°C].",
+    )
+    parser.add_argument(
+        "--mpc-t-out",
+        type=float,
+        default=8.0,
+        metavar="CELSIUS",
+        help="Fixed outdoor temperature used as MPC disturbance when no forecast [°C].",
+    )
+
+    # ── Sensors JSON (MPC live-readings source) ───────────────────────────
+    parser.add_argument(
+        "--sensors-json",
+        type=str,
+        default="sensors.json",
+        metavar="PATH",
+        help=(
+            "Path to a sensors JSON file (e.g. './sensors.json').  "
+            "When provided the MPC runner reads live initial conditions "
+            "(T_r, T_out, DHW temperatures, …) from this file at every "
+            "solve interval instead of using the fixed CLI defaults.  "
+            "The file is re-read on every MPC call so values can be "
+            "updated while the runner is active.  "
+            "Must contain all fields required by LocalBackend.from_json_file()."
+        ),
     )
 
     return parser.parse_args(argv)
@@ -280,6 +346,67 @@ def main(argv: list[str] | None = None) -> None:
     scheduler.start()
     persister.start(scheduler, run_immediately=False)  # already ran above
     log.info("Hourly forecast refresh scheduled.")
+
+    # ── 4b. Optional: schedule periodic MPC ───────────────────────────────
+    # When --sensors-json is provided, the MPC reads live initial conditions
+    # from the JSON file at every solve interval (LocalBackend re-reads the
+    # file on each call, so values updated on disk are picked up immediately).
+    # Without --sensors-json the MPC uses the fixed CLI defaults as initial
+    # conditions — useful for smoke-testing without real sensor data.
+    if args.mpc_interval > 0:
+        from .api import RunRequest  # noqa: PLC0415
+
+        # Build the sensor backend when a sensors.json path is supplied.
+        if args.sensors_json is not None:
+            sensors_path = Path(args.sensors_json).resolve()
+            if not sensors_path.exists():
+                log.critical("sensors-json file not found: %s — aborting MPC setup.", sensors_path)
+                sys.exit(1)
+            local_backend: LocalBackend | None = LocalBackend.from_json_file(sensors_path)
+            log.info("MPC sensor backend: LocalBackend reading %s", sensors_path)
+            # Read current outdoor temp from file to use as base_request default.
+            try:
+                readings = local_backend.read_all()
+                t_out_init = readings.outdoor_temperature_c
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Could not read sensors.json at startup (will retry at first MPC step): %s",
+                    exc,
+                )
+                t_out_init = args.mpc_t_out
+        else:
+            local_backend = None
+            t_out_init = args.mpc_t_out
+            log.info(
+                "MPC sensor backend: none — using CLI defaults " "(T_out=%.1f °C, T_ref=%.1f °C).",
+                t_out_init,
+                args.mpc_t_ref,
+            )
+
+        mpc_base_request = RunRequest(
+            outdoor_temperature_c=t_out_init,
+            T_ref=args.mpc_t_ref,
+            T_min=args.mpc_t_min,
+            T_max=args.mpc_t_max,
+        )
+        mpc_runner = MPCRunner(base_request=mpc_base_request, backend=local_backend)
+        schedule_mpc(
+            runner=mpc_runner,
+            scheduler=scheduler,
+            interval_seconds=args.mpc_interval,
+            run_immediately=True,
+        )
+        log.info(
+            "MPC periodic runner started (every %d s / %d min, sensors=%s)",
+            args.mpc_interval,
+            args.mpc_interval // 60,
+            args.sensors_json or "none (CLI defaults)",
+        )
+    else:
+        log.info(
+            "MPC scheduling disabled (--mpc-interval not set).  "
+            "Use POST /api/simulate for on-demand optimisation."
+        )
 
     # ── 5. SIGTERM handler ─────────────────────────────────────────────────
     # Only stop the APScheduler — Uvicorn handles its own shutdown on SIGTERM.
