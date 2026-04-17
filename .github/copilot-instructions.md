@@ -8,9 +8,10 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > ### 🚫 Anti-Patroon: Geen Magic Numbers
 > **Het hardcoden van numerieke waarden in de berekeningen of logica is streng verboden.** Elke fysieke constante, tuning-parameter, temperatuurgrens of tijdstap moet via een configuratiebestand (bijv. JSON/YAML) of parameter-object in de code worden geïnjecteerd. Zelfs universele constanten (zoals $\lambda = 1.1628$) of legionella-eisen (60°C) moeten benoemde variabelen zijn. In de formules en MPC-constraints staan uitsluitend referentienamen, géén losse getallen (met uitzondering van wiskundige operatoren zoals `0` of `1`).
 
-> ### ♻️ Architectuureis: DRY (Don't Repeat Yourself) / Geen Dubbele Code
-> **Het dupliceren van code of logica is ten strengste verboden.** Hoewel UFH en DHW fysisch andere systemen zijn, delen ze exact dezelfde wiskundige fundamenten (State-Space representaties, Kalman Filters, Forward Euler discretisatie en MPC).
-> Schrijf generieke, herbruikbare functies of klassen (bijv. een algemene `KalmanFilter`-klasse die $A, B, E, C, Q, R$ matrices accepteert en de Joseph-vorm update uitvoert, en een afgeleide `ExtendedKalmanFilter`-klasse die een Jacobiaan-callback accepteert) in plaats van aparte hardcoded implementaties. Gebruik object-oriëntatie, compositie of afgeleide klassen om specifieke eigenschappen (zoals de tijdsvariabele $A$-matrix voor DHW of de EKF-linearisatie) af te handelen zonder de kern-wiskunde te kopiëren.
+> ### ♻️ Architectuureis: Strict Object-Georiënteerd (OOP) & DRY
+> **De volledige codebase moet strikt object-georiënteerd (OOP) worden opgezet. Losse procedurele functies (behalve pure wiskundige helpers) en globale statussen zijn ten strengste verboden.** 
+> Hoewel UFH en DHW fysisch andere systemen zijn, delen ze wiskundige fundamenten. Gebruik abstracte basisklassen (ABC), overerving en compositie om code-duplicatie te voorkomen. 
+> * Voorbeeld: Ontwerp één abstracte `BaseKalmanFilter`-klasse die de state-updates (Joseph-vorm) en covarianties als interne attributen (`self.x`, `self.P`) beheert. Maak hiervan een `LinearKalmanFilter`-subklasse voor UFH en een `ExtendedKalmanFilter`-subklasse voor DHW die respectievelijk de lineaire matrices en de non-lineaire Jacobiaan-callbacks implementeren.
 
 > ### 🚀 Ontwerpeis: Geen Backwards Compatibility
 > **De code hoeft nergens backwards compatible te zijn met eerdere versies.** Focus uitsluitend op het bouwen van de meest robuuste, wiskundig zuivere en efficiënte architectuur zoals beschreven in dit document. Oude API's, legacy datastructuren, of eerdere (suboptimale) implementaties mogen zonder pardon worden gebroken, overschreven of verwijderd. Sleep geen technische schuld of workarounds mee om oudere systemen in de lucht te houden: de fysica en de nieuwe DRY-architectuur krijgen absolute voorrang.
@@ -666,6 +667,11 @@ Bij de implementatie moet een `pytest`-suite worden gegenereerd die de **Fysisch
 | `test_cop_validation` | Pydantic gooit `ValidationError` bij $COP \leq 1$ of $COP > COP_{max}$ | `pytest.raises(ValidationError)` |
 | `test_mpc_feasibility` | MPC-probleem is `OPTIMAL` (niet `INFEASIBLE`) voor standaardscenario | `problem.status == "optimal"` |
 | `test_lambda_constant` | $\lambda$ berekend vanuit $\rho$ en $c_p$ uit config = 1.1628 binnen tolerantie | `assert_allclose(lambda_calc, 1.1628, rtol=1e-4)` |
+
+
+#### 16.4 Object-Georiënteerde Architectuur & Klassendefinities
+
+Om de scheiding van verantwoordelijkheden (Separation of Concerns) te garanderen, moet de software worden ontworpen rondom stateful objecten.
 
 ---
 

@@ -40,12 +40,11 @@ from .mpc_scheduler import MPCRunner, schedule_mpc
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
-from .settings import DATABASE_URL_ENV
+from .settings import Database
 from .telemetry import (
     BufferedTelemetryCollector,
     ForecastPersister,
     TelemetryCollectorSettings,
-    TelemetryRepository,
 )
 
 # ---------------------------------------------------------------------------
@@ -379,7 +378,7 @@ def main() -> None:
     Lifecycle
     ---------
     1. Read and validate ``/data/options.json`` (fail-fast on bad config).
-    2. Create ``TelemetryRepository`` and ``BufferedTelemetryCollector``.
+    2. Create ``Database`` and obtain a ``TelemetryRepository`` via it.
     3. Start the collector (APScheduler runs in a daemon thread — non-blocking).
     4. Register SIGTERM handler so ``docker stop`` triggers a clean flush.
     5. Block on ``uvicorn.run()`` until the process is stopped.
@@ -410,12 +409,10 @@ def main() -> None:
     )
 
     # ── 2. Set up telemetry storage ────────────────────────────────────────
-    # Ensure the parent directory exists (e.g. /data/home_optimizer/).
-    # exist_ok=True is safe: no-op if directory is already present.
-    Path(opts.database_path).parent.mkdir(parents=True, exist_ok=True)
-    database_url = f"sqlite:///{opts.database_path}"
-    repository = TelemetryRepository(database_url=database_url)
-    repository.create_schema()
+    # Database.from_path() creates the parent directory, derives the SQLite
+    # URL, and validates the path — all in one call.
+    db = Database.from_path(opts.database_path)
+    repository = db.repository()
     log.info("Telemetry database ready at %s", opts.database_path)
 
     # ── 3. Build HA sensor backend ─────────────────────────────────────────
@@ -466,7 +463,7 @@ def main() -> None:
 
     # ── 4. Start telemetry collector ───────────────────────────────────────
     collector_settings = TelemetryCollectorSettings(
-        database_url=database_url,
+        database_url=db.url,
         sampling_interval_seconds=opts.sampling_interval_seconds,
         flush_interval_seconds=opts.flush_interval_seconds,
     )
@@ -562,10 +559,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
     # ── 6. Run FastAPI via Uvicorn (blocking) ──────────────────────────────
-    # Inject DATABASE_URL (defined in settings.py) so the API's
-    # /api/forecast/latest endpoint resolves the same database that the addon
-    # uses for telemetry and forecast persistence.
-    os.environ[DATABASE_URL_ENV] = f"sqlite:///{opts.database_path}"
+    # Export DATABASE_URL so the /api/forecast/latest endpoint finds the same
+    # database that the addon uses for telemetry and forecast persistence.
+    db.export_to_env()
 
     # HA Ingress proxies requests via /api/hassio_ingress/<token>/.
     # Setting root_path tells FastAPI/Uvicorn the effective mount prefix so

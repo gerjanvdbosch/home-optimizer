@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import signal
 import sys
 from pathlib import Path
@@ -61,8 +60,8 @@ from .api import app
 from .mpc_scheduler import MPCRunner, schedule_mpc
 from .sensors.local_backend import LocalBackend
 from .sensors.open_meteo import OpenMeteoClient
-from .settings import DATABASE_URL_DEFAULT, DATABASE_URL_ENV
-from .telemetry import ForecastPersister, TelemetryRepository
+from .settings import DATABASE_URL_DEFAULT, Database
+from .telemetry import ForecastPersister
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -289,24 +288,20 @@ def main(argv: list[str] | None = None) -> None:
 
     args = _parse_args(argv)
 
-    # ── 1. Resolve database URL ────────────────────────────────────────────
-    # Priority: --database CLI arg > DATABASE_URL env var > default
+    # ── 1. Resolve database — Database class handles path, mkdir, and URL ──
+    # Priority: --database CLI arg > DATABASE_URL env var > default.
     if args.database is not None:
-        # Ensure parent directory exists (mirrors addon behaviour).
-        db_path = Path(args.database).resolve()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        database_url = f"sqlite:///{db_path}"
-        log.info("Using database from --database: %s", db_path)
+        db = Database.from_path(args.database)
+        log.info("Using database from --database: %s", args.database)
     else:
-        database_url = os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT)
-        log.info("Using database from env/default: %s", database_url)
+        db = Database.from_env()
+        log.info("Using database from env/default: %s", db.url)
 
     # Export so the FastAPI /api/forecast/latest endpoint finds the same DB.
-    os.environ[DATABASE_URL_ENV] = database_url
+    db.export_to_env()
 
     # ── 2. Initialise database ─────────────────────────────────────────────
-    repository = TelemetryRepository(database_url=database_url)
-    repository.create_schema()
+    repository = db.repository()
     log.info("Database schema ready.")
 
     # ── 3. Build Open-Meteo client ─────────────────────────────────────────
