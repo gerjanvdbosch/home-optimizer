@@ -43,6 +43,10 @@ options:
   flush_interval_seconds: 300
   api_port: 8099
 
+  # --- MPC scheduling ---
+  mpc_enabled: true
+  mpc_interval_seconds: 3600
+
   # --- Sensor entity IDs ---
   # Temperatures (°C — no scaling needed)
   sensor_room_temperature: "sensor.danfoss_15_temperature"
@@ -113,6 +117,8 @@ schema:
   sampling_interval_seconds: int
   flush_interval_seconds: int
   api_port: int
+  mpc_enabled: bool
+  mpc_interval_seconds: int
 
   sensor_room_temperature: str
   sensor_outdoor_temperature: str
