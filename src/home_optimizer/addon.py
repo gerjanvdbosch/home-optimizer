@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
 from .database import Database
-from .mpc_scheduler import MPCRunner, schedule_mpc
+from .optimizer import Optimizer
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
@@ -552,9 +552,10 @@ def main() -> None:
             cop_min=opts.mpc_cop_min,
             cop_max=opts.mpc_cop_max,
         )
-        mpc_runner = MPCRunner(base_input=mpc_base_input, backend=backend)
-        schedule_mpc(
-            runner=mpc_runner,
+        optimizer = Optimizer()
+        optimizer.schedule_periodic(
+            base_input=mpc_base_input,
+            backend=backend,
             scheduler=collector.scheduler,
             interval_seconds=opts.mpc_interval_seconds,
             run_immediately=True,

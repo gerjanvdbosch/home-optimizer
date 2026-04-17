@@ -58,7 +58,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import app
 from .database import DATABASE_URL_DEFAULT, Database
-from .mpc_scheduler import MPCRunner, schedule_mpc
+from .optimizer import Optimizer
 from .sensors.open_meteo import OpenMeteoClient
 from .telemetry import ForecastPersister
 
@@ -200,7 +200,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mpc-interval",
         type=int,
-        default=10,
+        default=30,
         metavar="SECONDS",
         help=(
             "How often the MPC runs [s].  0 (default) disables scheduling — "
@@ -388,9 +388,10 @@ def main(argv: list[str] | None = None) -> None:
                 "T_max": args.mpc_t_max,
             }
         )
-        mpc_runner = MPCRunner(base_input=mpc_base_input, backend=local_backend)
-        schedule_mpc(
-            runner=mpc_runner,
+        optimizer = Optimizer()
+        optimizer.schedule_periodic(
+            base_input=mpc_base_input,
+            backend=local_backend,
             scheduler=scheduler,
             interval_seconds=args.mpc_interval,
             run_immediately=True,

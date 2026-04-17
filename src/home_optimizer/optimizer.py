@@ -4,7 +4,9 @@ Architecture
 ------------
 This module contains the **domain core** of the Home Optimizer.  It is
 deliberately kept free of any web-framework or visualisation concerns; those
-belong in ``api.py`` (FastAPI) and ``mpc_scheduler.py`` (APScheduler).
+belong in ``api.py`` (FastAPI).  Periodic APScheduler orchestration is exposed
+via methods on :class:`Optimizer` so API and background execution share one
+validated path.
 
 The public surface is intentionally small:
 
@@ -23,9 +25,8 @@ Design decisions
 * **Fail-fast** — invalid physics (non-positive capacities, COP ≤ 1, etc.)
   are caught by Pydantic and the ``HeatPumpCOPModel`` *before* the CVXPY
   solver is invoked.
-* **DRY** — both the HTTP endpoint (``api.py``) and the background scheduler
-  (``mpc_scheduler.py``) call :meth:`Optimizer.solve`, not a copy of the
-  logic.
+* **DRY** — both the HTTP endpoint (``api.py``) and periodic scheduler calls
+  use :meth:`Optimizer.solve`, not a copy of the logic.
 
 Units: power [kW], temperature [°C], energy [kWh], time [h].
 """
@@ -34,6 +35,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -51,6 +54,13 @@ from .types import (
     MPCParameters,
     ThermalParameters,
 )
+
+if TYPE_CHECKING:
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    from .sensors.base import SensorBackend
+
+log = logging.getLogger("home_optimizer.optimizer")
 
 # ---------------------------------------------------------------------------
 # Solar / price proxy helpers (used when building forecasts)
@@ -304,9 +314,8 @@ class RunRequest(BaseModel):
 class MPCStepResult:
     """Numerical result of one MPC solve step (no charts, no web concerns).
 
-    Returned by :meth:`Optimizer.solve` so that both the HTTP endpoint and
-    the scheduled :class:`~home_optimizer.mpc_scheduler.MPCRunner` can reuse
-    the same core solver without duplicating logic.
+    Returned by :meth:`Optimizer.solve` so HTTP and periodic scheduler paths
+    can reuse the same core solver without duplicating logic.
 
     Attributes:
         solution:       Raw CVXPY/greedy solution with full control sequences.
@@ -517,6 +526,95 @@ class Optimizer:
             start_hour=start_hour,
         )
 
+    def run_scheduled_once(
+        self,
+        base_input: RunRequest,
+        backend: "SensorBackend | None" = None,
+    ) -> MPCStepResult | None:
+        """Execute one periodic MPC step and log first-step actions.
+
+        This method is intended for APScheduler jobs. It keeps the legacy
+        scheduler behavior: sensor-read failures and solver failures are logged
+        and skipped for the current interval.
+
+        Args:
+            base_input: Fully populated request containing all physical and MPC
+                parameters; live sensors override selected initial conditions.
+            backend: Optional sensor backend providing live readings.
+
+        Returns:
+            :class:`MPCStepResult` on success; ``None`` when the step is
+            skipped due to a recoverable read/solve failure.
+        """
+        try:
+            optimizer_input = self._build_scheduled_input(base_input=base_input, backend=backend)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("MPC run skipped — sensor read failed: %s", exc)
+            return None
+
+        try:
+            result = self.solve(optimizer_input)
+        except Exception as exc:  # noqa: BLE001
+            log.error("MPC solve failed: %s", exc)
+            return None
+
+        sol = result.solution
+        log.info(
+            "MPC step complete | status=%s | obj=%.3f | "
+            "P_UFH[0]=%.2f kW | P_dhw[0]=%.2f kW | cost=%.4f EUR",
+            sol.solver_status,
+            sol.objective_value,
+            result.p_ufh_kw[0],
+            result.p_dhw_kw[0],
+            result.total_cost_eur,
+        )
+        return result
+
+    def schedule_periodic(
+        self,
+        base_input: RunRequest,
+        scheduler: "BackgroundScheduler",
+        interval_seconds: int,
+        backend: "SensorBackend | None" = None,
+        run_immediately: bool = True,
+    ) -> None:
+        """Register periodic MPC execution on an APScheduler scheduler.
+
+        Args:
+            base_input: Immutable request template for periodic solves.
+            scheduler: Running APScheduler background scheduler.
+            interval_seconds: Period between MPC runs [s], must be > 0.
+            backend: Optional sensor backend used for live overrides.
+            run_immediately: Run one synchronous step before scheduling.
+
+        Raises:
+            ValueError: If ``interval_seconds`` is not strictly positive.
+        """
+        if interval_seconds <= 0:
+            raise ValueError(
+                f"interval_seconds must be > 0, got {interval_seconds}. "
+                "Pass 0 to disable MPC scheduling (do not call this method)."
+            )
+
+        if run_immediately:
+            log.info("Running initial MPC step before scheduling periodic job...")
+            self.run_scheduled_once(base_input=base_input, backend=backend)
+
+        scheduler.add_job(
+            self.run_scheduled_once,
+            trigger="interval",
+            seconds=interval_seconds,
+            kwargs={"base_input": base_input, "backend": backend},
+            id="mpc_periodic",
+            replace_existing=True,
+            misfire_grace_time=max(1, interval_seconds // 2),
+        )
+        log.info(
+            "MPC periodic job scheduled: every %d s (%d min)",
+            interval_seconds,
+            interval_seconds // 60,
+        )
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -633,3 +731,48 @@ class Optimizer:
             legionella_required=np.zeros(N, dtype=bool),
             cop_dhw_k=cop_dhw_k,
         )
+
+    @staticmethod
+    def _build_scheduled_input(
+        base_input: RunRequest,
+        backend: "SensorBackend | None",
+    ) -> RunRequest:
+        """Build one solver input by applying optional live sensor overrides.
+
+        Args:
+            base_input: Baseline validated request for periodic execution.
+            backend: Optional sensor backend. When ``None``, ``base_input`` is
+                returned unchanged.
+
+        Returns:
+            Immutable request for one optimizer step.
+
+        Raises:
+            Exception: Re-raised backend read failures for fail-fast scheduling.
+        """
+        if backend is None:
+            return base_input
+
+        readings = backend.read_all()
+
+        # Estimate slab temperature from supply/return average when possible.
+        t_b_estimate = (
+            (readings.hp_supply_temperature_c + readings.hp_return_temperature_c) / 2.0
+            if readings.hp_supply_temperature_c > readings.room_temperature_c
+            else readings.room_temperature_c + 2.0
+        )
+
+        overrides: dict[str, float] = {
+            "T_r_init": readings.room_temperature_c,
+            "T_b_init": t_b_estimate,
+            "outdoor_temperature_c": readings.outdoor_temperature_c,
+        }
+
+        if base_input.dhw_enabled:
+            overrides["dhw_T_top_init"] = readings.dhw_top_temperature_c
+            overrides["dhw_T_bot_init"] = readings.dhw_bottom_temperature_c
+            overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
+            overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
+
+        return base_input.model_copy(update=overrides)
+
