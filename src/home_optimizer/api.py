@@ -57,7 +57,7 @@ from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel
 
-from .database import get_database_url
+from .database import Database
 from .optimizer import (  # noqa: F401 – re-exported for scheduler
     MPCStepResult,
     Optimizer,
@@ -697,12 +697,11 @@ async def get_forecast(
 def _get_repository() -> TelemetryRepository:
     """Construct a :class:`TelemetryRepository` from the active database URL.
 
-    The URL is resolved by :func:`~home_optimizer.database.get_database_url`:
-    it reads the ``DATABASE_URL`` environment variable (set by the addon from
-    ``AddonOptions.database_path``) and falls back to the default SQLite path
-    for local development.
+    The URL is resolved by :meth:`~home_optimizer.database.Database.from_env`,
+    which reads ``DATABASE_URL`` and falls back to the local SQLite default.
 
-    ``create_schema()`` is called to ensure tables exist on a fresh database,
+    ``Database.repository()`` calls ``create_schema()`` to ensure tables exist
+    on a fresh database,
     so a missing table never causes a 502 — only an empty result (404).
 
     Returns
@@ -710,9 +709,7 @@ def _get_repository() -> TelemetryRepository:
     TelemetryRepository
         Ready-to-use repository pointing at the configured database.
     """
-    repo = TelemetryRepository(database_url=get_database_url())
-    repo.create_schema()
-    return repo
+    return Database.from_env().repository()
 
 
 @app.get("/api/forecast/latest", response_model=ForecastResponse)

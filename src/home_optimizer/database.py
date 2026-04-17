@@ -22,6 +22,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .telemetry import TelemetryRepository
 
 # ---------------------------------------------------------------------------
 # Named constants — kept for the handful of callers that still read the
@@ -88,6 +92,17 @@ class Database:
     # ------------------------------------------------------------------
 
     @classmethod
+    def url_from_env(cls) -> str:
+        """Return the active SQLAlchemy URL from ``DATABASE_URL``.
+
+        Falls back to :data:`DATABASE_URL_DEFAULT` when the variable is absent.
+
+        Returns:
+            SQLAlchemy connection URL [str].
+        """
+        return os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT)
+
+    @classmethod
     def from_env(cls) -> "Database":
         """Create a :class:`Database` from the ``DATABASE_URL`` environment variable.
 
@@ -96,7 +111,7 @@ class Database:
         Returns:
             :class:`Database` with the URL from the environment.
         """
-        return cls(os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT))
+        return cls(cls.url_from_env())
 
     @classmethod
     def from_path(cls, path: str | Path) -> "Database":
@@ -126,7 +141,7 @@ class Database:
     # Repository factory
     # ------------------------------------------------------------------
 
-    def repository(self, *, init_schema: bool = True) -> object:
+    def repository(self, *, init_schema: bool = True) -> "TelemetryRepository":
         """Return a fully initialised :class:`~home_optimizer.telemetry.TelemetryRepository`.
 
         This is the **single canonical entry point** for constructing a
@@ -161,7 +176,7 @@ class Database:
         """Write the URL to ``DATABASE_URL`` in the process environment.
 
         Required by the FastAPI ``/api/forecast/latest`` endpoint, which
-        resolves the database via :func:`get_database_url` (an env-var lookup)
+        resolves the database via :meth:`Database.from_env`
         at request time rather than through a DI-injected object.  Call this
         once at startup so every component sees the same URL.
 
@@ -176,26 +191,3 @@ class Database:
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Database(url={self._url!r})"
-
-
-# ---------------------------------------------------------------------------
-# Module-level helper — kept for api.py's /api/forecast/latest endpoint
-# which resolves the URL at request time via an env-var lookup.
-# ---------------------------------------------------------------------------
-
-
-def get_database_url() -> str:
-    """Return the active SQLAlchemy database URL from the environment.
-
-    Reads ``DATABASE_URL`` from ``os.environ``.  Falls back to
-    :data:`DATABASE_URL_DEFAULT` when the variable is absent.
-
-    Note:
-        Prefer :class:`Database` for new code.  This function is retained
-        only because the ``/api/forecast/latest`` endpoint calls it at
-        request time (after ``Database.export_to_env()`` has run).
-
-    Returns:
-        A valid SQLAlchemy database URL string.
-    """
-    return os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT)
