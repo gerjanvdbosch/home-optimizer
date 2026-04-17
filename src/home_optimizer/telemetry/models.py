@@ -190,6 +190,14 @@ class TelemetryAggregate(Base):
     household_elec_power_mean_kw: Mapped[float] = mapped_column(Float)
     household_elec_power_last_kw: Mapped[float] = mapped_column(Float)
 
+    # Electricity price during this bucket [€/kWh] --------------------------------
+    # Import price: mean captures price volatility within the bucket (relevant for
+    # Nordpool mode); last reflects the end-of-window price used by the next MPC step.
+    electricity_price_mean_eur_per_kwh: Mapped[float] = mapped_column(Float)
+    electricity_price_last_eur_per_kwh: Mapped[float] = mapped_column(Float)
+    # Feed-in (terugleververgoeding) rate [€/kWh] — 0.0 if not applicable (flat mode).
+    feed_in_price_eur_per_kwh: Mapped[float] = mapped_column(Float)
+
     # Energy counter deltas (always present — sensors are required in AddonOptions) ----
     # ΔkWh = counter_last − counter_first over the flush window.
     # More accurate than integrating mean_power × Δt because counter reads are
