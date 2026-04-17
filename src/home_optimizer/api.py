@@ -239,18 +239,17 @@ class HomeOptimizerAPI:
                 fillcolor="rgba(243,156,18,0.15)",
             )
         )
-        if any(v > 0 for v in gti_pv):
-            s_fig.add_trace(
-                go.Scatter(
-                    x=labels,
-                    y=gti_pv,
-                    name="GTI PV-panelen [W/m2]",
-                    mode="lines",
-                    line=dict(color="#f1c40f", width=2, dash="dot"),
-                    fill="tozeroy",
-                    fillcolor="rgba(241,196,15,0.10)",
-                )
+        s_fig.add_trace(
+            go.Scatter(
+                x=labels,
+                y=gti_pv,
+                name="GTI PV-panelen [W/m2]",
+                mode="lines",
+                line=dict(color="#f1c40f", width=2, dash="dot"),
+                fill="tozeroy",
+                fillcolor="rgba(241,196,15,0.10)",
             )
+        )
         s_fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
             yaxis=dict(title="Instraling [W/m2]", gridcolor="#f5f5f5", zeroline=False),

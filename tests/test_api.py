@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from home_optimizer.api import app
+from home_optimizer.api import HomeOptimizerAPI, app
 from home_optimizer.optimizer import Optimizer, RunRequest
+from home_optimizer.telemetry import TelemetryRepository
 
 client = TestClient(app)
 
@@ -92,6 +94,17 @@ def test_dashboard_html_contains_optimizer_mpc_forecast_section() -> None:
     assert "/api/optimizer/latest" in html
 
 
+def test_dashboard_html_builds_solar_chart_from_actual_pv_gti_arrays() -> None:
+    """Dashboard JS must render the solar chart from both GTI arrays returned by the API."""
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "function buildSolarFig(labels, gtiWindow, gtiPv)" in html
+    assert "buildSolarFig(d.labels, gtis, gtipv)" in html
+    assert "name: 'GTI PV-panelen [W/m²]'" in html
+
+
 def test_optimizer_latest_returns_404_without_scheduled_run() -> None:
     """Operational endpoint must fail clearly until a periodic run has succeeded."""
     Optimizer.clear_latest_scheduled_snapshot()
@@ -113,5 +126,45 @@ def test_optimizer_latest_returns_scheduled_optimizer_result() -> None:
     assert payload["status"]
     assert payload["first_ufh_power_kw"] >= 0.0
     assert len(payload["control_labels"]) == 8
+
+
+def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Latest-forecast solar figure must expose both GTI series, including an all-zero PV profile."""
+    database_url = f"sqlite:///{tmp_path / 'forecast-api.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    fetched_at = datetime(2026, 4, 17, 19, 0, tzinfo=timezone.utc)
+    repository.bulk_add_forecast_snapshots(
+        [
+            {
+                "fetched_at_utc": fetched_at,
+                "valid_at_utc": fetched_at + timedelta(hours=step_k),
+                "step_k": step_k,
+                "dt_hours": 1.0,
+                "t_out_c": 8.0 - step_k,
+                "gti_w_per_m2": value,
+                "gti_pv_w_per_m2": 0.0,
+            }
+            for step_k, value in enumerate([120.0, 60.0, 0.0])
+        ]
+    )
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    response = client.get("/api/forecast/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["gti_pv_w_per_m2"] == [0.0, 0.0, 0.0]
+
+    solar_fig = json.loads(payload["solar_forecast_fig"])
+    assert [trace["name"] for trace in solar_fig["data"]] == [
+        "GTI ramen [W/m2]",
+        "GTI PV-panelen [W/m2]",
+    ]
+    assert solar_fig["data"][1]["y"] == [0.0, 0.0, 0.0]
 
 
