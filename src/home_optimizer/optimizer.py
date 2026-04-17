@@ -110,9 +110,7 @@ def _solar_gti(hour: int) -> float:
         Global Tilted Irradiance proxy [W/m²], ≥ 0.
     """
     if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return _SOLAR_PEAK_W_PER_M2 * np.sin(
-            np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H
-        )
+        return _SOLAR_PEAK_W_PER_M2 * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
     return 0.0
 
 
@@ -156,14 +154,18 @@ class RunRequest(BaseModel):
     R_ro: float = Field(
         10.0, ge=0.1, le=30.0, description="Thermal resistance room -> outside R_ro [K/kW]"
     )
-    alpha: float = Field(0.25, ge=0.0, le=1.0, description="Fraction of solar gain to room air alpha [-]")
+    alpha: float = Field(
+        0.25, ge=0.0, le=1.0, description="Fraction of solar gain to room air alpha [-]"
+    )
     eta: float = Field(0.55, ge=0.0, le=1.0, description="Window solar transmittance eta [-]")
     A_glass: float = Field(
         7.5, ge=0.5, le=40.0, description="South-facing glazing area A_glass [m^2]"
     )
 
     # ── UFH: initial conditions ───────────────────────────────────────────
-    T_r_init: float = Field(20.5, ge=5.0, le=35.0, description="Initial room-air temperature T_r [degC]")
+    T_r_init: float = Field(
+        20.5, ge=5.0, le=35.0, description="Initial room-air temperature T_r [degC]"
+    )
     T_b_init: float = Field(
         22.5, ge=5.0, le=45.0, description="Initial floor/slab temperature T_b [degC]"
     )
@@ -181,19 +183,31 @@ class RunRequest(BaseModel):
     delta_P_max: float = Field(
         1.0, ge=0.1, le=10.0, description="Max UFH ramp-rate delta_P_UFH,max [kW/step]"
     )
-    T_min: float = Field(19.0, ge=10.0, le=25.0, description="Minimum comfort temperature T_min [degC]")
-    T_max: float = Field(22.5, ge=16.0, le=30.0, description="Maximum comfort temperature T_max [degC]")
+    T_min: float = Field(
+        19.0, ge=10.0, le=25.0, description="Minimum comfort temperature T_min [degC]"
+    )
+    T_max: float = Field(
+        22.5, ge=16.0, le=30.0, description="Maximum comfort temperature T_max [degC]"
+    )
     T_ref: float = Field(20.5, ge=15.0, le=26.0, description="Comfort setpoint T_ref [degC]")
 
     # ── UFH: disturbance forecast ─────────────────────────────────────────
-    outdoor_temperature_c: float = Field(6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC]")
+    outdoor_temperature_c: float = Field(
+        6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC]"
+    )
     dynamic_price: bool = Field(True, description="Use typical Dutch day-ahead price pattern")
-    flat_price: float = Field(0.25, ge=0.0, le=2.0, description="Flat electricity price p [EUR/kWh]")
+    flat_price: float = Field(
+        0.25, ge=0.0, le=2.0, description="Flat electricity price p [EUR/kWh]"
+    )
     solar_gain: bool = Field(True, description="Include solar irradiance profile")
-    internal_gains_kw: float = Field(0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]")
+    internal_gains_kw: float = Field(
+        0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]"
+    )
 
     # ── PV self-consumption ───────────────────────────────────────────────
-    pv_enabled: bool = Field(False, description="Enable PV self-consumption (reduces net grid cost)")
+    pv_enabled: bool = Field(
+        False, description="Enable PV self-consumption (reduces net grid cost)"
+    )
     pv_peak_kw: float = Field(4.0, ge=0.0, le=20.0, description="PV system peak capacity [kW]")
 
     # ── DHW: two-node stratification tank (§7–§11) ───────────────────────
@@ -204,23 +218,45 @@ class RunRequest(BaseModel):
     dhw_C_bot: float = Field(
         0.5814, ge=0.01, le=5.0, description="DHW bottom-layer thermal capacity C_bot [kWh/K]"
     )
-    dhw_R_strat: float = Field(10.0, ge=1.0, le=100.0, description="Stratification resistance R_strat [K/kW]")
-    dhw_R_loss: float = Field(50.0, ge=5.0, le=200.0, description="Standby-loss resistance R_loss [K/kW]")
-    dhw_T_top_init: float = Field(55.0, ge=20.0, le=85.0, description="Initial top-layer temperature T_top [degC]")
+    dhw_R_strat: float = Field(
+        10.0, ge=1.0, le=100.0, description="Stratification resistance R_strat [K/kW]"
+    )
+    dhw_R_loss: float = Field(
+        50.0, ge=5.0, le=200.0, description="Standby-loss resistance R_loss [K/kW]"
+    )
+    dhw_T_top_init: float = Field(
+        55.0, ge=20.0, le=85.0, description="Initial top-layer temperature T_top [degC]"
+    )
     dhw_T_bot_init: float = Field(
         45.0, ge=15.0, le=80.0, description="Initial bottom-layer temperature T_bot [degC]"
     )
-    dhw_P_max: float = Field(3.0, ge=0.5, le=15.0, description="Max DHW thermal power P_dhw,max [kW]")
-    dhw_delta_P_max: float = Field(1.0, ge=0.1, le=10.0, description="Max DHW ramp-rate delta_P_dhw,max [kW/step]")
-    dhw_T_min: float = Field(50.0, ge=35.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [degC]")
-    dhw_T_legionella: float = Field(60.0, ge=55.0, le=85.0, description="Legionella prevention temperature T_leg [degC]")
-    dhw_legionella_period_steps: int = Field(168, ge=24, le=336, description="Legionella cycle period n_leg [steps]")
+    dhw_P_max: float = Field(
+        3.0, ge=0.5, le=15.0, description="Max DHW thermal power P_dhw,max [kW]"
+    )
+    dhw_delta_P_max: float = Field(
+        1.0, ge=0.1, le=10.0, description="Max DHW ramp-rate delta_P_dhw,max [kW/step]"
+    )
+    dhw_T_min: float = Field(
+        50.0, ge=35.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [degC]"
+    )
+    dhw_T_legionella: float = Field(
+        60.0, ge=55.0, le=85.0, description="Legionella prevention temperature T_leg [degC]"
+    )
+    dhw_legionella_period_steps: int = Field(
+        168, ge=24, le=336, description="Legionella cycle period n_leg [steps]"
+    )
     dhw_legionella_duration_steps: int = Field(
         1, ge=1, le=4, description="Min consecutive steps at T_legionella for legionella kill"
     )
-    dhw_v_tap_m3_per_h: float = Field(0.01, ge=0.0, le=0.2, description="Average tap-water flow Vdot_tap [m^3/h]")
-    dhw_t_mains_c: float = Field(10.0, ge=0.0, le=25.0, description="Cold mains-water temperature T_mains [degC]")
-    dhw_t_amb_c: float = Field(20.0, ge=5.0, le=35.0, description="Ambient temperature around the boiler T_amb [degC]")
+    dhw_v_tap_m3_per_h: float = Field(
+        0.01, ge=0.0, le=0.2, description="Average tap-water flow Vdot_tap [m^3/h]"
+    )
+    dhw_t_mains_c: float = Field(
+        10.0, ge=0.0, le=25.0, description="Cold mains-water temperature T_mains [degC]"
+    )
+    dhw_t_amb_c: float = Field(
+        20.0, ge=5.0, le=35.0, description="Ambient temperature around the boiler T_amb [degC]"
+    )
 
     # ── Shared heat-pump electrical budget ───────────────────────────────
     P_hp_max_elec: float = Field(
@@ -235,9 +271,15 @@ class RunRequest(BaseModel):
 
     # ── Warmtepomp — Carnot COP model (§14.1) ────────────────────────────
     eta_carnot: float = Field(0.45, ge=0.1, le=0.99, description="Carnot efficiency factor eta [-]")
-    delta_T_cond: float = Field(5.0, ge=0.0, le=15.0, description="Condensing approach temperature delta_cond [K]")
-    delta_T_evap: float = Field(5.0, ge=0.0, le=15.0, description="Evaporating approach temperature delta_evap [K]")
-    T_supply_min: float = Field(28.0, ge=15.0, le=60.0, description="Minimum UFH supply temperature T_supply,min [degC]")
+    delta_T_cond: float = Field(
+        5.0, ge=0.0, le=15.0, description="Condensing approach temperature delta_cond [K]"
+    )
+    delta_T_evap: float = Field(
+        5.0, ge=0.0, le=15.0, description="Evaporating approach temperature delta_evap [K]"
+    )
+    T_supply_min: float = Field(
+        28.0, ge=15.0, le=60.0, description="Minimum UFH supply temperature T_supply,min [degC]"
+    )
     T_ref_outdoor_curve: float = Field(
         18.0,
         ge=5.0,
@@ -245,8 +287,12 @@ class RunRequest(BaseModel):
         description="Balance-point outdoor temperature for heating curve [degC]",
     )
     heating_curve_slope: float = Field(1.0, ge=0.0, le=3.0, description="Heating curve slope [K/K]")
-    cop_min: float = Field(1.5, ge=1.01, le=5.0, description="Physical lower bound on COP [-], must be > 1")
-    cop_max: float = Field(7.0, ge=2.0, le=15.0, description="Upper bound on COP for fail-fast validation [-]")
+    cop_min: float = Field(
+        1.5, ge=1.01, le=5.0, description="Physical lower bound on COP [-], must be > 1"
+    )
+    cop_max: float = Field(
+        7.0, ge=2.0, le=15.0, description="Upper bound on COP for fail-fast validation [-]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -439,9 +485,9 @@ class Optimizer:
         p_dhw = np.maximum(solution.dhw_control_sequence_kw, 0.0)
 
         # ── Step 7: Energy / cost summaries (electrical basis, §14.1) ───
-        assert ufh_forecast.cop_ufh_k is not None, (
-            "cop_ufh_k must be set on ufh_forecast after _build_ufh_forecast"
-        )
+        assert (
+            ufh_forecast.cop_ufh_k is not None
+        ), "cop_ufh_k must be set on ufh_forecast after _build_ufh_forecast"
         cop_ufh_arr = ufh_forecast.cop_ufh_k
         cop_dhw_arr = (
             dhw_forecast.cop_dhw_k
@@ -533,9 +579,7 @@ class Optimizer:
             else np.full(N, req.flat_price)
         )
         gti = (
-            np.array([_solar_gti(h) for h in hours], dtype=float)
-            if req.solar_gain
-            else np.zeros(N)
+            np.array([_solar_gti(h) for h in hours], dtype=float) if req.solar_gain else np.zeros(N)
         )
         pv = (
             np.array([_pv_generation(h, req.pv_peak_kw) for h in hours], dtype=float)
@@ -589,4 +633,3 @@ class Optimizer:
             legionella_required=np.zeros(N, dtype=bool),
             cop_dhw_k=cop_dhw_k,
         )
-

@@ -373,8 +373,7 @@ def main(argv: list[str] | None = None) -> None:
             local_backend = None
             t_out_init = args.mpc_t_out
             log.info(
-                "MPC sensor backend: none — using CLI defaults "
-                "(T_out=%.1f C, T_ref=%.1f C).",
+                "MPC sensor backend: none — using CLI defaults " "(T_out=%.1f C, T_ref=%.1f C).",
                 t_out_init,
                 args.mpc_t_ref,
             )

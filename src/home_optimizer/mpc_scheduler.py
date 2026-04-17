@@ -77,9 +77,7 @@ class MPCRunner:
         backend: "SensorBackend | None" = None,
     ) -> None:
         if not isinstance(base_input, RunRequest):
-            raise TypeError(
-                f"base_input must be a RunRequest instance, got {type(base_input)!r}"
-            )
+            raise TypeError(f"base_input must be a RunRequest instance, got {type(base_input)!r}")
         self._base_input: RunRequest = base_input
         self._backend = backend
 

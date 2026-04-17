@@ -71,7 +71,6 @@ from .telemetry import TelemetryRepository
 # ---------------------------------------------------------------------------
 
 
-
 class OptimizeResponse(BaseModel):
     """Structured optimisation response for the dashboard and API clients.
 
