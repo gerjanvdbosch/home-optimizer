@@ -59,6 +59,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .api import app
 from .database import DATABASE_URL_DEFAULT, Database
 from .optimizer import Optimizer
+from .price_model import PriceConfig, PriceMode, build_price_model
 from .sensors.open_meteo import OpenMeteoClient
 from .telemetry import ForecastPersister
 
@@ -256,6 +257,57 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
 
+    # ── Electricity price model ───────────────────────────────────────────
+    parser.add_argument(
+        "--price-mode",
+        type=str,
+        default="flat",
+        choices=["flat", "dual", "nordpool"],
+        help="Electricity price mode: flat | dual | nordpool.",
+    )
+    parser.add_argument(
+        "--price-flat-rate",
+        type=float,
+        default=0.25,
+        metavar="EUR_PER_KWH",
+        help="Flat import tariff [€/kWh] (used when --price-mode=flat).",
+    )
+    parser.add_argument(
+        "--price-high-rate",
+        type=float,
+        default=0.36,
+        metavar="EUR_PER_KWH",
+        help="Peak (high) import tariff [€/kWh] (used when --price-mode=dual).",
+    )
+    parser.add_argument(
+        "--price-low-rate",
+        type=float,
+        default=0.21,
+        metavar="EUR_PER_KWH",
+        help="Off-peak (low) import tariff [€/kWh] (used when --price-mode=dual).",
+    )
+    parser.add_argument(
+        "--price-feed-in-rate",
+        type=float,
+        default=0.09,
+        metavar="EUR_PER_KWH",
+        help="Feed-in / terugleververgoeding rate [€/kWh] (used when --price-mode=dual).",
+    )
+    parser.add_argument(
+        "--nordpool-country",
+        type=str,
+        default="NL",
+        metavar="CODE",
+        help="Nordpool bidding-zone code, e.g. 'NL' or 'DE-LU' (used when --price-mode=nordpool).",
+    )
+    parser.add_argument(
+        "--nordpool-vat",
+        type=float,
+        default=1.21,
+        metavar="FACTOR",
+        help="VAT + surcharge multiplier for Nordpool raw price (e.g. 1.21 = 21%% BTW).",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -353,6 +405,20 @@ def main(argv: list[str] | None = None) -> None:
         from .optimizer import RunRequest  # noqa: PLC0415
         from .sensors.local_backend import LocalBackend  # noqa: PLC0415
 
+        # Build price model from CLI arguments so MPC cost function uses the
+        # correct electricity tariff (§14.2).
+        price_cfg = PriceConfig(
+            mode=PriceMode(args.price_mode),
+            flat_rate_eur_per_kwh=args.price_flat_rate,
+            high_rate_eur_per_kwh=args.price_high_rate,
+            low_rate_eur_per_kwh=args.price_low_rate,
+            feed_in_rate_eur_per_kwh=args.price_feed_in_rate,
+            nordpool_country_code=args.nordpool_country,
+            nordpool_vat_factor=args.nordpool_vat,
+        )
+        price_model = build_price_model(price_cfg)  # noqa: F841 — used via price_cfg in RunRequest
+        log.info("Price model ready (mode=%s)", args.price_mode)
+
         # Build the sensor backend when a sensors.json path is supplied.
         if args.sensors_json is not None:
             sensors_path = Path(args.sensors_json).resolve()
@@ -388,6 +454,7 @@ def main(argv: list[str] | None = None) -> None:
                 "T_ref": args.mpc_t_ref,
                 "T_min": args.mpc_t_min,
                 "T_max": args.mpc_t_max,
+                "price_config": price_cfg,
             }
         )
         optimizer = Optimizer()

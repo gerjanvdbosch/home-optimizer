@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from ..price_model import BasePriceModel
 from ..sensors.base import LiveReadings, SensorBackend
 from .models import TelemetryCollectorSettings
 from .repository import TelemetryRepository
@@ -184,11 +185,13 @@ class BufferedTelemetryCollector:
         repository: TelemetryRepository,
         settings: TelemetryCollectorSettings,
         scheduler: BackgroundScheduler | None = None,
+        price_model: BasePriceModel | None = None,
     ) -> None:
         self._backend = backend
         self._repository = repository
         self._settings = settings
         self._scheduler = scheduler or BackgroundScheduler(timezone=settings.timezone_name)
+        self._price_model = price_model
         self._buffer: list[LiveReadings] = []
         self._lock = Lock()
         self._sample_job_id = f"{settings.job_id_prefix}-sample"
@@ -206,10 +209,51 @@ class BufferedTelemetryCollector:
             return len(self._buffer)
 
     def _persist_samples(self, samples: Sequence[LiveReadings]) -> dict[str, Any] | None:
-        """Aggregate and persist a completed telemetry bucket."""
+        """Aggregate and persist a completed telemetry bucket.
+
+        If a :class:`~home_optimizer.price_model.BasePriceModel` was injected,
+        the electricity import price and feed-in rate are computed per sample
+        (using each sample's UTC hour) and aggregated as mean + last, consistent
+        with the pattern used for all other numeric fields.  The feed-in rate is
+        stored as a single end-of-window value because it is time-invariant within
+        a flush bucket for all supported price modes.
+
+        When no price model is available the three price columns default to 0.0
+        rather than crashing — the telemetry layer must never block the sensor
+        collection loop.
+        """
         if not samples:
             return None
         aggregate = aggregate_readings(samples)
+
+        if self._price_model is not None:
+            # Compute per-sample import prices using each sample's UTC hour.
+            # For sub-hourly flush windows all samples will share the same hour
+            # and therefore the same price; mean == last in that case.
+            ordered = sorted(samples, key=lambda s: s.timestamp)
+            import_prices = np.asarray(
+                [
+                    self._price_model.prices(
+                        start_hour=s.timestamp.hour, n_steps=1
+                    )[0]
+                    for s in ordered
+                ],
+                dtype=float,
+            )
+            aggregate["electricity_price_mean_eur_per_kwh"] = float(np.mean(import_prices))
+            aggregate["electricity_price_last_eur_per_kwh"] = float(import_prices[-1])
+            # Feed-in rate: query for the last sample's hour; time-invariant within bucket.
+            aggregate["feed_in_price_eur_per_kwh"] = float(
+                self._price_model.feed_in_prices(
+                    start_hour=ordered[-1].timestamp.hour, n_steps=1
+                )[0]
+            )
+        else:
+            # No price model configured — store sentinel 0.0 values.
+            aggregate["electricity_price_mean_eur_per_kwh"] = 0.0
+            aggregate["electricity_price_last_eur_per_kwh"] = 0.0
+            aggregate["feed_in_price_eur_per_kwh"] = 0.0
+
         self._repository.add_aggregate(aggregate)
         return aggregate
 

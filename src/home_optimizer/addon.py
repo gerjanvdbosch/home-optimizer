@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from .api import app
 from .database import Database
 from .optimizer import Optimizer
-from .price_model import PriceConfig, PriceMode
+from .price_model import PriceConfig, PriceMode, build_price_model
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
@@ -516,6 +516,21 @@ def main() -> None:
     )
 
     # ── 4. Start telemetry collector ───────────────────────────────────────
+    # Build the price model early so the collector can stamp every telemetry
+    # bucket with the applicable electricity tariff (§14.2).
+    price_cfg = PriceConfig(
+        mode=PriceMode(opts.price_mode),
+        flat_rate_eur_per_kwh=opts.price_flat_rate,
+        high_rate_eur_per_kwh=opts.price_high_rate,
+        low_rate_eur_per_kwh=opts.price_low_rate,
+        feed_in_rate_eur_per_kwh=opts.price_feed_in_rate,
+        low_tariff_hours=opts.price_low_tariff_hours,
+        nordpool_country_code=opts.nordpool_country_code,
+        nordpool_vat_factor=opts.nordpool_vat_factor,
+    )
+    price_model = build_price_model(price_cfg)
+    log.info("Price model ready (mode=%s)", opts.price_mode)
+
     collector_settings = TelemetryCollectorSettings(
         database_url=db.url,
         sampling_interval_seconds=opts.sampling_interval_seconds,
@@ -525,6 +540,7 @@ def main() -> None:
         backend=backend,
         repository=repository,
         settings=collector_settings,
+        price_model=price_model,
     )
     collector.start()
     log.info(
@@ -544,16 +560,7 @@ def main() -> None:
         from .optimizer import RunRequest  # noqa: PLC0415
 
         _defaults = RunRequest.model_validate({})
-        price_cfg = PriceConfig(
-            mode=PriceMode(opts.price_mode),
-            flat_rate_eur_per_kwh=opts.price_flat_rate,
-            high_rate_eur_per_kwh=opts.price_high_rate,
-            low_rate_eur_per_kwh=opts.price_low_rate,
-            feed_in_rate_eur_per_kwh=opts.price_feed_in_rate,
-            low_tariff_hours=opts.price_low_tariff_hours,
-            nordpool_country_code=opts.nordpool_country_code,
-            nordpool_vat_factor=opts.nordpool_vat_factor,
-        )
+        # price_cfg was already constructed above for the telemetry collector.
         mpc_base_input = RunRequest(
             # ── UFH thermal model ───────────────────────────────────────────
             C_r=opts.mpc_C_r,
@@ -581,7 +588,6 @@ def main() -> None:
             # ── UFH disturbance forecast ─────────────────────────────────────
             outdoor_temperature_c=_defaults.outdoor_temperature_c,
             price_config=price_cfg,
-            solar_gain=_defaults.solar_gain,
             internal_gains_kw=_defaults.internal_gains_kw,
             # ── PV ───────────────────────────────────────────────────────────
             pv_enabled=_defaults.pv_enabled,
