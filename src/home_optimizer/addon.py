@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from .api import app
 from .database import Database
 from .optimizer import Optimizer
+from .price_model import PriceConfig, PriceMode
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
@@ -146,6 +147,59 @@ class AddonOptions(BaseModel):
     mpc_dhw_T_legionella: float = Field(60.0, description="Legionella target temperature [°C]")
     mpc_dhw_R_strat: float = Field(10.0, gt=0.0, description="DHW stratification resistance [K/kW]")
     mpc_dhw_R_loss: float = Field(50.0, gt=0.0, description="DHW standby-loss resistance [K/kW]")
+
+    # ── Electricity price model ───────────────────────────────────────────
+    price_mode: str = Field(
+        "flat",
+        description=(
+            "Electricity price mode: 'flat' | 'dual' | 'nordpool'.  "
+            "flat: constant rate.  "
+            "dual: piek/dal tariff with terugleververgoeding.  "
+            "nordpool: live Entso-E day-ahead prices."
+        ),
+    )
+    price_flat_rate: float = Field(
+        0.25, ge=0.0, le=5.0, description="Flat import tariff [€/kWh] (used when price_mode=flat)"
+    )
+    price_high_rate: float = Field(
+        0.36,
+        ge=0.0,
+        le=5.0,
+        description="Peak (high) import tariff [€/kWh] (used when price_mode=dual)",
+    )
+    price_low_rate: float = Field(
+        0.21,
+        ge=0.0,
+        le=5.0,
+        description="Off-peak (low) import tariff [€/kWh] (used when price_mode=dual)",
+    )
+    price_feed_in_rate: float = Field(
+        0.09,
+        ge=0.0,
+        le=5.0,
+        description=(
+            "Feed-in / terugleververgoeding rate [€/kWh] for PV net export "
+            "(used when price_mode=dual)"
+        ),
+    )
+    price_low_tariff_hours: list[int] = Field(
+        default_factory=lambda: [23, 0, 1, 2, 3, 4, 5, 6],
+        description=(
+            "Hour-of-day integers (0–23) that qualify as off-peak in dual-tariff mode.  "
+            "Default: 23:00–06:00 inclusive."
+        ),
+    )
+    nordpool_country_code: str = Field(
+        "NL",
+        min_length=2,
+        description="Nordpool / Entso-E bidding zone code, e.g. 'NL' or 'DE-LU'",
+    )
+    nordpool_vat_factor: float = Field(
+        1.21,
+        ge=1.0,
+        le=2.0,
+        description="VAT + surcharge multiplier for Nordpool raw price (e.g. 1.21 = 21% BTW)",
+    )
 
     # --- Temperature sensors (°C — scale 1.0) ---
     sensor_room_temperature: str = Field(..., min_length=1)
@@ -490,6 +544,16 @@ def main() -> None:
         from .optimizer import RunRequest  # noqa: PLC0415
 
         _defaults = RunRequest.model_validate({})
+        price_cfg = PriceConfig(
+            mode=PriceMode(opts.price_mode),
+            flat_rate_eur_per_kwh=opts.price_flat_rate,
+            high_rate_eur_per_kwh=opts.price_high_rate,
+            low_rate_eur_per_kwh=opts.price_low_rate,
+            feed_in_rate_eur_per_kwh=opts.price_feed_in_rate,
+            low_tariff_hours=opts.price_low_tariff_hours,
+            nordpool_country_code=opts.nordpool_country_code,
+            nordpool_vat_factor=opts.nordpool_vat_factor,
+        )
         mpc_base_input = RunRequest(
             # ── UFH thermal model ───────────────────────────────────────────
             C_r=opts.mpc_C_r,
@@ -516,8 +580,7 @@ def main() -> None:
             T_ref=opts.mpc_T_ref,
             # ── UFH disturbance forecast ─────────────────────────────────────
             outdoor_temperature_c=_defaults.outdoor_temperature_c,
-            dynamic_price=_defaults.dynamic_price,
-            flat_price=_defaults.flat_price,
+            price_config=price_cfg,
             solar_gain=_defaults.solar_gain,
             internal_gains_kw=_defaults.internal_gains_kw,
             # ── PV ───────────────────────────────────────────────────────────

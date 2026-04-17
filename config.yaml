@@ -93,6 +93,36 @@ options:
   # DHW boiler tank volume [litres]
   boiler_tank_liters: 200
 
+  # ---------------------------------------------------------------------------
+  # Elektriciteitsprijsmodel — kies één van de drie modi:
+  #   flat     : vaste prijs (price_flat_rate) voor alle uren
+  #   dual     : piek/dal-tarief met terugleververgoeding
+  #   nordpool : live dagvoordprijzen van de Entso-E / Nordpool API
+  # ---------------------------------------------------------------------------
+  price_mode: "flat"
+
+  # flat-modus
+  price_flat_rate: 0.22
+
+  # dual-modus (piek/dal + terugleververgoeding)
+  price_high_rate: 0.22
+  price_low_rate: 0.21
+  price_feed_in_rate: 0.077
+  # Uren (0–23) die gelden als daltarief; standaard 23:00–06:00
+  price_low_tariff_hours:
+    - 23
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+
+  # nordpool-modus (Nordpool Data Portal — geen API-token nodig)
+  nordpool_country_code: "NL"
+  nordpool_vat_factor: 1.21     # 21% BTW + opslag
+
   # Optional monotonically-increasing energy counters [kWh].
   # Leave blank ("") or omit to disable.  When present, the telemetry layer
   # records ΔkWh per flush window for accurate COP validation (§14.1) and
@@ -158,3 +188,11 @@ schema:
   sensor_p1_import_total_kwh: str
   sensor_p1_export_total_kwh: str
 
+  price_mode: list(flat|dual|nordpool)
+  price_flat_rate: float
+  price_high_rate: float
+  price_low_rate: float
+  price_feed_in_rate: float
+  price_low_tariff_hours: [int]
+  nordpool_country_code: str
+  nordpool_vat_factor: float

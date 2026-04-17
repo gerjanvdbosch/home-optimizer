@@ -45,6 +45,7 @@ from pydantic import BaseModel, Field
 from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import DHWModel
 from .mpc import MPCController, MPCSolution
+from .price_model import BasePriceModel, PriceConfig, build_price_model  # noqa: F401 — PriceConfig re-exported via RunRequest
 from .thermal_model import ThermalModel
 from .types import (
     CombinedMPCParameters,
@@ -62,41 +63,6 @@ if TYPE_CHECKING:
     from .sensors.base import SensorBackend
 
 log = logging.getLogger("home_optimizer.optimizer")
-
-# ---------------------------------------------------------------------------
-# Solar / price proxy helpers (used when building forecasts)
-# ---------------------------------------------------------------------------
-
-#: Typical Dutch day-ahead electricity price pattern [€/kWh], hours 00–23.
-_PRICES_24H = np.array(
-    [
-        0.21,
-        0.20,
-        0.19,
-        0.18,
-        0.19,
-        0.22,  # 00–05 cheap night
-        0.28,
-        0.35,
-        0.38,
-        0.36,
-        0.32,
-        0.28,  # 06–11 morning peak
-        0.25,
-        0.24,
-        0.24,
-        0.25,
-        0.28,
-        0.35,  # 12–17 afternoon
-        0.42,
-        0.45,
-        0.40,
-        0.35,
-        0.28,
-        0.23,  # 18–23 evening peak
-    ],
-    dtype=float,
-)
 
 #: Peak south-facing irradiance at solar noon [W/m²].
 _SOLAR_PEAK_W_PER_M2: float = 550.0
@@ -206,9 +172,13 @@ class RunRequest(BaseModel):
     outdoor_temperature_c: float = Field(
         6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC]"
     )
-    dynamic_price: bool = Field(True, description="Use typical Dutch day-ahead price pattern")
-    flat_price: float = Field(
-        0.25, ge=0.0, le=2.0, description="Flat electricity price p [EUR/kWh]"
+    price_config: PriceConfig = Field(
+        default_factory=PriceConfig,
+        description=(
+            "Electricity price model: flat rate, dual-tariff (piek/dal + "
+            "terugleververgoeding), or real Nordpool day-ahead prices.  "
+            "See PriceConfig for all sub-fields."
+        ),
     )
     solar_gain: bool = Field(True, description="Include solar irradiance profile")
     internal_gains_kw: float = Field(
@@ -700,6 +670,9 @@ class Optimizer:
 
         Injects the time-varying UFH COP array (computed from the Carnot model
         and outdoor temperature) so the MPC can use physical electricity costs.
+        The electricity price array is constructed by the configured
+        :class:`~home_optimizer.price_model.BasePriceModel` subclass
+        (flat / dual-tariff / Nordpool), ensuring no magic numbers appear here.
 
         Args:
             req:        Validated request with all forecast parameters.
@@ -713,11 +686,9 @@ class Optimizer:
         """
         N = req.horizon_hours
         hours = [(start_hour + k) % 24 for k in range(N)]
-        prices = (
-            np.array([_PRICES_24H[h] for h in hours])
-            if req.dynamic_price
-            else np.full(N, req.flat_price)
-        )
+        # Build the configured price model (flat / dual / nordpool).
+        price_model: BasePriceModel = build_price_model(req.price_config)
+        prices = price_model.prices(start_hour, N)
         gti = (
             np.array([_solar_gti(h) for h in hours], dtype=float) if req.solar_gain else np.zeros(N)
         )
