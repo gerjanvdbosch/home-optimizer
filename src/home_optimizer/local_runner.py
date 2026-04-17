@@ -58,7 +58,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import app
 from .mpc_scheduler import MPCRunner, schedule_mpc
-from .sensors.local_backend import LocalBackend
 from .sensors.open_meteo import OpenMeteoClient
 from .settings import DATABASE_URL_DEFAULT, Database
 from .telemetry import ForecastPersister
@@ -349,10 +348,7 @@ def main(argv: list[str] | None = None) -> None:
     # Without --sensors-json the MPC uses the fixed CLI defaults as initial
     # conditions — useful for smoke-testing without real sensor data.
     if args.mpc_interval > 0:
-        import dataclasses  # noqa: PLC0415
-
-        from .api import RunRequest  # noqa: PLC0415 – Pydantic defaults only
-        from .optimizer import OptimizerInput  # noqa: PLC0415
+        from .optimizer import RunRequest  # noqa: PLC0415
         from .sensors.local_backend import LocalBackend  # noqa: PLC0415
 
         # Build the sensor backend when a sensors.json path is supplied.
@@ -383,15 +379,15 @@ def main(argv: list[str] | None = None) -> None:
                 args.mpc_t_ref,
             )
 
-        # Start from the Pydantic-validated defaults, then override the four
-        # CLI-configurable initial conditions via dataclasses.replace().
-        _defaults = RunRequest()
-        mpc_base_input = dataclasses.replace(
-            OptimizerInput(**_defaults.model_dump()),
-            outdoor_temperature_c=t_out_init,
-            T_ref=args.mpc_t_ref,
-            T_min=args.mpc_t_min,
-            T_max=args.mpc_t_max,
+        # Start from Pydantic defaults, then override runtime fields immutably.
+        _defaults = RunRequest.model_validate({})
+        mpc_base_input = _defaults.model_copy(
+            update={
+                "outdoor_temperature_c": t_out_init,
+                "T_ref": args.mpc_t_ref,
+                "T_min": args.mpc_t_min,
+                "T_max": args.mpc_t_max,
+            }
         )
         mpc_runner = MPCRunner(base_input=mpc_base_input, backend=local_backend)
         schedule_mpc(

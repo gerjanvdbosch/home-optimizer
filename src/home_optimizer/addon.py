@@ -487,11 +487,10 @@ def main() -> None:
 
     # ── 4c. Start periodic MPC (optional) ─────────────────────────────────
     if opts.mpc_enabled:
-        from .api import RunRequest  # noqa: PLC0415 – Pydantic defaults only
-        from .optimizer import OptimizerInput  # noqa: PLC0415
+        from .optimizer import RunRequest  # noqa: PLC0415
 
-        _defaults = RunRequest()
-        mpc_base_input = OptimizerInput(
+        _defaults = RunRequest.model_validate({})
+        mpc_base_input = RunRequest(
             # ── UFH thermal model ───────────────────────────────────────────
             C_r=opts.mpc_C_r,
             C_b=opts.mpc_C_b,

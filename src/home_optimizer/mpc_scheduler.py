@@ -12,8 +12,8 @@ Architecture
    :class:`~home_optimizer.sensors.base.SensorBackend` (addon mode).
    When no backend is provided it uses the configured fallback initial
    conditions (local-runner / testing mode).
-2. Applies live sensor overrides to the base :class:`~home_optimizer.optimizer.OptimizerInput`
-   via :func:`dataclasses.replace`.
+2. Applies live sensor overrides to the base :class:`~home_optimizer.optimizer.RunRequest`
+   via :meth:`pydantic.BaseModel.model_copy`.
 3. Calls :meth:`~home_optimizer.optimizer.Optimizer.solve` directly — no API
    layer involved.
 4. Logs the first-step control actions so an operator can see what the MPC
@@ -21,12 +21,12 @@ Architecture
 
 Design decisions
 ----------------
-* **No API dependency**: the scheduler works exclusively with
-  :class:`~home_optimizer.optimizer.OptimizerInput` and
-  :class:`~home_optimizer.optimizer.Optimizer`.  ``api.py`` and ``RunRequest``
-  are never imported here.
+* **Shared contract**: the scheduler reuses
+  :class:`~home_optimizer.optimizer.RunRequest` and
+  :class:`~home_optimizer.optimizer.Optimizer` so API and background runs share
+  one validated input model.
 * **No magic numbers**: all physical parameters come from the injected
-  :class:`~home_optimizer.optimizer.OptimizerInput`.
+  :class:`~home_optimizer.optimizer.RunRequest`.
 * **Fail-fast on backend errors**: a sensor read failure logs the exception
   but the MPC run is *skipped* for that interval.  The scheduler continues
   and retries at the next interval, so a single bad reading does not crash
@@ -43,11 +43,10 @@ Units: power [kW], temperature [°C], time [h].
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
-from .optimizer import Optimizer, OptimizerInput
+from .optimizer import Optimizer, RunRequest
 
 if TYPE_CHECKING:
     from .sensors.base import SensorBackend
@@ -60,7 +59,7 @@ class MPCRunner:
 
     Args:
         base_input:
-            A fully-populated :class:`~home_optimizer.optimizer.OptimizerInput`
+            A fully-populated :class:`~home_optimizer.optimizer.RunRequest`
             that provides all physical parameters and MPC weights.  Live sensor
             readings will *override* the initial-condition fields
             (``T_r_init``, ``T_b_init``, ``dhw_T_top_init``,
@@ -74,14 +73,14 @@ class MPCRunner:
 
     def __init__(
         self,
-        base_input: OptimizerInput,
+        base_input: RunRequest,
         backend: "SensorBackend | None" = None,
     ) -> None:
-        if not isinstance(base_input, OptimizerInput):
+        if not isinstance(base_input, RunRequest):
             raise TypeError(
-                f"base_input must be an OptimizerInput instance, got {type(base_input)!r}"
+                f"base_input must be a RunRequest instance, got {type(base_input)!r}"
             )
-        self._base_input: OptimizerInput = base_input
+        self._base_input: RunRequest = base_input
         self._backend = backend
 
     # ------------------------------------------------------------------
@@ -97,7 +96,7 @@ class MPCRunner:
         Workflow:
             1. Read live sensor state (if backend available).
             2. Apply sensor overrides to ``base_input`` via
-               :func:`dataclasses.replace` (immutable — no mutation).
+               :meth:`pydantic.BaseModel.model_copy` (immutable — no mutation).
             3. Call :meth:`~home_optimizer.optimizer.Optimizer.solve`.
             4. Log the first-step UFH and DHW thermal powers [kW].
 
@@ -136,18 +135,18 @@ class MPCRunner:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_optimizer_input(self) -> OptimizerInput:
-        """Return an :class:`~home_optimizer.optimizer.OptimizerInput` for this step.
+    def _build_optimizer_input(self) -> RunRequest:
+        """Return a :class:`~home_optimizer.optimizer.RunRequest` for this step.
 
         When no backend is configured the base input is returned unchanged
         (all initial conditions from the caller-supplied values).
 
         When a backend is available, live sensor readings override the
-        initial-condition fields via :func:`dataclasses.replace`, leaving all
+        initial-condition fields via :meth:`pydantic.BaseModel.model_copy`, leaving all
         physical parameters and MPC weights intact.
 
         Returns:
-            :class:`~home_optimizer.optimizer.OptimizerInput` — either the
+            :class:`~home_optimizer.optimizer.RunRequest` — either the
             original base input or an immutable copy with sensor overrides.
 
         Raises:
@@ -183,7 +182,7 @@ class MPCRunner:
             overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
             overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
 
-        return dataclasses.replace(self._base_input, **overrides)
+        return self._base_input.model_copy(update=overrides)
 
 
 def schedule_mpc(

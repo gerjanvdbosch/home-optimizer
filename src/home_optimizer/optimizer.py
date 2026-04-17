@@ -12,7 +12,7 @@ The public surface is intentionally small:
   outputs of one optimisation step (control sequences, COP arrays, energy
   summaries, forecasts).  No charts — chart generation is the API's concern.
 * :class:`Optimizer` — a stateless service object that accepts a
-  :class:`~home_optimizer.api.RunRequest`, orchestrates the full solve
+  :class:`RunRequest`, orchestrates the full solve
   pipeline (thermal model → COP model → forecasts → MPC → summaries) and
   returns an :class:`MPCStepResult`.
 
@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import DHWModel
@@ -131,91 +132,121 @@ def _pv_generation(hour: int, peak_kw: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Input dataclass — decouples Optimizer from the API layer
+# Shared request model (API + scheduler + local runners)
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class OptimizerInput:
-    """All physical and MPC parameters needed for one optimisation step.
+class RunRequest(BaseModel):
+    """All user-adjustable parameters for one MPC optimisation step.
 
-    This dataclass is the **only** input contract of :class:`Optimizer`.  It
-    is deliberately a plain Python dataclass (no Pydantic, no FastAPI) so that
-    ``optimizer.py`` remains free of any web-framework concerns.
-
-    ``api.py`` constructs an instance via ``OptimizerInput(**req.model_dump())``
-    before calling :meth:`Optimizer.solve`.
-
-    Units: power [kW], temperature [°C], energy [kWh], time [h].
+    The model uses Pydantic validation to enforce physical bounds on every
+    parameter before they reach the solver.
     """
 
-    # ── UFH: two-zone house thermal model (§3–§5) ─────────────────────
-    C_r: float
-    C_b: float
-    R_br: float
-    R_ro: float
-    alpha: float
-    eta: float
-    A_glass: float
+    # ── UFH: two-zone house thermal model (§3–§5) ─────────────────────────
+    C_r: float = Field(
+        6.0, ge=0.5, le=50.0, description="Room-air + furniture thermal capacity C_r [kWh/K]"
+    )
+    C_b: float = Field(
+        10.0, ge=1.0, le=200.0, description="UFH floor / concrete slab thermal capacity C_b [kWh/K]"
+    )
+    R_br: float = Field(
+        1.0, ge=0.1, le=20.0, description="Thermal resistance floor -> room R_br [K/kW]"
+    )
+    R_ro: float = Field(
+        10.0, ge=0.1, le=30.0, description="Thermal resistance room -> outside R_ro [K/kW]"
+    )
+    alpha: float = Field(0.25, ge=0.0, le=1.0, description="Fraction of solar gain to room air alpha [-]")
+    eta: float = Field(0.55, ge=0.0, le=1.0, description="Window solar transmittance eta [-]")
+    A_glass: float = Field(
+        7.5, ge=0.5, le=40.0, description="South-facing glazing area A_glass [m^2]"
+    )
 
-    # ── UFH: initial conditions ──────────────────────────────────────
-    T_r_init: float
-    T_b_init: float
-    previous_power_kw: float
+    # ── UFH: initial conditions ───────────────────────────────────────────
+    T_r_init: float = Field(20.5, ge=5.0, le=35.0, description="Initial room-air temperature T_r [degC]")
+    T_b_init: float = Field(
+        22.5, ge=5.0, le=45.0, description="Initial floor/slab temperature T_b [degC]"
+    )
+    previous_power_kw: float = Field(
+        0.8, ge=0.0, le=20.0, description="UFH power applied in previous step [kW]"
+    )
 
-    # ── MPC settings (§14) ──────────────────────────────────────────
-    horizon_hours: int
-    dt_hours: float
-    Q_c: float
-    R_c: float
-    Q_N: float
-    P_max: float
-    delta_P_max: float
-    T_min: float
-    T_max: float
-    T_ref: float
+    # ── MPC settings (§14) ────────────────────────────────────────────────
+    horizon_hours: int = Field(24, ge=4, le=48, description="Horizon length N [steps]")
+    dt_hours: float = Field(1.0, ge=0.25, le=2.0, description="Forward-Euler time step dt [h]")
+    Q_c: float = Field(8.0, ge=0.0, description="Comfort weight Q_c [dimensionless]")
+    R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
+    Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
+    P_max: float = Field(4.5, ge=0.5, le=20.0, description="Max UFH thermal power P_UFH,max [kW]")
+    delta_P_max: float = Field(
+        1.0, ge=0.1, le=10.0, description="Max UFH ramp-rate delta_P_UFH,max [kW/step]"
+    )
+    T_min: float = Field(19.0, ge=10.0, le=25.0, description="Minimum comfort temperature T_min [degC]")
+    T_max: float = Field(22.5, ge=16.0, le=30.0, description="Maximum comfort temperature T_max [degC]")
+    T_ref: float = Field(20.5, ge=15.0, le=26.0, description="Comfort setpoint T_ref [degC]")
 
-    # ── UFH: disturbance forecast ────────────────────────────────────
-    outdoor_temperature_c: float
-    dynamic_price: bool
-    flat_price: float
-    solar_gain: bool
-    internal_gains_kw: float
+    # ── UFH: disturbance forecast ─────────────────────────────────────────
+    outdoor_temperature_c: float = Field(6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC]")
+    dynamic_price: bool = Field(True, description="Use typical Dutch day-ahead price pattern")
+    flat_price: float = Field(0.25, ge=0.0, le=2.0, description="Flat electricity price p [EUR/kWh]")
+    solar_gain: bool = Field(True, description="Include solar irradiance profile")
+    internal_gains_kw: float = Field(0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]")
 
-    # ── PV self-consumption ──────────────────────────────────────────
-    pv_enabled: bool
-    pv_peak_kw: float
+    # ── PV self-consumption ───────────────────────────────────────────────
+    pv_enabled: bool = Field(False, description="Enable PV self-consumption (reduces net grid cost)")
+    pv_peak_kw: float = Field(4.0, ge=0.0, le=20.0, description="PV system peak capacity [kW]")
 
-    # ── DHW: two-node stratification tank (§7–§11) ──────────────────
-    dhw_enabled: bool
-    dhw_C_top: float
-    dhw_C_bot: float
-    dhw_R_strat: float
-    dhw_R_loss: float
-    dhw_T_top_init: float
-    dhw_T_bot_init: float
-    dhw_P_max: float
-    dhw_delta_P_max: float
-    dhw_T_min: float
-    dhw_T_legionella: float
-    dhw_legionella_period_steps: int
-    dhw_legionella_duration_steps: int
-    dhw_v_tap_m3_per_h: float
-    dhw_t_mains_c: float
-    dhw_t_amb_c: float
+    # ── DHW: two-node stratification tank (§7–§11) ───────────────────────
+    dhw_enabled: bool = Field(False, description="Enable DHW (domestic hot water) control")
+    dhw_C_top: float = Field(
+        0.5814, ge=0.01, le=5.0, description="DHW top-layer thermal capacity C_top [kWh/K]"
+    )
+    dhw_C_bot: float = Field(
+        0.5814, ge=0.01, le=5.0, description="DHW bottom-layer thermal capacity C_bot [kWh/K]"
+    )
+    dhw_R_strat: float = Field(10.0, ge=1.0, le=100.0, description="Stratification resistance R_strat [K/kW]")
+    dhw_R_loss: float = Field(50.0, ge=5.0, le=200.0, description="Standby-loss resistance R_loss [K/kW]")
+    dhw_T_top_init: float = Field(55.0, ge=20.0, le=85.0, description="Initial top-layer temperature T_top [degC]")
+    dhw_T_bot_init: float = Field(
+        45.0, ge=15.0, le=80.0, description="Initial bottom-layer temperature T_bot [degC]"
+    )
+    dhw_P_max: float = Field(3.0, ge=0.5, le=15.0, description="Max DHW thermal power P_dhw,max [kW]")
+    dhw_delta_P_max: float = Field(1.0, ge=0.1, le=10.0, description="Max DHW ramp-rate delta_P_dhw,max [kW/step]")
+    dhw_T_min: float = Field(50.0, ge=35.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [degC]")
+    dhw_T_legionella: float = Field(60.0, ge=55.0, le=85.0, description="Legionella prevention temperature T_leg [degC]")
+    dhw_legionella_period_steps: int = Field(168, ge=24, le=336, description="Legionella cycle period n_leg [steps]")
+    dhw_legionella_duration_steps: int = Field(
+        1, ge=1, le=4, description="Min consecutive steps at T_legionella for legionella kill"
+    )
+    dhw_v_tap_m3_per_h: float = Field(0.01, ge=0.0, le=0.2, description="Average tap-water flow Vdot_tap [m^3/h]")
+    dhw_t_mains_c: float = Field(10.0, ge=0.0, le=25.0, description="Cold mains-water temperature T_mains [degC]")
+    dhw_t_amb_c: float = Field(20.0, ge=5.0, le=35.0, description="Ambient temperature around the boiler T_amb [degC]")
 
-    # ── Shared heat-pump electrical budget ──────────────────────────
-    P_hp_max_elec: float
+    # ── Shared heat-pump electrical budget ───────────────────────────────
+    P_hp_max_elec: float = Field(
+        2.5,
+        ge=0.5,
+        le=30.0,
+        description=(
+            "Shared heat-pump electrical power budget P_hp,max,elec [kW]. "
+            "Enforces P_UFH/COP_UFH + P_dhw/COP_dhw <= P_hp_max_elec (section 14)."
+        ),
+    )
 
-    # ── Carnot COP model (§14.1) ─────────────────────────────────────
-    eta_carnot: float
-    delta_T_cond: float
-    delta_T_evap: float
-    T_supply_min: float
-    T_ref_outdoor_curve: float
-    heating_curve_slope: float
-    cop_min: float
-    cop_max: float
+    # ── Warmtepomp — Carnot COP model (§14.1) ────────────────────────────
+    eta_carnot: float = Field(0.45, ge=0.1, le=0.99, description="Carnot efficiency factor eta [-]")
+    delta_T_cond: float = Field(5.0, ge=0.0, le=15.0, description="Condensing approach temperature delta_cond [K]")
+    delta_T_evap: float = Field(5.0, ge=0.0, le=15.0, description="Evaporating approach temperature delta_evap [K]")
+    T_supply_min: float = Field(28.0, ge=15.0, le=60.0, description="Minimum UFH supply temperature T_supply,min [degC]")
+    T_ref_outdoor_curve: float = Field(
+        18.0,
+        ge=5.0,
+        le=25.0,
+        description="Balance-point outdoor temperature for heating curve [degC]",
+    )
+    heating_curve_slope: float = Field(1.0, ge=0.0, le=3.0, description="Heating curve slope [K/K]")
+    cop_min: float = Field(1.5, ge=1.01, le=5.0, description="Physical lower bound on COP [-], must be > 1")
+    cop_max: float = Field(7.0, ge=2.0, le=15.0, description="Upper bound on COP for fail-fast validation [-]")
 
 
 # ---------------------------------------------------------------------------
@@ -294,11 +325,11 @@ class Optimizer:
     # Public API
     # ------------------------------------------------------------------
 
-    def solve(self, req: OptimizerInput) -> MPCStepResult:
+    def solve(self, req: RunRequest) -> MPCStepResult:
         """Run one full MPC optimisation step.
 
         Args:
-            req: :class:`OptimizerInput` with all physical and MPC parameters.
+            req: :class:`RunRequest` with all physical and MPC parameters.
                  Callers are responsible for validating the parameters before
                  passing them (e.g. via Pydantic in the API layer).
 
@@ -445,7 +476,7 @@ class Optimizer:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_cop_model(req: OptimizerInput) -> HeatPumpCOPModel:
+    def _build_cop_model(req: RunRequest) -> HeatPumpCOPModel:
         """Construct the Carnot COP model from the user request.
 
         Assembles a ``HeatPumpCOPParameters`` dataclass from the request fields
@@ -475,7 +506,7 @@ class Optimizer:
 
     @staticmethod
     def _build_ufh_forecast(
-        req: OptimizerInput,
+        req: RunRequest,
         start_hour: int,
         cop_model: HeatPumpCOPModel,
     ) -> ForecastHorizon:
@@ -527,7 +558,7 @@ class Optimizer:
 
     @staticmethod
     def _build_dhw_forecast(
-        req: OptimizerInput,
+        req: RunRequest,
         N: int,
         cop_model: HeatPumpCOPModel,
     ) -> DHWForecastHorizon:
