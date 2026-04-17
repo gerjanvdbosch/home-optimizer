@@ -294,9 +294,19 @@ class HomeOptimizerAPI:
         t_ref: float,
         t_min: float,
         t_max: float,
-        t_out: float,
+        t_out: np.ndarray,
     ) -> str:
-        """Build UFH room-temperature figure."""
+        """Build UFH room-temperature figure.
+
+        Args:
+            labels: Time-axis labels (length N+1, one per state step).
+            t_r:    Predicted room-air temperature [°C], length N+1.
+            t_ref:  Comfort setpoint reference line [°C].
+            t_min:  Lower comfort band [°C].
+            t_max:  Upper comfort band [°C].
+            t_out:  Outdoor temperature forecast array [°C], length N+1.
+                    Plotted as a dotted reference trace.
+        """
         fig = go.Figure()
         n = len(labels)
         fig.add_trace(
@@ -313,8 +323,8 @@ class HomeOptimizerAPI:
         fig.add_trace(
             go.Scatter(
                 x=labels,
-                y=[t_out] * n,
-                name="T<sub>buiten</sub>",
+                y=t_out,
+                name="T<sub>buiten</sub> (forecast)",
                 mode="lines",
                 line=dict(color="#999", width=1.5, dash="dot"),
             )
@@ -602,13 +612,18 @@ class HomeOptimizerAPI:
         labels_ctrl = self._time_labels(start_hour, n)
         t_r = states[:, 0]
 
+        # Outdoor temperature: use the actual forecast array used by the solver.
+        # Pad to N+1 by repeating the last value so it aligns with state labels.
+        t_out_arr = result.ufh_forecast.outdoor_temperature_c
+        t_out_states = np.append(t_out_arr, t_out_arr[-1])
+
         temp_fig = self._temperature_figure(
             labels_states,
             t_r,
             req.T_ref,
             req.T_min,
             req.T_max,
-            req.outdoor_temperature_c,
+            t_out_states,
         )
         power_fig = self._power_figure(labels_ctrl, p_ufh, p_dhw, pv_kw, prices, req.P_max)
         cop_fig = self._cop_figure(
