@@ -76,6 +76,8 @@ _DEFAULT_HORIZON_HOURS: int = 48
 _DEFAULT_WINDOW_TILT: float = 90.0
 #: Default window azimuth [°] — 0 = South (Open-Meteo solar convention).
 _DEFAULT_WINDOW_AZIMUTH: float = 0.0
+# Default pv tilt
+_DEFAULT_PV_TILT: float = 50.0
 #: Default site latitude [°N] — Amsterdam.
 _DEFAULT_LATITUDE: float = 52.37
 #: Default site longitude [°E] — Amsterdam.
@@ -184,7 +186,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--pv-tilt",
         type=float,
-        default=None,
+        default=_DEFAULT_PV_TILT,
         metavar="DEGREES",
         help="PV panel tilt [°]. Omit to disable PV GTI forecast.",
     )
