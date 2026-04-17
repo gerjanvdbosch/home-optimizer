@@ -619,6 +619,7 @@ def main() -> None:
         optimizer.schedule_periodic(
             base_input=mpc_base_input,
             backend=backend,
+            repository=repository,
             scheduler=collector.scheduler,
             interval_seconds=opts.mpc_interval_seconds,
             run_immediately=True,

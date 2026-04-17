@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 from pydantic import BaseModel
 
 from .database import Database
-from .optimizer import MPCStepResult, Optimizer, RunRequest
+from .optimizer import MPCStepResult, Optimizer, RunRequest, inject_forecast_overrides
 from .telemetry import TelemetryRepository
 
 
@@ -107,7 +107,7 @@ class HomeOptimizerAPI:
         )
         self.app.add_api_route(
             "/api/simulate",
-            self.optimize,
+            self.simulate,
             methods=["POST"],
             response_model=OptimizeResponse,
         )
@@ -167,13 +167,39 @@ class HomeOptimizerAPI:
             solar_forecast_fig=solar_fig_json,
         )
 
-    async def optimize(self, req: RunRequest) -> OptimizeResponse:
-        """Run one MPC optimisation and return charts + summaries."""
+    async def simulate(self, req: RunRequest) -> OptimizeResponse:
+        """Run one MPC optimisation and return charts + summaries.
+
+        Injects the latest Open-Meteo forecast from the database into the
+        request before solving (for any array not already supplied by the
+        caller).  Raises 502 on DB error, 422 when no forecast rows exist.
+        """
+        if req.gti_window_forecast is None or req.t_out_forecast is None:
+            try:
+                rows = self._get_repository().get_latest_forecast_batch()
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Kon forecast niet uit de database lezen: {exc}",
+                ) from exc
+
+            if not rows:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Geen forecast gevonden in de database.  "
+                        "Zorg dat ForecastPersister minstens één keer heeft gedraaid "
+                        "voordat je /api/simulate aanroept."
+                    ),
+                )
+            req = req.model_copy(update=inject_forecast_overrides(rows, req.horizon_hours))
+
         try:
             result = Optimizer().solve(req)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return self._build_optimize_response(req=req, result=result)
+
 
     async def latest_optimizer_result(self) -> OptimizeResponse:
         """Return latest successful periodic Optimizer result."""

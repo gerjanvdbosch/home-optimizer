@@ -231,14 +231,6 @@
         <input type="checkbox" id="pv_enabled" />
         <label for="pv_enabled">PV-self-consumption actief</label>
       </div>
-      <div class="toggle">
-        <input type="checkbox" id="dynamic_price" checked />
-        <label for="dynamic_price">Dynamische stroomprijs</label>
-      </div>
-      <div class="toggle">
-        <input type="checkbox" id="solar_gain" checked />
-        <label for="solar_gain">Zoninstraling meenemen</label>
-      </div>
       <div class="hint">DHW alleen actief als dezelfde warmtepomp zowel UFH als tapwater voedt. Dan geldt de gedeelde elektrische vermogensconstraint.</div>
     </div>
 
@@ -332,12 +324,45 @@
         <label>Interne warmte [kW] <span id="vQint">0.3</span></label>
         <input type="number" id="internal_gains_kw" value="0.30" min="0" max="3" step="0.05" oninput="upd('vQint', this.value)" />
       </div>
-      <div class="field" id="flat_price_field">
-        <label>Vaste prijs [&euro;/kWh] <span id="vFlatP">0.25</span></label>
-        <input type="number" id="flat_price" value="0.25" min="0" max="2" step="0.01" oninput="upd('vFlatP', this.value)" />
-      </div>
       <div class="field">
-        <label>PV piekvermogen [kW] <span id="vPvPeak">4.0</span></label>
+        <label>Prijsmodus</label>
+        <select id="price_mode" style="width:100%;padding:.38rem .5rem;border:1px solid #d8dde3;border-radius:4px;font-size:.82rem;">
+          <option value="flat">Vast tarief</option>
+          <option value="dual">Piek/dal + terugleververgoeding</option>
+          <option value="nordpool">Nordpool day-ahead</option>
+        </select>
+      </div>
+      <div class="field" id="flat_rate_field">
+        <label>Vast tarief [&euro;/kWh] <span id="vFlatRate">0.25</span></label>
+        <input type="number" id="price_flat_rate" value="0.25" min="0" max="5" step="0.01" oninput="upd('vFlatRate', this.value)" />
+      </div>
+      <div id="dual_fields" class="hidden">
+        <div class="field">
+          <label>Piektarief [&euro;/kWh] <span id="vHighRate">0.36</span></label>
+          <input type="number" id="price_high_rate" value="0.36" min="0" max="5" step="0.01" oninput="upd('vHighRate', this.value)" />
+        </div>
+        <div class="field">
+          <label>Daltarief [&euro;/kWh] <span id="vLowRate">0.21</span></label>
+          <input type="number" id="price_low_rate" value="0.21" min="0" max="5" step="0.01" oninput="upd('vLowRate', this.value)" />
+        </div>
+        <div class="field">
+          <label>Terugleververgoeding [&euro;/kWh] <span id="vFeedIn">0.09</span></label>
+          <input type="number" id="price_feed_in_rate" value="0.09" min="0" max="5" step="0.01" oninput="upd('vFeedIn', this.value)" />
+        </div>
+      </div>
+      <div id="nordpool_fields" class="hidden">
+        <div class="field">
+          <label>Nordpool zone</label>
+          <input type="text" id="nordpool_country_code" value="NL" style="width:100%;padding:.38rem .5rem;border:1px solid #d8dde3;border-radius:4px;font-size:.82rem;" />
+        </div>
+        <div class="field">
+          <label>BTW-factor <span id="vVat">1.21</span></label>
+          <input type="number" id="nordpool_vat_factor" value="1.21" min="1" max="2" step="0.01" oninput="upd('vVat', this.value)" />
+        </div>
+      </div>
+      <div class="hint" id="forecast-hint">Zoninstraling en buitentemperatuur komen automatisch uit de opgeslagen Open-Meteo forecast.</div>
+      <div class="field">
+        <label>PV piekvermogen [kWp] <span id="vPvPeak">4.0</span></label>
         <input type="number" id="pv_peak_kw" value="4.0" min="0" max="20" step="0.5" oninput="upd('vPvPeak', this.value)" />
       </div>
     </div>
@@ -523,18 +548,34 @@
   }
 
   function syncVisibility() {
-    setVisible('flat_price_field', !document.getElementById('dynamic_price').checked);
+    const mode = document.getElementById('price_mode').value;
+    setVisible('flat_rate_field',  mode === 'flat');
+    setVisible('dual_fields',      mode === 'dual');
+    setVisible('nordpool_fields',  mode === 'nordpool');
     setVisible('dhw-settings',     document.getElementById('dhw_enabled').checked);
     setVisible('dhw-chart-card',   document.getElementById('dhw_enabled').checked);
   }
 
-  document.getElementById('dynamic_price').addEventListener('change', syncVisibility);
+  document.getElementById('price_mode').addEventListener('change', syncVisibility);
   document.getElementById('dhw_enabled').addEventListener('change', syncVisibility);
 
   function getReq() {
     const n = (id) => parseFloat(document.getElementById(id).value);
     const i = (id) => parseInt(document.getElementById(id).value, 10);
     const b = (id) => document.getElementById(id).checked;
+    const s = (id) => document.getElementById(id).value;
+    const mode = s('price_mode');
+    const price_config = { mode };
+    if (mode === 'flat') {
+      price_config.flat_rate_eur_per_kwh = n('price_flat_rate');
+    } else if (mode === 'dual') {
+      price_config.high_rate_eur_per_kwh  = n('price_high_rate');
+      price_config.low_rate_eur_per_kwh   = n('price_low_rate');
+      price_config.feed_in_rate_eur_per_kwh = n('price_feed_in_rate');
+    } else if (mode === 'nordpool') {
+      price_config.nordpool_country_code = s('nordpool_country_code');
+      price_config.nordpool_vat_factor   = n('nordpool_vat_factor');
+    }
     return {
       C_r: n('C_r'), C_b: n('C_b'), R_br: n('R_br'), R_ro: n('R_ro'),
       alpha: n('alpha'), eta: n('eta'), A_glass: n('A_glass'),
@@ -545,8 +586,8 @@
       P_max: n('P_max'), delta_P_max: n('delta_P_max'),
       T_min: n('T_min'), T_max: n('T_max'), T_ref: n('T_ref'),
       outdoor_temperature_c: n('outdoor_temperature_c'),
-      dynamic_price: b('dynamic_price'), flat_price: n('flat_price'),
-      solar_gain: b('solar_gain'), internal_gains_kw: n('internal_gains_kw'),
+      price_config,
+      internal_gains_kw: n('internal_gains_kw'),
       pv_enabled: b('pv_enabled'), pv_peak_kw: n('pv_peak_kw'),
       dhw_enabled: b('dhw_enabled'),
       dhw_C_top: n('dhw_C_top'), dhw_C_bot: n('dhw_C_bot'),
@@ -558,7 +599,7 @@
       dhw_legionella_duration_steps: i('dhw_legionella_duration_steps'),
       dhw_v_tap_m3_per_h: n('dhw_v_tap_m3_per_h'),
       dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),
-      P_hp_max_elec: n('P_hp_max_elec'),          // elektrisch budget
+      P_hp_max_elec: n('P_hp_max_elec'),
       eta_carnot: n('eta_carnot'),
       delta_T_cond: n('delta_T_cond'), delta_T_evap: n('delta_T_evap'),
       T_supply_min: n('T_supply_min'),

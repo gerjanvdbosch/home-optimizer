@@ -61,49 +61,51 @@ if TYPE_CHECKING:
     from apscheduler.schedulers.background import BackgroundScheduler
 
     from .sensors.base import SensorBackend
+    from .telemetry.repository import TelemetryRepository
 
 log = logging.getLogger("home_optimizer.optimizer")
 
-#: Peak south-facing irradiance at solar noon [W/m²].
-_SOLAR_PEAK_W_PER_M2: float = 550.0
-#: Hour at which the sun rises in the proxy model.
-_SOLAR_RISE_HOUR: int = 7
-#: Hour at which the sun sets in the proxy model.
-_SOLAR_SET_HOUR: int = 19
-#: Daylight duration used as the sine period argument [h].
-_SOLAR_PERIOD_H: float = 12.0
+
+# ---------------------------------------------------------------------------
+# Shared forecast-injection helper
+# ---------------------------------------------------------------------------
 
 
-def _solar_gti(hour: int) -> float:
-    """Return the bell-shaped south-facing GTI proxy [W/m²] for a given hour.
+def inject_forecast_overrides(
+    rows: list,
+    n_steps: int,
+    existing: "dict | None" = None,
+) -> dict:
+    """Build forecast override fields from persisted :class:`ForecastSnapshot` rows.
 
-    Models irradiance as a half-sine between sunrise and sunset, peaking at
-    solar noon.  Used when no real forecast data is available.
-
-    Args:
-        hour: Hour of the day (0–23).
-
-    Returns:
-        Global Tilted Irradiance proxy [W/m²], ≥ 0.
-    """
-    if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return _SOLAR_PEAK_W_PER_M2 * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
-    return 0.0
-
-
-def _pv_generation(hour: int, peak_kw: float) -> float:
-    """Return bell-shaped PV generation proxy [kW] for a given hour.
+    Produces ``t_out_forecast``, ``gti_window_forecast``, and
+    ``gti_pv_forecast`` lists ready to be passed to
+    :meth:`RunRequest.model_copy`.  Only fields whose key is absent from
+    ``existing`` (or when ``existing`` is ``None``) are populated, so
+    callers that already have a value keep it.
 
     Args:
-        hour:    Hour of the day (0–23).
-        peak_kw: PV system peak capacity [kW].
+        rows:     Ordered :class:`~home_optimizer.telemetry.models.ForecastSnapshot`
+                  rows from :meth:`~home_optimizer.telemetry.TelemetryRepository.get_latest_forecast_batch`.
+        n_steps:  Horizon length; at most ``n_steps`` rows are consumed.
+        existing: Optional dict of overrides already accumulated by the caller.
+                  Keys present here are **not** overwritten.
 
     Returns:
-        Estimated PV output [kW], ≥ 0.
+        Dict with zero or more of: ``t_out_forecast``, ``gti_window_forecast``,
+        ``gti_pv_forecast``.
     """
-    if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return peak_kw * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
-    return 0.0
+    existing = existing or {}
+    slice_ = rows[:n_steps]
+    overrides: dict = {}
+    if "t_out_forecast" not in existing:
+        overrides["t_out_forecast"] = [r.t_out_c for r in slice_]
+    if "gti_window_forecast" not in existing:
+        overrides["gti_window_forecast"] = [r.gti_w_per_m2 for r in slice_]
+    if "gti_pv_forecast" not in existing:
+        overrides["gti_pv_forecast"] = [r.gti_pv_w_per_m2 for r in slice_]
+    return overrides
+
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +172,31 @@ class RunRequest(BaseModel):
 
     # ── UFH: disturbance forecast ─────────────────────────────────────────
     outdoor_temperature_c: float = Field(
-        6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC]"
+        6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC] (scalar fallback)"
+    )
+    t_out_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Hourly outdoor temperature forecast [°C], length N.  "
+            "When provided (from Open-Meteo via ForecastPersister) this array "
+            "overrides the scalar outdoor_temperature_c for every step of the horizon."
+        ),
+    )
+    gti_window_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Hourly GTI forecast for south-facing windows [W/m²], length N.  "
+            "Must be provided via ForecastPersister (Open-Meteo).  "
+            "Raises ValueError when absent."
+        ),
+    )
+    gti_pv_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Hourly GTI forecast for PV panels [W/m²], length N.  "
+            "PV power is derived as (gti_pv / W_PER_KW) * pv_peak_kw.  "
+            "Raises ValueError when absent and pv_enabled=True."
+        ),
     )
     price_config: PriceConfig = Field(
         default_factory=PriceConfig,
@@ -180,19 +206,18 @@ class RunRequest(BaseModel):
             "See PriceConfig for all sub-fields."
         ),
     )
-    solar_gain: bool = Field(True, description="Include solar irradiance profile")
     internal_gains_kw: float = Field(
         0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]"
     )
 
     # ── PV self-consumption ───────────────────────────────────────────────
     pv_enabled: bool = Field(
-        False, description="Enable PV self-consumption (reduces net grid cost)"
+        True, description="Enable PV self-consumption (reduces net grid cost)"
     )
     pv_peak_kw: float = Field(4.0, ge=0.0, le=20.0, description="PV system peak capacity [kW]")
 
     # ── DHW: two-node stratification tank (§7–§11) ───────────────────────
-    dhw_enabled: bool = Field(False, description="Enable DHW (domestic hot water) control")
+    dhw_enabled: bool = Field(True, description="Enable DHW (domestic hot water) control")
     dhw_C_top: float = Field(
         0.5814, ge=0.01, le=5.0, description="DHW top-layer thermal capacity C_top [kWh/K]"
     )
@@ -519,6 +544,7 @@ class Optimizer:
         self,
         base_input: RunRequest,
         backend: "SensorBackend | None" = None,
+        repository: "TelemetryRepository | None" = None,
     ) -> MPCStepResult | None:
         """Execute one periodic MPC step and log first-step actions.
 
@@ -527,16 +553,22 @@ class Optimizer:
         and skipped for the current interval.
 
         Args:
-            base_input: Fully populated request containing all physical and MPC
+            base_input:  Fully populated request containing all physical and MPC
                 parameters; live sensors override selected initial conditions.
-            backend: Optional sensor backend providing live readings.
+            backend:     Optional sensor backend providing live readings.
+            repository:  Optional telemetry repository.  When provided, the most
+                recently persisted Open-Meteo forecast is injected as real
+                ``t_out_forecast``, ``gti_window_forecast``, and
+                ``gti_pv_forecast`` arrays, replacing the proxy sine-curves.
 
         Returns:
             :class:`MPCStepResult` on success; ``None`` when the step is
             skipped due to a recoverable read/solve failure.
         """
         try:
-            optimizer_input = self._build_scheduled_input(base_input=base_input, backend=backend)
+            optimizer_input = self._build_scheduled_input(
+                base_input=base_input, backend=backend, repository=repository
+            )
         except Exception as exc:  # noqa: BLE001
             log.warning("MPC run skipped — sensor read failed: %s", exc)
             return None
@@ -588,16 +620,21 @@ class Optimizer:
         scheduler: "BackgroundScheduler",
         interval_seconds: int,
         backend: "SensorBackend | None" = None,
+        repository: "TelemetryRepository | None" = None,
         run_immediately: bool = True,
     ) -> None:
         """Register periodic MPC execution on an APScheduler scheduler.
 
         Args:
-            base_input: Immutable request template for periodic solves.
-            scheduler: Running APScheduler background scheduler.
+            base_input:       Immutable request template for periodic solves.
+            scheduler:        Running APScheduler background scheduler.
             interval_seconds: Period between MPC runs [s], must be > 0.
-            backend: Optional sensor backend used for live overrides.
-            run_immediately: Run one synchronous step before scheduling.
+            backend:          Optional sensor backend used for live overrides.
+            repository:       Optional telemetry repository used to inject the
+                latest Open-Meteo forecast arrays (t_out, GTI window, GTI PV)
+                into each scheduled run.  When ``None`` the proxy sine-curves
+                are used as fallback.
+            run_immediately:  Run one synchronous step before scheduling.
 
         Raises:
             ValueError: If ``interval_seconds`` is not strictly positive.
@@ -610,13 +647,13 @@ class Optimizer:
 
         if run_immediately:
             log.info("Running initial MPC step before scheduling periodic job...")
-            self.run_scheduled_once(base_input=base_input, backend=backend)
+            self.run_scheduled_once(base_input=base_input, backend=backend, repository=repository)
 
         scheduler.add_job(
             self.run_scheduled_once,
             trigger="interval",
             seconds=interval_seconds,
-            kwargs={"base_input": base_input, "backend": backend},
+            kwargs={"base_input": base_input, "backend": backend, "repository": repository},
             id="mpc_periodic",
             replace_existing=True,
             misfire_grace_time=max(1, interval_seconds // 2),
@@ -685,19 +722,47 @@ class Optimizer:
             including the COP array.
         """
         N = req.horizon_hours
-        hours = [(start_hour + k) % 24 for k in range(N)]
         # Build the configured price model (flat / dual / nordpool).
         price_model: BasePriceModel = build_price_model(req.price_config)
         prices = price_model.prices(start_hour, N)
-        gti = (
-            np.array([_solar_gti(h) for h in hours], dtype=float) if req.solar_gain else np.zeros(N)
-        )
-        pv = (
-            np.array([_pv_generation(h, req.pv_peak_kw) for h in hours], dtype=float)
-            if req.pv_enabled
-            else np.zeros(N)
-        )
-        t_out_arr = np.full(N, req.outdoor_temperature_c)
+
+        # ── Outdoor temperature ──────────────────────────────────────────
+        # Use real Open-Meteo forecast when available; scalar sensor fallback otherwise.
+        if req.t_out_forecast is not None:
+            t_out_arr = np.array(req.t_out_forecast[:N], dtype=float)
+            if len(t_out_arr) < N:
+                t_out_arr = np.pad(t_out_arr, (0, N - len(t_out_arr)), mode="edge")
+        else:
+            t_out_arr = np.full(N, req.outdoor_temperature_c)
+
+        # ── Solar gain through windows — real Open-Meteo GTI required ───
+        # Proxy sine-curves are removed; real forecast data is mandatory.
+        if req.gti_window_forecast is None:
+            raise ValueError(
+                "gti_window_forecast is required.  "
+                "Ensure ForecastPersister has stored at least one Open-Meteo forecast "
+                "batch before calling the MPC solver."
+            )
+        gti = np.array(req.gti_window_forecast[:N], dtype=float)
+        if len(gti) < N:
+            gti = np.pad(gti, (0, N - len(gti)), mode="constant")
+
+        # ── PV generation — real Open-Meteo GTI_pv required when PV enabled ──
+        # P_pv = (GTI_pv [W/m²] / W_PER_KW) * pv_peak_kw [kW/kWp].
+        if req.pv_enabled:
+            if req.gti_pv_forecast is None:
+                raise ValueError(
+                    "gti_pv_forecast is required when pv_enabled=True.  "
+                    "Ensure the OpenMeteoClient is configured with pv_tilt/pv_azimuth "
+                    "and ForecastPersister has stored a forecast batch."
+                )
+            from .types import W_PER_KW  # noqa: PLC0415
+            gti_pv = np.array(req.gti_pv_forecast[:N], dtype=float)
+            if len(gti_pv) < N:
+                gti_pv = np.pad(gti_pv, (0, N - len(gti_pv)), mode="constant")
+            pv = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
+        else:
+            pv = np.zeros(N)
         # §14.1: Time-varying COP from the Carnot model + heating curve.
         # Colder outdoor → higher T_supply (heating curve) AND lower T_evap → lower COP.
         cop_ufh_k = cop_model.cop_ufh(t_out_arr)
@@ -732,7 +797,13 @@ class Optimizer:
             :class:`~home_optimizer.types.DHWForecastHorizon` with N steps,
             including the COP array.
         """
-        t_out_arr = np.full(N, req.outdoor_temperature_c)
+        # Use real Open-Meteo outdoor temperature when available; scalar fallback otherwise.
+        if req.t_out_forecast is not None:
+            t_out_arr = np.array(req.t_out_forecast[:N], dtype=float)
+            if len(t_out_arr) < N:
+                t_out_arr = np.pad(t_out_arr, (0, N - len(t_out_arr)), mode="edge")
+        else:
+            t_out_arr = np.full(N, req.outdoor_temperature_c)
         # DHW supply temperature ≈ comfort setpoint T_dhw_min (normal operation).
         # During a legionella cycle the effective supply temp would be T_legionella;
         # the legionella scheduler adjusts the constraint, not the COP model here.
@@ -749,43 +820,79 @@ class Optimizer:
     def _build_scheduled_input(
         base_input: RunRequest,
         backend: "SensorBackend | None",
+        repository: "TelemetryRepository | None" = None,
     ) -> RunRequest:
-        """Build one solver input by applying optional live sensor overrides.
+        """Build one solver input by applying optional live sensor and forecast overrides.
+
+        Overrides applied (in order):
+
+        1. **Live sensor readings** (via ``backend``): room temperature,
+           slab temperature estimate, outdoor temperature, DHW temperatures.
+        2. **Open-Meteo forecast arrays** (via ``repository``): fetches the most
+           recently persisted :class:`~home_optimizer.telemetry.models.ForecastSnapshot`
+           batch and injects ``t_out_forecast``, ``gti_window_forecast``, and
+           ``gti_pv_forecast`` so the MPC uses real forecast data instead of
+           the proxy sine-curves.
 
         Args:
-            base_input: Baseline validated request for periodic execution.
-            backend: Optional sensor backend. When ``None``, ``base_input`` is
-                returned unchanged.
+            base_input:  Baseline validated request for periodic execution.
+            backend:     Optional sensor backend. When ``None``, initial-state
+                overrides are skipped.
+            repository:  Optional telemetry repository. When ``None`` or when
+                the forecast table is empty, forecast arrays remain ``None``
+                and the proxy fallback in ``_build_ufh_forecast`` is used.
 
         Returns:
-            Immutable request for one optimizer step.
+            Immutable :class:`RunRequest` for one optimizer step.
 
         Raises:
             Exception: Re-raised backend read failures for fail-fast scheduling.
         """
-        if backend is None:
+        overrides: dict = {}
+
+        # ── 1. Live sensor overrides ─────────────────────────────────────
+        if backend is not None:
+            readings = backend.read_all()
+
+            # Estimate slab temperature from supply/return average when possible.
+            t_b_estimate = (
+                (readings.hp_supply_temperature_c + readings.hp_return_temperature_c) / 2.0
+                if readings.hp_supply_temperature_c > readings.room_temperature_c
+                else readings.room_temperature_c + 2.0
+            )
+
+            overrides.update(
+                {
+                    "T_r_init": readings.room_temperature_c,
+                    "T_b_init": t_b_estimate,
+                    "outdoor_temperature_c": readings.outdoor_temperature_c,
+                }
+            )
+
+            if base_input.dhw_enabled:
+                overrides["dhw_T_top_init"] = readings.dhw_top_temperature_c
+                overrides["dhw_T_bot_init"] = readings.dhw_bottom_temperature_c
+                overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
+                overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
+
+        # ── 2. Open-Meteo forecast arrays from database ──────────────────
+        if repository is not None:
+            try:
+                rows = repository.get_latest_forecast_batch()
+                if rows:
+                    forecast_overrides = inject_forecast_overrides(
+                        rows, base_input.horizon_hours, existing=overrides
+                    )
+                    overrides.update(forecast_overrides)
+                    log.debug(
+                        "Injected Open-Meteo forecast (%d steps) into MPC run.", len(rows[:base_input.horizon_hours])
+                    )
+                else:
+                    log.debug("No forecast rows in DB — real GTI data unavailable.")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Forecast DB read failed: %s", exc)
+
+        if not overrides:
             return base_input
-
-        readings = backend.read_all()
-
-        # Estimate slab temperature from supply/return average when possible.
-        t_b_estimate = (
-            (readings.hp_supply_temperature_c + readings.hp_return_temperature_c) / 2.0
-            if readings.hp_supply_temperature_c > readings.room_temperature_c
-            else readings.room_temperature_c + 2.0
-        )
-
-        overrides: dict[str, float] = {
-            "T_r_init": readings.room_temperature_c,
-            "T_b_init": t_b_estimate,
-            "outdoor_temperature_c": readings.outdoor_temperature_c,
-        }
-
-        if base_input.dhw_enabled:
-            overrides["dhw_T_top_init"] = readings.dhw_top_temperature_c
-            overrides["dhw_T_bot_init"] = readings.dhw_bottom_temperature_c
-            overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
-            overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
-
         return base_input.model_copy(update=overrides)
 
