@@ -2,16 +2,21 @@
 
 Architecture
 ------------
-The API acts as the **integration layer** between the dashboard UI and the
-thermal/MPC core.  A single ``POST /api/simulate`` endpoint:
+The API acts as the **presentation layer** — it owns HTTP endpoints, Pydantic
+request/response models, and Plotly chart serialisation.  All domain logic
+lives in the dedicated core modules:
+
+* :class:`~home_optimizer.optimizer.Optimizer` — orchestrates the full MPC
+  solve pipeline (thermal model → COP model → forecasts → CVXPY → summaries).
+* :class:`~home_optimizer.optimizer.MPCStepResult` — immutable result object
+  returned by :meth:`~home_optimizer.optimizer.Optimizer.solve`.
+
+A single ``POST /api/simulate`` endpoint:
 
 1. Validates the user request via Pydantic (fail-fast on invalid physics).
-2. Builds the Carnot COP model from the user's heat-pump parameters.
-3. Computes time-varying COP arrays from the outdoor-temperature forecast
-   (UFH via heating curve; DHW via fixed supply temperature).
-4. Constructs the UFH and DHW forecast horizons, injecting the COP arrays.
-5. Solves the MPC optimisation problem (CVXPY / greedy fallback).
-6. Returns all results—numerical summaries + Plotly chart JSON—to the browser.
+2. Delegates the numerical solve to ``Optimizer().solve(req)``.
+3. Assembles Plotly chart JSON from the result and returns the full
+   ``OptimizeResponse`` to the browser.
 
 COP model integration (§14.1)
 ------------------------------
@@ -42,7 +47,6 @@ POST /api/simulate      Run one MPC step, return charts + numerical summaries
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -53,99 +57,14 @@ from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field
 
-from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
-from .dhw_model import DHWModel
-from .mpc import MPCController, MPCSolution
+from .optimizer import (  # noqa: F401 – re-exported for scheduler
+    MPCStepResult,
+    Optimizer,
+    OptimizerInput,
+)
 from .sensors.open_meteo import OpenMeteoClient
 from .settings import get_database_url
 from .telemetry import TelemetryRepository
-from .thermal_model import ThermalModel
-from .types import (
-    CombinedMPCParameters,
-    DHWForecastHorizon,
-    DHWMPCParameters,
-    DHWParameters,
-    ForecastHorizon,
-    MPCParameters,
-    ThermalParameters,
-)
-
-# ---------------------------------------------------------------------------
-# Named preset data — never hardcoded inline
-# ---------------------------------------------------------------------------
-
-#: Typical Dutch day-ahead electricity price pattern [€/kWh], hours 00–23.
-_PRICES_24H = np.array(
-    [
-        0.21,
-        0.20,
-        0.19,
-        0.18,
-        0.19,
-        0.22,  # 00–05 cheap night
-        0.28,
-        0.35,
-        0.38,
-        0.36,
-        0.32,
-        0.28,  # 06–11 morning peak
-        0.25,
-        0.24,
-        0.24,
-        0.25,
-        0.28,
-        0.35,  # 12–17 afternoon
-        0.42,
-        0.45,
-        0.40,
-        0.35,
-        0.28,
-        0.23,  # 18–23 evening peak
-    ],
-    dtype=float,
-)
-
-#: Peak south-facing irradiance at solar noon [W/m²].
-_SOLAR_PEAK_W_PER_M2: float = 550.0
-#: Hour at which the sun rises in the proxy model.
-_SOLAR_RISE_HOUR: int = 7
-#: Hour at which the sun sets in the proxy model.
-_SOLAR_SET_HOUR: int = 19
-#: Daylight duration used as the sine period argument [h].
-_SOLAR_PERIOD_H: float = 12.0
-
-
-def _solar_gti(hour: int) -> float:
-    """Return the bell-shaped south-facing GTI proxy [W/m²] for a given hour.
-
-    Models irradiance as a half-sine between sunrise and sunset, peaking at
-    solar noon.  Used when no real forecast data is available.
-
-    Args:
-        hour: Hour of the day (0–23).
-
-    Returns:
-        Global Tilted Irradiance proxy [W/m²], ≥ 0.
-    """
-    if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return _SOLAR_PEAK_W_PER_M2 * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
-    return 0.0
-
-
-def _pv_generation(hour: int, peak_kw: float) -> float:
-    """Return bell-shaped PV generation proxy [kW] for a given hour.
-
-    Args:
-        hour:    Hour of the day (0–23).
-        peak_kw: PV system peak capacity [kW].
-
-    Returns:
-        Estimated PV output [kW], ≥ 0.
-    """
-    if _SOLAR_RISE_HOUR <= hour <= _SOLAR_SET_HOUR:
-        return peak_kw * np.sin(np.pi * (hour - _SOLAR_RISE_HOUR) / _SOLAR_PERIOD_H)
-    return 0.0
-
 
 # ---------------------------------------------------------------------------
 # Pydantic request / response models
@@ -408,120 +327,6 @@ class OptimizeResponse(BaseModel):
     cop_fig: str = ""  # Carnot COP profile chart
     pv_forecast_fig: str = ""
     dhw_fig: str = ""  # empty when DHW disabled
-
-
-# ---------------------------------------------------------------------------
-# Business logic helpers
-# ---------------------------------------------------------------------------
-
-
-def _build_cop_model(req: RunRequest) -> HeatPumpCOPModel:
-    """Construct the Carnot COP model from the user request.
-
-    Assembles a ``HeatPumpCOPParameters`` dataclass from the request fields
-    and wraps it in a ``HeatPumpCOPModel``.  Validation (e.g. cop_min > 1,
-    eta_carnot ∈ (0,1]) is handled by ``HeatPumpCOPParameters.__post_init__``.
-
-    Args:
-        req: Validated Pydantic request containing all COP model parameters.
-
-    Returns:
-        Constructed and validated ``HeatPumpCOPModel``.
-
-    Raises:
-        ValueError: If any parameter violates a physical constraint.
-    """
-    params = HeatPumpCOPParameters(
-        eta_carnot=req.eta_carnot,
-        delta_T_cond=req.delta_T_cond,
-        delta_T_evap=req.delta_T_evap,
-        T_supply_min=req.T_supply_min,
-        T_ref_outdoor=req.T_ref_outdoor_curve,
-        heating_curve_slope=req.heating_curve_slope,
-        cop_min=req.cop_min,
-        cop_max=req.cop_max,
-    )
-    return HeatPumpCOPModel(params)
-
-
-def _build_ufh_forecast(
-    req: RunRequest,
-    start_hour: int,
-    cop_model: HeatPumpCOPModel,
-) -> ForecastHorizon:
-    """Build the UFH disturbance and price forecast over the horizon.
-
-    Injects the time-varying UFH COP array (computed from the Carnot model
-    and outdoor temperature) so the MPC can use physical electricity costs.
-
-    Args:
-        req:        Validated request with all forecast parameters.
-        start_hour: Current hour of the day (0–23), used to index the price
-                    pattern and solar profile.
-        cop_model:  Carnot COP model; used to compute ``cop_ufh_k`` array.
-
-    Returns:
-        ``ForecastHorizon`` with N steps, including the COP array.
-    """
-    N = req.horizon_hours
-    hours = [(start_hour + k) % 24 for k in range(N)]
-    prices = (
-        np.array([_PRICES_24H[h] for h in hours])
-        if req.dynamic_price
-        else np.full(N, req.flat_price)
-    )
-    gti = np.array([_solar_gti(h) for h in hours], dtype=float) if req.solar_gain else np.zeros(N)
-    pv = (
-        np.array([_pv_generation(h, req.pv_peak_kw) for h in hours], dtype=float)
-        if req.pv_enabled
-        else np.zeros(N)
-    )
-    t_out_arr = np.full(N, req.outdoor_temperature_c)
-    # §14.1: Time-varying COP from the Carnot model + heating curve.
-    # Colder outdoor → higher T_supply (heating curve) AND lower T_evap → lower COP.
-    cop_ufh_k = cop_model.cop_ufh(t_out_arr)
-    return ForecastHorizon(
-        outdoor_temperature_c=t_out_arr,
-        gti_w_per_m2=gti,
-        internal_gains_kw=np.full(N, req.internal_gains_kw),
-        price_eur_per_kwh=prices,
-        room_temperature_ref_c=np.full(N + 1, req.T_ref),
-        pv_kw=pv,
-        cop_ufh_k=cop_ufh_k,
-    )
-
-
-def _build_dhw_forecast(
-    req: RunRequest,
-    N: int,
-    cop_model: HeatPumpCOPModel,
-) -> DHWForecastHorizon:
-    """Build the DHW disturbance forecast over the horizon.
-
-    The DHW COP depends on the outdoor temperature (evaporator side) and the
-    hot-water supply temperature (condenser side ≈ T_dhw_min for normal
-    operation).  Time-varying COP is injected into the forecast.
-
-    Args:
-        req:       Validated request with all DHW parameters.
-        N:         Horizon length [steps].
-        cop_model: Carnot COP model; used to compute ``cop_dhw_k`` array.
-
-    Returns:
-        ``DHWForecastHorizon`` with N steps, including the COP array.
-    """
-    t_out_arr = np.full(N, req.outdoor_temperature_c)
-    # DHW supply temperature ≈ comfort setpoint T_dhw_min (normal operation).
-    # During a legionella cycle the effective supply temp would be T_legionella;
-    # the legionella scheduler adjusts the constraint, not the COP model here.
-    cop_dhw_k = cop_model.cop_dhw(t_out_arr, t_dhw_supply=req.dhw_T_min)
-    return DHWForecastHorizon(
-        v_tap_m3_per_h=np.full(N, req.dhw_v_tap_m3_per_h),
-        t_mains_c=np.full(N, req.dhw_t_mains_c),
-        t_amb_c=np.full(N, req.dhw_t_amb_c),
-        legionella_required=np.zeros(N, dtype=bool),  # scheduler handles this
-        cop_dhw_k=cop_dhw_k,
-    )
 
 
 def _time_labels(start_hour: int, n_points: int) -> list[str]:
@@ -1188,198 +993,13 @@ async def get_latest_forecast() -> ForecastResponse:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class MPCStepResult:
-    """Numerical result of one MPC solve step (no charts).
-
-    Returned by :func:`solve_mpc_step` so that both the HTTP endpoint and
-    the scheduled :class:`~home_optimizer.mpc_scheduler.MPCRunner` can reuse
-    the same core solver without duplicating logic.
-
-    Attributes:
-        solution:       Raw CVXPY/greedy solution with full control sequences.
-        ufh_forecast:   Forecast horizon used for UFH (contains COP array).
-        dhw_forecast:   Forecast horizon used for DHW, or ``None`` when disabled.
-        p_ufh_kw:       Clipped UFH thermal power array [kW], length N.
-        p_dhw_kw:       Clipped DHW thermal power array [kW], length N (zeros if DHW off).
-        cop_ufh_arr:    UFH COP array used in the solve, length N.
-        cop_dhw_arr:    DHW COP array used in the solve, length N.
-        pv_kw:          PV generation array [kW], length N.
-        total_cost_eur: Total electricity cost over horizon [€].
-        ufh_energy_kwh: UFH thermal energy [kWh].
-        dhw_energy_kwh: DHW thermal energy [kWh].
-        start_hour:     UTC hour the solve was triggered (0–23).
-    """
-
-    solution: MPCSolution
-    ufh_forecast: "ForecastHorizon"
-    dhw_forecast: "DHWForecastHorizon | None"
-    p_ufh_kw: "np.ndarray"
-    p_dhw_kw: "np.ndarray"
-    cop_ufh_arr: "np.ndarray"
-    cop_dhw_arr: "np.ndarray"
-    pv_kw: "np.ndarray"
-    total_cost_eur: float
-    ufh_energy_kwh: float
-    dhw_energy_kwh: float
-    start_hour: int
-
-
-def solve_mpc_step(req: RunRequest) -> MPCStepResult:
-    """Core MPC solve step — reusable by both the HTTP endpoint and the scheduler.
-
-    Implements steps 1–6 of the optimisation pipeline (see §14):
-
-    1. Build UFH thermal model from physical parameters.
-    2. Build Carnot COP model (§14.1).
-    3. Compute time-varying COP arrays over the horizon.
-    4. Construct UFH and DHW forecast horizons.
-    5. Solve the QP (CVXPY / greedy fallback).
-    6. Compute energy and cost summaries.
-
-    No charts are generated here — chart construction remains in the HTTP
-    endpoint so the scheduler does not pay the Plotly serialisation cost.
-
-    Args:
-        req: Validated :class:`RunRequest` with all physical and MPC parameters.
-
-    Returns:
-        :class:`MPCStepResult` with the full solution and numerical summaries.
-
-    Raises:
-        ValueError: If any parameter is physically invalid (re-raised from
-            Pydantic / the MPC controller).
-    """
-    start_hour = datetime.now(tz=timezone.utc).hour
-    N = req.horizon_hours
-
-    # ── 1. Build UFH thermal model ──────────────────────────────────────
-    thermal_params = ThermalParameters(
-        dt_hours=req.dt_hours,
-        C_r=req.C_r,
-        C_b=req.C_b,
-        R_br=req.R_br,
-        R_ro=req.R_ro,
-        alpha=req.alpha,
-        eta=req.eta,
-        A_glass=req.A_glass,
-    )
-
-    # ── 2. Build Carnot COP model (14.1) ──────────────────────────────
-    cop_model = _build_cop_model(req)
-
-    # ── 3. Compute representative scalar COPs for MPCParameters validation ─
-    t_rep = np.array([req.outdoor_temperature_c])
-    cop_ufh_scalar = float(cop_model.cop_ufh(t_rep)[0])
-    cop_dhw_scalar = float(cop_model.cop_dhw(t_rep, req.dhw_T_min)[0])
-
-    mpc_params = MPCParameters(
-        horizon_steps=N,
-        Q_c=req.Q_c,
-        R_c=req.R_c,
-        Q_N=req.Q_N,
-        P_max=req.P_max,
-        delta_P_max=req.delta_P_max,
-        T_min=req.T_min,
-        T_max=req.T_max,
-        cop_ufh=cop_ufh_scalar,
-        cop_max=req.cop_max,
-    )
-
-    # ── 4. Build forecasts with embedded COP arrays ─────────────────────
-    ufh_forecast = _build_ufh_forecast(req, start_hour, cop_model)
-    ufh_model = ThermalModel(thermal_params)
-    dt = thermal_params.dt_hours
-    prices = ufh_forecast.price_eur_per_kwh
-    pv_kw = ufh_forecast.pv_kw
-
-    # ── 5. Solve MPC ────────────────────────────────────────────────────
-    dhw_model: DHWModel | None = None
-    dhw_forecast: DHWForecastHorizon | None = None
-    controller_params: MPCParameters | CombinedMPCParameters = mpc_params
-    initial_dhw_state: np.ndarray | None = None
-
-    if req.dhw_enabled:
-        dhw_params = DHWParameters(
-            dt_hours=req.dt_hours,
-            C_top=req.dhw_C_top,
-            C_bot=req.dhw_C_bot,
-            R_strat=req.dhw_R_strat,
-            R_loss=req.dhw_R_loss,
-        )
-        dhw_mpc_params = DHWMPCParameters(
-            P_dhw_max=req.dhw_P_max,
-            delta_P_dhw_max=req.dhw_delta_P_max,
-            T_dhw_min=req.dhw_T_min,
-            T_legionella=req.dhw_T_legionella,
-            legionella_period_steps=req.dhw_legionella_period_steps,
-            legionella_duration_steps=req.dhw_legionella_duration_steps,
-            cop_dhw=cop_dhw_scalar,
-            cop_max=req.cop_max,
-        )
-        controller_params = CombinedMPCParameters(
-            ufh=mpc_params,
-            dhw=dhw_mpc_params,
-            P_hp_max_elec=req.P_hp_max_elec,
-        )
-        dhw_model = DHWModel(dhw_params)
-        dhw_forecast = _build_dhw_forecast(req, N, cop_model)
-        initial_dhw_state = np.array([req.dhw_T_top_init, req.dhw_T_bot_init])
-
-    controller = MPCController(
-        ufh_model=ufh_model,
-        params=controller_params,
-        dhw_model=dhw_model,
-    )
-    solution = controller.solve(
-        initial_ufh_state_c=np.array([req.T_r_init, req.T_b_init]),
-        ufh_forecast=ufh_forecast,
-        initial_dhw_state_c=initial_dhw_state,
-        dhw_forecast=dhw_forecast,
-        previous_p_ufh_kw=req.previous_power_kw,
-    )
-    p_ufh = np.maximum(solution.ufh_control_sequence_kw, 0.0)
-    p_dhw = np.maximum(solution.dhw_control_sequence_kw, 0.0)
-
-    # ── 6. Energy / cost summaries (electrical basis, §14.1) ─────────────
-    assert ufh_forecast.cop_ufh_k is not None
-    cop_ufh_arr = ufh_forecast.cop_ufh_k
-    cop_dhw_arr = (
-        dhw_forecast.cop_dhw_k
-        if dhw_forecast is not None and dhw_forecast.cop_dhw_k is not None
-        else np.ones(N)
-    )
-    p_ufh_elec = p_ufh / cop_ufh_arr
-    p_dhw_elec = p_dhw / cop_dhw_arr
-    p_total_elec = p_ufh_elec + p_dhw_elec
-    p_import = np.maximum(p_total_elec - pv_kw, 0.0)
-    total_cost = float(np.sum(p_import * prices * dt))
-    ufh_energy = float(np.sum(p_ufh) * dt)
-    dhw_energy = float(np.sum(p_dhw) * dt)
-
-    return MPCStepResult(
-        solution=solution,
-        ufh_forecast=ufh_forecast,
-        dhw_forecast=dhw_forecast,
-        p_ufh_kw=p_ufh,
-        p_dhw_kw=p_dhw,
-        cop_ufh_arr=cop_ufh_arr,
-        cop_dhw_arr=cop_dhw_arr,
-        pv_kw=pv_kw,
-        total_cost_eur=total_cost,
-        ufh_energy_kwh=ufh_energy,
-        dhw_energy_kwh=dhw_energy,
-        start_hour=start_hour,
-    )
-
-
 @app.post("/api/simulate", response_model=OptimizeResponse)
 async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     """Run one MPC optimisation step and return charts + numerical summaries.
 
     Processing pipeline:
 
-    1. Delegate numerical solve to :func:`solve_mpc_step`.
+    1. Delegate numerical solve to :meth:`~home_optimizer.optimizer.Optimizer.solve`.
     2. Compute cost-attribution summaries.
     3. Serialise all Plotly charts to JSON for the browser.
 
@@ -1393,7 +1013,7 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
         HTTPException 422: If any parameter is physically invalid.
     """
     try:
-        result = solve_mpc_step(req)
+        result = Optimizer().solve(OptimizerInput(**req.model_dump()))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

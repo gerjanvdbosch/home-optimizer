@@ -349,7 +349,11 @@ def main(argv: list[str] | None = None) -> None:
     # Without --sensors-json the MPC uses the fixed CLI defaults as initial
     # conditions — useful for smoke-testing without real sensor data.
     if args.mpc_interval > 0:
-        from .api import RunRequest  # noqa: PLC0415
+        import dataclasses  # noqa: PLC0415
+
+        from .api import RunRequest  # noqa: PLC0415 – Pydantic defaults only
+        from .optimizer import OptimizerInput  # noqa: PLC0415
+        from .sensors.local_backend import LocalBackend  # noqa: PLC0415
 
         # Build the sensor backend when a sensors.json path is supplied.
         if args.sensors_json is not None:
@@ -359,7 +363,7 @@ def main(argv: list[str] | None = None) -> None:
                 sys.exit(1)
             local_backend: LocalBackend | None = LocalBackend.from_json_file(sensors_path)
             log.info("MPC sensor backend: LocalBackend reading %s", sensors_path)
-            # Read current outdoor temp from file to use as base_request default.
+            # Read current outdoor temp from file to use as base_input default.
             try:
                 readings = local_backend.read_all()
                 t_out_init = readings.outdoor_temperature_c
@@ -373,18 +377,23 @@ def main(argv: list[str] | None = None) -> None:
             local_backend = None
             t_out_init = args.mpc_t_out
             log.info(
-                "MPC sensor backend: none — using CLI defaults " "(T_out=%.1f °C, T_ref=%.1f °C).",
+                "MPC sensor backend: none — using CLI defaults "
+                "(T_out=%.1f C, T_ref=%.1f C).",
                 t_out_init,
                 args.mpc_t_ref,
             )
 
-        mpc_base_request = RunRequest(
+        # Start from the Pydantic-validated defaults, then override the four
+        # CLI-configurable initial conditions via dataclasses.replace().
+        _defaults = RunRequest()
+        mpc_base_input = dataclasses.replace(
+            OptimizerInput(**_defaults.model_dump()),
             outdoor_temperature_c=t_out_init,
             T_ref=args.mpc_t_ref,
             T_min=args.mpc_t_min,
             T_max=args.mpc_t_max,
         )
-        mpc_runner = MPCRunner(base_request=mpc_base_request, backend=local_backend)
+        mpc_runner = MPCRunner(base_input=mpc_base_input, backend=local_backend)
         schedule_mpc(
             runner=mpc_runner,
             scheduler=scheduler,

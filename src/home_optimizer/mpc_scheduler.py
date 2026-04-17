@@ -1,7 +1,8 @@
-"""Periodic MPC runner — schedules :func:`solve_mpc_step` via APScheduler.
+"""Periodic MPC runner — schedules :class:`~home_optimizer.optimizer.Optimizer` via APScheduler.
 
 This module bridges the gap between the scheduled world (APScheduler jobs
-running in the background) and the MPC core (:func:`~home_optimizer.api.solve_mpc_step`).
+running in the background) and the MPC core
+(:class:`~home_optimizer.optimizer.Optimizer`).
 
 Architecture
 ------------
@@ -11,22 +12,27 @@ Architecture
    :class:`~home_optimizer.sensors.base.SensorBackend` (addon mode).
    When no backend is provided it uses the configured fallback initial
    conditions (local-runner / testing mode).
-2. Overrides the ``RunRequest`` initial conditions with live readings.
-3. Calls :func:`~home_optimizer.api.solve_mpc_step` — the *same* core solver
-   used by the ``POST /api/simulate`` HTTP endpoint.
+2. Applies live sensor overrides to the base :class:`~home_optimizer.optimizer.OptimizerInput`
+   via :func:`dataclasses.replace`.
+3. Calls :meth:`~home_optimizer.optimizer.Optimizer.solve` directly — no API
+   layer involved.
 4. Logs the first-step control actions so an operator can see what the MPC
    recommends at each interval.
 
 Design decisions
 ----------------
+* **No API dependency**: the scheduler works exclusively with
+  :class:`~home_optimizer.optimizer.OptimizerInput` and
+  :class:`~home_optimizer.optimizer.Optimizer`.  ``api.py`` and ``RunRequest``
+  are never imported here.
 * **No magic numbers**: all physical parameters come from the injected
-  :class:`RunRequest` (which is fully validated by Pydantic on construction).
+  :class:`~home_optimizer.optimizer.OptimizerInput`.
 * **Fail-fast on backend errors**: a sensor read failure logs the exception
   but the MPC run is *skipped* for that interval.  The scheduler continues
   and retries at the next interval, so a single bad reading does not crash
   the process.
-* **DRY**: :func:`~home_optimizer.api.solve_mpc_step` is called here, not
-  re-implemented.  Chart generation is deliberately skipped to avoid the
+* **DRY**: :meth:`~home_optimizer.optimizer.Optimizer.solve` is called here,
+  not re-implemented.  Chart generation is deliberately skipped to avoid the
   Plotly serialisation overhead in the background thread.
 * **Thread-safety**: :class:`MPCRunner` is stateless between calls (no mutable
   instance attributes modified during a run), so APScheduler can safely call
@@ -37,8 +43,11 @@ Units: power [kW], temperature [°C], time [h].
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import TYPE_CHECKING
+
+from .optimizer import Optimizer, OptimizerInput
 
 if TYPE_CHECKING:
     from .sensors.base import SensorBackend
@@ -50,33 +59,29 @@ class MPCRunner:
     """Callable MPC job suitable for registration with APScheduler.
 
     Args:
-        base_request:
-            A fully-validated :class:`~home_optimizer.api.RunRequest` that
-            provides all physical parameters and MPC weights.  Live sensor
+        base_input:
+            A fully-populated :class:`~home_optimizer.optimizer.OptimizerInput`
+            that provides all physical parameters and MPC weights.  Live sensor
             readings will *override* the initial-condition fields
             (``T_r_init``, ``T_b_init``, ``dhw_T_top_init``,
             ``dhw_T_bot_init``, ``outdoor_temperature_c``,
             ``dhw_t_mains_c``, ``dhw_t_amb_c``) when a backend is present.
         backend:
             Optional sensor backend.  When ``None`` the runner uses the
-            initial conditions embedded in ``base_request`` (useful for the
+            initial conditions embedded in ``base_input`` (useful for the
             local development runner where no HA instance is available).
     """
 
     def __init__(
         self,
-        base_request: "RunRequest",  # noqa: F821 – resolved at import time
+        base_input: OptimizerInput,
         backend: "SensorBackend | None" = None,
     ) -> None:
-        # Avoid a circular import: api.py imports mpc_scheduler indirectly
-        # only at runtime via addon.py / local_runner.py.
-        from .api import RunRequest  # noqa: PLC0415
-
-        if not isinstance(base_request, RunRequest):
+        if not isinstance(base_input, OptimizerInput):
             raise TypeError(
-                f"base_request must be a RunRequest instance, got {type(base_request)!r}"
+                f"base_input must be an OptimizerInput instance, got {type(base_input)!r}"
             )
-        self._base_request: RunRequest = base_request
+        self._base_input: OptimizerInput = base_input
         self._backend = backend
 
     # ------------------------------------------------------------------
@@ -91,30 +96,27 @@ class MPCRunner:
 
         Workflow:
             1. Read live sensor state (if backend available).
-            2. Override initial conditions in ``base_request`` with live data.
-            3. Call :func:`~home_optimizer.api.solve_mpc_step`.
+            2. Apply sensor overrides to ``base_input`` via
+               :func:`dataclasses.replace` (immutable — no mutation).
+            3. Call :meth:`~home_optimizer.optimizer.Optimizer.solve`.
             4. Log the first-step UFH and DHW thermal powers [kW].
 
         Side effects:
             Writes INFO/WARNING log messages.  Does *not* mutate
-            ``self._base_request``; instead it constructs a new
-            ``RunRequest`` copy with updated fields via Pydantic's
-            ``model_copy``.
+            ``self._base_input``.
 
         Raises:
             Nothing — all exceptions are caught and logged so that
             APScheduler does not reschedule the job with a failed state.
         """
-        from .api import RunRequest, solve_mpc_step  # noqa: PLC0415
-
         try:
-            req = self._build_request(RunRequest)
+            optimizer_input = self._build_optimizer_input()
         except Exception as exc:  # noqa: BLE001
             log.warning("MPC run skipped — sensor read failed: %s", exc)
             return
 
         try:
-            result = solve_mpc_step(req)
+            result = Optimizer().solve(optimizer_input)
         except Exception as exc:  # noqa: BLE001
             log.error("MPC solve failed: %s", exc)
             return
@@ -134,20 +136,19 @@ class MPCRunner:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_request(self, RunRequest: type) -> object:
-        """Build a :class:`RunRequest` with live sensor overrides where available.
+    def _build_optimizer_input(self) -> OptimizerInput:
+        """Return an :class:`~home_optimizer.optimizer.OptimizerInput` for this step.
 
-        When no backend is configured the base request is returned unchanged
-        (all initial conditions from the Pydantic model default or the
-        caller-supplied values).
+        When no backend is configured the base input is returned unchanged
+        (all initial conditions from the caller-supplied values).
 
-        Args:
-            RunRequest: The ``RunRequest`` class (injected to avoid circular
-                import at module level).
+        When a backend is available, live sensor readings override the
+        initial-condition fields via :func:`dataclasses.replace`, leaving all
+        physical parameters and MPC weights intact.
 
         Returns:
-            A :class:`RunRequest` instance — either the original base request
-            or a copy with live-sensor overrides applied.
+            :class:`~home_optimizer.optimizer.OptimizerInput` — either the
+            original base input or an immutable copy with sensor overrides.
 
         Raises:
             Exception: Re-raised from the sensor backend on read failure so
@@ -155,7 +156,7 @@ class MPCRunner:
         """
         if self._backend is None:
             # Local-runner mode: no live sensors — use config defaults.
-            return self._base_request
+            return self._base_input
 
         # Addon mode: override initial conditions with live sensor readings.
         readings = self._backend.read_all()
@@ -176,13 +177,13 @@ class MPCRunner:
             "outdoor_temperature_c": readings.outdoor_temperature_c,
         }
 
-        if self._base_request.dhw_enabled:
+        if self._base_input.dhw_enabled:
             overrides["dhw_T_top_init"] = readings.dhw_top_temperature_c
             overrides["dhw_T_bot_init"] = readings.dhw_bottom_temperature_c
             overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
             overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
 
-        return self._base_request.model_copy(update=overrides)
+        return dataclasses.replace(self._base_input, **overrides)
 
 
 def schedule_mpc(

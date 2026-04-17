@@ -487,9 +487,12 @@ def main() -> None:
 
     # ── 4c. Start periodic MPC (optional) ─────────────────────────────────
     if opts.mpc_enabled:
-        from .api import RunRequest  # noqa: PLC0415 – deferred to avoid circular import
+        from .api import RunRequest  # noqa: PLC0415 – Pydantic defaults only
+        from .optimizer import OptimizerInput  # noqa: PLC0415
 
-        mpc_base_request = RunRequest(
+        _defaults = RunRequest()
+        mpc_base_input = OptimizerInput(
+            # ── UFH thermal model ───────────────────────────────────────────
             C_r=opts.mpc_C_r,
             C_b=opts.mpc_C_b,
             R_br=opts.mpc_R_br,
@@ -497,33 +500,60 @@ def main() -> None:
             alpha=opts.mpc_alpha,
             eta=opts.mpc_eta,
             A_glass=opts.mpc_A_glass,
-            P_max=opts.mpc_P_max,
-            delta_P_max=opts.mpc_delta_P_max,
-            T_min=opts.mpc_T_min,
-            T_max=opts.mpc_T_max,
-            T_ref=opts.mpc_T_ref,
+            # ── UFH initial conditions (overridden by backend at each step) ─
+            T_r_init=_defaults.T_r_init,
+            T_b_init=_defaults.T_b_init,
+            previous_power_kw=_defaults.previous_power_kw,
+            # ── MPC settings ─────────────────────────────────────────────────
             horizon_hours=opts.mpc_horizon_hours,
             dt_hours=opts.mpc_dt_hours,
             Q_c=opts.mpc_Q_c,
             R_c=opts.mpc_R_c,
             Q_N=opts.mpc_Q_N,
-            P_hp_max_elec=opts.mpc_P_hp_max_elec,
-            eta_carnot=opts.mpc_eta_carnot,
-            delta_T_cond=opts.mpc_delta_T_cond,
-            delta_T_evap=opts.mpc_delta_T_evap,
-            cop_min=opts.mpc_cop_min,
-            cop_max=opts.mpc_cop_max,
+            P_max=opts.mpc_P_max,
+            delta_P_max=opts.mpc_delta_P_max,
+            T_min=opts.mpc_T_min,
+            T_max=opts.mpc_T_max,
+            T_ref=opts.mpc_T_ref,
+            # ── UFH disturbance forecast ─────────────────────────────────────
+            outdoor_temperature_c=_defaults.outdoor_temperature_c,
+            dynamic_price=_defaults.dynamic_price,
+            flat_price=_defaults.flat_price,
+            solar_gain=_defaults.solar_gain,
+            internal_gains_kw=_defaults.internal_gains_kw,
+            # ── PV ───────────────────────────────────────────────────────────
+            pv_enabled=_defaults.pv_enabled,
+            pv_peak_kw=_defaults.pv_peak_kw,
+            # ── DHW ──────────────────────────────────────────────────────────
             dhw_enabled=opts.mpc_dhw_enabled,
+            dhw_C_top=opts.boiler_tank_liters * 1.1628e-3 / 2.0,  # lambdaV_tank/2
+            dhw_C_bot=opts.boiler_tank_liters * 1.1628e-3 / 2.0,
+            dhw_R_strat=opts.mpc_dhw_R_strat,
+            dhw_R_loss=opts.mpc_dhw_R_loss,
+            dhw_T_top_init=_defaults.dhw_T_top_init,
+            dhw_T_bot_init=_defaults.dhw_T_bot_init,
             dhw_P_max=opts.mpc_dhw_P_max,
             dhw_delta_P_max=opts.mpc_dhw_delta_P_max,
             dhw_T_min=opts.mpc_dhw_T_min,
             dhw_T_legionella=opts.mpc_dhw_T_legionella,
-            dhw_C_top=opts.boiler_tank_liters * 1.1628e-3 / 2.0,  # λ·V_tank/2
-            dhw_C_bot=opts.boiler_tank_liters * 1.1628e-3 / 2.0,
-            dhw_R_strat=opts.mpc_dhw_R_strat,
-            dhw_R_loss=opts.mpc_dhw_R_loss,
+            dhw_legionella_period_steps=_defaults.dhw_legionella_period_steps,
+            dhw_legionella_duration_steps=_defaults.dhw_legionella_duration_steps,
+            dhw_v_tap_m3_per_h=_defaults.dhw_v_tap_m3_per_h,
+            dhw_t_mains_c=_defaults.dhw_t_mains_c,
+            dhw_t_amb_c=_defaults.dhw_t_amb_c,
+            # ── Shared WP electrical budget ──────────────────────────────────
+            P_hp_max_elec=opts.mpc_P_hp_max_elec,
+            # ── Carnot COP model ─────────────────────────────────────────────
+            eta_carnot=opts.mpc_eta_carnot,
+            delta_T_cond=opts.mpc_delta_T_cond,
+            delta_T_evap=opts.mpc_delta_T_evap,
+            T_supply_min=_defaults.T_supply_min,
+            T_ref_outdoor_curve=_defaults.T_ref_outdoor_curve,
+            heating_curve_slope=_defaults.heating_curve_slope,
+            cop_min=opts.mpc_cop_min,
+            cop_max=opts.mpc_cop_max,
         )
-        mpc_runner = MPCRunner(base_request=mpc_base_request, backend=backend)
+        mpc_runner = MPCRunner(base_input=mpc_base_input, backend=backend)
         schedule_mpc(
             runner=mpc_runner,
             scheduler=collector.scheduler,
