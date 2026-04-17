@@ -57,9 +57,9 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import app
+from .database import DATABASE_URL_DEFAULT, Database
 from .mpc_scheduler import MPCRunner, schedule_mpc
 from .sensors.open_meteo import OpenMeteoClient
-from .settings import DATABASE_URL_DEFAULT, Database
 from .telemetry import ForecastPersister
 
 # ---------------------------------------------------------------------------

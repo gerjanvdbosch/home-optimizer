@@ -36,11 +36,11 @@ import uvicorn
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
+from .database import Database
 from .mpc_scheduler import MPCRunner, schedule_mpc
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
-from .settings import Database
 from .telemetry import (
     BufferedTelemetryCollector,
     ForecastPersister,

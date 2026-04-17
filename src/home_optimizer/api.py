@@ -57,13 +57,13 @@ from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel
 
+from .database import get_database_url
 from .optimizer import (  # noqa: F401 – re-exported for scheduler
     MPCStepResult,
     Optimizer,
     RunRequest,
 )
 from .sensors.open_meteo import OpenMeteoClient
-from .settings import get_database_url
 from .telemetry import TelemetryRepository
 
 # ---------------------------------------------------------------------------
@@ -691,13 +691,13 @@ async def get_forecast(
 
 #: Environment variable that the addon sets so the API knows where the DB is.
 #: Falls back to a local SQLite file in the current working directory.
-#: Both constant and default are defined in ``settings.py`` — do not repeat here.
+#: Both constant and default are defined in ``database.py`` — do not repeat here.
 
 
 def _get_repository() -> TelemetryRepository:
     """Construct a :class:`TelemetryRepository` from the active database URL.
 
-    The URL is resolved by :func:`~home_optimizer.settings.get_database_url`:
+    The URL is resolved by :func:`~home_optimizer.database.get_database_url`:
     it reads the ``DATABASE_URL`` environment variable (set by the addon from
     ``AddonOptions.database_path``) and falls back to the default SQLite path
     for local development.
