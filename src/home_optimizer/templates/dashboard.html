@@ -163,7 +163,7 @@
   <label>PV helling (°)</label>
   <input type="number" id="pv-tilt" value="35" min="0" max="90" step="1" />
   <span class="separator">|</span>
-  <button class="btn-sm" onclick="loadForecast()">🌤 Forecast laden</button>
+  <button class="btn-sm" onclick="loadAll()">🌤 Forecast laden</button>
   <span class="separator">|</span>
   <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
     <input type="checkbox" id="use-live" style="accent-color:#3b82f6;" />
@@ -247,6 +247,38 @@
     <div class="chart-card full">
       <h3>Graaduren verwarming [K·h] — proxy UFH-vraag (18 °C referentie)</h3>
       <div id="chart-hdd" class="chart-inner"></div>
+    </div>
+  </div>
+
+  <!-- MPC forecast -->
+  <div class="section-header"><h2>MPC voorspelling (Optimizer)</h2><hr /></div>
+  <div class="kpi-grid">
+    <div class="kpi-card highlight">
+      <div class="kpi-label">MPC status</div>
+      <div class="kpi-value" style="font-size:.95rem;" id="kpi-mpc-status">&ndash;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">UFH eerste stap</div>
+      <div class="kpi-value" id="kpi-mpc-ufh-p0">&ndash;<span class="kpi-unit">kW</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">DHW eerste stap</div>
+      <div class="kpi-value" id="kpi-mpc-dhw-p0">&ndash;<span class="kpi-unit">kW</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Totale kost horizon</div>
+      <div class="kpi-value" id="kpi-mpc-cost">&ndash;<span class="kpi-unit">€</span></div>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-card">
+      <h3>MPC temperatuur [°C] — kamerverwachting</h3>
+      <div id="chart-mpc-temp" class="chart-inner"></div>
+    </div>
+    <div class="chart-card">
+      <h3>MPC vermogen [kW] + prijs [€/kWh]</h3>
+      <div id="chart-mpc-power" class="chart-inner"></div>
     </div>
   </div>
 
@@ -339,6 +371,45 @@
         yaxis: { ...DARK.yaxis, title: 'Graaduren [K·h]' },
       },
     };
+  }
+
+  function applyDarkTheme(fig, yTitle) {
+    return {
+      ...fig,
+      layout: {
+        ...fig.layout,
+        ...DARK,
+        yaxis: { ...DARK.yaxis, ...(fig.layout?.yaxis || {}), title: yTitle || fig.layout?.yaxis?.title },
+      },
+    };
+  }
+
+  async function loadMpcForecast() {
+    try {
+      showBanner('banner-info', 'Laatste geplande Optimizer-run wordt opgehaald…');
+
+      const resp = await fetch(apiUrl('/api/optimizer/latest'));
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail || resp.statusText || 'Optimizer-resultaat ontbreekt');
+      }
+      const mpc = await resp.json();
+
+      document.getElementById('kpi-mpc-status').textContent = (mpc.status || '-').toUpperCase();
+      setKpi('kpi-mpc-ufh-p0', mpc.first_ufh_power_kw, 2);
+      setKpi('kpi-mpc-dhw-p0', mpc.first_dhw_power_kw, 2);
+      setKpi('kpi-mpc-cost', mpc.total_cost_eur, 2);
+
+      const mpcTempFig = applyDarkTheme(JSON.parse(mpc.temperature_fig), 'Temperatuur [°C]');
+      const mpcPowerFig = applyDarkTheme(JSON.parse(mpc.power_fig), 'Vermogen [kW]');
+      Plotly.react('chart-mpc-temp', mpcTempFig.data, mpcTempFig.layout, CFG);
+      Plotly.react('chart-mpc-power', mpcPowerFig.data, mpcPowerFig.layout, CFG);
+
+      hideBanner('banner-info');
+    } catch (e) {
+      showBanner('banner-warn', 'MPC voorspelling laden mislukt: ' + e.message);
+      hideBanner('banner-info');
+    }
   }
 
   // ─── Forecast loader ─────────────────────────────────────────────────────
@@ -445,17 +516,23 @@
       const hddFig = buildHddFig(d.labels, temps);
       Plotly.react('chart-hdd', hddFig.data, hddFig.layout, CFG);
 
+      return d;
+
     } catch (e) {
       setBadge('⚠ Fout', 'err');
       showBanner('banner-err', '⚠ Forecast laden mislukt: ' + e.message);
       hideBanner('banner-info');
+      return null;
     } finally {
       btn.disabled = false;
       btn.innerHTML = '↻ Vernieuwen';
     }
   }
 
-  function loadAll() { loadForecast(); }
+  async function loadAll() {
+    await loadForecast();
+    await loadMpcForecast();
+  }
   window.addEventListener('load', loadAll);
 </script>
 </body>

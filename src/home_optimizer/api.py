@@ -780,7 +780,7 @@ async def get_latest_forecast() -> ForecastResponse:
 
 
 @app.post("/api/simulate", response_model=OptimizeResponse)
-async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
+async def optimize(req: RunRequest) -> OptimizeResponse:
     """Run one MPC optimisation step and return charts + numerical summaries.
 
     Processing pipeline:
@@ -803,6 +803,39 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    return _build_optimize_response(req=req, result=result)
+
+
+@app.get("/api/optimizer/latest", response_model=OptimizeResponse)
+async def latest_optimizer_result() -> OptimizeResponse:
+    """Return the latest successful periodic Optimizer result.
+
+    This endpoint exposes the *real* scheduler output (from
+    :meth:`Optimizer.run_scheduled_once`) so the operational dashboard can
+    display the same prediction used by the running controller.
+
+    Raises:
+        HTTPException 404: When no periodic run has succeeded yet.
+    """
+    snapshot = Optimizer.get_latest_scheduled_snapshot()
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Nog geen geplande MPC-uitkomst beschikbaar. Wacht op de eerste scheduler-run.",
+        )
+    return _build_optimize_response(req=snapshot.request, result=snapshot.result)
+
+
+def _build_optimize_response(req: RunRequest, result: MPCStepResult) -> OptimizeResponse:
+    """Build API response payload from one optimizer run.
+
+    Args:
+        req: Request values used for this optimizer solve.
+        result: Numerical optimizer output.
+
+    Returns:
+        Serialized response model consumed by simulator and dashboard.
+    """
     N = req.horizon_hours
     start_hour = result.start_hour
     P_UFH = result.p_ufh_kw
@@ -815,7 +848,6 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     prices = result.ufh_forecast.price_eur_per_kwh
     dt = req.dt_hours
 
-    # ── Cost / energy attribution (electrical basis, §14.1) ──────────────
     P_UFH_elec = P_UFH / cop_ufh_arr
     P_dhw_elec = P_dhw / cop_dhw_arr
     P_hp_total_elec = P_UFH_elec + P_dhw_elec
@@ -848,7 +880,6 @@ async def optimize(req: RunRequest) -> OptimizeResponse:  # noqa: C901
     ufh_grid_cost = float(np.sum(total_cost_steps * ufh_cost_weights))
     dhw_grid_cost = float(np.sum(total_cost_steps * dhw_cost_weights))
 
-    # ── 7. Build charts ──────────────────────────────────────────────────
     labels_states = _time_labels(start_hour, N + 1)
     labels_ctrl = _time_labels(start_hour, N)
     T_r = states[:, 0]

@@ -36,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+from threading import Lock
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -346,6 +347,21 @@ class MPCStepResult:
     start_hour: int
 
 
+@dataclass(frozen=True, slots=True)
+class ScheduledRunSnapshot:
+    """Immutable snapshot of the latest successful scheduled MPC execution.
+
+    Attributes:
+        solved_at_utc: UTC timestamp when the scheduled step finished.
+        request: Fully materialized optimizer input used for this run.
+        result: Numerical optimizer output for this run.
+    """
+
+    solved_at_utc: datetime
+    request: RunRequest
+    result: MPCStepResult
+
+
 # ---------------------------------------------------------------------------
 # Optimizer — the domain core
 # ---------------------------------------------------------------------------
@@ -375,6 +391,9 @@ class Optimizer:
         result = optimizer.solve(req)
         print(result.p_ufh_kw[0])  # first-step UFH power [kW]
     """
+
+    _latest_scheduled_snapshot: ScheduledRunSnapshot | None = None
+    _snapshot_lock: Lock = Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -559,6 +578,12 @@ class Optimizer:
             return None
 
         sol = result.solution
+        with type(self)._snapshot_lock:
+            type(self)._latest_scheduled_snapshot = ScheduledRunSnapshot(
+                solved_at_utc=datetime.now(tz=timezone.utc),
+                request=optimizer_input,
+                result=result,
+            )
         log.info(
             "MPC step complete | status=%s | obj=%.3f | "
             "P_UFH[0]=%.2f kW | P_dhw[0]=%.2f kW | cost=%.4f EUR",
@@ -569,6 +594,23 @@ class Optimizer:
             result.total_cost_eur,
         )
         return result
+
+    @classmethod
+    def get_latest_scheduled_snapshot(cls) -> ScheduledRunSnapshot | None:
+        """Return the most recent successful scheduled MPC snapshot.
+
+        Returns:
+            :class:`ScheduledRunSnapshot` when at least one periodic run
+            succeeded in this process; otherwise ``None``.
+        """
+        with cls._snapshot_lock:
+            return cls._latest_scheduled_snapshot
+
+    @classmethod
+    def clear_latest_scheduled_snapshot(cls) -> None:
+        """Clear cached scheduled snapshot (mainly used by tests)."""
+        with cls._snapshot_lock:
+            cls._latest_scheduled_snapshot = None
 
     def schedule_periodic(
         self,

@@ -7,6 +7,7 @@ import json
 from fastapi.testclient import TestClient
 
 from home_optimizer.api import app
+from home_optimizer.optimizer import Optimizer, RunRequest
 
 client = TestClient(app)
 
@@ -73,3 +74,44 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-chart-card"' in html
     assert 'id="pv_enabled"' in html
     assert "UFH + DHW + PV MPC" in html
+
+
+def test_dashboard_html_contains_optimizer_mpc_forecast_section() -> None:
+    """Dashboard page must expose Optimizer MPC forecast KPIs and chart containers."""
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "MPC voorspelling (Optimizer)" in html
+    assert 'id="kpi-mpc-status"' in html
+    assert 'id="kpi-mpc-ufh-p0"' in html
+    assert 'id="kpi-mpc-dhw-p0"' in html
+    assert 'id="kpi-mpc-cost"' in html
+    assert 'id="chart-mpc-temp"' in html
+    assert 'id="chart-mpc-power"' in html
+    assert "/api/optimizer/latest" in html
+
+
+def test_optimizer_latest_returns_404_without_scheduled_run() -> None:
+    """Operational endpoint must fail clearly until a periodic run has succeeded."""
+    Optimizer.clear_latest_scheduled_snapshot()
+    response = client.get("/api/optimizer/latest")
+    assert response.status_code == 404
+
+
+def test_optimizer_latest_returns_scheduled_optimizer_result() -> None:
+    """Operational endpoint must expose the latest cached periodic Optimizer run."""
+    Optimizer.clear_latest_scheduled_snapshot()
+    optimizer = Optimizer()
+    req = RunRequest.model_validate({"horizon_hours": 8})
+    result = optimizer.run_scheduled_once(base_input=req)
+    assert result is not None
+
+    response = client.get("/api/optimizer/latest")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"]
+    assert payload["first_ufh_power_kw"] >= 0.0
+    assert len(payload["control_labels"]) == 8
+
+
