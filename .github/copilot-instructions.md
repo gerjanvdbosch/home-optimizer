@@ -9,8 +9,8 @@ Dit document bevat de volledige wiskundige en logische instructies voor het impl
 > **Het hardcoden van numerieke waarden in de berekeningen of logica is streng verboden.** Elke fysieke constante, tuning-parameter, temperatuurgrens of tijdstap moet via een configuratiebestand (bijv. JSON/YAML) of parameter-object in de code worden geïnjecteerd. Zelfs universele constanten (zoals $\lambda = 1.1628$) of legionella-eisen (60°C) moeten benoemde variabelen zijn. In de formules en MPC-constraints staan uitsluitend referentienamen, géén losse getallen (met uitzondering van wiskundige operatoren zoals `0` of `1`).
 
 > ### ♻️ Architectuureis: Strict Object-Georiënteerd (OOP) & DRY
-> **De volledige codebase moet strikt object-georiënteerd (OOP) worden opgezet. Losse procedurele functies (behalve pure wiskundige helpers) en globale statussen zijn ten strengste verboden.** 
-> Hoewel UFH en DHW fysisch andere systemen zijn, delen ze wiskundige fundamenten. Gebruik abstracte basisklassen (ABC), overerving en compositie om code-duplicatie te voorkomen. 
+> **De volledige codebase moet strikt object-georiënteerd (OOP) worden opgezet. Losse procedurele functies (behalve pure wiskundige helpers) en globale statussen zijn ten strengste verboden.**
+> Hoewel UFH en DHW fysisch andere systemen zijn, delen ze wiskundige fundamenten. Gebruik abstracte basisklassen (ABC), overerving en compositie om code-duplicatie te voorkomen.
 > * Voorbeeld: Ontwerp één abstracte `BaseKalmanFilter`-klasse die de state-updates (Joseph-vorm) en covarianties als interne attributen (`self.x`, `self.P`) beheert. Maak hiervan een `LinearKalmanFilter`-subklasse voor UFH en een `ExtendedKalmanFilter`-subklasse voor DHW die respectievelijk de lineaire matrices en de non-lineaire Jacobiaan-callbacks implementeren.
 
 > ### 🚀 Ontwerpeis: Geen Backwards Compatibility
@@ -119,7 +119,7 @@ $$C_r \cdot \frac{dT_r}{dt} = \frac{T_b - T_r}{R_{br}} - \frac{T_r - T_{out}}{R_
 **Stabiliteitseis:**
 $$\Delta t \ll \min\left(C_r \cdot R_{br},\ C_b \cdot R_{br},\ C_r \cdot R_{ro}\right)$$
 
-Typisch is $\Delta t \in \{0.25, 0.5, 1.0\}$ uur acceptabel voor een woning. Bij twijfel: gebruik Zero-Order Hold (ZOH) discretisatie, die onvoorwaardelijk stabiel is.
+UFH heeft typisch grote tijdconstanten ($\tau \sim$ uren), waardoor Forward Euler in de praktijk stabiel is voor $\Delta t \leq 1$ h. Bij twijfel: gebruik Zero-Order Hold (ZOH) discretisatie, die onvoorwaardelijk stabiel is.
 
 $$T_b[k+1] = T_b[k] + \frac{\Delta t}{C_b} \cdot \left( P_{UFH}[k] - \frac{T_b[k] - T_r[k]}{R_{br}} + (1 - \alpha) \cdot Q_{solar}[k] \right)$$
 
@@ -148,7 +148,11 @@ $$B_{UFH} = \begin{bmatrix} 0 \\ \dfrac{\Delta t}{C_b} \end{bmatrix}$$
 
 $$E_{UFH} = \begin{bmatrix} a_{ro} & \alpha \cdot \dfrac{\Delta t}{C_r} & \dfrac{\Delta t}{C_r} \\[6pt] 0 & (1-\alpha) \cdot \dfrac{\Delta t}{C_b} & 0 \end{bmatrix}$$
 
-> Het systeem is **observeerbaar** en **regelbaar**. Controleer observeerbaarheid na parametrisatie via $\mathcal{O} = [C_{UFH}^T,\ (C_{UFH} A_{UFH})^T]^T$ met rang 2, waarbij $C_{UFH} = [1,\ 0]$.
+> Het systeem is **observeerbaar** en **regelbaar**. Controleer observeerbaarheid na parametrisatie via de observeerbaarheidsmatrix:
+>
+> $$\mathcal{O} = \begin{bmatrix} C_{UFH} \\ C_{UFH}\, A_{UFH} \end{bmatrix} \in \mathbb{R}^{2 \times 2}$$
+>
+> met $C_{UFH} = [1,\ 0]$. De rang is 2 zolang $a_{br} \neq 0$, wat altijd geldt voor een reële vloer met eindige $R_{br}$.
 
 ---
 
@@ -253,6 +257,8 @@ $$\dot{Q}_{strat} = \frac{T_{top} - T_{bot}}{R_{strat}} \quad \text{[kW]}$$
 
 Hogere $R_{strat}$ → minder menging → betere stratificatie.
 
+> **Modelbeperking:** $\dot{Q}_{strat}$ is **geen** fysische conductieterm — moleculaire conductie van water is verwaarloosbaar op tankschaal. De term modelleert effectieve menging door turbulentie bij tapstromen, interne circulatie en warmtewisselaarstroming. $R_{strat}$ is daardoor **niet identificeerbaar uit first principles** en moet empirisch worden gekalibreerd aan meetdata. Het model is op dit punt een grey-box, geen white-box. Gebruik van een te lage $R_{strat}$ overschat menging en onderschat het stratificatievoordeel; kalibreer $R_{strat}$ altijd op basis van gemeten temperatuurprofielen.
+
 ### 9.4 Continue differentiaalvergelijkingen
 
 **Bovenlaag:**
@@ -275,19 +281,21 @@ De $\dot{Q}_{strat}$-term valt weg (intern transport, netto nul). Dit is de eers
 
 ### 10.1 Bilineariteit & Behandeling
 
-De termen $\lambda\dot{V}_{tap}[k]\cdot T_{top}[k]$ en $\lambda\dot{V}_{tap}[k]\cdot T_{mains}[k]$ zijn bilineair. Omdat $\dot{V}_{tap}[k]$ niet direct gemeten wordt, kan de LTV-aanname (§10 origineel) niet rechtstreeks worden toegepast.
+De termen $\lambda\dot{V}_{tap}[k]\cdot T_{top}[k]$ en $\lambda\dot{V}_{tap}[k]\cdot T_{mains}[k]$ zijn bilineair. Omdat $\dot{V}_{tap}[k]$ niet direct gemeten wordt, kan de LTV-aanname niet rechtstreeks worden toegepast.
 
 **Oplossing (tweestaps architectuur):**
 
 1. **EKF-stap** (§12): Schat $\hat{\dot{V}}_{tap}[k]$ via linearisatie rondom de vorige schatting. De EKF werkt met de 3-dimensionale augmented state en beide temperatuurmetingen.
 2. **MPC-stap** (§11 en §14): Behandel $\hat{\dot{V}}_{tap}[k]$ als **bekende LTV-parameter** voor de horizon. De MPC ontvangt een array $\hat{\dot{V}}_{tap}[k],\ k=0,\ldots,N-1$ en construeert daarmee de tijdsvariabele matrices $A_{dhw}[k]$ en $E_{dhw}[k]$ precies zoals in het originele LTV-schema.
 
-Definieer (zoals voorheen, nu gebaseerd op EKF-schatting):
+Definieer (gebaseerd op EKF-schatting):
 $$a_{tap}[k] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k], \qquad b_{tap}[k] = \frac{\Delta t}{C_{bot}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k]$$
 
 ### 10.2 Stabiliteitseis
 
 $$\Delta t \ll \min\!\left(C_{top}\cdot R_{strat},\ C_{bot}\cdot R_{strat},\ C_{top}\cdot R_{loss}\right)$$
+
+> ⚠️ **DHW stabiliteitsrisico:** DHW kan bij grote tapdebieten snelle dynamiek vertonen. Controleer bij elke parameterset dat $\Delta t \ll C_{top} / (\lambda \cdot \dot{V}_{tap,max})$. Typisch: bij $\dot{V}_{tap,max} = 0.01$ m³/h en $C_{top} = 0.05$ kWh/K is de tapterm-tijdconstante $\approx 4.3$ h; bij $\dot{V}_{tap,max} = 0.3$ m³/h daalt dit naar $\approx 8$ min. Bij twijfel of bij grote $\dot{V}_{tap}$: gebruik **ZOH-discretisatie** via `scipy.linalg.expm` voor de lineaire termen. Forward Euler is hier conditioneel stabiel, niet onvoorwaardelijk.
 
 ### 10.3 Vergelijkingen
 
@@ -326,7 +334,7 @@ $$E_{dhw}[k] = \begin{bmatrix} a_{loss} & 0 \\ b_{loss} & b_{tap}[k] \end{bmatri
 > Kolom 1 = $T_{amb}$ (standby-verlies beide lagen). Kolom 2 = $T_{mains}$ (koud instromend water, alleen onderlaag).
 
 **Observeerbaarheid (MPC-model, 2 states, $C_{obs,dhw} = [1,\ 0]$):**
-$$\mathcal{O}_{dhw} = \begin{bmatrix} 1 & 0 \\ 1 - a_{strat} - a_{loss} - a_{tap}[k] & a_{strat} \end{bmatrix}$$
+$$\mathcal{O}_{dhw} = \begin{bmatrix} C_{obs,dhw} \\ C_{obs,dhw}\,A_{dhw}[k] \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ 1 - a_{strat} - a_{loss} - a_{tap}[k] & a_{strat} \end{bmatrix} \in \mathbb{R}^{2 \times 2}$$
 
 $\text{rang}(\mathcal{O}_{dhw}) = 2 \iff a_{strat} \neq 0$, wat altijd geldt voor een reële tank met eindige $R_{strat}$.
 
@@ -372,34 +380,48 @@ T_{bot} + \dfrac{\Delta t}{C_{bot}}\!\left( \dfrac{T_{top}-T_{bot}}{R_{strat}} +
 
 ### 12.4 Jacobiaan (Linearisatie rondom schatting)
 
-De Jacobiaan $F[k] = \left.\dfrac{\partial f}{\partial x_{aug}}\right|_{\hat{x}_{aug}[k]}$ wordt bij elke tijdstap geëvalueerd:
+> ⚠️ **Implementatiefout-risico:** De Jacobiaan $F[k-1]$ moet geëvalueerd worden op het punt $\hat{x}_{aug}[k-1]$, $u_{dhw}[k-1]$, $d_{dhw}[k-1]$ **vóór** de propagatiestap, niet op de gepropageerde state $\hat{x}^-_{aug}[k]$. Een off-by-one hier leidt tot een structureel verkeerd geconditioneerde covariantie-update — een klassieke EKF-implementatiefout.
 
-$$F[k] = \begin{bmatrix}
-1 - a_{strat} - a_{loss} - \hat{a}_{tap}[k] & a_{strat} & -\dfrac{\Delta t}{C_{top}}\,\lambda\,\hat{T}_{top}[k] \\[6pt]
-b_{strat} & 1 - b_{strat} - b_{loss} & \dfrac{\Delta t}{C_{bot}}\,\lambda\,T_{mains}[k] \\[6pt]
+De Jacobiaan wordt gedefinieerd als:
+
+$$F[k-1] = \left.\frac{\partial f}{\partial x_{aug}}\right|_{\hat{x}_{aug}[k-1],\, u_{dhw}[k-1],\, d_{dhw}[k-1]}$$
+
+en heeft de expliciete vorm:
+
+$$F[k-1] = \begin{bmatrix}
+1 - a_{strat} - a_{loss} - \hat{a}_{tap}[k-1] & a_{strat} & -\dfrac{\Delta t}{C_{top}}\,\lambda\,\hat{T}_{top}[k-1] \\[6pt]
+b_{strat} & 1 - b_{strat} - b_{loss} & \dfrac{\Delta t}{C_{bot}}\,\lambda\,T_{mains}[k-1] \\[6pt]
 0 & 0 & 1
 \end{bmatrix}$$
 
 Waarbij:
-$$\hat{a}_{tap}[k] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k]$$
+$$\hat{a}_{tap}[k-1] = \frac{\Delta t}{C_{top}} \cdot \lambda \cdot \hat{\dot{V}}_{tap}[k-1]$$
 
-> De derde kolom van $F[k]$ is de kern van de EKF: hij drukt uit hoe gevoelig $T_{top}$ en $T_{bot}$ zijn voor een verandering in $\dot{V}_{tap}$. Bij een hoge $\hat{T}_{top}[k]$ (groot temperatuurverschil met koud water) is de schatting van $\dot{V}_{tap}$ beter geconditioneerd. Bij $T_{top} \approx T_{mains}$ — geen tapegebeurtenis — is de gevoeligheid laag en domineert de procesruis; de EKF zal $\dot{V}_{tap} \approx 0$ behouden.
+> De derde kolom van $F[k-1]$ is de kern van de EKF: hij drukt uit hoe gevoelig $T_{top}$ en $T_{bot}$ zijn voor een verandering in $\dot{V}_{tap}$. Bij een hoge $\hat{T}_{top}[k-1]$ (groot temperatuurverschil met koud water) is de schatting van $\dot{V}_{tap}$ beter geconditioneerd. Bij $T_{top} \approx T_{mains}$ — geen tapgebeurtenis — is de gevoeligheid laag en domineert de procesruis; de EKF zal $\dot{V}_{tap} \approx 0$ behouden.
 
 ### 12.5 Observeerbaarheid van het augmented systeem
 
-De linearisatie $F[k]$ is rank-3 observeerbaar voor $C_{obs,dhw}$ zolang $a_{strat} \neq 0$ **en** $\hat{T}_{top}[k] \neq T_{mains}[k]$. De observeerbaarheidsmatrix van de linearisatie is:
+De linearisatie $F[k-1]$ is rank-3 observeerbaar voor $C_{obs,dhw}$ zolang $a_{strat} \neq 0$ **en** $\hat{T}_{top}[k-1] \neq T_{mains}[k-1]$. De observeerbaarheidsmatrix van de linearisatie is:
 
-$$\mathcal{O}_{aug}[k] = \begin{bmatrix} C_{obs,dhw} \\ C_{obs,dhw}\,F[k] \end{bmatrix} \in \mathbb{R}^{4 \times 3}$$
+$$\mathcal{O}_{aug}[k] = \begin{bmatrix} C_{obs,dhw} \\ C_{obs,dhw}\,F[k-1] \end{bmatrix} \in \mathbb{R}^{4 \times 3}$$
 
-$\text{rang}(\mathcal{O}_{aug}[k]) = 3$ mits $a_{strat} \neq 0$ en $\hat{T}_{top}[k] \neq T_{mains}[k]$.
+$\text{rang}(\mathcal{O}_{aug}[k]) = 3$ mits $a_{strat} \neq 0$ en $\hat{T}_{top}[k-1] \neq T_{mains}[k-1]$.
 
 > **Rand-conditie:** Als de tank volledig is afgekoeld tot $T_{top} \approx T_{mains}$ (bijv. bij een langdurig ongebruikte installatie), is $\dot{V}_{tap}$ niet observeerbaar via de temperatuursensoren. In dat geval geldt: de EKF divergeert niet (de procesruis houdt $P$ begrensd), maar de schatting van $\dot{V}_{tap}$ wordt onzeker. Dit is fysisch correct gedrag — je kunt immers geen tap detecteren als er toch al geen temperatuurverschil is.
 
 ### 12.6 EKF Algoritme
 
 **Stap 1 — Predictie:**
+
+Propageer de nonlineaire toestand en bereken de Jacobiaan op het vorige geschatte punt:
+
 $$\hat{x}^-_{aug}[k] = f\!\left(\hat{x}_{aug}[k-1],\ u_{dhw}[k-1],\ d_{dhw}[k-1]\right)$$
+
+$$F[k-1] = \left.\frac{\partial f}{\partial x_{aug}}\right|_{\hat{x}_{aug}[k-1],\, u_{dhw}[k-1],\, d_{dhw}[k-1]}$$
+
 $$P^-_{aug}[k] = F[k-1]\,P_{aug}[k-1]\,F[k-1]^T + Q_{n,dhw,aug}$$
+
+> ⚠️ De Jacobiaan $F[k-1]$ wordt geëvalueerd op $\hat{x}_{aug}[k-1]$ — het punt **vóór** de propagatie, niet erna. Dit is de strikte EKF-vereiste. Zie §12.4.
 
 Met:
 $$Q_{n,dhw,aug} = \begin{bmatrix} Q_{n,dhw} & 0 \\ 0 & Q_{n,\dot{V}} \end{bmatrix} \in \mathbb{R}^{3 \times 3}$$
@@ -461,6 +483,8 @@ $$T_{evap}[k]  = (T_{out}[k]  - \Delta T_{evap}) + 273.15$$
 - Voor **UFH** wordt een weersafhankelijke stooklijn of vaste ontwerptemperatuur gebruikt voor $T_{aanvoer}$ (bijv. 30–35 °C).
 - Voor **DHW** wordt de doeltemperatuur van de tank gebruikt voor $T_{aanvoer}$ (bijv. 55 °C of $T_{leg}$).
 - De parameters $\eta_{Carnot}$ (typisch 0.4–0.6), $\Delta T_{cond}$ (typisch 2–5 K) en $\Delta T_{evap}$ (typisch 2–5 K) moeten in de configuratie (Pydantic) als benoemde variabelen aanwezig zijn.
+
+**Modelbeperking:** De werkelijke COP hangt af van de condensortemperatuur, die gerelateerd is aan $T_b$ (UFH) en $T_{top}$ (DHW). Door COP vooraf te fixeren op basis van $T_{out}[k]$ wordt de optimalisatie convex gehouden, maar introduceert dit een dispatch-fout: bij hoge tanktemperaturen (DHW) is de werkelijke COP lager dan voorspeld, waardoor de MPC de energiekosten onderschat. Dit effect is het grootst bij DHW op hoge doeltemperaturen (bijv. legionella-run bij $T_{leg}$). Dit is een bewuste ontwerpkeuze voor convexiteit; geen correctie is vereist in de solver, maar de foutmarge moet worden meegenomen bij het instellen van $COP_{max}$ en $\eta_{Carnot}$. Overweeg conservatievere waarden voor $\eta_{Carnot}$ bij DHW ten opzichte van UFH.
 
 **Let op de eenheden:** $P_{UFH}$ en $P_{dhw}$ zijn thermisch [kW]; $P_{UFH,elec}$ en $P_{dhw,elec}$ zijn elektrisch [kW]. De thermische vermogens zijn de beslissingsvariabelen van de MPC (ze sturen de state-dynamica); de elektrische vermogens verschijnen uitsluitend in de kostfunctie en de gedeelde vermogensconstraint.
 
@@ -563,7 +587,7 @@ $$\frac{P_{UFH}[k]}{COP_{UFH}[k]} + \frac{P_{dhw}[k]}{COP_{dhw}[k]} \leq P_{hp,m
 |---|---|---|---|
 | $C_{top}$ | kWh/K | 0.03–0.07 | Warmtecapaciteit bovenlaag ($\approx \tfrac{1}{2}V_{tank}\cdot\lambda$) |
 | $C_{bot}$ | kWh/K | 0.03–0.07 | Warmtecapaciteit onderlaag |
-| $R_{strat}$ | K/kW | 5–50 | Stratificatieweerstand (empirisch kalibreren) |
+| $R_{strat}$ | K/kW | 5–50 | Effectieve mengweerstand (empirisch kalibreren; zie modelbeperking §9.3) |
 | $R_{loss}$ | K/kW | 20–100 | Isolatieweerstand boiler naar omgeving |
 | $\lambda$ | kWh/(m³·K) | **1.1628** | $\rho c_p$ water (vaste fysische constante) |
 
@@ -659,12 +683,13 @@ Bij de implementatie moet een `pytest`-suite worden gegenereerd die de **Fysisch
 | `test_ekf_vtap_nonnegative` | $\hat{\dot{V}}_{tap}[k] \geq 0$ na elke EKF-updatestap, ook bij initialisatie met negatieve procesruis-realisatie | `assert all(v_tap_estimates >= 0)` |
 | `test_ekf_vtap_detection` | Bij gesimuleerde tapgebeurtenis (stap in $\dot{V}_{tap}$) convergeert EKF-schatting binnen $n_{conv}$ stappen tot werkelijke waarde (binnen tolerantie $\delta_{V}$) | `assert_allclose(..., atol=delta_V)` na $n_{conv}$ stappen |
 | `test_ekf_no_tap_zero` | Zonder tapgebeurtenis ($\dot{V}_{tap} = 0$, constante temperaturen): EKF-schatting convergeert naar 0 | `assert_allclose(v_tap_est, 0, atol=delta_V)` |
+| `test_ekf_jacobian_eval_point` | Jacobiaan $F[k-1]$ is geëvalueerd op $\hat{x}_{aug}[k-1]$ vóór propagatie; verificeer via finite differences dat $F \cdot \delta x \approx f(x+\delta x) - f(x)$ | `assert_allclose(..., rtol=1e-5)` |
 | `test_observability_rank` | Rang observeerbaarheidsmatrix = 2 voor UFH en 2-state DHW (MPC-model) | `np.linalg.matrix_rank(...) == 2` |
 | `test_ekf_observability_rank` | Rang augmented observeerbaarheidsmatrix = 3 voor DHW-EKF bij $T_{top} \neq T_{mains}$ | `np.linalg.matrix_rank(...) == 3` |
 | `test_cop_validation` | Pydantic gooit `ValidationError` bij $COP \leq 1$ of $COP > COP_{max}$ | `pytest.raises(ValidationError)` |
 | `test_mpc_feasibility` | MPC-probleem is `OPTIMAL` (niet `INFEASIBLE`) voor standaardscenario | `problem.status == "optimal"` |
 | `test_lambda_constant` | $\lambda$ berekend vanuit $\rho$ en $c_p$ uit config = 1.1628 binnen tolerantie | `assert_allclose(lambda_calc, 1.1628, rtol=1e-4)` |
-
+| `test_dhw_euler_stability` | Forward Euler stabiel bij $\dot{V}_{tap,max}$: controleer $\Delta t < C_{top} / (\lambda \cdot \dot{V}_{tap,max})$ voor gegeven config | `assert dt < stability_bound` |
 
 #### 16.4 Object-Georiënteerde Architectuur & Klassendefinities
 
@@ -684,12 +709,15 @@ Bij elke implementatie of parameterwijziging verifiëren:
 | Tapterm gesplitst | $-\lambda\dot{V}T_{top}$ in bovenlaag; $+\lambda\dot{V}T_{mains}$ in onderlaag |
 | $P_{dhw}$ locatie | WP-wisselaar onderin → $B_{dhw}[0]=0$; elektrisch element boverin → $B_{dhw}[1]=0$ |
 | $T_{dhw}$ afgeleid | Nooit als onafhankelijke state; altijd gewogen gemiddelde van $T_{top}$ en $T_{bot}$ |
-| Stabiliteit Euler | $\Delta t \ll$ kleinste tijdconstante van elk subsysteem afzonderlijk |
-| EKF Jacobiaan | $F[k]$ herberekenen bij elke $k$ op basis van $\hat{x}_{aug}[k]$ en $T_{mains}[k]$ |
+| Stabiliteit Euler | $\Delta t \ll$ kleinste tijdconstante van elk subsysteem afzonderlijk; voor DHW extra check op $C_{top}/(\lambda \cdot \dot{V}_{tap,max})$ |
+| EKF Jacobiaan evaluatiepunt | $F[k-1]$ berekend op $\hat{x}_{aug}[k-1]$, $u[k-1]$, $d[k-1]$ — strikt vóór de propagatiestap, niet erna |
 | EKF clamp | $\hat{\dot{V}}_{tap}[k] \leftarrow \max(0,\ \hat{\dot{V}}_{tap}[k])$ na elke updatestap — harde fysische eis |
 | LTV matrices (MPC) | $A_{dhw}[k]$ en $E_{dhw}[k]$ herberekenen met $\hat{\dot{V}}_{tap}[k]$ uit EKF bij elke MPC-aanroep |
-| Observeerbaarheid (2-state) | Rang observeerbaarheidsmatrix = 2 voor UFH en DHW MPC-model na parametrisatie |
+| Observeerbaarheidsmatrix UFH | $\mathcal{O} = [C_{UFH};\ C_{UFH}A_{UFH}] \in \mathbb{R}^{2\times2}$; rang 2 mits $a_{br} \neq 0$ |
+| Observeerbaarheid (2-state DHW) | Rang observeerbaarheidsmatrix = 2 voor DHW MPC-model na parametrisatie |
 | Observeerbaarheid (EKF 3-state) | Rang augmented observeerbaarheidsmatrix = 3 mits $a_{strat} \neq 0$ en $T_{top} \neq T_{mains}$ |
+| $R_{strat}$ is empirisch | Niet identificeerbaar uit first principles; altijd kalibreren op meetdata; nooit afleiden uit materiaalparameters |
+| COP pre-calculatie foutmarge | COP gefixeerd op $T_{out}[k]$; dispatch-fout bij hoge $T_{top}$ (DHW); conservatieve $\eta_{Carnot}$ voor DHW |
 | Kalman covariantie | $P$ en $P_{aug}$ blijven symmetrisch PD dankzij Joseph-vorm update |
 | COP > 1 | Fail-Fast validatie bij laden config; kostfunctie gebruikt elektrisch vermogen = thermisch / COP |
 | Soft constraints | $\epsilon_{UFH}[k] \geq 0$ en $\epsilon_{dhw}[k] \geq 0$ in QP; straffactor $M$ uit config |
