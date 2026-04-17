@@ -147,28 +147,8 @@
 </header>
 
 <div class="location-bar">
-  <label>Latitude</label>
-  <input type="number" id="loc-lat" value="52.37" step="0.01" />
-  <label>Longitude</label>
-  <input type="number" id="loc-lon" value="4.90" step="0.01" />
-  <span class="separator">|</span>
-  <label>Horizon</label>
-  <select id="loc-horizon">
-    <option value="24">24 h</option>
-    <option value="48" selected>48 h</option>
-    <option value="72">72 h</option>
-    <option value="120">5 dagen</option>
-    <option value="168">7 dagen</option>
-  </select>
-  <label>PV helling (°)</label>
-  <input type="number" id="pv-tilt" value="35" min="0" max="90" step="1" />
-  <span class="separator">|</span>
   <button class="btn-sm" onclick="loadAll()">🌤 Forecast laden</button>
-  <span class="separator">|</span>
-  <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;">
-    <input type="checkbox" id="use-live" style="accent-color:#3b82f6;" />
-    <span>Live Open-Meteo ophalen</span>
-  </label>
+  <span style="font-size:.78rem;color:#9ca3af;">Bron: database (laatste opgeslagen forecast)</span>
 </div>
 
 <main class="main">
@@ -223,6 +203,41 @@
     <span>🌍 bron: <strong id="meta-source">–</strong></span>
   </div>
 
+  <!-- MPC forecast -->
+  <div class="section-header"><h2>MPC voorspelling (Optimizer)</h2><hr /></div>
+  <div class="kpi-grid">
+    <div class="kpi-card highlight">
+      <div class="kpi-label">MPC status</div>
+      <div class="kpi-value" style="font-size:.95rem;" id="kpi-mpc-status">&ndash;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">UFH eerste stap</div>
+      <div class="kpi-value" id="kpi-mpc-ufh-p0">&ndash;<span class="kpi-unit">kW</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">DHW eerste stap</div>
+      <div class="kpi-value" id="kpi-mpc-dhw-p0">&ndash;<span class="kpi-unit">kW</span></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Totale kost horizon</div>
+      <div class="kpi-value" id="kpi-mpc-cost">&ndash;<span class="kpi-unit">€</span></div>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-card full">
+      <h3>MPC temperatuur [°C] — kamerverwachting</h3>
+      <div id="chart-mpc-temp" class="chart-inner"></div>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-card full">
+      <h3>MPC vermogen [kW] + prijs [€/kWh]</h3>
+      <div id="chart-mpc-power" class="chart-inner"></div>
+    </div>
+  </div>
+
   <!-- Temperature forecast -->
   <div class="section-header"><h2>Temperatuurverwachting</h2><hr /></div>
   <div class="chart-row">
@@ -247,38 +262,6 @@
     <div class="chart-card full">
       <h3>Graaduren verwarming [K·h] — proxy UFH-vraag (18 °C referentie)</h3>
       <div id="chart-hdd" class="chart-inner"></div>
-    </div>
-  </div>
-
-  <!-- MPC forecast -->
-  <div class="section-header"><h2>MPC voorspelling (Optimizer)</h2><hr /></div>
-  <div class="kpi-grid">
-    <div class="kpi-card highlight">
-      <div class="kpi-label">MPC status</div>
-      <div class="kpi-value" style="font-size:.95rem;" id="kpi-mpc-status">&ndash;</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">UFH eerste stap</div>
-      <div class="kpi-value" id="kpi-mpc-ufh-p0">&ndash;<span class="kpi-unit">kW</span></div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">DHW eerste stap</div>
-      <div class="kpi-value" id="kpi-mpc-dhw-p0">&ndash;<span class="kpi-unit">kW</span></div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Totale kost horizon</div>
-      <div class="kpi-value" id="kpi-mpc-cost">&ndash;<span class="kpi-unit">€</span></div>
-    </div>
-  </div>
-
-  <div class="chart-row">
-    <div class="chart-card">
-      <h3>MPC temperatuur [°C] — kamerverwachting</h3>
-      <div id="chart-mpc-temp" class="chart-inner"></div>
-    </div>
-    <div class="chart-card">
-      <h3>MPC vermogen [kW] + prijs [€/kWh]</h3>
-      <div id="chart-mpc-power" class="chart-inner"></div>
     </div>
   </div>
 
@@ -420,32 +403,11 @@
     hideAllBanners();
     setBadge('laden…', '');
 
-    const useLive = document.getElementById('use-live').checked;
-
     try {
-      let url, source;
-
-      if (useLive) {
-        // ── Live: Open-Meteo API call ─────────────────────────────────
-        showBanner('banner-info', 'Open-Meteo forecast wordt live opgehaald…');
-        const lat = parseFloat(document.getElementById('loc-lat').value);
-        const lon = parseFloat(document.getElementById('loc-lon').value);
-        const hor = parseInt(document.getElementById('loc-horizon').value, 10);
-        const pvT = parseFloat(document.getElementById('pv-tilt').value);
-        const params = new URLSearchParams({
-          latitude: lat, longitude: lon,
-          horizon_hours: hor, dt_hours: 1,
-          window_tilt: 90, window_azimuth: 0, pv_azimuth: 0,
-        });
-        if (!isNaN(pvT) && pvT >= 0) params.set('pv_tilt', pvT);
-        url = apiUrl('/api/forecast') + '?' + params.toString();
-        source = 'Open-Meteo (live API)';
-      } else {
-        // ── Database: meest recente opgeslagen forecast ────────────────
-        showBanner('banner-info', 'Meest recente forecast uit database laden…');
-        url = apiUrl('/api/forecast/latest');
-        source = 'Database (meest recente opgeslagen forecast)';
-      }
+      // ── Database: meest recente opgeslagen forecast ────────────────
+      showBanner('banner-info', 'Meest recente forecast uit database laden…');
+      const url = apiUrl('/api/forecast/latest');
+      const source = 'Database (meest recente opgeslagen forecast)';
 
       const resp = await fetch(url);
       if (!resp.ok) {
@@ -455,7 +417,7 @@
       const d = await resp.json();
 
       hideBanner('banner-info');
-      setBadge('✓ ' + (useLive ? 'Live' : 'DB'), 'ok');
+      setBadge('✓ DB', 'ok');
 
       // ── KPI ──────────────────────────────────────────────────────────
       const temps = d.outdoor_temperature_c;
@@ -487,13 +449,7 @@
 
       // ── Forecast meta ─────────────────────────────────────────────────
       document.getElementById('forecast-meta').style.display = 'flex';
-      if (useLive) {
-        const lat = parseFloat(document.getElementById('loc-lat').value);
-        const lon = parseFloat(document.getElementById('loc-lon').value);
-        document.getElementById('meta-location').textContent = lat.toFixed(2) + '°N, ' + lon.toFixed(2) + '°E';
-      } else {
-        document.getElementById('meta-location').textContent = '(locatie uit database)';
-      }
+      document.getElementById('meta-location').textContent = '(locatie uit database)';
       document.getElementById('meta-valid').textContent  = vf.toLocaleString('nl-NL');
       document.getElementById('meta-steps').textContent  = d.horizon_steps;
       document.getElementById('meta-source').textContent = source;
