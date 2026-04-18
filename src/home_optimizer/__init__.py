@@ -17,6 +17,7 @@ from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParamet
 from .calibration import (
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationResult,
+    UFHActiveCalibrationSegmentQuality,
     UFHActiveCalibrationSample,
     UFHActiveCalibrationSettings,
     UFHCalibrationDataset,
@@ -86,6 +87,7 @@ __all__ = [
     "ThermalParameters",
     "UFHActiveCalibrationDataset",
     "UFHActiveCalibrationResult",
+    "UFHActiveCalibrationSegmentQuality",
     "UFHActiveCalibrationSample",
     "UFHActiveCalibrationSettings",
     "UFHCalibrationDataset",

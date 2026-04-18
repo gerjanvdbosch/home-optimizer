@@ -43,6 +43,14 @@ DEFAULT_MAX_PARAMETER_RATIO: float = 4.0
 DEFAULT_REGULARIZATION_WEIGHT: float = 0.0
 DEFAULT_REGULARIZATION_SCALE_RATIO: float = 0.25
 DEFAULT_MIN_SEGMENT_SAMPLES: int = 4
+DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW: float = 0.05
+DEFAULT_MIN_SEGMENT_ROOM_TEMPERATURE_SPAN_C: float = 0.05
+DEFAULT_MIN_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C: float = 0.1
+DEFAULT_MIN_SEGMENT_SCORE: float = 0.0
+DEFAULT_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT: float = 1.0
+DEFAULT_SEGMENT_SCORE_WEIGHT_UFH_POWER_SPAN: float = 1.0
+DEFAULT_SEGMENT_SCORE_WEIGHT_ROOM_TEMPERATURE_SPAN: float = 1.0
+DEFAULT_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN: float = 1.0
 DEFAULT_MIN_INITIAL_FLOOR_OFFSET_C: float = -15.0
 DEFAULT_MAX_INITIAL_FLOOR_OFFSET_C: float = 15.0
 DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT: float = 0.0
@@ -191,6 +199,60 @@ class UFHOffCalibrationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class UFHActiveCalibrationSegmentQuality:
+    """Quality diagnostics for one raw contiguous UFH replay segment.
+
+    Attributes:
+        raw_segment_index: Zero-based index before selection/reranking [-].
+        selected_segment_index: Zero-based index after selection/reranking, or
+            ``None`` if the segment was dropped [-].
+        selected: Whether this segment survives the quality filter [-].
+        sample_count: Number of replay transitions in the raw segment [-].
+        duration_hours: Total segment duration [h].
+        ufh_power_span_kw: Range of UFH thermal power over the segment [kW].
+        room_temperature_span_c: Range of room temperature over the segment [°C].
+        outdoor_temperature_span_c: Range of outdoor temperature over the segment [°C].
+        mean_gti_w_per_m2: Mean GTI over the segment [W/m²].
+        score: Dimensionless quality score used for ranking [-].
+    """
+
+    raw_segment_index: int
+    selected_segment_index: int | None
+    selected: bool
+    sample_count: int
+    duration_hours: float
+    ufh_power_span_kw: float
+    room_temperature_span_c: float
+    outdoor_temperature_span_c: float
+    mean_gti_w_per_m2: float
+    score: float
+
+    def __post_init__(self) -> None:
+        if self.raw_segment_index < 0:
+            raise ValueError("raw_segment_index must be non-negative.")
+        if self.selected_segment_index is not None and self.selected_segment_index < 0:
+            raise ValueError("selected_segment_index must be non-negative when present.")
+        if self.sample_count <= 0:
+            raise ValueError("sample_count must be strictly positive.")
+        if self.duration_hours <= 0.0:
+            raise ValueError("duration_hours must be strictly positive.")
+        if self.ufh_power_span_kw < 0.0:
+            raise ValueError("ufh_power_span_kw must be non-negative.")
+        if self.room_temperature_span_c < 0.0:
+            raise ValueError("room_temperature_span_c must be non-negative.")
+        if self.outdoor_temperature_span_c < 0.0:
+            raise ValueError("outdoor_temperature_span_c must be non-negative.")
+        if self.mean_gti_w_per_m2 < 0.0:
+            raise ValueError("mean_gti_w_per_m2 must be non-negative.")
+        if self.score < 0.0:
+            raise ValueError("score must be non-negative.")
+        if self.selected and self.selected_segment_index is None:
+            raise ValueError("selected segments must expose selected_segment_index.")
+        if not self.selected and self.selected_segment_index is not None:
+            raise ValueError("Dropped segments may not expose selected_segment_index.")
+
+
+@dataclass(frozen=True, slots=True)
 class UFHActiveCalibrationSample:
     """One active UFH transition sample for batch RC calibration.
 
@@ -234,6 +296,7 @@ class UFHActiveCalibrationDataset:
     """Collection of active UFH replay samples used for 2-state RC fitting."""
 
     samples: tuple[UFHActiveCalibrationSample, ...]
+    segment_qualities: tuple[UFHActiveCalibrationSegmentQuality, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.samples:
@@ -246,6 +309,18 @@ class UFHActiveCalibrationDataset:
                 raise ValueError("segment_index must be non-decreasing across the dataset.")
             if next_index - previous_index > 1:
                 raise ValueError("segment_index increments may not skip values.")
+        if self.segment_qualities:
+            raw_indices = [quality.raw_segment_index for quality in self.segment_qualities]
+            if raw_indices != list(range(len(raw_indices))):
+                raise ValueError("segment_qualities raw_segment_index values must be contiguous from 0.")
+            selected_indices_from_samples = sorted(set(segment_indices))
+            selected_indices_from_quality = [
+                quality.selected_segment_index for quality in self.segment_qualities if quality.selected
+            ]
+            if selected_indices_from_quality != selected_indices_from_samples:
+                raise ValueError(
+                    "Selected segment indices in segment_qualities must match dataset sample.segment_index values."
+                )
 
     @property
     def sample_count(self) -> int:
@@ -266,6 +341,16 @@ class UFHActiveCalibrationDataset:
     def segment_count(self) -> int:
         """Number of contiguous UFH replay runs represented in the dataset [-]."""
         return self.samples[-1].segment_index + 1
+
+    @property
+    def raw_segment_count(self) -> int:
+        """Number of raw contiguous UFH runs evaluated before quality selection [-]."""
+        return len(self.segment_qualities) if self.segment_qualities else self.segment_count
+
+    @property
+    def dropped_segment_count(self) -> int:
+        """Number of raw segments rejected by the quality-selection policy [-]."""
+        return self.raw_segment_count - self.segment_count
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +376,16 @@ class UFHActiveCalibrationSettings:
             telemetry timestamps for GTI lookup [h].
         min_sample_count: Minimum replay samples required before fitting [-].
         min_segment_samples: Minimum replay samples per contiguous UFH run [-].
+        min_segment_ufh_power_span_kw: Minimum UFH power range inside a segment [kW].
+        min_segment_room_temperature_span_c: Minimum room-temperature range inside a segment [°C].
+        min_segment_outdoor_temperature_span_c: Minimum outdoor-temperature range inside a segment [°C].
+        min_segment_score: Minimum dimensionless quality score required for selection [-].
+        max_selected_segments: Optional cap on the number of retained segments [-].
+            ``None`` keeps all segments that pass the score thresholds.
+        segment_score_weight_sample_count: Weight on segment length contribution [-].
+        segment_score_weight_ufh_power_span: Weight on UFH power variation contribution [-].
+        segment_score_weight_room_temperature_span: Weight on room-temperature variation [-].
+        segment_score_weight_outdoor_temperature_span: Weight on outdoor-temperature variation [-].
         min_ufh_power_kw: Minimum mean UFH power to keep a bucket in the active set [kW].
         fit_c_r: Whether to fit ``C_r`` in addition to ``C_b``, ``R_br`` and ``R_ro`` [-].
         fit_initial_floor_temperature_offset: Whether to fit a global nuisance
@@ -330,6 +425,15 @@ class UFHActiveCalibrationSettings:
     forecast_alignment_tolerance_hours: float = DEFAULT_FORECAST_ALIGNMENT_TOLERANCE_HOURS
     min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
     min_segment_samples: int = DEFAULT_MIN_SEGMENT_SAMPLES
+    min_segment_ufh_power_span_kw: float = DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW
+    min_segment_room_temperature_span_c: float = DEFAULT_MIN_SEGMENT_ROOM_TEMPERATURE_SPAN_C
+    min_segment_outdoor_temperature_span_c: float = DEFAULT_MIN_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C
+    min_segment_score: float = DEFAULT_MIN_SEGMENT_SCORE
+    max_selected_segments: int | None = None
+    segment_score_weight_sample_count: float = DEFAULT_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT
+    segment_score_weight_ufh_power_span: float = DEFAULT_SEGMENT_SCORE_WEIGHT_UFH_POWER_SPAN
+    segment_score_weight_room_temperature_span: float = DEFAULT_SEGMENT_SCORE_WEIGHT_ROOM_TEMPERATURE_SPAN
+    segment_score_weight_outdoor_temperature_span: float = DEFAULT_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN
     min_ufh_power_kw: float = DEFAULT_MIN_UFH_POWER_KW
     fit_c_r: bool = False
     fit_initial_floor_temperature_offset: bool = False
@@ -356,6 +460,9 @@ class UFHActiveCalibrationSettings:
             "dt_compatibility_tolerance_hours",
             "forecast_alignment_tolerance_hours",
             "min_ufh_power_kw",
+            "min_segment_ufh_power_span_kw",
+            "min_segment_room_temperature_span_c",
+            "min_segment_outdoor_temperature_span_c",
             "max_initial_floor_temperature_offset_c",
             "initial_room_covariance_k2",
             "initial_floor_covariance_k2",
@@ -366,11 +473,17 @@ class UFHActiveCalibrationSettings:
             "max_parameter_ratio",
             "regularization_scale_ratio",
             "initial_floor_offset_scale_c",
+            "segment_score_weight_sample_count",
+            "segment_score_weight_ufh_power_span",
+            "segment_score_weight_room_temperature_span",
+            "segment_score_weight_outdoor_temperature_span",
         ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be strictly positive.")
         if self.max_gti_w_per_m2 < 0.0:
             raise ValueError("max_gti_w_per_m2 must be non-negative.")
+        if self.min_segment_score < 0.0:
+            raise ValueError("min_segment_score must be non-negative.")
         if self.max_defrost_active_fraction < 0.0 or self.max_defrost_active_fraction > 1.0:
             raise ValueError("max_defrost_active_fraction must be in [0, 1].")
         if self.max_booster_active_fraction < 0.0 or self.max_booster_active_fraction > 1.0:
@@ -381,6 +494,8 @@ class UFHActiveCalibrationSettings:
             raise ValueError("min_segment_samples must be at least 2.")
         if self.min_segment_samples > self.min_sample_count:
             raise ValueError("min_segment_samples must be <= min_sample_count.")
+        if self.max_selected_segments is not None and self.max_selected_segments <= 0:
+            raise ValueError("max_selected_segments must be strictly positive when provided.")
         if self.min_parameter_ratio >= self.max_parameter_ratio:
             raise ValueError("min_parameter_ratio must be < max_parameter_ratio.")
         if self.regularization_weight < 0.0:

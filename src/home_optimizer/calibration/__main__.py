@@ -11,6 +11,10 @@ from .models import (
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
     DEFAULT_MIN_UFH_POWER_KW,
     DEFAULT_MIN_SEGMENT_SAMPLES,
+    DEFAULT_MIN_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C,
+    DEFAULT_MIN_SEGMENT_ROOM_TEMPERATURE_SPAN_C,
+    DEFAULT_MIN_SEGMENT_SCORE,
+    DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW,
     UFHActiveCalibrationSettings,
     UFHOffCalibrationSettings,
 )
@@ -77,6 +81,36 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MIN_SEGMENT_SAMPLES,
         help="Minimum number of replay samples per contiguous UFH run [-].",
+    )
+    parser.add_argument(
+        "--min-segment-power-span-kw",
+        type=float,
+        default=DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW,
+        help="Minimum UFH power span required within a segment [kW].",
+    )
+    parser.add_argument(
+        "--min-segment-room-span-c",
+        type=float,
+        default=DEFAULT_MIN_SEGMENT_ROOM_TEMPERATURE_SPAN_C,
+        help="Minimum room-temperature span required within a segment [°C].",
+    )
+    parser.add_argument(
+        "--min-segment-outdoor-span-c",
+        type=float,
+        default=DEFAULT_MIN_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C,
+        help="Minimum outdoor-temperature span required within a segment [°C].",
+    )
+    parser.add_argument(
+        "--min-segment-score",
+        type=float,
+        default=DEFAULT_MIN_SEGMENT_SCORE,
+        help="Minimum dimensionless quality score required for a segment to be selected [-].",
+    )
+    parser.add_argument(
+        "--max-selected-segments",
+        type=int,
+        default=None,
+        help="Optional cap on the number of retained UFH segments; best-scoring runs are kept.",
     )
     parser.add_argument(
         "--max-gti-w-per-m2",
@@ -173,6 +207,11 @@ def main() -> None:
             max_gti_w_per_m2=max_gti_w_per_m2,
             min_sample_count=args.min_samples,
             min_segment_samples=args.min_segment_samples,
+            min_segment_ufh_power_span_kw=args.min_segment_power_span_kw,
+            min_segment_room_temperature_span_c=args.min_segment_room_span_c,
+            min_segment_outdoor_temperature_span_c=args.min_segment_outdoor_span_c,
+            min_segment_score=args.min_segment_score,
+            max_selected_segments=args.max_selected_segments,
             min_ufh_power_kw=args.min_ufh_power_kw,
             fit_c_r=bool(args.fit_c_r),
             fit_initial_floor_temperature_offset=bool(args.fit_initial_floor_offset),
@@ -184,6 +223,9 @@ def main() -> None:
             "stage": args.stage,
             "dataset": {
                 "sample_count": dataset.sample_count,
+                "segment_count": dataset.segment_count,
+                "raw_segment_count": dataset.raw_segment_count,
+                "dropped_segment_count": dataset.dropped_segment_count,
                 "start_utc": dataset.start_utc.isoformat(),
                 "end_utc": dataset.end_utc.isoformat(),
             },
@@ -215,6 +257,8 @@ def main() -> None:
     print("=========================")
     print(f"Samples          : {dataset.sample_count}")
     print(f"Segments         : {dataset.segment_count}")
+    print(f"Raw segments     : {dataset.raw_segment_count}")
+    print(f"Dropped segments : {dataset.dropped_segment_count}")
     print(f"Window           : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
     print(f"fit C_r          : {result.fit_c_r}")
     print(f"fit T_b offset   : {result.fit_initial_floor_temperature_offset}")

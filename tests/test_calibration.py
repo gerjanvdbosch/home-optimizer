@@ -199,6 +199,8 @@ def test_build_ufh_active_calibration_dataset_filters_to_excited_ufh_windows() -
 
     assert dataset.sample_count == 2
     assert dataset.segment_count == 1
+    assert dataset.raw_segment_count == 1
+    assert dataset.dropped_segment_count == 0
     sample = dataset.samples[0]
     assert sample.room_temperature_start_c == 20.0
     assert sample.room_temperature_end_c == 20.1
@@ -313,7 +315,128 @@ def test_build_ufh_active_calibration_dataset_splits_contiguous_runs() -> None:
 
     assert dataset.sample_count == 4
     assert dataset.segment_count == 2
+    assert dataset.raw_segment_count == 2
+    assert dataset.dropped_segment_count == 0
     assert [sample.segment_index for sample in dataset.samples] == [0, 0, 1, 1]
+
+
+def test_build_ufh_active_calibration_dataset_keeps_only_best_segments_when_capped() -> None:
+    """Top-N segment selection must keep the highest-scoring informative UFH runs."""
+    reference_parameters = ThermalParameters(
+        dt_hours=5.0 / 60.0,
+        C_r=3.0,
+        C_b=18.0,
+        R_br=2.5,
+        R_ro=4.0,
+        alpha=0.35,
+        eta=0.62,
+        A_glass=12.0,
+    )
+    start = datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.0,
+            outdoor_temperature_mean_c=6.0,
+            household_elec_power_mean_kw=0.2,
+            hp_thermal_power_mean_kw=0.3,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.04,
+            outdoor_temperature_mean_c=6.05,
+            household_elec_power_mean_kw=0.2,
+            hp_thermal_power_mean_kw=0.35,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.08,
+            outdoor_temperature_mean_c=6.1,
+            household_elec_power_mean_kw=0.2,
+            hp_thermal_power_mean_kw=0.4,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.08,
+            outdoor_temperature_mean_c=6.1,
+            household_elec_power_mean_kw=0.2,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.2,
+            outdoor_temperature_mean_c=4.5,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.5,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=25),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.5,
+            outdoor_temperature_mean_c=5.1,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=1.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=30),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.85,
+            outdoor_temperature_mean_c=5.8,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=1.5,
+        ),
+    ]
+    forecasts = [
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=5), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=10), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=15), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=20), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=25), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=30), gti_w_per_m2=0.0),
+    ]
+
+    dataset = build_ufh_active_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        forecast_rows=cast(list, forecasts),
+        settings=UFHActiveCalibrationSettings(
+            reference_parameters=reference_parameters,
+            min_sample_count=2,
+            min_segment_samples=2,
+            max_selected_segments=1,
+            min_segment_room_temperature_span_c=0.01,
+            min_segment_outdoor_temperature_span_c=0.01,
+            min_segment_ufh_power_span_kw=0.01,
+            min_ufh_power_kw=0.1,
+        ),
+    )
+
+    assert dataset.raw_segment_count == 2
+    assert dataset.segment_count == 1
+    assert dataset.dropped_segment_count == 1
+    assert [sample.segment_index for sample in dataset.samples] == [0, 0]
+    assert dataset.samples[0].room_temperature_start_c == 20.2
+    selected_scores = [quality.score for quality in dataset.segment_qualities if quality.selected]
+    dropped_scores = [quality.score for quality in dataset.segment_qualities if not quality.selected]
+    assert selected_scores[0] > dropped_scores[0]
 
 
 def test_calibrate_ufh_active_rc_recovers_synthetic_parameters() -> None:

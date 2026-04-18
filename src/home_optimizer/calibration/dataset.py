@@ -12,8 +12,11 @@ from bisect import bisect_left
 from datetime import datetime
 from typing import Sequence
 
+import numpy as np
+
 from .models import (
     UFHActiveCalibrationDataset,
+    UFHActiveCalibrationSegmentQuality,
     UFHActiveCalibrationSample,
     UFHActiveCalibrationSettings,
     UFHCalibrationDataset,
@@ -156,18 +159,75 @@ def build_ufh_active_calibration_dataset(
     """
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
     forecast_lookup = _ForecastLookup(forecast_rows)
-    samples: list[UFHActiveCalibrationSample] = []
+    raw_segments: list[list[UFHActiveCalibrationSample]] = []
     current_segment_samples: list[UFHActiveCalibrationSample] = []
-    segment_index = 0
     dt_reference_hours = settings.reference_parameters.dt_hours
 
     def flush_current_segment() -> None:
         nonlocal current_segment_samples
-        nonlocal segment_index
         if len(current_segment_samples) >= settings.min_segment_samples:
-            samples.extend(current_segment_samples)
-            segment_index += 1
+            raw_segments.append(current_segment_samples)
         current_segment_samples = []
+
+    def compute_segment_quality(
+        raw_segment_index: int,
+        segment_samples: list[UFHActiveCalibrationSample],
+    ) -> UFHActiveCalibrationSegmentQuality:
+        def meets_threshold(value: float, lower_bound: float) -> bool:
+            """Return whether a metric satisfies a configured lower bound.
+
+            The comparison is inclusive up to floating-point round-off because
+            telemetry aggregates often land exactly on the configured threshold.
+            """
+
+            return value > lower_bound or bool(np.isclose(value, lower_bound))
+
+        room_temperatures = np.array(
+            [segment_samples[0].room_temperature_start_c]
+            + [sample.room_temperature_end_c for sample in segment_samples],
+            dtype=float,
+        )
+        outdoor_temperatures = np.array(
+            [sample.outdoor_temperature_mean_c for sample in segment_samples], dtype=float
+        )
+        ufh_powers = np.array([sample.ufh_power_mean_kw for sample in segment_samples], dtype=float)
+        gti_values = np.array([sample.gti_w_per_m2 for sample in segment_samples], dtype=float)
+
+        sample_count = len(segment_samples)
+        duration_hours = float(sum(sample.dt_hours for sample in segment_samples))
+        ufh_power_span_kw = float(np.max(ufh_powers) - np.min(ufh_powers))
+        room_temperature_span_c = float(np.max(room_temperatures) - np.min(room_temperatures))
+        outdoor_temperature_span_c = float(np.max(outdoor_temperatures) - np.min(outdoor_temperatures))
+        mean_gti_w_per_m2 = float(np.mean(gti_values))
+
+        score = (
+            settings.segment_score_weight_sample_count * (sample_count / settings.min_segment_samples)
+            + settings.segment_score_weight_ufh_power_span
+            * (ufh_power_span_kw / settings.min_segment_ufh_power_span_kw)
+            + settings.segment_score_weight_room_temperature_span
+            * (room_temperature_span_c / settings.min_segment_room_temperature_span_c)
+            + settings.segment_score_weight_outdoor_temperature_span
+            * (outdoor_temperature_span_c / settings.min_segment_outdoor_temperature_span_c)
+        )
+        passes_hard_thresholds = (
+            sample_count >= settings.min_segment_samples
+            and meets_threshold(ufh_power_span_kw, settings.min_segment_ufh_power_span_kw)
+            and meets_threshold(room_temperature_span_c, settings.min_segment_room_temperature_span_c)
+            and meets_threshold(outdoor_temperature_span_c, settings.min_segment_outdoor_temperature_span_c)
+            and meets_threshold(score, settings.min_segment_score)
+        )
+        return UFHActiveCalibrationSegmentQuality(
+            raw_segment_index=raw_segment_index,
+            selected_segment_index=raw_segment_index if passes_hard_thresholds else None,
+            selected=passes_hard_thresholds,
+            sample_count=sample_count,
+            duration_hours=duration_hours,
+            ufh_power_span_kw=ufh_power_span_kw,
+            room_temperature_span_c=room_temperature_span_c,
+            outdoor_temperature_span_c=outdoor_temperature_span_c,
+            mean_gti_w_per_m2=mean_gti_w_per_m2,
+            score=float(score),
+        )
 
     for previous_row, next_row in zip(rows, rows[1:]):
         pair_is_valid = True
@@ -216,17 +276,71 @@ def build_ufh_active_calibration_dataset(
                 gti_w_per_m2=float(forecast.gti_w_per_m2),
                 internal_gain_proxy_kw=float(next_row.household_elec_power_mean_kw),
                 ufh_power_mean_kw=float(next_row.hp_thermal_power_mean_kw),
-                segment_index=segment_index,
+                segment_index=len(raw_segments),
             )
         )
 
     flush_current_segment()
 
-    if len(samples) < settings.min_sample_count:
+    raw_segment_qualities = tuple(
+        compute_segment_quality(index, segment_samples) for index, segment_samples in enumerate(raw_segments)
+    )
+    selected_raw_indices = [
+        quality.raw_segment_index for quality in raw_segment_qualities if quality.selected
+    ]
+    if settings.max_selected_segments is not None and len(selected_raw_indices) > settings.max_selected_segments:
+        selected_raw_indices = [
+            quality.raw_segment_index
+            for quality in sorted(
+                (quality for quality in raw_segment_qualities if quality.selected),
+                key=lambda quality: (-quality.score, quality.raw_segment_index),
+            )[: settings.max_selected_segments]
+        ]
+        selected_raw_indices.sort()
+
+    raw_to_selected_index = {raw_index: selected_index for selected_index, raw_index in enumerate(selected_raw_indices)}
+    selected_samples: list[UFHActiveCalibrationSample] = []
+    for raw_index in selected_raw_indices:
+        for sample in raw_segments[raw_index]:
+            selected_samples.append(
+                UFHActiveCalibrationSample(
+                    interval_start_utc=sample.interval_start_utc,
+                    interval_end_utc=sample.interval_end_utc,
+                    dt_hours=sample.dt_hours,
+                    room_temperature_start_c=sample.room_temperature_start_c,
+                    room_temperature_end_c=sample.room_temperature_end_c,
+                    outdoor_temperature_mean_c=sample.outdoor_temperature_mean_c,
+                    gti_w_per_m2=sample.gti_w_per_m2,
+                    internal_gain_proxy_kw=sample.internal_gain_proxy_kw,
+                    ufh_power_mean_kw=sample.ufh_power_mean_kw,
+                    segment_index=raw_to_selected_index[raw_index],
+                )
+            )
+
+    segment_qualities = tuple(
+        UFHActiveCalibrationSegmentQuality(
+            raw_segment_index=quality.raw_segment_index,
+            selected_segment_index=raw_to_selected_index.get(quality.raw_segment_index),
+            selected=quality.raw_segment_index in raw_to_selected_index,
+            sample_count=quality.sample_count,
+            duration_hours=quality.duration_hours,
+            ufh_power_span_kw=quality.ufh_power_span_kw,
+            room_temperature_span_c=quality.room_temperature_span_c,
+            outdoor_temperature_span_c=quality.outdoor_temperature_span_c,
+            mean_gti_w_per_m2=quality.mean_gti_w_per_m2,
+            score=quality.score,
+        )
+        for quality in raw_segment_qualities
+    )
+
+    if len(selected_samples) < settings.min_sample_count:
         raise ValueError(
             "Not enough active UFH samples for RC calibration: "
-            f"required >= {settings.min_sample_count}, found {len(samples)}."
+            f"required >= {settings.min_sample_count}, found {len(selected_samples)}."
         )
-    return UFHActiveCalibrationDataset(samples=tuple(samples))
+    return UFHActiveCalibrationDataset(
+        samples=tuple(selected_samples),
+        segment_qualities=segment_qualities,
+    )
 
 

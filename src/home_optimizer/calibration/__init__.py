@@ -4,6 +4,7 @@ from .dataset import build_ufh_active_calibration_dataset, build_ufh_off_calibra
 from .models import (
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationResult,
+    UFHActiveCalibrationSegmentQuality,
     UFHActiveCalibrationSample,
     UFHActiveCalibrationSettings,
     UFHCalibrationDataset,
@@ -23,6 +24,7 @@ from .ufh_offline import calibrate_ufh_off_envelope
 __all__ = [
     "UFHActiveCalibrationDataset",
     "UFHActiveCalibrationResult",
+    "UFHActiveCalibrationSegmentQuality",
     "UFHActiveCalibrationSample",
     "UFHActiveCalibrationSettings",
     "UFHCalibrationDataset",
