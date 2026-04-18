@@ -107,7 +107,7 @@ options:
   # dual-modus (piek/dal + terugleververgoeding)
   price_high_rate: 0.22
   price_low_rate: 0.21
-  price_feed_in_rate: 0.077
+  price_feed_in_rate: 0.07
   # Uren (0–23) die gelden als daltarief; standaard 23:00–06:00
   price_low_tariff_hours:
     - 23
