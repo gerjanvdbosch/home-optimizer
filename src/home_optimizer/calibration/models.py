@@ -95,6 +95,24 @@ DEFAULT_DELTA_T_COND_K: float = 5.0
 DEFAULT_DELTA_T_EVAP_K: float = 5.0
 DEFAULT_COP_MIN: float = 1.5
 DEFAULT_COP_MAX: float = 7.0
+DEFAULT_MIN_COP_SEGMENT_SAMPLES: int = 3
+DEFAULT_MIN_COP_SEGMENT_THERMAL_ENERGY_KWH: float = 0.3
+DEFAULT_MIN_COP_SEGMENT_ACTUAL_COP_SPAN: float = 0.2
+DEFAULT_MAX_COP_SEGMENT_SUPPLY_TRACKING_RMSE_C: float = 4.0
+DEFAULT_MIN_UFH_COP_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C: float = 1.0
+DEFAULT_MIN_UFH_COP_SEGMENT_SUPPLY_TARGET_SPAN_C: float = 1.0
+DEFAULT_MIN_COP_SEGMENT_SCORE: float = 0.0
+DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT: float = 1.0
+DEFAULT_COP_SEGMENT_SCORE_WEIGHT_THERMAL_ENERGY: float = 1.0
+DEFAULT_COP_SEGMENT_SCORE_WEIGHT_ACTUAL_COP_SPAN: float = 1.0
+DEFAULT_COP_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN: float = 1.0
+DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TARGET_SPAN: float = 1.0
+DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TRACKING: float = 0.5
+COP_LEAST_SQUARES_LOSS_CHOICES: tuple[str, ...] = ("linear", "soft_l1", "huber", "cauchy", "arctan")
+DEFAULT_COP_HEATING_CURVE_LOSS_NAME: str = "soft_l1"
+DEFAULT_COP_ETA_LOSS_NAME: str = "soft_l1"
+DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C: float = 1.0
+DEFAULT_COP_ETA_LOSS_SCALE_KWH: float = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,10 +455,50 @@ class COPCalibrationSample:
 
 
 @dataclass(frozen=True, slots=True)
+class COPCalibrationSegmentQuality:
+    """Quality diagnostics for one raw contiguous COP calibration segment."""
+
+    raw_segment_index: int
+    mode_name: str
+    selected: bool
+    sample_count: int
+    duration_hours: float
+    thermal_energy_kwh: float
+    electric_energy_kwh: float
+    outdoor_temperature_span_c: float
+    supply_target_temperature_span_c: float
+    actual_cop_span: float
+    supply_tracking_rmse_c: float
+    score: float
+
+    def __post_init__(self) -> None:
+        if self.raw_segment_index < 0:
+            raise ValueError("raw_segment_index must be non-negative.")
+        if not self.mode_name.strip():
+            raise ValueError("mode_name must not be blank.")
+        if self.sample_count <= 0:
+            raise ValueError("sample_count must be strictly positive.")
+        if self.duration_hours <= 0.0:
+            raise ValueError("duration_hours must be strictly positive.")
+        for name in (
+            "thermal_energy_kwh",
+            "electric_energy_kwh",
+            "outdoor_temperature_span_c",
+            "supply_target_temperature_span_c",
+            "actual_cop_span",
+            "supply_tracking_rmse_c",
+            "score",
+        ):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
 class COPCalibrationDataset:
     """Collection of filtered operating buckets used for offline COP calibration."""
 
     samples: tuple[COPCalibrationSample, ...]
+    segment_qualities: tuple[COPCalibrationSegmentQuality, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.samples:
@@ -471,6 +529,41 @@ class COPCalibrationDataset:
         """Latest timestamp in the COP calibration dataset [UTC]."""
         return self.samples[-1].bucket_end_utc
 
+    @property
+    def raw_segment_count(self) -> int:
+        """Number of raw contiguous COP segments evaluated before selection [-]."""
+        return len(self.segment_qualities) if self.segment_qualities else 1
+
+    @property
+    def dropped_segment_count(self) -> int:
+        """Number of raw COP segments rejected by the quality-selection policy [-]."""
+        if not self.segment_qualities:
+            return 0
+        return sum(not quality.selected for quality in self.segment_qualities)
+
+    @property
+    def selected_segment_count(self) -> int:
+        """Number of retained contiguous COP segments after quality selection [-]."""
+        if not self.segment_qualities:
+            return 1
+        return sum(quality.selected for quality in self.segment_qualities)
+
+    @property
+    def selected_ufh_segment_count(self) -> int:
+        """Number of retained UFH-mode COP segments after selection [-]."""
+        return sum(
+            quality.selected and quality.mode_name == DEFAULT_UFH_MODE_NAME
+            for quality in self.segment_qualities
+        )
+
+    @property
+    def selected_dhw_segment_count(self) -> int:
+        """Number of retained DHW-mode COP segments after selection [-]."""
+        return sum(
+            quality.selected and quality.mode_name == DEFAULT_DHW_MODE_NAME
+            for quality in self.segment_qualities
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class COPCalibrationSettings:
@@ -500,6 +593,21 @@ class COPCalibrationSettings:
     min_ufh_curve_sample_count: int = DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT
     min_thermal_energy_kwh: float = DEFAULT_MIN_THERMAL_ENERGY_KWH
     min_electric_energy_kwh: float = DEFAULT_MIN_ELECTRIC_ENERGY_KWH
+    min_segment_samples: int = DEFAULT_MIN_COP_SEGMENT_SAMPLES
+    min_segment_thermal_energy_kwh: float = DEFAULT_MIN_COP_SEGMENT_THERMAL_ENERGY_KWH
+    min_segment_actual_cop_span: float = DEFAULT_MIN_COP_SEGMENT_ACTUAL_COP_SPAN
+    max_segment_supply_tracking_rmse_c: float = DEFAULT_MAX_COP_SEGMENT_SUPPLY_TRACKING_RMSE_C
+    min_ufh_segment_outdoor_temperature_span_c: float = DEFAULT_MIN_UFH_COP_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C
+    min_ufh_segment_supply_target_span_c: float = DEFAULT_MIN_UFH_COP_SEGMENT_SUPPLY_TARGET_SPAN_C
+    min_segment_score: float = DEFAULT_MIN_COP_SEGMENT_SCORE
+    max_selected_ufh_segments: int | None = None
+    max_selected_dhw_segments: int | None = None
+    segment_score_weight_sample_count: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT
+    segment_score_weight_thermal_energy: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_THERMAL_ENERGY
+    segment_score_weight_actual_cop_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_ACTUAL_COP_SPAN
+    segment_score_weight_outdoor_temperature_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN
+    segment_score_weight_supply_target_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TARGET_SPAN
+    segment_score_weight_supply_tracking: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TRACKING
     initial_eta_carnot: float = DEFAULT_INITIAL_ETA_CARNOT
     min_eta_carnot: float = DEFAULT_MIN_ETA_CARNOT
     max_eta_carnot: float = DEFAULT_MAX_ETA_CARNOT
@@ -514,6 +622,10 @@ class COPCalibrationSettings:
     delta_t_evap_k: float = DEFAULT_DELTA_T_EVAP_K
     cop_min: float = DEFAULT_COP_MIN
     cop_max: float = DEFAULT_COP_MAX
+    heating_curve_loss_name: str = DEFAULT_COP_HEATING_CURVE_LOSS_NAME
+    eta_loss_name: str = DEFAULT_COP_ETA_LOSS_NAME
+    heating_curve_loss_scale_c: float = DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C
+    eta_loss_scale_kwh: float = DEFAULT_COP_ETA_LOSS_SCALE_KWH
 
     def __post_init__(self) -> None:
         if not self.ufh_mode_name.strip():
@@ -523,6 +635,17 @@ class COPCalibrationSettings:
         for name in (
             "min_thermal_energy_kwh",
             "min_electric_energy_kwh",
+            "min_segment_thermal_energy_kwh",
+            "min_segment_actual_cop_span",
+            "max_segment_supply_tracking_rmse_c",
+            "min_ufh_segment_outdoor_temperature_span_c",
+            "min_ufh_segment_supply_target_span_c",
+            "segment_score_weight_sample_count",
+            "segment_score_weight_thermal_energy",
+            "segment_score_weight_actual_cop_span",
+            "segment_score_weight_outdoor_temperature_span",
+            "segment_score_weight_supply_target_span",
+            "segment_score_weight_supply_tracking",
             "initial_eta_carnot",
             "min_eta_carnot",
             "max_eta_carnot",
@@ -533,6 +656,8 @@ class COPCalibrationSettings:
             "max_heating_curve_slope",
             "cop_min",
             "cop_max",
+            "heating_curve_loss_scale_c",
+            "eta_loss_scale_kwh",
         ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be strictly positive.")
@@ -544,6 +669,16 @@ class COPCalibrationSettings:
             raise ValueError("min_sample_count must be at least 2.")
         if self.min_ufh_curve_sample_count < 2:
             raise ValueError("min_ufh_curve_sample_count must be at least 2.")
+        if self.min_segment_samples < 2:
+            raise ValueError("min_segment_samples must be at least 2.")
+        if self.min_segment_samples > self.min_sample_count:
+            raise ValueError("min_segment_samples must be <= min_sample_count.")
+        if self.min_segment_score < 0.0:
+            raise ValueError("min_segment_score must be non-negative.")
+        if self.max_selected_ufh_segments is not None and self.max_selected_ufh_segments <= 0:
+            raise ValueError("max_selected_ufh_segments must be strictly positive when provided.")
+        if self.max_selected_dhw_segments is not None and self.max_selected_dhw_segments <= 0:
+            raise ValueError("max_selected_dhw_segments must be strictly positive when provided.")
         if not (self.min_eta_carnot <= self.initial_eta_carnot <= self.max_eta_carnot):
             raise ValueError("initial_eta_carnot must lie within its bounds.")
         if self.min_eta_carnot >= self.max_eta_carnot:
@@ -570,6 +705,13 @@ class COPCalibrationSettings:
             raise ValueError("cop_min must be > 1.")
         if self.cop_max <= self.cop_min:
             raise ValueError("cop_max must be strictly greater than cop_min.")
+        if self.heating_curve_loss_name not in COP_LEAST_SQUARES_LOSS_CHOICES:
+            raise ValueError(
+                "heating_curve_loss_name must be one of "
+                f"{COP_LEAST_SQUARES_LOSS_CHOICES!r}."
+            )
+        if self.eta_loss_name not in COP_LEAST_SQUARES_LOSS_CHOICES:
+            raise ValueError(f"eta_loss_name must be one of {COP_LEAST_SQUARES_LOSS_CHOICES!r}.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -580,6 +722,14 @@ class COPCalibrationResult:
     rmse_supply_temperature_c: float
     rmse_electric_energy_kwh: float
     rmse_actual_cop: float
+    ufh_rmse_electric_energy_kwh: float
+    dhw_rmse_electric_energy_kwh: float | None
+    ufh_rmse_actual_cop: float
+    dhw_rmse_actual_cop: float | None
+    ufh_bias_actual_cop: float
+    dhw_bias_actual_cop: float | None
+    diagnostic_eta_carnot_ufh: float
+    diagnostic_eta_carnot_dhw: float | None
     sample_count: int
     ufh_sample_count: int
     dhw_sample_count: int
@@ -597,6 +747,18 @@ class COPCalibrationResult:
             raise ValueError("rmse_electric_energy_kwh must be non-negative.")
         if self.rmse_actual_cop < 0.0:
             raise ValueError("rmse_actual_cop must be non-negative.")
+        if self.ufh_rmse_electric_energy_kwh < 0.0:
+            raise ValueError("ufh_rmse_electric_energy_kwh must be non-negative.")
+        if self.dhw_rmse_electric_energy_kwh is not None and self.dhw_rmse_electric_energy_kwh < 0.0:
+            raise ValueError("dhw_rmse_electric_energy_kwh must be non-negative when present.")
+        if self.ufh_rmse_actual_cop < 0.0:
+            raise ValueError("ufh_rmse_actual_cop must be non-negative.")
+        if self.dhw_rmse_actual_cop is not None and self.dhw_rmse_actual_cop < 0.0:
+            raise ValueError("dhw_rmse_actual_cop must be non-negative when present.")
+        if self.diagnostic_eta_carnot_ufh <= 0.0:
+            raise ValueError("diagnostic_eta_carnot_ufh must be strictly positive.")
+        if self.diagnostic_eta_carnot_dhw is not None and self.diagnostic_eta_carnot_dhw <= 0.0:
+            raise ValueError("diagnostic_eta_carnot_dhw must be strictly positive when present.")
         if self.sample_count <= 0:
             raise ValueError("sample_count must be strictly positive.")
         if self.ufh_sample_count <= 0:

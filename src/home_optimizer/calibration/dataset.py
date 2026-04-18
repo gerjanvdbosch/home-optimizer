@@ -16,6 +16,7 @@ import numpy as np
 
 from .models import (
     COPCalibrationDataset,
+    COPCalibrationSegmentQuality,
     COPCalibrationSample,
     COPCalibrationSettings,
     DHWActiveCalibrationDataset,
@@ -204,6 +205,145 @@ def build_ufh_off_calibration_dataset(
     return UFHCalibrationDataset(samples=tuple(samples))
 
 
+def _cop_segment_score(
+    samples: Sequence[COPCalibrationSample],
+    settings: COPCalibrationSettings,
+) -> float:
+    """Return a dimensionless quality score for one contiguous COP segment."""
+    sample_count = float(len(samples))
+    thermal_energy_kwh = float(sum(sample.thermal_energy_kwh for sample in samples))
+    actual_cops = np.array([sample.actual_cop for sample in samples], dtype=float)
+    outdoor_temperatures_c = np.array([sample.outdoor_temperature_mean_c for sample in samples], dtype=float)
+    supply_targets_c = np.array([sample.supply_target_temperature_mean_c for sample in samples], dtype=float)
+    supply_measured_c = np.array([sample.supply_temperature_mean_c for sample in samples], dtype=float)
+    actual_cop_span = float(np.ptp(actual_cops))
+    outdoor_span_c = float(np.ptp(outdoor_temperatures_c))
+    supply_target_span_c = float(np.ptp(supply_targets_c))
+    supply_tracking_rmse_c = float(np.sqrt(np.mean(np.square(supply_measured_c - supply_targets_c))))
+    tracking_margin = max(
+        0.0,
+        1.0 - supply_tracking_rmse_c / settings.max_segment_supply_tracking_rmse_c,
+    )
+
+    score = (
+        settings.segment_score_weight_sample_count * sample_count / float(settings.min_segment_samples)
+        + settings.segment_score_weight_thermal_energy
+        * thermal_energy_kwh
+        / settings.min_segment_thermal_energy_kwh
+        + settings.segment_score_weight_actual_cop_span
+        * actual_cop_span
+        / settings.min_segment_actual_cop_span
+        + settings.segment_score_weight_supply_tracking * tracking_margin
+    )
+    if samples[0].mode_name == settings.ufh_mode_name:
+        score += (
+            settings.segment_score_weight_outdoor_temperature_span
+            * outdoor_span_c
+            / settings.min_ufh_segment_outdoor_temperature_span_c
+            + settings.segment_score_weight_supply_target_span
+            * supply_target_span_c
+            / settings.min_ufh_segment_supply_target_span_c
+        )
+    return float(score)
+
+
+def _cop_segment_quality(
+    samples: Sequence[COPCalibrationSample],
+    *,
+    raw_segment_index: int,
+    settings: COPCalibrationSettings,
+) -> COPCalibrationSegmentQuality:
+    """Summarise one raw contiguous COP segment before top-N selection."""
+    actual_cops = np.array([sample.actual_cop for sample in samples], dtype=float)
+    outdoor_temperatures_c = np.array([sample.outdoor_temperature_mean_c for sample in samples], dtype=float)
+    supply_targets_c = np.array([sample.supply_target_temperature_mean_c for sample in samples], dtype=float)
+    supply_measured_c = np.array([sample.supply_temperature_mean_c for sample in samples], dtype=float)
+    quality = COPCalibrationSegmentQuality(
+        raw_segment_index=raw_segment_index,
+        mode_name=samples[0].mode_name,
+        selected=False,
+        sample_count=len(samples),
+        duration_hours=float(sum(sample.dt_hours for sample in samples)),
+        thermal_energy_kwh=float(sum(sample.thermal_energy_kwh for sample in samples)),
+        electric_energy_kwh=float(sum(sample.electric_energy_kwh for sample in samples)),
+        outdoor_temperature_span_c=float(np.ptp(outdoor_temperatures_c)),
+        supply_target_temperature_span_c=float(np.ptp(supply_targets_c)),
+        actual_cop_span=float(np.ptp(actual_cops)),
+        supply_tracking_rmse_c=float(np.sqrt(np.mean(np.square(supply_measured_c - supply_targets_c)))),
+        score=_cop_segment_score(samples, settings),
+    )
+    hard_selected = (
+        quality.sample_count >= settings.min_segment_samples
+        and quality.thermal_energy_kwh >= settings.min_segment_thermal_energy_kwh
+        and quality.actual_cop_span >= settings.min_segment_actual_cop_span
+        and quality.supply_tracking_rmse_c <= settings.max_segment_supply_tracking_rmse_c
+        and quality.score >= settings.min_segment_score
+    )
+    if quality.mode_name == settings.ufh_mode_name:
+        hard_selected = hard_selected and (
+            quality.outdoor_temperature_span_c >= settings.min_ufh_segment_outdoor_temperature_span_c
+            and quality.supply_target_temperature_span_c >= settings.min_ufh_segment_supply_target_span_c
+        )
+    return COPCalibrationSegmentQuality(
+        raw_segment_index=quality.raw_segment_index,
+        mode_name=quality.mode_name,
+        selected=hard_selected,
+        sample_count=quality.sample_count,
+        duration_hours=quality.duration_hours,
+        thermal_energy_kwh=quality.thermal_energy_kwh,
+        electric_energy_kwh=quality.electric_energy_kwh,
+        outdoor_temperature_span_c=quality.outdoor_temperature_span_c,
+        supply_target_temperature_span_c=quality.supply_target_temperature_span_c,
+        actual_cop_span=quality.actual_cop_span,
+        supply_tracking_rmse_c=quality.supply_tracking_rmse_c,
+        score=quality.score,
+    )
+
+
+def _apply_cop_segment_caps(
+    qualities: list[COPCalibrationSegmentQuality],
+    settings: COPCalibrationSettings,
+) -> list[COPCalibrationSegmentQuality]:
+    """Apply optional top-N per-mode caps after hard-threshold screening."""
+    selected_by_mode: dict[str, list[COPCalibrationSegmentQuality]] = {}
+    for quality in qualities:
+        if not quality.selected:
+            continue
+        selected_by_mode.setdefault(quality.mode_name, []).append(quality)
+
+    selected_raw_indices: set[int] = set()
+    for mode_name, mode_qualities in selected_by_mode.items():
+        max_selected_segments = (
+            settings.max_selected_ufh_segments
+            if mode_name == settings.ufh_mode_name
+            else settings.max_selected_dhw_segments
+        )
+        ranked = sorted(
+            mode_qualities,
+            key=lambda quality: (-quality.score, quality.supply_tracking_rmse_c, quality.raw_segment_index),
+        )
+        kept = ranked if max_selected_segments is None else ranked[:max_selected_segments]
+        selected_raw_indices.update(quality.raw_segment_index for quality in kept)
+
+    return [
+        COPCalibrationSegmentQuality(
+            raw_segment_index=quality.raw_segment_index,
+            mode_name=quality.mode_name,
+            selected=quality.selected and quality.raw_segment_index in selected_raw_indices,
+            sample_count=quality.sample_count,
+            duration_hours=quality.duration_hours,
+            thermal_energy_kwh=quality.thermal_energy_kwh,
+            electric_energy_kwh=quality.electric_energy_kwh,
+            outdoor_temperature_span_c=quality.outdoor_temperature_span_c,
+            supply_target_temperature_span_c=quality.supply_target_temperature_span_c,
+            actual_cop_span=quality.actual_cop_span,
+            supply_tracking_rmse_c=quality.supply_tracking_rmse_c,
+            score=quality.score,
+        )
+        for quality in qualities
+    ]
+
+
 def build_cop_calibration_dataset(
     aggregates: Sequence[TelemetryAggregate],
     settings: COPCalibrationSettings,
@@ -213,37 +353,54 @@ def build_cop_calibration_dataset(
     The builder keeps only UFH and DHW buckets that are physically meaningful for
     COP fitting: positive thermal/electrical energy, no defrost/booster overlap,
     and measured bucket COP within the physically meaningful interval
-    ``(1, cop_max]``.
+    ``(1, cop_max]``. Surviving buckets are then grouped into contiguous same-mode
+    segments, scored for excitation/supply tracking quality, and optionally capped
+    per mode before the final dataset is emitted.
     """
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
-    samples: list[COPCalibrationSample] = []
+    raw_segments: list[list[COPCalibrationSample]] = []
+    current_segment: list[COPCalibrationSample] = []
     accepted_modes = {settings.ufh_mode_name, settings.dhw_mode_name}
+
+    def flush_segment() -> None:
+        nonlocal current_segment
+        if current_segment:
+            raw_segments.append(current_segment)
+            current_segment = []
 
     for row in rows:
         mode_name = str(row.hp_mode_last)
         if mode_name not in accepted_modes:
+            flush_segment()
             continue
         if float(row.defrost_active_fraction) > settings.max_defrost_active_fraction:
+            flush_segment()
             continue
         if float(row.booster_heater_active_fraction) > settings.max_booster_active_fraction:
+            flush_segment()
             continue
 
         dt_hours = (row.bucket_end_utc - row.bucket_start_utc).total_seconds() / _SECONDS_PER_HOUR
         if dt_hours <= 0.0:
+            flush_segment()
             continue
 
         thermal_energy_kwh = float(row.hp_thermal_power_mean_kw) * dt_hours
         electric_energy_kwh = float(row.hp_electric_energy_delta_kwh)
         if thermal_energy_kwh < settings.min_thermal_energy_kwh:
+            flush_segment()
             continue
         if electric_energy_kwh < settings.min_electric_energy_kwh:
+            flush_segment()
             continue
 
         supply_target_temperature_mean_c = float(row.hp_supply_target_temperature_mean_c)
         supply_temperature_mean_c = float(row.hp_supply_temperature_mean_c)
         if not np.isfinite(supply_target_temperature_mean_c):
+            flush_segment()
             continue
         if not np.isfinite(supply_temperature_mean_c):
+            flush_segment()
             continue
 
         sample = COPCalibrationSample(
@@ -258,17 +415,43 @@ def build_cop_calibration_dataset(
             electric_energy_kwh=electric_energy_kwh,
         )
         if sample.actual_cop <= 1.0:
+            flush_segment()
             continue
         if sample.actual_cop > settings.cop_max:
+            flush_segment()
             continue
-        samples.append(sample)
+        if current_segment and (
+            current_segment[-1].mode_name != sample.mode_name
+            or current_segment[-1].bucket_end_utc != sample.bucket_start_utc
+        ):
+            flush_segment()
+        current_segment.append(sample)
+
+    flush_segment()
+
+    segment_qualities = _apply_cop_segment_caps(
+        [
+            _cop_segment_quality(segment_samples, raw_segment_index=index, settings=settings)
+            for index, segment_samples in enumerate(raw_segments)
+        ],
+        settings,
+    )
+    selected_segment_indices = {
+        quality.raw_segment_index for quality in segment_qualities if quality.selected
+    }
+    samples = [
+        sample
+        for segment_index, segment_samples in enumerate(raw_segments)
+        if segment_index in selected_segment_indices
+        for sample in segment_samples
+    ]
 
     if len(samples) < settings.min_sample_count:
         raise ValueError(
             "Not enough valid operating buckets for COP calibration: "
             f"required >= {settings.min_sample_count}, found {len(samples)}."
         )
-    dataset = COPCalibrationDataset(samples=tuple(samples))
+    dataset = COPCalibrationDataset(samples=tuple(samples), segment_qualities=tuple(segment_qualities))
     if dataset.ufh_sample_count < settings.min_ufh_curve_sample_count:
         raise ValueError(
             "Not enough UFH buckets for heating-curve calibration: "

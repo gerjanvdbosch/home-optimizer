@@ -44,7 +44,9 @@ from .models import (
     COPCalibrationResult,
     COPCalibrationSettings,
 )
-from ..cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+from ..cop_model import HeatPumpCOPModel, HeatPumpCOPParameters, T_CELSIUS_TO_KELVIN
+
+_MIN_DIAGNOSTIC_TEMPERATURE_LIFT_K: float = float(np.finfo(float).eps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +80,48 @@ class _EtaFit:
     optimizer_cost: float
 
 
+def _normalised_energy_weights(thermal_energy_kwh: np.ndarray) -> np.ndarray:
+    """Return positive sample weights with mean value 1 based on delivered energy."""
+    mean_thermal_energy_kwh = float(np.mean(thermal_energy_kwh))
+    if mean_thermal_energy_kwh <= 0.0:
+        raise ValueError("mean_thermal_energy_kwh must be strictly positive.")
+    return thermal_energy_kwh / mean_thermal_energy_kwh
+
+
+def _weighted_residuals(residuals: np.ndarray, *, weights: np.ndarray) -> np.ndarray:
+    """Scale residuals by sqrt(weights) for weighted least squares."""
+    return np.sqrt(weights) * residuals
+
+
+def _ideal_carnot_cop(
+    *,
+    t_supply_c: np.ndarray,
+    t_out_c: np.ndarray,
+    settings: COPCalibrationSettings,
+) -> np.ndarray:
+    """Return the unclipped ideal Carnot COP used for diagnostic eta estimates."""
+    t_cond_k = t_supply_c + settings.delta_t_cond_k + T_CELSIUS_TO_KELVIN
+    t_evap_k = t_out_c - settings.delta_t_evap_k + T_CELSIUS_TO_KELVIN
+    lift_k = np.maximum(t_cond_k - t_evap_k, _MIN_DIAGNOSTIC_TEMPERATURE_LIFT_K)
+    return t_cond_k / lift_k
+
+
+def _rmse(values: np.ndarray) -> float:
+    """Return the root-mean-square of a residual vector."""
+    return sqrt(float(np.mean(np.square(values))))
+
+
+def _diagnostic_eta_carnot(
+    actual_cop: np.ndarray,
+    ideal_carnot_cop: np.ndarray,
+    *,
+    weights: np.ndarray,
+) -> float:
+    """Return the weighted mean η that best explains actual COP diagnostically."""
+    eta_samples = actual_cop / ideal_carnot_cop
+    return float(np.average(eta_samples, weights=weights))
+
+
 def _as_arrays(dataset: COPCalibrationDataset) -> _CalibrationArrays:
     """Convert immutable COP sample objects into NumPy arrays for optimisation."""
     samples = dataset.samples
@@ -104,6 +148,7 @@ def _fit_heating_curve(
     ufh_mask = arrays.mode_name == settings.ufh_mode_name
     t_out_ufh = arrays.outdoor_temperature_mean_c[ufh_mask]
     t_supply_target_ufh = arrays.supply_target_temperature_mean_c[ufh_mask]
+    weights_ufh = _normalised_energy_weights(arrays.thermal_energy_kwh[ufh_mask])
 
     def residuals(theta: np.ndarray) -> np.ndarray:
         t_supply_min_c = float(theta[0])
@@ -112,7 +157,7 @@ def _fit_heating_curve(
             settings.t_ref_outdoor_c - t_out_ufh,
             0.0,
         )
-        return predicted_supply_c - t_supply_target_ufh
+        return _weighted_residuals(predicted_supply_c - t_supply_target_ufh, weights=weights_ufh)
 
     initial_theta = np.array(
         [settings.initial_t_supply_min_c, settings.initial_heating_curve_slope],
@@ -132,12 +177,17 @@ def _fit_heating_curve(
         x0=initial_theta,
         bounds=(lower_bounds, upper_bounds),
         method="trf",
+        loss=settings.heating_curve_loss_name,
+        f_scale=settings.heating_curve_loss_scale_c,
     )
     if not result.success:
         raise RuntimeError(f"COP heating-curve calibration failed: {result.message}")
 
-    fitted_residuals = residuals(result.x)
-    rmse_supply_temperature_c = sqrt(float(np.mean(np.square(fitted_residuals))))
+    predicted_supply_c = float(result.x[0]) + float(result.x[1]) * np.maximum(
+        settings.t_ref_outdoor_c - t_out_ufh,
+        0.0,
+    )
+    rmse_supply_temperature_c = _rmse(predicted_supply_c - t_supply_target_ufh)
     return _HeatingCurveFit(
         t_supply_min_c=float(result.x[0]),
         heating_curve_slope=float(result.x[1]),
@@ -202,6 +252,7 @@ def _fit_eta_carnot(
         t_supply_min_c=t_supply_min_c,
         heating_curve_slope=heating_curve_slope,
     )
+    weights = _normalised_energy_weights(arrays.thermal_energy_kwh)
 
     def residuals(theta: np.ndarray) -> np.ndarray:
         eta_carnot = float(theta[0])
@@ -217,7 +268,10 @@ def _fit_eta_carnot(
             t_out=arrays.outdoor_temperature_mean_c,
         )
         predicted_electric_energy_kwh = arrays.thermal_energy_kwh / predicted_cop
-        return predicted_electric_energy_kwh - arrays.electric_energy_kwh
+        return _weighted_residuals(
+            predicted_electric_energy_kwh - arrays.electric_energy_kwh,
+            weights=weights,
+        )
 
     result = least_squares(
         residuals,
@@ -227,6 +281,8 @@ def _fit_eta_carnot(
             np.array([settings.max_eta_carnot], dtype=float),
         ),
         method="trf",
+        loss=settings.eta_loss_name,
+        f_scale=settings.eta_loss_scale_kwh,
     )
     if not result.success:
         raise RuntimeError(f"COP eta_carnot calibration failed: {result.message}")
@@ -248,7 +304,8 @@ def calibrate_cop_model(
         settings: Bounds, fixed approach temperatures, and sample-count rules.
 
     Returns:
-        Calibrated COP model parameters and fit diagnostics.
+        Calibrated COP model parameters and fit diagnostics, including per-mode
+        UFH/DHW RMSE and diagnostic-only Carnot-efficiency estimates.
     """
     if dataset.sample_count < settings.min_sample_count:
         raise ValueError(
@@ -288,14 +345,51 @@ def calibrate_cop_model(
     )
     predicted_electric_energy_kwh = arrays.thermal_energy_kwh / predicted_cop
     actual_cop = arrays.thermal_energy_kwh / arrays.electric_energy_kwh
+    ideal_carnot_cop = _ideal_carnot_cop(
+        t_supply_c=predicted_supply_c,
+        t_out_c=arrays.outdoor_temperature_mean_c,
+        settings=settings,
+    )
+    weights = _normalised_energy_weights(arrays.thermal_energy_kwh)
+    ufh_mask = arrays.mode_name == settings.ufh_mode_name
+    dhw_mask = arrays.mode_name == settings.dhw_mode_name
+
+    ufh_electric_residuals = predicted_electric_energy_kwh[ufh_mask] - arrays.electric_energy_kwh[ufh_mask]
+    ufh_cop_residuals = predicted_cop[ufh_mask] - actual_cop[ufh_mask]
+
+    dhw_rmse_electric_energy_kwh: float | None = None
+    dhw_rmse_actual_cop: float | None = None
+    dhw_bias_actual_cop: float | None = None
+    diagnostic_eta_carnot_dhw: float | None = None
+    if np.any(dhw_mask):
+        dhw_electric_residuals = predicted_electric_energy_kwh[dhw_mask] - arrays.electric_energy_kwh[dhw_mask]
+        dhw_cop_residuals = predicted_cop[dhw_mask] - actual_cop[dhw_mask]
+        dhw_rmse_electric_energy_kwh = _rmse(dhw_electric_residuals)
+        dhw_rmse_actual_cop = _rmse(dhw_cop_residuals)
+        dhw_bias_actual_cop = float(np.mean(dhw_cop_residuals))
+        diagnostic_eta_carnot_dhw = _diagnostic_eta_carnot(
+            actual_cop[dhw_mask],
+            ideal_carnot_cop[dhw_mask],
+            weights=weights[dhw_mask],
+        )
 
     return COPCalibrationResult(
         fitted_parameters=fitted_parameters,
         rmse_supply_temperature_c=heating_curve_fit.rmse_supply_temperature_c,
-        rmse_electric_energy_kwh=sqrt(
-            float(np.mean(np.square(predicted_electric_energy_kwh - arrays.electric_energy_kwh)))
+        rmse_electric_energy_kwh=_rmse(predicted_electric_energy_kwh - arrays.electric_energy_kwh),
+        rmse_actual_cop=_rmse(predicted_cop - actual_cop),
+        ufh_rmse_electric_energy_kwh=_rmse(ufh_electric_residuals),
+        dhw_rmse_electric_energy_kwh=dhw_rmse_electric_energy_kwh,
+        ufh_rmse_actual_cop=_rmse(ufh_cop_residuals),
+        dhw_rmse_actual_cop=dhw_rmse_actual_cop,
+        ufh_bias_actual_cop=float(np.mean(ufh_cop_residuals)),
+        dhw_bias_actual_cop=dhw_bias_actual_cop,
+        diagnostic_eta_carnot_ufh=_diagnostic_eta_carnot(
+            actual_cop[ufh_mask],
+            ideal_carnot_cop[ufh_mask],
+            weights=weights[ufh_mask],
         ),
-        rmse_actual_cop=sqrt(float(np.mean(np.square(predicted_cop - actual_cop)))),
+        diagnostic_eta_carnot_dhw=diagnostic_eta_carnot_dhw,
         sample_count=dataset.sample_count,
         ufh_sample_count=dataset.ufh_sample_count,
         dhw_sample_count=dataset.dhw_sample_count,

@@ -7,15 +7,25 @@ import json
 from dataclasses import asdict
 
 from .models import (
+    COP_LEAST_SQUARES_LOSS_CHOICES,
     COPCalibrationSettings,
     DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
     DEFAULT_COP_MAX,
     DEFAULT_COP_MIN,
+    DEFAULT_COP_ETA_LOSS_NAME,
+    DEFAULT_COP_ETA_LOSS_SCALE_KWH,
+    DEFAULT_COP_HEATING_CURVE_LOSS_NAME,
+    DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C,
     DEFAULT_DELTA_T_COND_K,
     DEFAULT_DELTA_T_EVAP_K,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
+    DEFAULT_MAX_COP_SEGMENT_SUPPLY_TRACKING_RMSE_C,
     DEFAULT_MIN_ELECTRIC_ENERGY_KWH,
+    DEFAULT_MIN_COP_SEGMENT_ACTUAL_COP_SPAN,
+    DEFAULT_MIN_COP_SEGMENT_SCORE,
+    DEFAULT_MIN_COP_SEGMENT_SAMPLES,
+    DEFAULT_MIN_COP_SEGMENT_THERMAL_ENERGY_KWH,
     DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_DHW_POWER_KW,
     DEFAULT_MIN_DHW_SEGMENT_SAMPLES,
@@ -27,6 +37,8 @@ from .models import (
     DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C,
     DEFAULT_MIN_THERMAL_ENERGY_KWH,
     DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT,
+    DEFAULT_MIN_UFH_COP_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C,
+    DEFAULT_MIN_UFH_COP_SEGMENT_SUPPLY_TARGET_SPAN_C,
     DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_UFH_POWER_KW,
     DEFAULT_MIN_SEGMENT_SAMPLES,
@@ -161,6 +173,60 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Minimum UFH buckets required to fit the heating curve in the COP stage [-].",
     )
     parser.add_argument(
+        "--cop-min-segment-samples",
+        type=int,
+        default=DEFAULT_MIN_COP_SEGMENT_SAMPLES,
+        help="Minimum contiguous same-mode buckets per raw COP segment before selection [-].",
+    )
+    parser.add_argument(
+        "--cop-min-segment-thermal-energy-kwh",
+        type=float,
+        default=DEFAULT_MIN_COP_SEGMENT_THERMAL_ENERGY_KWH,
+        help="Minimum delivered thermal energy required within a contiguous COP segment [kWh].",
+    )
+    parser.add_argument(
+        "--cop-min-segment-actual-cop-span",
+        type=float,
+        default=DEFAULT_MIN_COP_SEGMENT_ACTUAL_COP_SPAN,
+        help="Minimum measured COP span required within a contiguous COP segment [-].",
+    )
+    parser.add_argument(
+        "--cop-max-segment-supply-tracking-rmse-c",
+        type=float,
+        default=DEFAULT_MAX_COP_SEGMENT_SUPPLY_TRACKING_RMSE_C,
+        help="Maximum RMSE between measured and target supply temperatures within a COP segment [°C].",
+    )
+    parser.add_argument(
+        "--cop-min-ufh-segment-outdoor-span-c",
+        type=float,
+        default=DEFAULT_MIN_UFH_COP_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C,
+        help="Minimum outdoor-temperature span required within a UFH COP segment [°C].",
+    )
+    parser.add_argument(
+        "--cop-min-ufh-segment-supply-target-span-c",
+        type=float,
+        default=DEFAULT_MIN_UFH_COP_SEGMENT_SUPPLY_TARGET_SPAN_C,
+        help="Minimum target-supply-temperature span required within a UFH COP segment [°C].",
+    )
+    parser.add_argument(
+        "--cop-min-segment-score",
+        type=float,
+        default=DEFAULT_MIN_COP_SEGMENT_SCORE,
+        help="Minimum dimensionless quality score required for a COP segment to survive selection [-].",
+    )
+    parser.add_argument(
+        "--cop-max-selected-ufh-segments",
+        type=int,
+        default=None,
+        help="Optional top-N cap on selected UFH COP segments after quality ranking [-].",
+    )
+    parser.add_argument(
+        "--cop-max-selected-dhw-segments",
+        type=int,
+        default=None,
+        help="Optional top-N cap on selected DHW COP segments after quality ranking [-].",
+    )
+    parser.add_argument(
         "--cop-t-ref-outdoor-c",
         type=float,
         default=DEFAULT_T_REF_OUTDOOR_C,
@@ -189,6 +255,30 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_COP_MAX,
         help="Physical upper COP bound enforced during COP calibration [-].",
+    )
+    parser.add_argument(
+        "--cop-heating-curve-loss",
+        choices=COP_LEAST_SQUARES_LOSS_CHOICES,
+        default=DEFAULT_COP_HEATING_CURVE_LOSS_NAME,
+        help="Robust least-squares loss used for heating-curve fitting.",
+    )
+    parser.add_argument(
+        "--cop-eta-loss",
+        choices=COP_LEAST_SQUARES_LOSS_CHOICES,
+        default=DEFAULT_COP_ETA_LOSS_NAME,
+        help="Robust least-squares loss used for eta fitting against electrical energy.",
+    )
+    parser.add_argument(
+        "--cop-heating-curve-loss-scale-c",
+        type=float,
+        default=DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C,
+        help="Residual scale used by the chosen heating-curve robust loss [°C].",
+    )
+    parser.add_argument(
+        "--cop-eta-loss-scale-kwh",
+        type=float,
+        default=DEFAULT_COP_ETA_LOSS_SCALE_KWH,
+        help="Residual scale used by the chosen eta-fit robust loss [kWh].",
     )
     parser.add_argument(
         "--dhw-min-segment-delivered-energy-kwh",
@@ -389,11 +479,24 @@ def _build_cop_settings(args: argparse.Namespace) -> COPCalibrationSettings:
         min_ufh_curve_sample_count=args.cop_min_ufh_samples,
         min_thermal_energy_kwh=args.cop_min_thermal_energy_kwh,
         min_electric_energy_kwh=args.cop_min_electric_energy_kwh,
+        min_segment_samples=args.cop_min_segment_samples,
+        min_segment_thermal_energy_kwh=args.cop_min_segment_thermal_energy_kwh,
+        min_segment_actual_cop_span=args.cop_min_segment_actual_cop_span,
+        max_segment_supply_tracking_rmse_c=args.cop_max_segment_supply_tracking_rmse_c,
+        min_ufh_segment_outdoor_temperature_span_c=args.cop_min_ufh_segment_outdoor_span_c,
+        min_ufh_segment_supply_target_span_c=args.cop_min_ufh_segment_supply_target_span_c,
+        min_segment_score=args.cop_min_segment_score,
+        max_selected_ufh_segments=args.cop_max_selected_ufh_segments,
+        max_selected_dhw_segments=args.cop_max_selected_dhw_segments,
         t_ref_outdoor_c=args.cop_t_ref_outdoor_c,
         delta_t_cond_k=args.cop_delta_t_cond_k,
         delta_t_evap_k=args.cop_delta_t_evap_k,
         cop_min=args.cop_min,
         cop_max=args.cop_max,
+        heating_curve_loss_name=args.cop_heating_curve_loss,
+        eta_loss_name=args.cop_eta_loss,
+        heating_curve_loss_scale_c=args.cop_heating_curve_loss_scale_c,
+        eta_loss_scale_kwh=args.cop_eta_loss_scale_kwh,
     )
 
 
@@ -439,6 +542,12 @@ def main() -> None:
                 "sample_count": dataset.sample_count,
                 "ufh_sample_count": dataset.ufh_sample_count,
                 "dhw_sample_count": dataset.dhw_sample_count,
+                "selected_segment_count": dataset.selected_segment_count,
+                "selected_ufh_segment_count": dataset.selected_ufh_segment_count,
+                "selected_dhw_segment_count": dataset.selected_dhw_segment_count,
+                "raw_segment_count": dataset.raw_segment_count,
+                "dropped_segment_count": dataset.dropped_segment_count,
+                "segment_qualities": [asdict(quality) for quality in dataset.segment_qualities],
                 "start_utc": dataset.start_utc.isoformat(),
                 "end_utc": dataset.end_utc.isoformat(),
             },
@@ -560,13 +669,32 @@ def main() -> None:
         print(f"Samples              : {dataset.sample_count}")
         print(f"UFH samples          : {dataset.ufh_sample_count}")
         print(f"DHW samples          : {dataset.dhw_sample_count}")
+        print(f"Selected segments    : {dataset.selected_segment_count}")
+        print(f"Selected UFH segs    : {dataset.selected_ufh_segment_count}")
+        print(f"Selected DHW segs    : {dataset.selected_dhw_segment_count}")
+        print(f"Raw segments         : {dataset.raw_segment_count}")
+        print(f"Dropped segments     : {dataset.dropped_segment_count}")
         print(f"Window               : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
         print(f"eta_carnot           : {result.fitted_parameters.eta_carnot:.6f} [-]")
         print(f"T_supply_min         : {result.fitted_parameters.T_supply_min:.6f} °C")
         print(f"heating_curve_slope  : {result.fitted_parameters.heating_curve_slope:.6f} K/K")
+        print(f"Heating-curve loss   : {settings.heating_curve_loss_name}")
+        print(f"Eta-fit loss         : {settings.eta_loss_name}")
         print(f"RMSE(T_supply)       : {result.rmse_supply_temperature_c:.5f} °C")
         print(f"RMSE(E_elec)         : {result.rmse_electric_energy_kwh:.5f} kWh")
         print(f"RMSE(COP)            : {result.rmse_actual_cop:.5f} [-]")
+        print(f"UFH RMSE(E_elec)     : {result.ufh_rmse_electric_energy_kwh:.5f} kWh")
+        if result.dhw_rmse_electric_energy_kwh is not None:
+            print(f"DHW RMSE(E_elec)     : {result.dhw_rmse_electric_energy_kwh:.5f} kWh")
+        print(f"UFH RMSE(COP)        : {result.ufh_rmse_actual_cop:.5f} [-]")
+        if result.dhw_rmse_actual_cop is not None:
+            print(f"DHW RMSE(COP)        : {result.dhw_rmse_actual_cop:.5f} [-]")
+        print(f"UFH bias(COP)        : {result.ufh_bias_actual_cop:.5f} [-]")
+        if result.dhw_bias_actual_cop is not None:
+            print(f"DHW bias(COP)        : {result.dhw_bias_actual_cop:.5f} [-]")
+        print(f"UFH diagnostic eta   : {result.diagnostic_eta_carnot_ufh:.6f} [-]")
+        if result.diagnostic_eta_carnot_dhw is not None:
+            print(f"DHW diagnostic eta   : {result.diagnostic_eta_carnot_dhw:.6f} [-]")
         print(f"Heating-curve status : {result.heating_curve_optimizer_status}")
         print(f"Eta status           : {result.eta_optimizer_status}")
         return
