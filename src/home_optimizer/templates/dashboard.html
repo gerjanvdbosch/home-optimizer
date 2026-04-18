@@ -356,34 +356,6 @@
     };
   }
 
-  // ─── Solar (GTI) chart builder ───────────────────────────────────────────
-  function buildSolarFig(labels, gtiWindow, gtiPv) {
-    return {
-      data: [
-        {
-          type: 'bar',
-          x: labels,
-          y: gtiWindow,
-          name: 'GTI ramen [W/m²]',
-          marker: { color: 'rgba(251,191,36,0.75)' },
-        },
-        {
-          type: 'scatter',
-          mode: 'lines',
-          x: labels,
-          y: gtiPv,
-          name: 'GTI PV-panelen [W/m²]',
-          line: { color: '#34d399', width: 2 },
-        },
-      ],
-      layout: {
-        ...DARK,
-        yaxis: { ...DARK.yaxis, title: 'GTI [W/m²]' },
-        barmode: 'overlay',
-      },
-    };
-  }
-
   function applyDarkTheme(fig, yTitle) {
     return {
       ...fig,
@@ -490,7 +462,9 @@
       Plotly.react('chart-temp', tFig.data, tFig.layout, CFG);
 
       // ── Solar chart ────────────────────────────────────────────────────
-      const solarFig = buildSolarFig(d.labels, gtis, gtipv);
+      // Gebruik de backend-figure als enige bron van waarheid zodat dashboard
+      // exact dezelfde GTI-visualisatie toont als de forecast API-respons.
+      const solarFig = applyDarkTheme(JSON.parse(d.solar_forecast_fig), 'Instraling [W/m2]');
       Plotly.react('chart-solar', solarFig.data, solarFig.layout, CFG);
 
       // ── Heating degree hours chart ─────────────────────────────────────

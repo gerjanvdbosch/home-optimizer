@@ -94,15 +94,15 @@ def test_dashboard_html_contains_optimizer_mpc_forecast_section() -> None:
     assert "/api/optimizer/latest" in html
 
 
-def test_dashboard_html_builds_solar_chart_from_actual_pv_gti_arrays() -> None:
-    """Dashboard JS must render the solar chart from both GTI arrays returned by the API."""
+def test_dashboard_html_uses_api_solar_figure_for_gti_chart() -> None:
+    """Dashboard JS must render the GTI chart from the forecast API figure JSON."""
     response = client.get("/")
 
     assert response.status_code == 200
     html = response.text
-    assert "function buildSolarFig(labels, gtiWindow, gtiPv)" in html
-    assert "buildSolarFig(d.labels, gtis, gtipv)" in html
-    assert "name: 'GTI PV-panelen [W/m²]'" in html
+    assert "JSON.parse(d.solar_forecast_fig)" in html
+    assert "Plotly.react('chart-solar', solarFig.data, solarFig.layout, CFG);" in html
+    assert "function buildSolarFig(labels, gtiWindow, gtiPv)" not in html
 
 
 def test_optimizer_latest_returns_404_without_scheduled_run() -> None:
