@@ -277,8 +277,19 @@ def _apply_calibration_overrides(
     base_request: RunRequest,
     overrides: CalibrationParameterOverrides,
 ) -> RunRequest:
-    """Return a request copy with the current effective calibration overrides applied."""
-    return merge_run_request_updates(base_request, overrides.as_run_request_updates())
+    """Return a field-validated request copy for building calibration references.
+
+    Automatic calibration may need to operate on telemetry replay timesteps that
+    differ from the runtime MPC timestep. Therefore this helper intentionally
+    performs only Pydantic field validation and does *not* enforce the coupled
+    runtime Euler-stability checks. Runtime safety is enforced later, when newly
+    fitted stage overrides are considered for persistence via
+    ``_merge_runtime_safe_stage_overrides``.
+    """
+    updates = overrides.as_run_request_updates()
+    if not updates:
+        return base_request
+    return RunRequest.model_validate({**base_request.model_dump(mode="python"), **updates})
 
 
 def _merge_runtime_safe_stage_overrides(

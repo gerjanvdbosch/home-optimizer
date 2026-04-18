@@ -1631,6 +1631,92 @@ def test_build_dhw_active_calibration_dataset_splits_contiguous_runs() -> None:
     assert [sample.segment_index for sample in dataset.samples] == [0, 0, 1, 1]
 
 
+def test_build_dhw_active_calibration_dataset_keeps_small_bucket_jitter() -> None:
+    """Active-DHW calibration must keep informative no-draw runs despite mild dt jitter."""
+    reference_parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=12.0,
+        R_loss=50.0,
+    )
+    start = datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=47.8,
+            dhw_bottom_temperature_last_c=41.0,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5, seconds=20),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.1,
+            dhw_bottom_temperature_last_c=42.2,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.4,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10, seconds=5),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.4,
+            dhw_bottom_temperature_last_c=43.5,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.5,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15, seconds=25),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.8,
+            dhw_bottom_temperature_last_c=44.9,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.6,
+        ),
+    ]
+
+    dataset = build_dhw_active_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=DHWActiveCalibrationSettings(
+            reference_parameters=reference_parameters,
+            min_sample_count=3,
+            min_segment_samples=3,
+            min_dhw_power_kw=0.5,
+            min_layer_temperature_spread_c=2.0,
+            max_implied_tap_m3_per_h=0.02,
+            min_segment_delivered_energy_kwh=0.2,
+            min_segment_mean_layer_spread_c=2.0,
+            min_segment_layer_spread_span_c=0.1,
+            min_segment_bottom_temperature_rise_c=0.2,
+            min_segment_top_temperature_rise_c=0.1,
+        ),
+    )
+
+    assert dataset.sample_count == 3
+    np.testing.assert_allclose(
+        [sample.dt_hours for sample in dataset.samples],
+        [
+            (aggregates[1].bucket_end_utc - aggregates[0].bucket_end_utc).total_seconds() / 3600.0,
+            (aggregates[2].bucket_end_utc - aggregates[1].bucket_end_utc).total_seconds() / 3600.0,
+            (aggregates[3].bucket_end_utc - aggregates[2].bucket_end_utc).total_seconds() / 3600.0,
+        ],
+        rtol=1e-12,
+    )
+
+
 def test_build_dhw_active_calibration_dataset_drops_weak_segments() -> None:
     """Weak but no-draw DHW runs must be dropped by the richer segment-quality filter."""
     reference_parameters = DHWParameters(
@@ -1927,6 +2013,81 @@ def test_calibrate_dhw_active_stratification_recovers_synthetic_r_strat() -> Non
     np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, rtol=5e-2)
     np.testing.assert_allclose(result.fitted_parameters.R_loss, true_parameters.R_loss, rtol=1e-12)
     assert result.segment_count == 1
+    assert result.rmse_t_top_c < 1e-6
+    assert result.rmse_t_bot_c < 1e-6
+
+
+def test_calibrate_dhw_active_stratification_recovers_synthetic_r_strat_with_variable_dt() -> None:
+    """Active-DHW calibration must recover ``R_strat`` when persisted bucket dt jitters slightly."""
+    dt_hours_sequence = (5.0 / 60.0, 4.0 / 60.0, 6.0 / 60.0, 5.5 / 60.0) * 24
+    true_parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=14.0,
+        R_loss=50.0,
+    )
+    reference_parameters = DHWParameters(
+        dt_hours=true_parameters.dt_hours,
+        C_top=true_parameters.C_top,
+        C_bot=true_parameters.C_bot,
+        R_strat=10.0,
+        R_loss=true_parameters.R_loss,
+    )
+    start = datetime(2026, 1, 2, 0, 0, tzinfo=timezone.utc)
+    state = np.array([47.0, 41.0], dtype=float)
+    samples: list[DHWActiveCalibrationSample] = []
+    current_time = start
+    for step_k, dt_hours in enumerate(dt_hours_sequence):
+        interval_start = current_time
+        interval_end = interval_start + timedelta(hours=dt_hours)
+        control_kw = 2.0 + 0.35 * np.sin(step_k / 8.0) + 0.12 * np.cos(step_k / 11.0)
+        t_mains_c = 10.0 + 0.3 * np.sin(step_k / 20.0)
+        t_amb_c = 20.0 + 0.2 * np.cos(step_k / 18.0)
+        next_state = DHWModel(
+            DHWParameters(
+                dt_hours=dt_hours,
+                C_top=true_parameters.C_top,
+                C_bot=true_parameters.C_bot,
+                R_strat=true_parameters.R_strat,
+                R_loss=true_parameters.R_loss,
+            )
+        ).step(
+            state=state,
+            control_kw=control_kw,
+            v_tap_m3_per_h=0.0,
+            t_mains_c=t_mains_c,
+            t_amb_c=t_amb_c,
+        )
+        samples.append(
+            DHWActiveCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=dt_hours,
+                t_top_start_c=float(state[0]),
+                t_top_end_c=float(next_state[0]),
+                t_bot_start_c=float(state[1]),
+                t_bot_end_c=float(next_state[1]),
+                p_dhw_mean_kw=control_kw,
+                t_mains_c=t_mains_c,
+                t_amb_c=t_amb_c,
+                implied_v_tap_m3_per_h=0.0,
+                segment_index=0,
+            )
+        )
+        state = next_state
+        current_time = interval_end
+
+    dataset = DHWActiveCalibrationDataset(samples=tuple(samples))
+    settings = DHWActiveCalibrationSettings(
+        reference_parameters=reference_parameters,
+        min_sample_count=24,
+        min_segment_samples=4,
+    )
+
+    result = calibrate_dhw_active_stratification(dataset, settings)
+
+    np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, rtol=5e-2)
     assert result.rmse_t_top_c < 1e-6
     assert result.rmse_t_bot_c < 1e-6
 

@@ -102,6 +102,11 @@ def _implied_v_tap_m3_per_h(
 
         V_tap = (P_dhw - Q_loss - ΔE/Δt) / (λ·(T_top - T_mains))
 
+    The standby-loss term and outlet temperature are evaluated on interval means
+    instead of start-of-interval values. This reduces systematic false positives
+    from measurement noise and from the fact that persisted telemetry buckets
+    represent finite windows rather than infinitesimal samples.
+
     The result is projected onto the physically feasible set ``V_tap ≥ 0`` before
     use in dataset filtering. Negative implied draw would be non-physical and is
     interpreted here as measurement/model noise rather than a real tap event.
@@ -120,8 +125,10 @@ def _implied_v_tap_m3_per_h(
         c_bot_kwh_per_k=p.C_bot,
     )
     delta_energy_rate_kw = (end_energy_kwh - start_energy_kwh) / dt_hours
-    q_loss_kw = (t_top_start_c - t_amb_c) / p.R_loss + (t_bot_start_c - t_amb_c) / p.R_loss
-    tap_denominator = p.lambda_water * (t_top_start_c - t_mains_c)
+    mean_t_top_c = 0.5 * (t_top_start_c + t_top_end_c)
+    mean_t_bot_c = 0.5 * (t_bot_start_c + t_bot_end_c)
+    q_loss_kw = (mean_t_top_c - t_amb_c) / p.R_loss + (mean_t_bot_c - t_amb_c) / p.R_loss
+    tap_denominator = p.lambda_water * (mean_t_top_c - t_mains_c)
     if tap_denominator <= 0.0:
         return float("inf")
     implied_v_tap = (p_dhw_mean_kw - q_loss_kw - delta_energy_rate_kw) / tap_denominator
@@ -862,8 +869,6 @@ def build_dhw_active_calibration_dataset(
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
     raw_segments: list[list[DHWActiveCalibrationSample]] = []
     current_segment_samples: list[DHWActiveCalibrationSample] = []
-    dt_reference_hours = settings.reference_parameters.dt_hours
-
     def flush_current_segment() -> None:
         nonlocal current_segment_samples
         if len(current_segment_samples) >= settings.min_segment_samples:
@@ -966,8 +971,9 @@ def build_dhw_active_calibration_dataset(
         dt_hours = (next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds() / _SECONDS_PER_HOUR
         if dt_hours <= 0.0 or dt_hours > settings.max_pair_dt_hours:
             pair_is_valid = False
-        if abs(dt_hours - dt_reference_hours) > settings.dt_compatibility_tolerance_hours:
-            pair_is_valid = False
+        # Active-DHW replay uses the exact sample-specific ``dt_hours`` stored in
+        # each sample, so small persisted-bucket jitter is physically acceptable.
+        # Only non-positive or excessively large gaps are rejected here.
 
         p_dhw_mean_kw = float(next_row.hp_thermal_power_mean_kw)
         if p_dhw_mean_kw < settings.min_dhw_power_kw:

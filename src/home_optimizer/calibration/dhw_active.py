@@ -55,6 +55,7 @@ _MIN_REGULARIZATION_SCALE: float = 1e-9
 class _ActiveCalibrationArrays:
     """Vectorised numerical view of the active DHW replay dataset."""
 
+    dt_hours: np.ndarray
     t_top_start_c: np.ndarray
     t_top_end_c: np.ndarray
     t_bot_start_c: np.ndarray
@@ -97,6 +98,7 @@ def _as_arrays(dataset: DHWActiveCalibrationDataset) -> _ActiveCalibrationArrays
     """Convert immutable replay samples into NumPy arrays for optimisation."""
     samples = dataset.samples
     return _ActiveCalibrationArrays(
+        dt_hours=np.array([sample.dt_hours for sample in samples], dtype=float),
         t_top_start_c=np.array([sample.t_top_start_c for sample in samples], dtype=float),
         t_top_end_c=np.array([sample.t_top_end_c for sample in samples], dtype=float),
         t_bot_start_c=np.array([sample.t_bot_start_c for sample in samples], dtype=float),
@@ -154,11 +156,24 @@ def _replay_with_parameters(
     arrays: _ActiveCalibrationArrays,
     parameters: DHWParameters,
 ) -> _ReplayDiagnostics:
-    """Replay one-step DHW transitions with ``V_tap = 0`` and collect residuals."""
-    model = DHWModel(parameters)
+    """Replay one-step DHW transitions with ``V_tap = 0`` and collect residuals.
+
+    Each persisted telemetry interval carries its own ``dt_hours``. The replay
+    therefore reconstructs the DHW model per sample so mild bucket jitter does
+    not force the dataset builder to reject otherwise informative no-draw runs.
+    """
     t_top_residuals: list[float] = []
     t_bot_residuals: list[float] = []
     for index in range(arrays.t_top_end_c.size):
+        sample_parameters = DHWParameters(
+            dt_hours=float(arrays.dt_hours[index]),
+            C_top=parameters.C_top,
+            C_bot=parameters.C_bot,
+            R_strat=parameters.R_strat,
+            R_loss=parameters.R_loss,
+            lambda_water=parameters.lambda_water,
+        )
+        model = DHWModel(sample_parameters)
         predicted_state = model.step(
             state=np.array([arrays.t_top_start_c[index], arrays.t_bot_start_c[index]], dtype=float),
             control_kw=float(arrays.p_dhw_mean_kw[index]),
