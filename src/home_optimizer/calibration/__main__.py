@@ -13,6 +13,12 @@ from .models import (
     DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_DHW_POWER_KW,
     DEFAULT_MIN_DHW_SEGMENT_SAMPLES,
+    DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C,
+    DEFAULT_MIN_DHW_SEGMENT_DELIVERED_ENERGY_KWH,
+    DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C,
+    DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C,
+    DEFAULT_MIN_DHW_SEGMENT_SCORE,
+    DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C,
     DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_UFH_POWER_KW,
     DEFAULT_MIN_SEGMENT_SAMPLES,
@@ -124,6 +130,48 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MIN_DHW_SEGMENT_SAMPLES,
         help="Minimum number of replay samples per contiguous active DHW run [-].",
+    )
+    parser.add_argument(
+        "--dhw-min-segment-delivered-energy-kwh",
+        type=float,
+        default=DEFAULT_MIN_DHW_SEGMENT_DELIVERED_ENERGY_KWH,
+        help="Minimum delivered DHW charging energy within an active-DHW segment [kWh].",
+    )
+    parser.add_argument(
+        "--dhw-min-segment-mean-layer-spread-c",
+        type=float,
+        default=DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C,
+        help="Minimum mean |T_top − T_bot| required within an active-DHW segment [°C].",
+    )
+    parser.add_argument(
+        "--dhw-min-segment-layer-spread-span-c",
+        type=float,
+        default=DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C,
+        help="Minimum range of |T_top − T_bot| required within an active-DHW segment [°C].",
+    )
+    parser.add_argument(
+        "--dhw-min-segment-bottom-rise-c",
+        type=float,
+        default=DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C,
+        help="Minimum net bottom-layer temperature rise required within an active-DHW segment [°C].",
+    )
+    parser.add_argument(
+        "--dhw-min-segment-top-rise-c",
+        type=float,
+        default=DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C,
+        help="Minimum net top-layer temperature rise required within an active-DHW segment [°C].",
+    )
+    parser.add_argument(
+        "--dhw-min-segment-score",
+        type=float,
+        default=DEFAULT_MIN_DHW_SEGMENT_SCORE,
+        help="Minimum dimensionless quality score required for an active-DHW segment to be selected [-].",
+    )
+    parser.add_argument(
+        "--dhw-max-selected-segments",
+        type=int,
+        default=None,
+        help="Optional cap on the number of retained active-DHW segments; best-scoring runs are kept.",
     )
     parser.add_argument(
         "--fit-c-r",
@@ -352,6 +400,13 @@ def main() -> None:
             min_dhw_power_kw=args.dhw_min_power_kw,
             min_layer_temperature_spread_c=args.dhw_min_layer_spread_c,
             max_implied_tap_m3_per_h=args.dhw_max_implied_tap_m3_per_h,
+            min_segment_delivered_energy_kwh=args.dhw_min_segment_delivered_energy_kwh,
+            min_segment_mean_layer_spread_c=args.dhw_min_segment_mean_layer_spread_c,
+            min_segment_layer_spread_span_c=args.dhw_min_segment_layer_spread_span_c,
+            min_segment_bottom_temperature_rise_c=args.dhw_min_segment_bottom_rise_c,
+            min_segment_top_temperature_rise_c=args.dhw_min_segment_top_rise_c,
+            min_segment_score=args.dhw_min_segment_score,
+            max_selected_segments=args.dhw_max_selected_segments,
         )
         dataset = build_dhw_active_dataset_from_repository(repository, settings)
         result = calibrate_dhw_active_from_repository(repository, settings)
@@ -360,6 +415,8 @@ def main() -> None:
             "dataset": {
                 "sample_count": dataset.sample_count,
                 "segment_count": dataset.segment_count,
+                "raw_segment_count": dataset.raw_segment_count,
+                "dropped_segment_count": dataset.dropped_segment_count,
                 "start_utc": dataset.start_utc.isoformat(),
                 "end_utc": dataset.end_utc.isoformat(),
             },
@@ -421,6 +478,8 @@ def main() -> None:
         print("===================================")
         print(f"Samples          : {dataset.sample_count}")
         print(f"Segments         : {dataset.segment_count}")
+        print(f"Raw segments     : {dataset.raw_segment_count}")
+        print(f"Dropped segments : {dataset.dropped_segment_count}")
         print(f"Window           : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
         print(f"R_strat          : {result.fitted_parameters.R_strat:.6f} K/kW")
         print(f"R_loss (fixed)   : {result.fitted_parameters.R_loss:.6f} K/kW")

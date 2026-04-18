@@ -11,6 +11,7 @@ from .dhw_standby import calibrate_dhw_standby_loss
 from .models import (
     DHWActiveCalibrationDataset,
     DHWActiveCalibrationResult,
+    DHWActiveCalibrationSegmentQuality,
     DHWActiveCalibrationSample,
     DHWActiveCalibrationSettings,
     DHWStandbyCalibrationDataset,
@@ -43,6 +44,7 @@ from .ufh_offline import calibrate_ufh_off_envelope
 __all__ = [
     "DHWActiveCalibrationDataset",
     "DHWActiveCalibrationResult",
+    "DHWActiveCalibrationSegmentQuality",
     "DHWActiveCalibrationSample",
     "DHWActiveCalibrationSettings",
     "UFHActiveCalibrationDataset",

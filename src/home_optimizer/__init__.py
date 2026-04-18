@@ -17,6 +17,7 @@ from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParamet
 from .calibration import (
     DHWActiveCalibrationDataset,
     DHWActiveCalibrationResult,
+    DHWActiveCalibrationSegmentQuality,
     DHWActiveCalibrationSample,
     DHWActiveCalibrationSettings,
     build_dhw_active_calibration_dataset,
@@ -80,6 +81,7 @@ __all__ = [
     "CombinedMPCParameters",
     "DHWActiveCalibrationDataset",
     "DHWActiveCalibrationResult",
+    "DHWActiveCalibrationSegmentQuality",
     "DHWActiveCalibrationSample",
     "DHWActiveCalibrationSettings",
     "DHWStandbyCalibrationDataset",

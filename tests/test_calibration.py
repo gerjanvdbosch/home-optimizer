@@ -318,11 +318,18 @@ def test_build_dhw_active_calibration_dataset_filters_to_no_draw_dhw_windows() -
             min_dhw_power_kw=0.5,
             min_layer_temperature_spread_c=2.0,
             max_implied_tap_m3_per_h=0.01,
+            min_segment_delivered_energy_kwh=0.1,
+            min_segment_mean_layer_spread_c=2.0,
+            min_segment_layer_spread_span_c=0.1,
+            min_segment_bottom_temperature_rise_c=0.1,
+            min_segment_top_temperature_rise_c=0.1,
         ),
     )
 
     assert dataset.sample_count == 2
     assert dataset.segment_count == 1
+    assert dataset.raw_segment_count == 1
+    assert dataset.dropped_segment_count == 0
     assert all(sample.implied_v_tap_m3_per_h <= 0.01 for sample in dataset.samples)
     assert dataset.samples[0].t_top_start_c == 48.0
     assert dataset.samples[1].t_bot_end_c == 45.8
@@ -427,12 +434,252 @@ def test_build_dhw_active_calibration_dataset_splits_contiguous_runs() -> None:
             min_dhw_power_kw=0.5,
             min_layer_temperature_spread_c=2.0,
             max_implied_tap_m3_per_h=0.01,
+            min_segment_delivered_energy_kwh=0.1,
+            min_segment_mean_layer_spread_c=2.0,
+            min_segment_layer_spread_span_c=0.1,
+            min_segment_bottom_temperature_rise_c=0.1,
+            min_segment_top_temperature_rise_c=0.1,
         ),
     )
 
     assert dataset.sample_count == 4
     assert dataset.segment_count == 2
+    assert dataset.raw_segment_count == 2
+    assert dataset.dropped_segment_count == 0
     assert [sample.segment_index for sample in dataset.samples] == [0, 0, 1, 1]
+
+
+def test_build_dhw_active_calibration_dataset_drops_weak_segments() -> None:
+    """Weak but no-draw DHW runs must be dropped by the richer segment-quality filter."""
+    reference_parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=12.0,
+        R_loss=50.0,
+    )
+    start = datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.0,
+            dhw_bottom_temperature_last_c=42.5,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.1,
+            dhw_bottom_temperature_last_c=42.7,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.8,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.15,
+            dhw_bottom_temperature_last_c=42.8,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.85,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.15,
+            dhw_bottom_temperature_last_c=42.8,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.0,
+            dhw_bottom_temperature_last_c=41.0,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.9,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=25),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.5,
+            dhw_bottom_temperature_last_c=43.8,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.6,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=30),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=49.0,
+            dhw_bottom_temperature_last_c=45.6,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.8,
+        ),
+    ]
+
+    dataset = build_dhw_active_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=DHWActiveCalibrationSettings(
+            reference_parameters=reference_parameters,
+            min_sample_count=2,
+            min_segment_samples=2,
+            min_dhw_power_kw=0.5,
+            min_layer_temperature_spread_c=2.0,
+            max_implied_tap_m3_per_h=0.05,
+            min_segment_delivered_energy_kwh=0.2,
+            min_segment_mean_layer_spread_c=3.0,
+            min_segment_layer_spread_span_c=0.3,
+            min_segment_bottom_temperature_rise_c=0.5,
+            min_segment_top_temperature_rise_c=0.2,
+        ),
+    )
+
+    assert dataset.raw_segment_count == 2
+    assert dataset.segment_count == 1
+    assert dataset.dropped_segment_count == 1
+    assert [sample.segment_index for sample in dataset.samples] == [0, 0]
+    kept_quality = [quality for quality in dataset.segment_qualities if quality.selected][0]
+    dropped_quality = [quality for quality in dataset.segment_qualities if not quality.selected][0]
+    assert kept_quality.bottom_temperature_rise_c > dropped_quality.bottom_temperature_rise_c
+
+
+def test_build_dhw_active_calibration_dataset_keeps_best_segments_when_capped() -> None:
+    """Top-N active-DHW segment selection must keep the highest-scoring informative runs."""
+    reference_parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=12.0,
+        R_loss=50.0,
+    )
+    start = datetime(2026, 4, 18, 1, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.0,
+            dhw_bottom_temperature_last_c=42.0,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.2,
+            dhw_bottom_temperature_last_c=43.0,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=1.2,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.35,
+            dhw_bottom_temperature_last_c=43.7,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=1.3,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.35,
+            dhw_bottom_temperature_last_c=43.7,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.0,
+            dhw_bottom_temperature_last_c=40.5,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=1.6,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=25),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.5,
+            dhw_bottom_temperature_last_c=43.8,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.8,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=30),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=49.1,
+            dhw_bottom_temperature_last_c=45.9,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=3.0,
+        ),
+    ]
+
+    dataset = build_dhw_active_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=DHWActiveCalibrationSettings(
+            reference_parameters=reference_parameters,
+            min_sample_count=2,
+            min_segment_samples=2,
+            min_dhw_power_kw=0.5,
+            min_layer_temperature_spread_c=2.0,
+            max_implied_tap_m3_per_h=0.05,
+            min_segment_delivered_energy_kwh=0.1,
+            min_segment_mean_layer_spread_c=2.0,
+            min_segment_layer_spread_span_c=0.1,
+            min_segment_bottom_temperature_rise_c=0.1,
+            min_segment_top_temperature_rise_c=0.1,
+            max_selected_segments=1,
+        ),
+    )
+
+    assert dataset.raw_segment_count == 2
+    assert dataset.segment_count == 1
+    assert dataset.dropped_segment_count == 1
+    selected_scores = [quality.score for quality in dataset.segment_qualities if quality.selected]
+    dropped_scores = [quality.score for quality in dataset.segment_qualities if not quality.selected]
+    assert selected_scores[0] > dropped_scores[0]
+    assert dataset.samples[0].t_bot_start_c == 40.5
 
 
 def test_calibrate_dhw_active_stratification_recovers_synthetic_r_strat() -> None:

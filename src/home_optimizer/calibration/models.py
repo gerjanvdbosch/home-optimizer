@@ -61,6 +61,19 @@ DEFAULT_MIN_DHW_POWER_KW: float = 0.25
 DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 3.0
 DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H: float = 0.002
 DEFAULT_MIN_DHW_SEGMENT_SAMPLES: int = 4
+DEFAULT_MIN_DHW_SEGMENT_DELIVERED_ENERGY_KWH: float = 0.6
+DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C: float = 3.5
+DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C: float = 0.5
+DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C: float = 0.5
+DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C: float = 0.1
+DEFAULT_MIN_DHW_SEGMENT_SCORE: float = 0.0
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT: float = 1.0
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_DELIVERED_ENERGY: float = 1.0
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_MEAN_LAYER_SPREAD: float = 1.0
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_LAYER_SPREAD_SPAN: float = 1.0
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_BOTTOM_TEMPERATURE_RISE: float = 1.0
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TOP_TEMPERATURE_RISE: float = 0.5
+DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN: float = 0.5
 
 from ..types import DHWParameters, ThermalParameters
 
@@ -407,10 +420,71 @@ class DHWActiveCalibrationSample:
 
 
 @dataclass(frozen=True, slots=True)
+class DHWActiveCalibrationSegmentQuality:
+    """Quality diagnostics for one raw contiguous active-DHW replay segment.
+
+    Attributes:
+        raw_segment_index: Zero-based index before selection/reranking [-].
+        selected_segment_index: Zero-based index after selection/reranking, or
+            ``None`` if the segment was dropped [-].
+        selected: Whether this segment survives the quality filter [-].
+        sample_count: Number of replay transitions in the raw segment [-].
+        duration_hours: Total segment duration [h].
+        delivered_energy_kwh: Integrated DHW charging energy over the segment [kWh].
+        mean_layer_spread_c: Mean ``|T_top - T_bot|`` over the segment [°C].
+        layer_spread_span_c: Range of ``|T_top - T_bot|`` over the segment [°C].
+        bottom_temperature_rise_c: Net bottom-layer temperature rise over the segment [°C].
+        top_temperature_rise_c: Net top-layer temperature rise over the segment [°C].
+        p95_implied_v_tap_m3_per_h: 95th percentile of implied tap flow over the segment [m³/h].
+        max_implied_v_tap_m3_per_h: Maximum implied tap flow over the segment [m³/h].
+        score: Dimensionless quality score used for ranking [-].
+    """
+
+    raw_segment_index: int
+    selected_segment_index: int | None
+    selected: bool
+    sample_count: int
+    duration_hours: float
+    delivered_energy_kwh: float
+    mean_layer_spread_c: float
+    layer_spread_span_c: float
+    bottom_temperature_rise_c: float
+    top_temperature_rise_c: float
+    p95_implied_v_tap_m3_per_h: float
+    max_implied_v_tap_m3_per_h: float
+    score: float
+
+    def __post_init__(self) -> None:
+        if self.raw_segment_index < 0:
+            raise ValueError("raw_segment_index must be non-negative.")
+        if self.selected_segment_index is not None and self.selected_segment_index < 0:
+            raise ValueError("selected_segment_index must be non-negative when present.")
+        if self.sample_count <= 0:
+            raise ValueError("sample_count must be strictly positive.")
+        if self.duration_hours <= 0.0:
+            raise ValueError("duration_hours must be strictly positive.")
+        for name in (
+            "delivered_energy_kwh",
+            "mean_layer_spread_c",
+            "layer_spread_span_c",
+            "p95_implied_v_tap_m3_per_h",
+            "max_implied_v_tap_m3_per_h",
+            "score",
+        ):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be non-negative.")
+        if self.selected and self.selected_segment_index is None:
+            raise ValueError("selected segments must expose selected_segment_index.")
+        if not self.selected and self.selected_segment_index is not None:
+            raise ValueError("Dropped segments may not expose selected_segment_index.")
+
+
+@dataclass(frozen=True, slots=True)
 class DHWActiveCalibrationDataset:
     """Collection of active DHW no-draw replay samples used for R_strat fitting."""
 
     samples: tuple[DHWActiveCalibrationSample, ...]
+    segment_qualities: tuple[DHWActiveCalibrationSegmentQuality, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.samples:
@@ -423,6 +497,18 @@ class DHWActiveCalibrationDataset:
                 raise ValueError("segment_index must be non-decreasing across the dataset.")
             if next_index - previous_index > 1:
                 raise ValueError("segment_index increments may not skip values.")
+        if self.segment_qualities:
+            raw_indices = [quality.raw_segment_index for quality in self.segment_qualities]
+            if raw_indices != list(range(len(raw_indices))):
+                raise ValueError("segment_qualities raw_segment_index values must be contiguous from 0.")
+            selected_indices_from_samples = sorted(set(segment_indices))
+            selected_indices_from_quality = [
+                quality.selected_segment_index for quality in self.segment_qualities if quality.selected
+            ]
+            if selected_indices_from_quality != selected_indices_from_samples:
+                raise ValueError(
+                    "Selected segment indices in segment_qualities must match dataset sample.segment_index values."
+                )
 
     @property
     def sample_count(self) -> int:
@@ -443,6 +529,16 @@ class DHWActiveCalibrationDataset:
     def segment_count(self) -> int:
         """Number of contiguous active DHW replay runs represented in the dataset [-]."""
         return self.samples[-1].segment_index + 1
+
+    @property
+    def raw_segment_count(self) -> int:
+        """Number of raw contiguous active-DHW runs evaluated before quality selection [-]."""
+        return len(self.segment_qualities) if self.segment_qualities else self.segment_count
+
+    @property
+    def dropped_segment_count(self) -> int:
+        """Number of raw active-DHW segments rejected by the quality-selection policy [-]."""
+        return self.raw_segment_count - self.segment_count
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,6 +564,20 @@ class DHWActiveCalibrationSettings:
     min_dhw_power_kw: float = DEFAULT_MIN_DHW_POWER_KW
     min_layer_temperature_spread_c: float = DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C
     max_implied_tap_m3_per_h: float = DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H
+    min_segment_delivered_energy_kwh: float = DEFAULT_MIN_DHW_SEGMENT_DELIVERED_ENERGY_KWH
+    min_segment_mean_layer_spread_c: float = DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C
+    min_segment_layer_spread_span_c: float = DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C
+    min_segment_bottom_temperature_rise_c: float = DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C
+    min_segment_top_temperature_rise_c: float = DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C
+    min_segment_score: float = DEFAULT_MIN_DHW_SEGMENT_SCORE
+    max_selected_segments: int | None = None
+    segment_score_weight_sample_count: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT
+    segment_score_weight_delivered_energy: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_DELIVERED_ENERGY
+    segment_score_weight_mean_layer_spread: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_MEAN_LAYER_SPREAD
+    segment_score_weight_layer_spread_span: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_LAYER_SPREAD_SPAN
+    segment_score_weight_bottom_temperature_rise: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_BOTTOM_TEMPERATURE_RISE
+    segment_score_weight_top_temperature_rise: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TOP_TEMPERATURE_RISE
+    segment_score_weight_tap_margin: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN
     min_parameter_ratio: float = DEFAULT_MIN_PARAMETER_RATIO
     max_parameter_ratio: float = DEFAULT_MAX_PARAMETER_RATIO
     regularization_weight: float = DEFAULT_REGULARIZATION_WEIGHT
@@ -482,12 +592,26 @@ class DHWActiveCalibrationSettings:
             "min_dhw_power_kw",
             "min_layer_temperature_spread_c",
             "max_implied_tap_m3_per_h",
+            "min_segment_delivered_energy_kwh",
+            "min_segment_mean_layer_spread_c",
+            "min_segment_layer_spread_span_c",
+            "min_segment_bottom_temperature_rise_c",
+            "min_segment_top_temperature_rise_c",
             "min_parameter_ratio",
             "max_parameter_ratio",
             "regularization_scale_ratio",
+            "segment_score_weight_sample_count",
+            "segment_score_weight_delivered_energy",
+            "segment_score_weight_mean_layer_spread",
+            "segment_score_weight_layer_spread_span",
+            "segment_score_weight_bottom_temperature_rise",
+            "segment_score_weight_top_temperature_rise",
+            "segment_score_weight_tap_margin",
         ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be strictly positive.")
+        if self.min_segment_score < 0.0:
+            raise ValueError("min_segment_score must be non-negative.")
         if self.max_defrost_active_fraction < 0.0 or self.max_defrost_active_fraction > 1.0:
             raise ValueError("max_defrost_active_fraction must be in [0, 1].")
         if self.max_booster_active_fraction < 0.0 or self.max_booster_active_fraction > 1.0:
@@ -498,6 +622,8 @@ class DHWActiveCalibrationSettings:
             raise ValueError("min_segment_samples must be at least 2.")
         if self.min_segment_samples > self.min_sample_count:
             raise ValueError("min_segment_samples must be <= min_sample_count.")
+        if self.max_selected_segments is not None and self.max_selected_segments <= 0:
+            raise ValueError("max_selected_segments must be strictly positive when provided.")
         if self.min_parameter_ratio >= self.max_parameter_ratio:
             raise ValueError("min_parameter_ratio must be < max_parameter_ratio.")
         if self.regularization_weight < 0.0:

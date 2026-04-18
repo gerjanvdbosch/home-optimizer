@@ -16,6 +16,7 @@ import numpy as np
 
 from .models import (
     DHWActiveCalibrationDataset,
+    DHWActiveCalibrationSegmentQuality,
     DHWActiveCalibrationSample,
     DHWActiveCalibrationSettings,
     DHWStandbyCalibrationDataset,
@@ -301,6 +302,84 @@ def build_dhw_active_calibration_dataset(
             raw_segments.append(current_segment_samples)
         current_segment_samples = []
 
+    def meets_threshold(value: float, lower_bound: float) -> bool:
+        """Return whether a metric satisfies a configured lower bound."""
+        return value > lower_bound or bool(np.isclose(value, lower_bound))
+
+    def compute_segment_quality(
+        raw_segment_index: int,
+        segment_samples: list[DHWActiveCalibrationSample],
+    ) -> DHWActiveCalibrationSegmentQuality:
+        top_temperatures = np.array(
+            [segment_samples[0].t_top_start_c] + [sample.t_top_end_c for sample in segment_samples],
+            dtype=float,
+        )
+        bot_temperatures = np.array(
+            [segment_samples[0].t_bot_start_c] + [sample.t_bot_end_c for sample in segment_samples],
+            dtype=float,
+        )
+        layer_spreads = np.abs(top_temperatures - bot_temperatures)
+        delivered_energy_kwh = float(
+            sum(sample.p_dhw_mean_kw * sample.dt_hours for sample in segment_samples)
+        )
+        implied_v_taps = np.array(
+            [sample.implied_v_tap_m3_per_h for sample in segment_samples],
+            dtype=float,
+        )
+
+        sample_count = len(segment_samples)
+        duration_hours = float(sum(sample.dt_hours for sample in segment_samples))
+        mean_layer_spread_c = float(np.mean(layer_spreads))
+        layer_spread_span_c = float(np.max(layer_spreads) - np.min(layer_spreads))
+        bottom_temperature_rise_c = float(bot_temperatures[-1] - bot_temperatures[0])
+        top_temperature_rise_c = float(top_temperatures[-1] - top_temperatures[0])
+        p95_implied_v_tap_m3_per_h = float(np.percentile(implied_v_taps, 95))
+        max_implied_v_tap_m3_per_h = float(np.max(implied_v_taps))
+        tap_margin = max(
+            0.0,
+            1.0 - p95_implied_v_tap_m3_per_h / settings.max_implied_tap_m3_per_h,
+        )
+
+        score = (
+            settings.segment_score_weight_sample_count * (sample_count / settings.min_segment_samples)
+            + settings.segment_score_weight_delivered_energy
+            * (delivered_energy_kwh / settings.min_segment_delivered_energy_kwh)
+            + settings.segment_score_weight_mean_layer_spread
+            * (mean_layer_spread_c / settings.min_segment_mean_layer_spread_c)
+            + settings.segment_score_weight_layer_spread_span
+            * (layer_spread_span_c / settings.min_segment_layer_spread_span_c)
+            + settings.segment_score_weight_bottom_temperature_rise
+            * (bottom_temperature_rise_c / settings.min_segment_bottom_temperature_rise_c)
+            + settings.segment_score_weight_top_temperature_rise
+            * (top_temperature_rise_c / settings.min_segment_top_temperature_rise_c)
+            + settings.segment_score_weight_tap_margin * tap_margin
+        )
+        passes_hard_thresholds = (
+            sample_count >= settings.min_segment_samples
+            and meets_threshold(delivered_energy_kwh, settings.min_segment_delivered_energy_kwh)
+            and meets_threshold(mean_layer_spread_c, settings.min_segment_mean_layer_spread_c)
+            and meets_threshold(layer_spread_span_c, settings.min_segment_layer_spread_span_c)
+            and meets_threshold(bottom_temperature_rise_c, settings.min_segment_bottom_temperature_rise_c)
+            and meets_threshold(top_temperature_rise_c, settings.min_segment_top_temperature_rise_c)
+            and p95_implied_v_tap_m3_per_h <= settings.max_implied_tap_m3_per_h
+            and meets_threshold(score, settings.min_segment_score)
+        )
+        return DHWActiveCalibrationSegmentQuality(
+            raw_segment_index=raw_segment_index,
+            selected_segment_index=raw_segment_index if passes_hard_thresholds else None,
+            selected=passes_hard_thresholds,
+            sample_count=sample_count,
+            duration_hours=duration_hours,
+            delivered_energy_kwh=delivered_energy_kwh,
+            mean_layer_spread_c=mean_layer_spread_c,
+            layer_spread_span_c=layer_spread_span_c,
+            bottom_temperature_rise_c=bottom_temperature_rise_c,
+            top_temperature_rise_c=top_temperature_rise_c,
+            p95_implied_v_tap_m3_per_h=p95_implied_v_tap_m3_per_h,
+            max_implied_v_tap_m3_per_h=max_implied_v_tap_m3_per_h,
+            score=float(score),
+        )
+
     for previous_row, next_row in zip(rows, rows[1:]):
         pair_is_valid = True
         if previous_row.hp_mode_last != settings.active_mode_name:
@@ -373,13 +452,73 @@ def build_dhw_active_calibration_dataset(
         )
 
     flush_current_segment()
-    selected_samples = tuple(sample for segment in raw_segments for sample in segment)
+    raw_segment_qualities = tuple(
+        compute_segment_quality(index, segment_samples) for index, segment_samples in enumerate(raw_segments)
+    )
+    selected_raw_indices = [quality.raw_segment_index for quality in raw_segment_qualities if quality.selected]
+    if settings.max_selected_segments is not None and len(selected_raw_indices) > settings.max_selected_segments:
+        selected_raw_indices = [
+            quality.raw_segment_index
+            for quality in sorted(
+                (quality for quality in raw_segment_qualities if quality.selected),
+                key=lambda quality: (
+                    -quality.score,
+                    quality.p95_implied_v_tap_m3_per_h,
+                    quality.raw_segment_index,
+                ),
+            )[: settings.max_selected_segments]
+        ]
+        selected_raw_indices.sort()
+
+    raw_to_selected_index = {raw_index: selected_index for selected_index, raw_index in enumerate(selected_raw_indices)}
+    selected_samples: list[DHWActiveCalibrationSample] = []
+    for raw_index in selected_raw_indices:
+        for sample in raw_segments[raw_index]:
+            selected_samples.append(
+                DHWActiveCalibrationSample(
+                    interval_start_utc=sample.interval_start_utc,
+                    interval_end_utc=sample.interval_end_utc,
+                    dt_hours=sample.dt_hours,
+                    t_top_start_c=sample.t_top_start_c,
+                    t_top_end_c=sample.t_top_end_c,
+                    t_bot_start_c=sample.t_bot_start_c,
+                    t_bot_end_c=sample.t_bot_end_c,
+                    p_dhw_mean_kw=sample.p_dhw_mean_kw,
+                    t_mains_c=sample.t_mains_c,
+                    t_amb_c=sample.t_amb_c,
+                    implied_v_tap_m3_per_h=sample.implied_v_tap_m3_per_h,
+                    segment_index=raw_to_selected_index[raw_index],
+                )
+            )
+
+    segment_qualities = tuple(
+        DHWActiveCalibrationSegmentQuality(
+            raw_segment_index=quality.raw_segment_index,
+            selected_segment_index=raw_to_selected_index.get(quality.raw_segment_index),
+            selected=quality.raw_segment_index in raw_to_selected_index,
+            sample_count=quality.sample_count,
+            duration_hours=quality.duration_hours,
+            delivered_energy_kwh=quality.delivered_energy_kwh,
+            mean_layer_spread_c=quality.mean_layer_spread_c,
+            layer_spread_span_c=quality.layer_spread_span_c,
+            bottom_temperature_rise_c=quality.bottom_temperature_rise_c,
+            top_temperature_rise_c=quality.top_temperature_rise_c,
+            p95_implied_v_tap_m3_per_h=quality.p95_implied_v_tap_m3_per_h,
+            max_implied_v_tap_m3_per_h=quality.max_implied_v_tap_m3_per_h,
+            score=quality.score,
+        )
+        for quality in raw_segment_qualities
+    )
+
     if len(selected_samples) < settings.min_sample_count:
         raise ValueError(
             "Not enough active no-draw DHW samples for stratification calibration: "
             f"required >= {settings.min_sample_count}, found {len(selected_samples)}."
         )
-    return DHWActiveCalibrationDataset(samples=selected_samples)
+    return DHWActiveCalibrationDataset(
+        samples=tuple(selected_samples),
+        segment_qualities=segment_qualities,
+    )
 
 
 def build_ufh_active_calibration_dataset(
