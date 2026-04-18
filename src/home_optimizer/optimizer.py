@@ -735,32 +735,29 @@ class Optimizer:
         else:
             t_out_arr = np.full(N, req.outdoor_temperature_c)
 
-        # ── Solar gain through windows — real Open-Meteo GTI required ───
-        # Proxy sine-curves are removed; real forecast data is mandatory.
+        # ── Solar gain through windows — real Open-Meteo GTI preferred ───
+        # Fall back to zero GTI (no solar gain) when no forecast is available.
+        # This is physically valid (cloudy sky, night) and keeps the scheduler
+        # operational even before the first Open-Meteo batch has been persisted.
         if req.gti_window_forecast is None:
-            raise ValueError(
-                "gti_window_forecast is required.  "
-                "Ensure ForecastPersister has stored at least one Open-Meteo forecast "
-                "batch before calling the MPC solver."
-            )
-        gti = np.array(req.gti_window_forecast[:N], dtype=float)
+            gti = np.zeros(N, dtype=float)
+        else:
+            gti = np.array(req.gti_window_forecast[:N], dtype=float)
         if len(gti) < N:
             gti = np.pad(gti, (0, N - len(gti)), mode="constant")
 
-        # ── PV generation — real Open-Meteo GTI_pv required when PV enabled ──
+        # ── PV generation — real Open-Meteo GTI_pv when PV enabled ──
         # P_pv = (GTI_pv [W/m²] / W_PER_KW) * pv_peak_kw [kW/kWp].
+        # Falls back to zeros when no GTI PV forecast is available yet.
         if req.pv_enabled:
             if req.gti_pv_forecast is None:
-                raise ValueError(
-                    "gti_pv_forecast is required when pv_enabled=True.  "
-                    "Ensure the OpenMeteoClient is configured with pv_tilt/pv_azimuth "
-                    "and ForecastPersister has stored a forecast batch."
-                )
-            from .types import W_PER_KW  # noqa: PLC0415
-            gti_pv = np.array(req.gti_pv_forecast[:N], dtype=float)
-            if len(gti_pv) < N:
-                gti_pv = np.pad(gti_pv, (0, N - len(gti_pv)), mode="constant")
-            pv = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
+                pv = np.zeros(N)
+            else:
+                from .types import W_PER_KW  # noqa: PLC0415
+                gti_pv = np.array(req.gti_pv_forecast[:N], dtype=float)
+                if len(gti_pv) < N:
+                    gti_pv = np.pad(gti_pv, (0, N - len(gti_pv)), mode="constant")
+                pv = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
         else:
             pv = np.zeros(N)
         # §14.1: Time-varying COP from the Carnot model + heating curve.
