@@ -48,6 +48,7 @@ from .mpc import MPCController, MPCSolution
 from .price_model import BasePriceModel, PriceConfig, build_price_model  # noqa: F401 — PriceConfig re-exported via RunRequest
 from .thermal_model import ThermalModel
 from .types import (
+    CalibrationParameterOverrides,
     CombinedMPCParameters,
     DHWForecastHorizon,
     DHWMPCParameters,
@@ -299,6 +300,120 @@ class RunRequest(BaseModel):
     cop_max: float = Field(
         7.0, ge=2.0, le=15.0, description="Upper bound on COP for fail-fast validation [-]"
     )
+
+
+_UFH_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = ("C_r", "C_b", "R_br", "R_ro")
+_DHW_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = ("dhw_R_strat", "dhw_R_loss")
+_COP_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
+    "eta_carnot",
+    "T_supply_min",
+    "heating_curve_slope",
+)
+
+
+def validate_run_request_physics(req: RunRequest) -> None:
+    """Fail fast when a fully materialised runtime request violates coupled physics.
+
+    Args:
+        req: Validated runtime request whose scalar fields already satisfy the
+            Pydantic field bounds.
+
+    Raises:
+        ValueError: If the UFH or DHW parameter tuple violates the Forward-Euler
+            stability constraints enforced by the runtime models.
+    """
+    # Implements the UFH state-space validity checks from §4/§5.
+    ThermalModel(
+        ThermalParameters(
+            dt_hours=req.dt_hours,
+            C_r=req.C_r,
+            C_b=req.C_b,
+            R_br=req.R_br,
+            R_ro=req.R_ro,
+            alpha=req.alpha,
+            eta=req.eta,
+            A_glass=req.A_glass,
+        )
+    )
+    if req.dhw_enabled:
+        # Implements the DHW Euler validity checks from §10/§11.
+        DHWModel(
+            DHWParameters(
+                dt_hours=req.dt_hours,
+                C_top=req.dhw_C_top,
+                C_bot=req.dhw_C_bot,
+                R_strat=req.dhw_R_strat,
+                R_loss=req.dhw_R_loss,
+            )
+        )
+
+
+def merge_run_request_updates(base_request: RunRequest, updates: dict[str, object]) -> RunRequest:
+    """Return a fully revalidated request after applying runtime updates.
+
+    Args:
+        base_request: Baseline request whose validated values act as defaults.
+        updates: Candidate field updates, for example calibrated parameters or
+            live sensor readings.
+
+    Returns:
+        A new validated :class:`RunRequest`.
+
+    Raises:
+        ValueError: If Pydantic validation or coupled physical runtime checks fail.
+    """
+    if not updates:
+        validate_run_request_physics(base_request)
+        return base_request
+    merged_request = RunRequest.model_validate({**base_request.model_dump(mode="python"), **updates})
+    validate_run_request_physics(merged_request)
+    return merged_request
+
+
+def sanitize_calibration_overrides(
+    base_request: RunRequest,
+    overrides: CalibrationParameterOverrides,
+) -> tuple[CalibrationParameterOverrides, dict[str, str]]:
+    """Keep only calibration override groups that remain valid for runtime MPC.
+
+    The calibrated UFH tuple ``(C_r, C_b, R_br, R_ro)`` is treated as one coupled
+    physical group. Rejecting or clipping only a single field would destroy the
+    fitted RC model, so the whole group is dropped whenever it cannot be applied
+    to the runtime request at the configured MPC timestep.
+
+    Args:
+        base_request: Baseline runtime request onto which overrides would be applied.
+        overrides: Calibrated parameter snapshot read from persistence or produced
+            by the automatic calibration scheduler.
+
+    Returns:
+        A tuple ``(accepted_overrides, rejection_reasons)`` where
+        ``accepted_overrides`` contains only the runtime-safe groups and
+        ``rejection_reasons`` maps rejected group names to explicit failure messages.
+    """
+    accepted_overrides = CalibrationParameterOverrides()
+    rejection_reasons: dict[str, str] = {}
+    override_groups: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("ufh", _UFH_CALIBRATION_OVERRIDE_FIELDS),
+        ("dhw", _DHW_CALIBRATION_OVERRIDE_FIELDS),
+        ("cop", _COP_CALIBRATION_OVERRIDE_FIELDS),
+    )
+
+    current_request = base_request
+    raw_updates = overrides.as_run_request_updates()
+    for group_name, fields in override_groups:
+        group_updates = {field: raw_updates[field] for field in fields if field in raw_updates}
+        if not group_updates:
+            continue
+        try:
+            current_request = merge_run_request_updates(current_request, group_updates)
+        except Exception as exc:  # noqa: BLE001
+            rejection_reasons[group_name] = str(exc)
+            continue
+        accepted_overrides = accepted_overrides.merged_with(
+            CalibrationParameterOverrides.model_validate(group_updates)
+        )
+    return accepted_overrides, rejection_reasons
 
 
 # ---------------------------------------------------------------------------
@@ -892,7 +1007,17 @@ class Optimizer:
             try:
                 calibration_snapshot = repository.get_latest_calibration_snapshot()
                 if calibration_snapshot is not None and calibration_snapshot.has_effective_parameters:
-                    overrides.update(calibration_snapshot.effective_parameters.as_run_request_updates())
+                    safe_overrides, rejection_reasons = sanitize_calibration_overrides(
+                        base_input,
+                        calibration_snapshot.effective_parameters,
+                    )
+                    overrides.update(safe_overrides.as_run_request_updates())
+                    for group_name, reason in rejection_reasons.items():
+                        log.warning(
+                            "Ignoring unsafe calibration override group '%s' for scheduled MPC input: %s",
+                            group_name,
+                            reason,
+                        )
             except Exception as exc:  # noqa: BLE001
                 log.warning("Calibration snapshot DB read failed: %s", exc)
 
@@ -939,6 +1064,6 @@ class Optimizer:
                 log.warning("Forecast DB read failed: %s", exc)
 
         if not overrides:
-            return base_input
-        return base_input.model_copy(update=overrides)
+            return merge_run_request_updates(base_input, {})
+        return merge_run_request_updates(base_input, overrides)
 

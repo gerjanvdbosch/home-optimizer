@@ -1243,6 +1243,82 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     assert snapshot.dhw_active is not None and snapshot.dhw_active.succeeded is True
 
 
+def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(monkeypatch) -> None:
+    """Automatic calibration must not persist a UFH tuple that is invalid at runtime dt."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: CalibrationSnapshotPayload(
+            generated_at_utc=start,
+            effective_parameters=CalibrationParameterOverrides(dhw_R_loss=52.0),
+        ),
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=ThermalParameters(
+                dt_hours=5.0 / 60.0,
+                C_r=6.0,
+                C_b=0.15625,
+                R_br=20.8625,
+                R_ro=1.7483,
+                alpha=0.25,
+                eta=0.55,
+                A_glass=7.5,
+            ),
+            sample_count=25,
+            segment_count=1,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=2),
+            optimizer_status="ok",
+            rmse_room_temperature_c=0.04,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            suggested_r_loss_k_per_kw=60.0,
+            sample_count=12,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=1),
+            optimizer_status="ok",
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip cop")),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({"dt_hours": 1.0}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.ufh_active is not None
+    assert snapshot.ufh_active.succeeded is False
+    assert "Forward-Euler time step" in snapshot.ufh_active.message or "greater than or equal" in snapshot.ufh_active.message
+    assert snapshot.effective_parameters.C_r is None
+    assert snapshot.effective_parameters.C_b is None
+    assert snapshot.effective_parameters.R_br is None
+    assert snapshot.effective_parameters.R_ro is None
+    assert snapshot.effective_parameters.dhw_R_loss == 60.0
+
+
 def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:
     """Only non-DHW quasi-mixed windows may enter the first-stage standby dataset."""
     start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)

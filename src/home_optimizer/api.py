@@ -17,7 +17,14 @@ from plotly.subplots import make_subplots
 from pydantic import BaseModel
 
 from .database import Database
-from .optimizer import MPCStepResult, Optimizer, RunRequest, inject_forecast_overrides
+from .optimizer import (
+    MPCStepResult,
+    Optimizer,
+    RunRequest,
+    inject_forecast_overrides,
+    merge_run_request_updates,
+    sanitize_calibration_overrides,
+)
 from .telemetry import TelemetryRepository
 from .types import CalibrationSnapshotPayload
 
@@ -142,7 +149,8 @@ class HomeOptimizerAPI:
             raise HTTPException(status_code=502, detail=f"Database error: {exc}") from exc
         if snapshot is None or not snapshot.has_effective_parameters:
             return defaults
-        return defaults.model_copy(update=snapshot.effective_parameters.as_run_request_updates())
+        safe_overrides, _ = sanitize_calibration_overrides(defaults, snapshot.effective_parameters)
+        return merge_run_request_updates(defaults, safe_overrides.as_run_request_updates())
 
 
     async def get_latest_forecast(self) -> ForecastResponse:
@@ -208,7 +216,7 @@ class HomeOptimizerAPI:
                         "voordat je /api/simulate aanroept."
                     ),
                 )
-            req = req.model_copy(update=inject_forecast_overrides(rows, req.horizon_hours))
+            req = merge_run_request_updates(req, inject_forecast_overrides(rows, req.horizon_hours))
 
         try:
             result = Optimizer().solve(req)

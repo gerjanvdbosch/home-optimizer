@@ -48,7 +48,7 @@ from .settings_factory import (
 from .dhw_standby import calibrate_dhw_standby_loss
 from .ufh_active import calibrate_ufh_active_rc
 from .ufh_offline import calibrate_ufh_off_envelope
-from ..optimizer import RunRequest
+from ..optimizer import RunRequest, merge_run_request_updates, sanitize_calibration_overrides
 from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
 from ..telemetry.repository import TelemetryRepository
 from ..types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult, DHWParameters, ThermalParameters
@@ -278,10 +278,18 @@ def _apply_calibration_overrides(
     overrides: CalibrationParameterOverrides,
 ) -> RunRequest:
     """Return a request copy with the current effective calibration overrides applied."""
-    update = overrides.as_run_request_updates()
-    if not update:
-        return base_request
-    return base_request.model_copy(update=update)
+    return merge_run_request_updates(base_request, overrides.as_run_request_updates())
+
+
+def _merge_runtime_safe_stage_overrides(
+    base_request: RunRequest,
+    current_effective_parameters: CalibrationParameterOverrides,
+    stage_overrides: CalibrationParameterOverrides,
+) -> CalibrationParameterOverrides:
+    """Merge one stage result only when the resulting runtime request stays valid."""
+    current_request = _apply_calibration_overrides(base_request, current_effective_parameters)
+    merge_run_request_updates(current_request, stage_overrides.as_run_request_updates())
+    return current_effective_parameters.merged_with(stage_overrides)
 
 
 def _stage_failure(stage_name: str, message: str) -> CalibrationStageResult:
@@ -338,9 +346,10 @@ def build_automatic_calibration_snapshot(
         return None
 
     previous_snapshot = repository.get_latest_calibration_snapshot()
-    effective_parameters = (
+    raw_effective_parameters = (
         previous_snapshot.effective_parameters if previous_snapshot is not None else CalibrationParameterOverrides()
     )
+    effective_parameters, _ = sanitize_calibration_overrides(base_request, raw_effective_parameters)
 
     snapshot_time_utc = datetime.now(tz=timezone.utc)
     stage_results: dict[str, CalibrationStageResult | None] = {
@@ -385,7 +394,11 @@ def build_automatic_calibration_snapshot(
                 R_br=result.fitted_parameters.R_br,
                 R_ro=result.fitted_parameters.R_ro,
             )
-            effective_parameters = effective_parameters.merged_with(overrides)
+            effective_parameters = _merge_runtime_safe_stage_overrides(
+                base_request,
+                effective_parameters,
+                overrides,
+            )
             stage_results["ufh_active"] = _stage_success(
                 "ufh_active",
                 f"UFH active RC calibrated (RMSE={result.rmse_room_temperature_c:.4f} °C).",
@@ -416,7 +429,11 @@ def build_automatic_calibration_snapshot(
                 ),
             )
             overrides = CalibrationParameterOverrides(dhw_R_loss=result.suggested_r_loss_k_per_kw)
-            effective_parameters = effective_parameters.merged_with(overrides)
+            effective_parameters = _merge_runtime_safe_stage_overrides(
+                base_request,
+                effective_parameters,
+                overrides,
+            )
             stage_results["dhw_standby"] = _stage_success(
                 "dhw_standby",
                 f"DHW standby calibrated (R_loss={result.suggested_r_loss_k_per_kw:.4f} K/kW).",
@@ -449,7 +466,11 @@ def build_automatic_calibration_snapshot(
                 build_dhw_active_calibration_settings(reference_parameters=dhw_reference_parameters),
             )
             overrides = CalibrationParameterOverrides(dhw_R_strat=result.fitted_parameters.R_strat)
-            effective_parameters = effective_parameters.merged_with(overrides)
+            effective_parameters = _merge_runtime_safe_stage_overrides(
+                base_request,
+                effective_parameters,
+                overrides,
+            )
             stage_results["dhw_active"] = _stage_success(
                 "dhw_active",
                 f"DHW active stratification calibrated (RMSE_top={result.rmse_t_top_c:.4f} °C).",
@@ -480,7 +501,11 @@ def build_automatic_calibration_snapshot(
             T_supply_min=result.fitted_parameters.T_supply_min,
             heating_curve_slope=result.fitted_parameters.heating_curve_slope,
         )
-        effective_parameters = effective_parameters.merged_with(overrides)
+        effective_parameters = _merge_runtime_safe_stage_overrides(
+            base_request,
+            effective_parameters,
+            overrides,
+        )
         stage_results["cop"] = _stage_success(
             "cop",
             f"COP calibrated (RMSE_COP={result.rmse_actual_cop:.4f}).",

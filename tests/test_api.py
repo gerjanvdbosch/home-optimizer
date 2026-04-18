@@ -161,6 +161,38 @@ def test_optimizer_scheduled_input_applies_latest_calibration_snapshot(tmp_path)
     assert scheduled_input.T_supply_min == 26.5
 
 
+def test_optimizer_scheduled_input_ignores_invalid_ufh_calibration_tuple(tmp_path) -> None:
+    """Scheduled MPC must ignore unsafe calibrated UFH tuples but keep safe groups."""
+    database_url = f"sqlite:///{tmp_path / 'optimizer-unsafe-calibration.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                C_r=6.0,
+                C_b=0.15625,
+                R_br=20.8625,
+                R_ro=1.7483,
+                dhw_R_loss=55.0,
+            ),
+        )
+    )
+
+    base_input = RunRequest.model_validate({"horizon_hours": 8, "dt_hours": 1.0})
+    scheduled_input = Optimizer._build_scheduled_input(
+        base_input=base_input,
+        backend=None,
+        repository=repository,
+    )
+
+    assert scheduled_input.C_r == base_input.C_r
+    assert scheduled_input.C_b == base_input.C_b
+    assert scheduled_input.R_br == base_input.R_br
+    assert scheduled_input.R_ro == base_input.R_ro
+    assert scheduled_input.dhw_R_loss == 55.0
+
+
 def test_calibration_latest_returns_404_without_snapshot(monkeypatch, tmp_path) -> None:
     """Calibration endpoint must fail clearly until the first automatic snapshot exists."""
     database_url = f"sqlite:///{tmp_path / 'calibration-api-empty.sqlite3'}"
@@ -242,6 +274,37 @@ def test_defaults_returns_latest_calibration_snapshot_over_static_defaults(monke
     assert payload["C_b"] == 11.2
     assert payload["eta_carnot"] == 0.38
     assert payload["T_supply_min"] == 26.8
+
+
+def test_defaults_ignores_invalid_ufh_calibration_tuple_but_keeps_safe_groups(monkeypatch, tmp_path) -> None:
+    """/api/defaults must not expose calibrated values that fail runtime validation."""
+    database_url = f"sqlite:///{tmp_path / 'defaults-unsafe-calibrated.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                C_r=6.0,
+                C_b=0.15625,
+                R_br=20.8625,
+                R_ro=1.7483,
+                dhw_R_loss=55.0,
+            ),
+        )
+    )
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    response = client.get("/api/defaults")
+
+    assert response.status_code == 200
+    payload = response.json()
+    defaults = RunRequest.model_validate({})
+    assert payload["C_r"] == defaults.C_r
+    assert payload["C_b"] == defaults.C_b
+    assert payload["R_br"] == defaults.R_br
+    assert payload["R_ro"] == defaults.R_ro
+    assert payload["dhw_R_loss"] == 55.0
 
 
 def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(
