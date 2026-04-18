@@ -10,7 +10,6 @@ from typing import Any
 from .models import (
     COP_LEAST_SQUARES_LOSS_CHOICES,
     COPCalibrationSettings,
-    DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
     DEFAULT_COP_MAX,
     DEFAULT_COP_MIN,
     DEFAULT_COP_ETA_LOSS_NAME,
@@ -51,10 +50,14 @@ from .models import (
     DEFAULT_MIN_SEGMENT_SCORE,
     DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW,
     DEFAULT_T_REF_OUTDOOR_C,
-    DHWActiveCalibrationSettings,
     DHWStandbyCalibrationSettings,
-    UFHActiveCalibrationSettings,
     UFHOffCalibrationSettings,
+)
+from .settings_factory import (
+    build_cop_calibration_settings,
+    build_dhw_active_calibration_settings,
+    build_dhw_standby_calibration_settings,
+    build_ufh_active_calibration_settings,
 )
 from .service import (
     build_cop_dataset_from_repository,
@@ -481,7 +484,7 @@ def _build_dhw_standby_settings(args: argparse.Namespace) -> DHWStandbyCalibrati
             "DHW standby calibration requires explicit reference capacities and time step: "
             f"missing {joined}."
         )
-    return DHWStandbyCalibrationSettings(
+    return build_dhw_standby_calibration_settings(
         dt_hours=float(args.dhw_dt_hours),
         reference_c_top_kwh_per_k=float(args.dhw_c_top),
         reference_c_bot_kwh_per_k=float(args.dhw_c_bot),
@@ -506,37 +509,6 @@ def _build_dhw_reference_parameters(args: argparse.Namespace) -> DHWParameters:
         C_bot=float(args.dhw_c_bot),
         R_strat=float(args.dhw_r_strat),
         R_loss=float(args.dhw_r_loss),
-    )
-
-
-def _build_cop_settings(args: argparse.Namespace) -> COPCalibrationSettings:
-    """Build the settings object for offline COP calibration."""
-    return COPCalibrationSettings(
-        min_sample_count=args.min_samples,
-        min_ufh_curve_sample_count=args.cop_min_ufh_samples,
-        min_thermal_energy_kwh=args.cop_min_thermal_energy_kwh,
-        min_electric_energy_kwh=args.cop_min_electric_energy_kwh,
-        min_segment_samples=args.cop_min_segment_samples,
-        min_segment_thermal_energy_kwh=args.cop_min_segment_thermal_energy_kwh,
-        min_segment_actual_cop_span=args.cop_min_segment_actual_cop_span,
-        max_segment_supply_tracking_rmse_c=args.cop_max_segment_supply_tracking_rmse_c,
-        min_ufh_segment_outdoor_temperature_span_c=args.cop_min_ufh_segment_outdoor_span_c,
-        min_ufh_segment_supply_target_span_c=args.cop_min_ufh_segment_supply_target_span_c,
-        min_segment_score=args.cop_min_segment_score,
-        max_selected_ufh_segments=args.cop_max_selected_ufh_segments,
-        max_selected_dhw_segments=args.cop_max_selected_dhw_segments,
-        reaggregate_min_electric_energy_kwh=args.cop_reaggregate_min_electric_energy_kwh,
-        reaggregate_min_bucket_count=args.cop_reaggregate_min_bucket_count,
-        max_segment_boundary_gap_ratio=args.cop_max_segment_boundary_gap_ratio,
-        t_ref_outdoor_c=args.cop_t_ref_outdoor_c,
-        delta_t_cond_k=args.cop_delta_t_cond_k,
-        delta_t_evap_k=args.cop_delta_t_evap_k,
-        cop_min=args.cop_min,
-        cop_max=args.cop_max,
-        heating_curve_loss_name=args.cop_heating_curve_loss,
-        eta_loss_name=args.cop_eta_loss,
-        heating_curve_loss_scale_c=args.cop_heating_curve_loss_scale_c,
-        eta_loss_scale_kwh=args.cop_eta_loss_scale_kwh,
     )
 
 
@@ -575,7 +547,33 @@ def main() -> None:
             },
         }
     elif args.stage == "cop":
-        settings = _build_cop_settings(args)
+        settings = build_cop_calibration_settings(
+            min_sample_count=args.min_samples,
+            min_ufh_curve_sample_count=args.cop_min_ufh_samples,
+            min_thermal_energy_kwh=args.cop_min_thermal_energy_kwh,
+            min_electric_energy_kwh=args.cop_min_electric_energy_kwh,
+            min_segment_samples=args.cop_min_segment_samples,
+            min_segment_thermal_energy_kwh=args.cop_min_segment_thermal_energy_kwh,
+            min_segment_actual_cop_span=args.cop_min_segment_actual_cop_span,
+            max_segment_supply_tracking_rmse_c=args.cop_max_segment_supply_tracking_rmse_c,
+            min_ufh_segment_outdoor_temperature_span_c=args.cop_min_ufh_segment_outdoor_span_c,
+            min_ufh_segment_supply_target_span_c=args.cop_min_ufh_segment_supply_target_span_c,
+            min_segment_score=args.cop_min_segment_score,
+            max_selected_ufh_segments=args.cop_max_selected_ufh_segments,
+            max_selected_dhw_segments=args.cop_max_selected_dhw_segments,
+            reaggregate_min_electric_energy_kwh=args.cop_reaggregate_min_electric_energy_kwh,
+            reaggregate_min_bucket_count=args.cop_reaggregate_min_bucket_count,
+            max_segment_boundary_gap_ratio=args.cop_max_segment_boundary_gap_ratio,
+            t_ref_outdoor_c=args.cop_t_ref_outdoor_c,
+            delta_t_cond_k=args.cop_delta_t_cond_k,
+            delta_t_evap_k=args.cop_delta_t_evap_k,
+            cop_min=args.cop_min,
+            cop_max=args.cop_max,
+            heating_curve_loss_name=args.cop_heating_curve_loss,
+            eta_loss_name=args.cop_eta_loss,
+            heating_curve_loss_scale_c=args.cop_heating_curve_loss_scale_c,
+            eta_loss_scale_kwh=args.cop_eta_loss_scale_kwh,
+        )
         if args.cop_diagnostics:
             diagnostics = diagnose_cop_dataset_from_repository(repository, settings)
             payload = {
@@ -610,12 +608,9 @@ def main() -> None:
                 },
             }
     elif args.stage == "active-ufh":
-        max_gti_w_per_m2 = (
-            DEFAULT_ACTIVE_MAX_GTI_W_PER_M2 if args.max_gti_w_per_m2 is None else args.max_gti_w_per_m2
-        )
-        settings = UFHActiveCalibrationSettings(
+        settings = build_ufh_active_calibration_settings(
             reference_parameters=_build_reference_parameters(args),
-            max_gti_w_per_m2=max_gti_w_per_m2,
+            max_gti_w_per_m2=args.max_gti_w_per_m2,
             min_sample_count=args.min_samples,
             min_segment_samples=args.min_segment_samples,
             min_segment_ufh_power_span_kw=args.min_segment_power_span_kw,
@@ -647,7 +642,7 @@ def main() -> None:
             },
         }
     elif args.stage == "active-dhw":
-        settings = DHWActiveCalibrationSettings(
+        settings = build_dhw_active_calibration_settings(
             reference_parameters=_build_dhw_reference_parameters(args),
             min_sample_count=args.min_samples,
             min_segment_samples=args.dhw_min_segment_samples,

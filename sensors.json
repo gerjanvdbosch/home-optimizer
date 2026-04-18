@@ -1,5 +1,5 @@
 {
-    "room_temperature_c": 20.5,
+    "room_temperature_c": 20.0,
     "outdoor_temperature_c": 8.0,
     "hp_supply_temperature_c": 31.5,
     "hp_supply_target_temperature_c": 33.0,

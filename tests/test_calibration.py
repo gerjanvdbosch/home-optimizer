@@ -39,6 +39,7 @@ from home_optimizer.calibration import (
     build_ufh_off_calibration_dataset,
     calibrate_ufh_off_envelope,
 )
+from home_optimizer.calibration.models import DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
 from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
 from home_optimizer.optimizer import RunRequest
@@ -1048,16 +1049,23 @@ def test_calibrate_cop_model_soft_l1_is_more_robust_to_outliers_than_linear() ->
 
 def test_build_automatic_calibration_snapshot_merges_previous_successful_overrides(monkeypatch) -> None:
     """Automatic calibration must retain prior successful parameters when a stage is disabled or absent."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
 
     repository = SimpleNamespace(
         get_aggregate_time_bounds=lambda: (
-            datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
+            start,
             datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc),
         ),
         get_latest_calibration_snapshot=lambda: CalibrationSnapshotPayload(
             generated_at_utc=datetime(2026, 4, 18, 5, 0, tzinfo=timezone.utc),
             effective_parameters=CalibrationParameterOverrides(dhw_R_loss=52.0, eta_carnot=0.33),
         ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: [
+            SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index)) for index in range(4)
+        ],
     )
 
     monkeypatch.setattr(
@@ -1117,6 +1125,122 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
     assert snapshot.effective_parameters.dhw_R_loss == 52.0
     assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
     assert snapshot.cop is not None and snapshot.cop.succeeded is True
+
+
+def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeypatch) -> None:
+    """Automatic calibration must reuse the CLI stage defaults and telemetry replay Δt."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+    captured_settings: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, settings: (
+            captured_settings.setdefault("ufh_active", settings),
+            SimpleNamespace(
+                fitted_parameters=ThermalParameters(
+                    dt_hours=settings.reference_parameters.dt_hours,
+                    C_r=settings.reference_parameters.C_r,
+                    C_b=settings.reference_parameters.C_b,
+                    R_br=settings.reference_parameters.R_br,
+                    R_ro=settings.reference_parameters.R_ro,
+                    alpha=settings.reference_parameters.alpha,
+                    eta=settings.reference_parameters.eta,
+                    A_glass=settings.reference_parameters.A_glass,
+                ),
+                sample_count=12,
+                segment_count=2,
+                dataset_start_utc=start,
+                dataset_end_utc=start + timedelta(hours=1),
+                optimizer_status="ok",
+                rmse_room_temperature_c=0.1,
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, settings: (
+            captured_settings.setdefault("dhw_standby", settings),
+            SimpleNamespace(
+                suggested_r_loss_k_per_kw=60.0,
+                sample_count=12,
+                dataset_start_utc=start,
+                dataset_end_utc=start + timedelta(hours=1),
+                optimizer_status="ok",
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, settings: (
+            captured_settings.setdefault("dhw_active", settings),
+            SimpleNamespace(
+                fitted_parameters=DHWParameters(
+                    dt_hours=settings.reference_parameters.dt_hours,
+                    C_top=settings.reference_parameters.C_top,
+                    C_bot=settings.reference_parameters.C_bot,
+                    R_strat=settings.reference_parameters.R_strat,
+                    R_loss=settings.reference_parameters.R_loss,
+                ),
+                sample_count=12,
+                segment_count=2,
+                dataset_start_utc=start,
+                dataset_end_utc=start + timedelta(hours=1),
+                optimizer_status="ok",
+                rmse_t_top_c=0.1,
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, settings: SimpleNamespace(
+            fitted_parameters=HeatPumpCOPParameters(
+                eta_carnot=0.41,
+                delta_T_cond=5.0,
+                delta_T_evap=5.0,
+                T_supply_min=26.0,
+                T_ref_outdoor=18.0,
+                heating_curve_slope=0.9,
+                cop_min=1.5,
+                cop_max=7.0,
+            ),
+            sample_count=12,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=1),
+            eta_optimizer_status="ok",
+            rmse_actual_cop=0.1,
+        ),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    ufh_settings = cast(UFHActiveCalibrationSettings, captured_settings["ufh_active"])
+    standby_settings = cast(DHWStandbyCalibrationSettings, captured_settings["dhw_standby"])
+    dhw_active_settings = cast(DHWActiveCalibrationSettings, captured_settings["dhw_active"])
+    assert ufh_settings.reference_parameters.dt_hours == 5.0 / 60.0
+    assert ufh_settings.max_gti_w_per_m2 == DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
+    assert ufh_settings.reference_parameters.dt_hours != RunRequest.model_validate({}).dt_hours
+    assert standby_settings.dt_hours == 5.0 / 60.0
+    assert dhw_active_settings.reference_parameters.dt_hours == 5.0 / 60.0
+    assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
+    assert snapshot.dhw_standby is not None and snapshot.dhw_standby.succeeded is True
+    assert snapshot.dhw_active is not None and snapshot.dhw_active.succeeded is True
 
 
 def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:
