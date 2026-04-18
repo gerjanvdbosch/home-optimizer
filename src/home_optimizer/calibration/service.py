@@ -9,11 +9,16 @@ from typing import cast
 from sqlalchemy import text
 
 from .dataset import (
+    build_dhw_active_calibration_dataset,
     build_dhw_standby_calibration_dataset,
     build_ufh_active_calibration_dataset,
     build_ufh_off_calibration_dataset,
 )
+from .dhw_active import calibrate_dhw_active_stratification
 from .models import (
+    DHWActiveCalibrationDataset,
+    DHWActiveCalibrationResult,
+    DHWActiveCalibrationSettings,
     DHWStandbyCalibrationDataset,
     DHWStandbyCalibrationResult,
     DHWStandbyCalibrationSettings,
@@ -125,6 +130,17 @@ def build_dhw_standby_dataset_from_repository(
     )
 
 
+def build_dhw_active_dataset_from_repository(
+    repository: TelemetryRepository,
+    settings: DHWActiveCalibrationSettings,
+) -> DHWActiveCalibrationDataset:
+    """Load telemetry history from the repository and build an active DHW dataset."""
+    return build_dhw_active_calibration_dataset(
+        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        settings=settings,
+    )
+
+
 def build_ufh_active_dataset_from_repository(
     repository: TelemetryRepository,
     settings: UFHActiveCalibrationSettings,
@@ -154,6 +170,15 @@ def calibrate_dhw_standby_from_repository(
     """Run the first-stage DHW standby-loss calibration from persisted telemetry."""
     dataset = build_dhw_standby_dataset_from_repository(repository, settings)
     return calibrate_dhw_standby_loss(dataset, settings)
+
+
+def calibrate_dhw_active_from_repository(
+    repository: TelemetryRepository,
+    settings: DHWActiveCalibrationSettings,
+) -> DHWActiveCalibrationResult:
+    """Run the active DHW stratification calibration from persisted telemetry."""
+    dataset = build_dhw_active_dataset_from_repository(repository, settings)
+    return calibrate_dhw_active_stratification(dataset, settings)
 
 
 def calibrate_ufh_active_from_repository(

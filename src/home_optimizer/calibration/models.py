@@ -57,8 +57,12 @@ DEFAULT_MAX_INITIAL_FLOOR_OFFSET_C: float = 15.0
 DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT: float = 0.0
 DEFAULT_INITIAL_FLOOR_OFFSET_SCALE_C: float = 2.0
 DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 2.0
+DEFAULT_MIN_DHW_POWER_KW: float = 0.25
+DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 3.0
+DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H: float = 0.002
+DEFAULT_MIN_DHW_SEGMENT_SAMPLES: int = 4
 
-from ..types import ThermalParameters
+from ..types import DHWParameters, ThermalParameters
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +360,176 @@ class DHWStandbyCalibrationResult:
             raise ValueError("max_abs_residual_c must be non-negative.")
         if self.sample_count <= 0:
             raise ValueError("sample_count must be strictly positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class DHWActiveCalibrationSample:
+    """One active DHW no-draw transition sample for stratification calibration.
+
+    Attributes:
+        interval_start_utc: Start timestamp of the replay interval [UTC].
+        interval_end_utc: End timestamp of the replay interval [UTC].
+        dt_hours: Replay interval duration Δt [h].
+        t_top_start_c: Measured top-layer temperature at k [°C].
+        t_top_end_c: Measured top-layer temperature at k+1 [°C].
+        t_bot_start_c: Measured bottom-layer temperature at k [°C].
+        t_bot_end_c: Measured bottom-layer temperature at k+1 [°C].
+        p_dhw_mean_kw: Mean DHW thermal charging power over the interval [kW].
+        t_mains_c: Mean mains-water temperature over the interval [°C].
+        t_amb_c: Mean boiler ambient temperature over the interval [°C].
+        implied_v_tap_m3_per_h: Tap draw implied by the total-energy balance [m³/h],
+            clamped to the physically feasible set ``≥ 0`` before storage.
+        segment_index: Index of the contiguous active DHW replay run this sample belongs to [-].
+    """
+
+    interval_start_utc: datetime
+    interval_end_utc: datetime
+    dt_hours: float
+    t_top_start_c: float
+    t_top_end_c: float
+    t_bot_start_c: float
+    t_bot_end_c: float
+    p_dhw_mean_kw: float
+    t_mains_c: float
+    t_amb_c: float
+    implied_v_tap_m3_per_h: float
+    segment_index: int
+
+    def __post_init__(self) -> None:
+        if self.dt_hours <= 0.0:
+            raise ValueError("dt_hours must be strictly positive.")
+        if self.p_dhw_mean_kw < 0.0:
+            raise ValueError("p_dhw_mean_kw must be non-negative.")
+        if self.implied_v_tap_m3_per_h < 0.0:
+            raise ValueError("implied_v_tap_m3_per_h must be non-negative.")
+        if self.segment_index < 0:
+            raise ValueError("segment_index must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
+class DHWActiveCalibrationDataset:
+    """Collection of active DHW no-draw replay samples used for R_strat fitting."""
+
+    samples: tuple[DHWActiveCalibrationSample, ...]
+
+    def __post_init__(self) -> None:
+        if not self.samples:
+            raise ValueError("DHWActiveCalibrationDataset requires at least one sample.")
+        segment_indices = [sample.segment_index for sample in self.samples]
+        if segment_indices[0] != 0:
+            raise ValueError("DHWActiveCalibrationDataset segment_index must start at 0.")
+        for previous_index, next_index in zip(segment_indices, segment_indices[1:]):
+            if next_index < previous_index:
+                raise ValueError("segment_index must be non-decreasing across the dataset.")
+            if next_index - previous_index > 1:
+                raise ValueError("segment_index increments may not skip values.")
+
+    @property
+    def sample_count(self) -> int:
+        """Number of replay samples available for active DHW calibration [-]."""
+        return len(self.samples)
+
+    @property
+    def start_utc(self) -> datetime:
+        """Earliest timestamp in the active DHW replay dataset [UTC]."""
+        return self.samples[0].interval_start_utc
+
+    @property
+    def end_utc(self) -> datetime:
+        """Latest timestamp in the active DHW replay dataset [UTC]."""
+        return self.samples[-1].interval_end_utc
+
+    @property
+    def segment_count(self) -> int:
+        """Number of contiguous active DHW replay runs represented in the dataset [-]."""
+        return self.samples[-1].segment_index + 1
+
+
+@dataclass(frozen=True, slots=True)
+class DHWActiveCalibrationSettings:
+    """Validated settings for active DHW stratification identification.
+
+    This stage fits only ``R_strat`` from contiguous DHW charging windows that are
+    filtered to look like no-draw events.  ``C_top``, ``C_bot``, ``R_loss`` and
+    ``lambda_water`` remain fixed from the injected reference parameter object.
+
+    The fitter replays the 2-state DHW model with ``V_tap = 0`` and minimises the
+    one-step residuals on both ``T_top`` and ``T_bot``.
+    """
+
+    reference_parameters: DHWParameters
+    active_mode_name: str = DEFAULT_DHW_MODE_NAME
+    max_pair_dt_hours: float = DEFAULT_MAX_PAIR_DT_HOURS
+    dt_compatibility_tolerance_hours: float = DEFAULT_DT_COMPATIBILITY_TOLERANCE_HOURS
+    max_defrost_active_fraction: float = DEFAULT_MAX_DEFROST_ACTIVE_FRACTION
+    max_booster_active_fraction: float = DEFAULT_MAX_BOOSTER_ACTIVE_FRACTION
+    min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
+    min_segment_samples: int = DEFAULT_MIN_DHW_SEGMENT_SAMPLES
+    min_dhw_power_kw: float = DEFAULT_MIN_DHW_POWER_KW
+    min_layer_temperature_spread_c: float = DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C
+    max_implied_tap_m3_per_h: float = DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H
+    min_parameter_ratio: float = DEFAULT_MIN_PARAMETER_RATIO
+    max_parameter_ratio: float = DEFAULT_MAX_PARAMETER_RATIO
+    regularization_weight: float = DEFAULT_REGULARIZATION_WEIGHT
+    regularization_scale_ratio: float = DEFAULT_REGULARIZATION_SCALE_RATIO
+
+    def __post_init__(self) -> None:
+        if not self.active_mode_name.strip():
+            raise ValueError("active_mode_name must not be blank.")
+        for name in (
+            "max_pair_dt_hours",
+            "dt_compatibility_tolerance_hours",
+            "min_dhw_power_kw",
+            "min_layer_temperature_spread_c",
+            "max_implied_tap_m3_per_h",
+            "min_parameter_ratio",
+            "max_parameter_ratio",
+            "regularization_scale_ratio",
+        ):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be strictly positive.")
+        if self.max_defrost_active_fraction < 0.0 or self.max_defrost_active_fraction > 1.0:
+            raise ValueError("max_defrost_active_fraction must be in [0, 1].")
+        if self.max_booster_active_fraction < 0.0 or self.max_booster_active_fraction > 1.0:
+            raise ValueError("max_booster_active_fraction must be in [0, 1].")
+        if self.min_sample_count < 2:
+            raise ValueError("min_sample_count must be at least 2.")
+        if self.min_segment_samples < 2:
+            raise ValueError("min_segment_samples must be at least 2.")
+        if self.min_segment_samples > self.min_sample_count:
+            raise ValueError("min_segment_samples must be <= min_sample_count.")
+        if self.min_parameter_ratio >= self.max_parameter_ratio:
+            raise ValueError("min_parameter_ratio must be < max_parameter_ratio.")
+        if self.regularization_weight < 0.0:
+            raise ValueError("regularization_weight must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
+class DHWActiveCalibrationResult:
+    """Result of fitting active DHW stratification parameters from no-draw charging runs."""
+
+    fitted_parameters: DHWParameters
+    rmse_t_top_c: float
+    rmse_t_bot_c: float
+    max_abs_residual_c: float
+    sample_count: int
+    segment_count: int
+    dataset_start_utc: datetime
+    dataset_end_utc: datetime
+    optimizer_status: str
+    optimizer_cost: float
+
+    def __post_init__(self) -> None:
+        if self.rmse_t_top_c < 0.0:
+            raise ValueError("rmse_t_top_c must be non-negative.")
+        if self.rmse_t_bot_c < 0.0:
+            raise ValueError("rmse_t_bot_c must be non-negative.")
+        if self.max_abs_residual_c < 0.0:
+            raise ValueError("max_abs_residual_c must be non-negative.")
+        if self.sample_count <= 0:
+            raise ValueError("sample_count must be strictly positive.")
+        if self.segment_count <= 0:
+            raise ValueError("segment_count must be strictly positive.")
 
 
 @dataclass(frozen=True, slots=True)

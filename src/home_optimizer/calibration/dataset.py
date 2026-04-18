@@ -15,6 +15,9 @@ from typing import Sequence
 import numpy as np
 
 from .models import (
+    DHWActiveCalibrationDataset,
+    DHWActiveCalibrationSample,
+    DHWActiveCalibrationSettings,
     DHWStandbyCalibrationDataset,
     DHWStandbyCalibrationSample,
     DHWStandbyCalibrationSettings,
@@ -29,6 +32,65 @@ from .models import (
 from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
 
 _SECONDS_PER_HOUR: float = 3600.0
+
+
+def _dhw_total_energy_kwh(
+    *,
+    t_top_c: float,
+    t_bot_c: float,
+    c_top_kwh_per_k: float,
+    c_bot_kwh_per_k: float,
+) -> float:
+    """Return total tank thermal energy proxy ``C_top·T_top + C_bot·T_bot`` [kWh]."""
+    return c_top_kwh_per_k * t_top_c + c_bot_kwh_per_k * t_bot_c
+
+
+def _implied_v_tap_m3_per_h(
+    *,
+    t_top_start_c: float,
+    t_bot_start_c: float,
+    t_top_end_c: float,
+    t_bot_end_c: float,
+    dt_hours: float,
+    p_dhw_mean_kw: float,
+    t_mains_c: float,
+    t_amb_c: float,
+    settings: DHWActiveCalibrationSettings,
+) -> float:
+    """Infer tap flow from the full-tank energy balance and clamp it to ``≥ 0``.
+
+    Implements the rearranged total-energy balance from DHW §9.5:
+
+        ΔE/Δt = P_dhw - λ·V_tap·(T_top - T_mains) - Q_loss
+
+    so that
+
+        V_tap = (P_dhw - Q_loss - ΔE/Δt) / (λ·(T_top - T_mains))
+
+    The result is projected onto the physically feasible set ``V_tap ≥ 0`` before
+    use in dataset filtering. Negative implied draw would be non-physical and is
+    interpreted here as measurement/model noise rather than a real tap event.
+    """
+    p = settings.reference_parameters
+    start_energy_kwh = _dhw_total_energy_kwh(
+        t_top_c=t_top_start_c,
+        t_bot_c=t_bot_start_c,
+        c_top_kwh_per_k=p.C_top,
+        c_bot_kwh_per_k=p.C_bot,
+    )
+    end_energy_kwh = _dhw_total_energy_kwh(
+        t_top_c=t_top_end_c,
+        t_bot_c=t_bot_end_c,
+        c_top_kwh_per_k=p.C_top,
+        c_bot_kwh_per_k=p.C_bot,
+    )
+    delta_energy_rate_kw = (end_energy_kwh - start_energy_kwh) / dt_hours
+    q_loss_kw = (t_top_start_c - t_amb_c) / p.R_loss + (t_bot_start_c - t_amb_c) / p.R_loss
+    tap_denominator = p.lambda_water * (t_top_start_c - t_mains_c)
+    if tap_denominator <= 0.0:
+        return float("inf")
+    implied_v_tap = (p_dhw_mean_kw - q_loss_kw - delta_energy_rate_kw) / tap_denominator
+    return float(max(0.0, implied_v_tap))
 
 
 class _ForecastLookup:
@@ -212,6 +274,112 @@ def build_dhw_standby_calibration_dataset(
             f"required >= {settings.min_sample_count}, found {len(samples)}."
         )
     return DHWStandbyCalibrationDataset(samples=tuple(samples))
+
+
+def build_dhw_active_calibration_dataset(
+    aggregates: Sequence[TelemetryAggregate],
+    settings: DHWActiveCalibrationSettings,
+) -> DHWActiveCalibrationDataset:
+    """Build active DHW no-draw replay samples for ``R_strat`` calibration.
+
+    Each sample replays one transition ``x[k] -> x[k+1]`` during DHW charging,
+    using the measured top/bottom state at the start of the interval and the mean
+    power/ambient/mains disturbances from the second bucket of the pair.
+
+    To stay physically consistent without a tap-flow meter, this stage keeps only
+    pairs whose total-energy-balance-implied draw remains below the configured
+    threshold.  Those windows are then replayed with ``V_tap = 0``.
+    """
+    rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
+    raw_segments: list[list[DHWActiveCalibrationSample]] = []
+    current_segment_samples: list[DHWActiveCalibrationSample] = []
+    dt_reference_hours = settings.reference_parameters.dt_hours
+
+    def flush_current_segment() -> None:
+        nonlocal current_segment_samples
+        if len(current_segment_samples) >= settings.min_segment_samples:
+            raw_segments.append(current_segment_samples)
+        current_segment_samples = []
+
+    for previous_row, next_row in zip(rows, rows[1:]):
+        pair_is_valid = True
+        if previous_row.hp_mode_last != settings.active_mode_name:
+            pair_is_valid = False
+        if next_row.hp_mode_last != settings.active_mode_name:
+            pair_is_valid = False
+        if previous_row.defrost_active_fraction > settings.max_defrost_active_fraction:
+            pair_is_valid = False
+        if next_row.defrost_active_fraction > settings.max_defrost_active_fraction:
+            pair_is_valid = False
+        if previous_row.booster_heater_active_fraction > settings.max_booster_active_fraction:
+            pair_is_valid = False
+        if next_row.booster_heater_active_fraction > settings.max_booster_active_fraction:
+            pair_is_valid = False
+
+        dt_hours = (next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds() / _SECONDS_PER_HOUR
+        if dt_hours <= 0.0 or dt_hours > settings.max_pair_dt_hours:
+            pair_is_valid = False
+        if abs(dt_hours - dt_reference_hours) > settings.dt_compatibility_tolerance_hours:
+            pair_is_valid = False
+
+        p_dhw_mean_kw = float(next_row.hp_thermal_power_mean_kw)
+        if p_dhw_mean_kw < settings.min_dhw_power_kw:
+            pair_is_valid = False
+
+        layer_spread_start_c = abs(
+            float(previous_row.dhw_top_temperature_last_c) - float(previous_row.dhw_bottom_temperature_last_c)
+        )
+        layer_spread_end_c = abs(
+            float(next_row.dhw_top_temperature_last_c) - float(next_row.dhw_bottom_temperature_last_c)
+        )
+        if max(layer_spread_start_c, layer_spread_end_c) < settings.min_layer_temperature_spread_c:
+            pair_is_valid = False
+
+        t_mains_c = float(next_row.t_mains_estimated_mean_c)
+        t_amb_c = float(next_row.boiler_ambient_temp_mean_c)
+        implied_v_tap_m3_per_h = _implied_v_tap_m3_per_h(
+            t_top_start_c=float(previous_row.dhw_top_temperature_last_c),
+            t_bot_start_c=float(previous_row.dhw_bottom_temperature_last_c),
+            t_top_end_c=float(next_row.dhw_top_temperature_last_c),
+            t_bot_end_c=float(next_row.dhw_bottom_temperature_last_c),
+            dt_hours=dt_hours,
+            p_dhw_mean_kw=p_dhw_mean_kw,
+            t_mains_c=t_mains_c,
+            t_amb_c=t_amb_c,
+            settings=settings,
+        )
+        if implied_v_tap_m3_per_h > settings.max_implied_tap_m3_per_h:
+            pair_is_valid = False
+
+        if not pair_is_valid:
+            flush_current_segment()
+            continue
+
+        current_segment_samples.append(
+            DHWActiveCalibrationSample(
+                interval_start_utc=previous_row.bucket_end_utc,
+                interval_end_utc=next_row.bucket_end_utc,
+                dt_hours=dt_hours,
+                t_top_start_c=float(previous_row.dhw_top_temperature_last_c),
+                t_top_end_c=float(next_row.dhw_top_temperature_last_c),
+                t_bot_start_c=float(previous_row.dhw_bottom_temperature_last_c),
+                t_bot_end_c=float(next_row.dhw_bottom_temperature_last_c),
+                p_dhw_mean_kw=p_dhw_mean_kw,
+                t_mains_c=t_mains_c,
+                t_amb_c=t_amb_c,
+                implied_v_tap_m3_per_h=implied_v_tap_m3_per_h,
+                segment_index=len(raw_segments),
+            )
+        )
+
+    flush_current_segment()
+    selected_samples = tuple(sample for segment in raw_segments for sample in segment)
+    if len(selected_samples) < settings.min_sample_count:
+        raise ValueError(
+            "Not enough active no-draw DHW samples for stratification calibration: "
+            f"required >= {settings.min_sample_count}, found {len(selected_samples)}."
+        )
+    return DHWActiveCalibrationDataset(samples=selected_samples)
 
 
 def build_ufh_active_calibration_dataset(
