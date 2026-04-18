@@ -12,6 +12,7 @@ from .cop_offline import calibrate_cop_model
 from .dhw_active import calibrate_dhw_active_stratification
 from .dhw_standby import calibrate_dhw_standby_loss
 from .models import (
+    AutomaticCalibrationSettings,
     COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationResult,
@@ -38,6 +39,7 @@ from .models import (
     UFHOffCalibrationSettings,
 )
 from .service import (
+    build_automatic_calibration_snapshot,
     build_cop_dataset_from_repository,
     build_dhw_active_dataset_from_repository,
     build_dhw_standby_dataset_from_repository,
@@ -49,6 +51,7 @@ from .service import (
     calibrate_ufh_active_from_repository,
     calibrate_ufh_off_from_repository,
     diagnose_cop_dataset_from_repository,
+    run_and_persist_automatic_calibration,
 )
 from .ufh_active import calibrate_ufh_active_rc
 from .ufh_offline import calibrate_ufh_off_envelope
@@ -60,6 +63,7 @@ __all__ = [
     "COPCalibrationSegmentQuality",
     "COPCalibrationSample",
     "COPCalibrationSettings",
+    "AutomaticCalibrationSettings",
     "DHWActiveCalibrationDataset",
     "DHWActiveCalibrationResult",
     "DHWActiveCalibrationSegmentQuality",
@@ -79,6 +83,7 @@ __all__ = [
     "UFHOffCalibrationResult",
     "UFHOffCalibrationSettings",
     "build_cop_calibration_dataset",
+    "build_automatic_calibration_snapshot",
     "build_cop_dataset_from_repository",
     "diagnose_cop_calibration_dataset",
     "diagnose_cop_dataset_from_repository",
@@ -100,5 +105,6 @@ __all__ = [
     "calibrate_ufh_active_rc",
     "calibrate_ufh_off_envelope",
     "calibrate_ufh_off_from_repository",
+    "run_and_persist_automatic_calibration",
 ]
 

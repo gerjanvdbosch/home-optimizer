@@ -861,9 +861,11 @@ class Optimizer:
 
         Overrides applied (in order):
 
-        1. **Live sensor readings** (via ``backend``): room temperature,
+        1. **Persisted calibration snapshot** (via ``repository``): latest
+           calibrated physical/COP parameters stored by the addon.
+        2. **Live sensor readings** (via ``backend``): room temperature,
            slab temperature estimate, outdoor temperature, DHW temperatures.
-        2. **Open-Meteo forecast arrays** (via ``repository``): fetches the most
+        3. **Open-Meteo forecast arrays** (via ``repository``): fetches the most
            recently persisted :class:`~home_optimizer.telemetry.models.ForecastSnapshot`
            batch and injects ``t_out_forecast``, ``gti_window_forecast``, and
            ``gti_pv_forecast`` so the MPC uses real forecast data instead of
@@ -885,7 +887,16 @@ class Optimizer:
         """
         overrides: dict = {}
 
-        # ── 1. Live sensor overrides ─────────────────────────────────────
+        # ── 1. Persisted calibration overrides ────────────────────────────
+        if repository is not None:
+            try:
+                calibration_snapshot = repository.get_latest_calibration_snapshot()
+                if calibration_snapshot is not None and calibration_snapshot.has_effective_parameters:
+                    overrides.update(calibration_snapshot.effective_parameters.as_run_request_updates())
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Calibration snapshot DB read failed: %s", exc)
+
+        # ── 2. Live sensor overrides ─────────────────────────────────────
         if backend is not None:
             readings = backend.read_all()
 
@@ -910,7 +921,7 @@ class Optimizer:
                 overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
                 overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
 
-        # ── 2. Open-Meteo forecast arrays from database ──────────────────
+        # ── 3. Open-Meteo forecast arrays from database ──────────────────
         if repository is not None:
             try:
                 rows = repository.get_latest_forecast_batch()

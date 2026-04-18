@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from home_optimizer.api import HomeOptimizerAPI, app
 from home_optimizer.optimizer import Optimizer, RunRequest
 from home_optimizer.telemetry import TelemetryRepository
+from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload
 
 client = TestClient(app)
 
@@ -126,6 +127,74 @@ def test_optimizer_latest_returns_scheduled_optimizer_result() -> None:
     assert payload["status"]
     assert payload["first_ufh_power_kw"] >= 0.0
     assert len(payload["control_labels"]) == 8
+
+
+def test_optimizer_scheduled_input_applies_latest_calibration_snapshot(tmp_path) -> None:
+    """Scheduled MPC input must apply the latest persisted calibration overrides before solving."""
+    database_url = f"sqlite:///{tmp_path / 'optimizer-calibration.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                C_r=7.2,
+                C_b=11.3,
+                eta_carnot=0.39,
+                T_supply_min=26.5,
+            ),
+        )
+    )
+
+    base_input = RunRequest.model_validate({"horizon_hours": 8, "C_r": 6.0, "eta_carnot": 0.45})
+    scheduled_input = Optimizer._build_scheduled_input(
+        base_input=base_input,
+        backend=None,
+        repository=repository,
+    )
+
+    assert scheduled_input.C_r == 7.2
+    assert scheduled_input.C_b == 11.3
+    assert scheduled_input.eta_carnot == 0.39
+    assert scheduled_input.T_supply_min == 26.5
+
+
+def test_calibration_latest_returns_404_without_snapshot(monkeypatch, tmp_path) -> None:
+    """Calibration endpoint must fail clearly until the first automatic snapshot exists."""
+    database_url = f"sqlite:///{tmp_path / 'calibration-api-empty.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    response = client.get("/api/calibration/latest")
+
+    assert response.status_code == 404
+
+
+def test_calibration_latest_returns_latest_snapshot(monkeypatch, tmp_path) -> None:
+    """Calibration endpoint must expose the latest persisted automatic calibration snapshot."""
+    database_url = f"sqlite:///{tmp_path / 'calibration-api.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 10, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                R_ro=9.1,
+                eta_carnot=0.42,
+                dhw_R_loss=55.0,
+            ),
+        )
+    )
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    response = client.get("/api/calibration/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["effective_parameters"]["R_ro"] == 9.1
+    assert payload["effective_parameters"]["eta_carnot"] == 0.42
+    assert payload["effective_parameters"]["dhw_R_loss"] == 55.0
 
 
 def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(

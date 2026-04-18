@@ -9,6 +9,7 @@ from typing import cast
 import numpy as np
 
 from home_optimizer.calibration import (
+    AutomaticCalibrationSettings,
     COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationSample,
@@ -20,6 +21,7 @@ from home_optimizer.calibration import (
     DHWStandbyCalibrationSample,
     DHWStandbyCalibrationSettings,
     build_cop_calibration_dataset,
+    build_automatic_calibration_snapshot,
     build_dhw_active_calibration_dataset,
     diagnose_cop_calibration_dataset,
     UFHActiveCalibrationDataset,
@@ -39,9 +41,10 @@ from home_optimizer.calibration import (
 )
 from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
+from home_optimizer.optimizer import RunRequest
 from home_optimizer.thermal_model import ThermalModel, solar_gain_kw
-from home_optimizer.types import DHWParameters
-from home_optimizer.types import ThermalParameters
+from home_optimizer.telemetry import TelemetryRepository
+from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload, DHWParameters, ThermalParameters
 
 
 def test_build_ufh_off_calibration_dataset_filters_to_low_solar_off_windows() -> None:
@@ -1041,6 +1044,85 @@ def test_calibrate_cop_model_soft_l1_is_more_robust_to_outliers_than_linear() ->
     assert abs(robust_result.fitted_parameters.eta_carnot - true_parameters.eta_carnot) < abs(
         linear_result.fitted_parameters.eta_carnot - true_parameters.eta_carnot
     )
+
+
+def test_build_automatic_calibration_snapshot_merges_previous_successful_overrides(monkeypatch) -> None:
+    """Automatic calibration must retain prior successful parameters when a stage is disabled or absent."""
+
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (
+            datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc),
+        ),
+        get_latest_calibration_snapshot=lambda: CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 5, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(dhw_R_loss=52.0, eta_carnot=0.33),
+        ),
+    )
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=ThermalParameters(
+                dt_hours=1.0,
+                C_r=7.5,
+                C_b=11.0,
+                R_br=1.2,
+                R_ro=8.8,
+                alpha=0.25,
+                eta=0.55,
+                A_glass=7.5,
+            ),
+            sample_count=24,
+            segment_count=3,
+            dataset_start_utc=datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
+            dataset_end_utc=datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc),
+            optimizer_status="ok",
+            rmse_room_temperature_c=0.18,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=HeatPumpCOPParameters(
+                eta_carnot=0.41,
+                delta_T_cond=5.0,
+                delta_T_evap=5.0,
+                T_supply_min=26.2,
+                T_ref_outdoor=18.0,
+                heating_curve_slope=0.9,
+                cop_min=1.5,
+                cop_max=7.0,
+            ),
+            sample_count=14,
+            dataset_start_utc=datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
+            dataset_end_utc=datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc),
+            eta_optimizer_status="ok",
+            rmse_actual_cop=0.22,
+        ),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(
+            min_history_hours=12.0,
+            enable_ufh_active=True,
+            enable_dhw_standby=False,
+            enable_dhw_active=False,
+            enable_cop=True,
+        ),
+    )
+
+    assert snapshot is not None
+    assert snapshot.effective_parameters.C_r == 7.5
+    assert snapshot.effective_parameters.R_ro == 8.8
+    assert snapshot.effective_parameters.eta_carnot == 0.41
+    assert snapshot.effective_parameters.T_supply_min == 26.2
+    assert snapshot.effective_parameters.heating_curve_slope == 0.9
+    assert snapshot.effective_parameters.dhw_R_loss == 52.0
+    assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
+    assert snapshot.cop is not None and snapshot.cop.succeeded is True
 
 
 def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:

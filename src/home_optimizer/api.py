@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from .database import Database
 from .optimizer import MPCStepResult, Optimizer, RunRequest, inject_forecast_overrides
 from .telemetry import TelemetryRepository
+from .types import CalibrationSnapshotPayload
 
 
 class OptimizeResponse(BaseModel):
@@ -117,6 +118,12 @@ class HomeOptimizerAPI:
             methods=["GET"],
             response_model=OptimizeResponse,
         )
+        self.app.add_api_route(
+            "/api/calibration/latest",
+            self.latest_calibration_snapshot,
+            methods=["GET"],
+            response_model=CalibrationSnapshotPayload,
+        )
 
     async def index(self) -> HTMLResponse:
         """Serve operational dashboard HTML."""
@@ -210,6 +217,19 @@ class HomeOptimizerAPI:
                 detail="Nog geen geplande MPC-uitkomst beschikbaar. Wacht op de eerste scheduler-run.",
             )
         return self._build_optimize_response(req=snapshot.request, result=snapshot.result)
+
+    async def latest_calibration_snapshot(self) -> CalibrationSnapshotPayload:
+        """Return the latest persisted automatic calibration snapshot."""
+        try:
+            snapshot = self._get_repository().get_latest_calibration_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Database error: {exc}") from exc
+        if snapshot is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Nog geen calibration snapshot beschikbaar. Wacht op de eerste automatische calibratie-run.",
+            )
+        return snapshot
 
     @staticmethod
     def _get_repository() -> TelemetryRepository:

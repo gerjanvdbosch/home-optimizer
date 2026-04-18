@@ -116,6 +116,7 @@ DEFAULT_COP_HEATING_CURVE_LOSS_NAME: str = "soft_l1"
 DEFAULT_COP_ETA_LOSS_NAME: str = "soft_l1"
 DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C: float = 1.0
 DEFAULT_COP_ETA_LOSS_SCALE_KWH: float = 0.05
+DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -800,6 +801,35 @@ class COPCalibrationSettings:
             )
         if self.eta_loss_name not in COP_LEAST_SQUARES_LOSS_CHOICES:
             raise ValueError(f"eta_loss_name must be one of {COP_LEAST_SQUARES_LOSS_CHOICES!r}.")
+
+
+@dataclass(frozen=True, slots=True)
+class AutomaticCalibrationSettings:
+    """Scheduler/runtime settings for automatic in-addon calibration.
+
+    The addon executes the offline calibrators against persisted telemetry only
+    after a minimum history window is available. Each stage can be toggled
+    independently so deployments may phase in UFH, COP, and DHW calibration.
+    """
+
+    min_history_hours: float = DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS
+    enable_ufh_active: bool = True
+    enable_dhw_standby: bool = True
+    enable_dhw_active: bool = True
+    enable_cop: bool = True
+
+    def __post_init__(self) -> None:
+        if self.min_history_hours <= 0.0:
+            raise ValueError("min_history_hours must be strictly positive.")
+        if not any(
+            (
+                self.enable_ufh_active,
+                self.enable_dhw_standby,
+                self.enable_dhw_active,
+                self.enable_cop,
+            )
+        ):
+            raise ValueError("At least one automatic calibration stage must be enabled.")
 
 
 @dataclass(frozen=True, slots=True)

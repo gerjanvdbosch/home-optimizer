@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DEFAULT_TELEMETRY_TIMEZONE_NAME: str = "UTC"
@@ -287,6 +287,26 @@ class ForecastSnapshot(Base):
     gti_w_per_m2: Mapped[float] = mapped_column(Float)
     gti_pv_w_per_m2: Mapped[float] = mapped_column(Float)
 
+    created_at_utc: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=timezone.utc),
+    )
+
+
+class CalibrationSnapshot(Base):
+    """Persisted automatic-calibration snapshot consumed by scheduled MPC runs.
+
+    The full structured payload is stored as JSON text so the automatic
+    calibration layer can evolve without adding a new SQL column for each fitted
+    parameter or diagnostic metric. ``generated_at_utc`` is indexed separately so
+    the repository can fetch the newest effective parameter set efficiently.
+    """
+
+    __tablename__ = "calibration_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    generated_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    payload_json: Mapped[str] = mapped_column(Text)
     created_at_utc: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(tz=timezone.utc),

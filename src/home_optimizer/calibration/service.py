@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import cast
 
@@ -19,6 +19,7 @@ from .dataset import (
 from .cop_offline import calibrate_cop_model
 from .dhw_active import calibrate_dhw_active_stratification
 from .models import (
+    AutomaticCalibrationSettings,
     COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationResult,
@@ -39,8 +40,10 @@ from .models import (
 from .dhw_standby import calibrate_dhw_standby_loss
 from .ufh_active import calibrate_ufh_active_rc
 from .ufh_offline import calibrate_ufh_off_envelope
+from ..optimizer import RunRequest
 from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
 from ..telemetry.repository import TelemetryRepository
+from ..types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult, DHWParameters, ThermalParameters
 
 
 def _parse_utc(value: object) -> datetime:
@@ -128,8 +131,8 @@ def build_ufh_off_dataset_from_repository(
 ) -> UFHCalibrationDataset:
     """Load telemetry history from the repository and build a UFH off-mode dataset."""
     return build_ufh_off_calibration_dataset(
-        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
-        forecast_rows=cast(list[ForecastSnapshot], _load_calibration_forecasts(repository)),
+        aggregates=cast(list[TelemetryAggregate], cast(object, _load_calibration_aggregates(repository))),
+        forecast_rows=cast(list[ForecastSnapshot], cast(object, _load_calibration_forecasts(repository))),
         settings=settings,
     )
 
@@ -140,7 +143,7 @@ def build_cop_dataset_from_repository(
 ) -> COPCalibrationDataset:
     """Load telemetry history from the repository and build a COP calibration dataset."""
     return build_cop_calibration_dataset(
-        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        aggregates=cast(list[TelemetryAggregate], cast(object, _load_calibration_aggregates(repository))),
         settings=settings,
     )
 
@@ -151,7 +154,7 @@ def diagnose_cop_dataset_from_repository(
 ) -> COPCalibrationDiagnostics:
     """Load telemetry history and return COP dataset-filter diagnostics without fitting."""
     return diagnose_cop_calibration_dataset(
-        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        aggregates=cast(list[TelemetryAggregate], cast(object, _load_calibration_aggregates(repository))),
         settings=settings,
     )
 
@@ -162,7 +165,7 @@ def build_dhw_standby_dataset_from_repository(
 ) -> DHWStandbyCalibrationDataset:
     """Load telemetry history from the repository and build a DHW standby dataset."""
     return build_dhw_standby_calibration_dataset(
-        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        aggregates=cast(list[TelemetryAggregate], cast(object, _load_calibration_aggregates(repository))),
         settings=settings,
     )
 
@@ -173,7 +176,7 @@ def build_dhw_active_dataset_from_repository(
 ) -> DHWActiveCalibrationDataset:
     """Load telemetry history from the repository and build an active DHW dataset."""
     return build_dhw_active_calibration_dataset(
-        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        aggregates=cast(list[TelemetryAggregate], cast(object, _load_calibration_aggregates(repository))),
         settings=settings,
     )
 
@@ -184,8 +187,8 @@ def build_ufh_active_dataset_from_repository(
 ) -> UFHActiveCalibrationDataset:
     """Load telemetry history from the repository and build an active UFH replay dataset."""
     return build_ufh_active_calibration_dataset(
-        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
-        forecast_rows=cast(list[ForecastSnapshot], _load_calibration_forecasts(repository)),
+        aggregates=cast(list[TelemetryAggregate], cast(object, _load_calibration_aggregates(repository))),
+        forecast_rows=cast(list[ForecastSnapshot], cast(object, _load_calibration_forecasts(repository))),
         settings=settings,
     )
 
@@ -234,5 +237,236 @@ def calibrate_ufh_active_from_repository(
     """Run the active UFH RC calibration from persisted telemetry history."""
     dataset = build_ufh_active_dataset_from_repository(repository, settings)
     return calibrate_ufh_active_rc(dataset, settings)
+
+
+def _apply_calibration_overrides(
+    base_request: RunRequest,
+    overrides: CalibrationParameterOverrides,
+) -> RunRequest:
+    """Return a request copy with the current effective calibration overrides applied."""
+    update = overrides.as_run_request_updates()
+    if not update:
+        return base_request
+    return base_request.model_copy(update=update)
+
+
+def _stage_failure(stage_name: str, message: str) -> CalibrationStageResult:
+    """Create a compact failed-stage summary for persistence/API observability."""
+    return CalibrationStageResult(
+        stage_name=stage_name,
+        succeeded=False,
+        message=message,
+    )
+
+
+def _stage_success(
+    stage_name: str,
+    message: str,
+    *,
+    overrides: CalibrationParameterOverrides,
+    sample_count: int,
+    dataset_start_utc: datetime,
+    dataset_end_utc: datetime,
+    segment_count: int | None = None,
+    optimizer_status: str | None = None,
+) -> CalibrationStageResult:
+    """Create a compact successful-stage summary for persistence/API observability."""
+    return CalibrationStageResult(
+        stage_name=stage_name,
+        succeeded=True,
+        message=message,
+        sample_count=sample_count,
+        segment_count=segment_count,
+        dataset_start_utc=dataset_start_utc,
+        dataset_end_utc=dataset_end_utc,
+        optimizer_status=optimizer_status,
+        overrides=overrides,
+    )
+
+
+def build_automatic_calibration_snapshot(
+    repository: TelemetryRepository,
+    *,
+    base_request: RunRequest,
+    settings: AutomaticCalibrationSettings,
+) -> CalibrationSnapshotPayload | None:
+    """Run the enabled offline calibrators and assemble one persisted MPC snapshot.
+
+    The snapshot is intentionally built from the latest successful overrides plus
+    any newly fitted stages in the current cycle. This lets one stage fail
+    temporarily without discarding previously validated parameters.
+    """
+    history_start_utc, history_end_utc = repository.get_aggregate_time_bounds()
+    if history_start_utc is None or history_end_utc is None:
+        return None
+    history_hours = (history_end_utc - history_start_utc).total_seconds() / 3600.0
+    if history_hours < settings.min_history_hours:
+        return None
+
+    previous_snapshot = repository.get_latest_calibration_snapshot()
+    effective_parameters = (
+        previous_snapshot.effective_parameters if previous_snapshot is not None else CalibrationParameterOverrides()
+    )
+
+    snapshot_time_utc = datetime.now(tz=timezone.utc)
+    stage_results: dict[str, CalibrationStageResult | None] = {
+        "ufh_active": None,
+        "dhw_standby": None,
+        "dhw_active": None,
+        "cop": None,
+    }
+
+    if settings.enable_ufh_active:
+        try:
+            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+            ufh_reference_parameters = ThermalParameters(
+                dt_hours=effective_request.dt_hours,
+                C_r=effective_request.C_r,
+                C_b=effective_request.C_b,
+                R_br=effective_request.R_br,
+                R_ro=effective_request.R_ro,
+                alpha=effective_request.alpha,
+                eta=effective_request.eta,
+                A_glass=effective_request.A_glass,
+            )
+            result = calibrate_ufh_active_from_repository(
+                repository,
+                UFHActiveCalibrationSettings(reference_parameters=ufh_reference_parameters),
+            )
+            overrides = CalibrationParameterOverrides(
+                C_r=result.fitted_parameters.C_r,
+                C_b=result.fitted_parameters.C_b,
+                R_br=result.fitted_parameters.R_br,
+                R_ro=result.fitted_parameters.R_ro,
+            )
+            effective_parameters = effective_parameters.merged_with(overrides)
+            stage_results["ufh_active"] = _stage_success(
+                "ufh_active",
+                f"UFH active RC calibrated (RMSE={result.rmse_room_temperature_c:.4f} °C).",
+                overrides=overrides,
+                sample_count=result.sample_count,
+                segment_count=result.segment_count,
+                dataset_start_utc=result.dataset_start_utc,
+                dataset_end_utc=result.dataset_end_utc,
+                optimizer_status=result.optimizer_status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            stage_results["ufh_active"] = _stage_failure("ufh_active", str(exc))
+
+    if settings.enable_dhw_standby:
+        try:
+            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+            result = calibrate_dhw_standby_from_repository(
+                repository,
+                DHWStandbyCalibrationSettings(
+                    dt_hours=effective_request.dt_hours,
+                    reference_c_top_kwh_per_k=effective_request.dhw_C_top,
+                    reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
+                ),
+            )
+            overrides = CalibrationParameterOverrides(dhw_R_loss=result.suggested_r_loss_k_per_kw)
+            effective_parameters = effective_parameters.merged_with(overrides)
+            stage_results["dhw_standby"] = _stage_success(
+                "dhw_standby",
+                f"DHW standby calibrated (R_loss={result.suggested_r_loss_k_per_kw:.4f} K/kW).",
+                overrides=overrides,
+                sample_count=result.sample_count,
+                dataset_start_utc=result.dataset_start_utc,
+                dataset_end_utc=result.dataset_end_utc,
+                optimizer_status=result.optimizer_status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            stage_results["dhw_standby"] = _stage_failure("dhw_standby", str(exc))
+
+    if settings.enable_dhw_active:
+        try:
+            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+            dhw_reference_parameters = DHWParameters(
+                dt_hours=effective_request.dt_hours,
+                C_top=effective_request.dhw_C_top,
+                C_bot=effective_request.dhw_C_bot,
+                R_strat=effective_request.dhw_R_strat,
+                R_loss=effective_request.dhw_R_loss,
+            )
+            result = calibrate_dhw_active_from_repository(
+                repository,
+                DHWActiveCalibrationSettings(reference_parameters=dhw_reference_parameters),
+            )
+            overrides = CalibrationParameterOverrides(dhw_R_strat=result.fitted_parameters.R_strat)
+            effective_parameters = effective_parameters.merged_with(overrides)
+            stage_results["dhw_active"] = _stage_success(
+                "dhw_active",
+                f"DHW active stratification calibrated (RMSE_top={result.rmse_t_top_c:.4f} °C).",
+                overrides=overrides,
+                sample_count=result.sample_count,
+                segment_count=result.segment_count,
+                dataset_start_utc=result.dataset_start_utc,
+                dataset_end_utc=result.dataset_end_utc,
+                optimizer_status=result.optimizer_status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            stage_results["dhw_active"] = _stage_failure("dhw_active", str(exc))
+
+    if settings.enable_cop:
+        try:
+            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+            result = calibrate_cop_from_repository(
+                repository,
+                COPCalibrationSettings(
+                    t_ref_outdoor_c=effective_request.T_ref_outdoor_curve,
+                    delta_t_cond_k=effective_request.delta_T_cond,
+                    delta_t_evap_k=effective_request.delta_T_evap,
+                    cop_min=effective_request.cop_min,
+                    cop_max=effective_request.cop_max,
+                ),
+            )
+            overrides = CalibrationParameterOverrides(
+                eta_carnot=result.fitted_parameters.eta_carnot,
+                T_supply_min=result.fitted_parameters.T_supply_min,
+                heating_curve_slope=result.fitted_parameters.heating_curve_slope,
+            )
+            effective_parameters = effective_parameters.merged_with(overrides)
+            stage_results["cop"] = _stage_success(
+                "cop",
+                f"COP calibrated (RMSE_COP={result.rmse_actual_cop:.4f}).",
+                overrides=overrides,
+                sample_count=result.sample_count,
+                dataset_start_utc=result.dataset_start_utc,
+                dataset_end_utc=result.dataset_end_utc,
+                optimizer_status=result.eta_optimizer_status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            stage_results["cop"] = _stage_failure("cop", str(exc))
+
+    return CalibrationSnapshotPayload(
+        generated_at_utc=snapshot_time_utc,
+        effective_parameters=effective_parameters,
+        ufh_active=stage_results["ufh_active"],
+        dhw_standby=stage_results["dhw_standby"],
+        dhw_active=stage_results["dhw_active"],
+        cop=stage_results["cop"],
+    )
+
+
+def run_and_persist_automatic_calibration(
+    repository: TelemetryRepository,
+    *,
+    base_request: RunRequest,
+    settings: AutomaticCalibrationSettings,
+) -> CalibrationSnapshotPayload | None:
+    """Execute one automatic calibration cycle and persist the resulting snapshot.
+
+    Returns ``None`` when not enough telemetry history exists yet; otherwise the
+    newly stored snapshot payload is returned.
+    """
+    payload = build_automatic_calibration_snapshot(
+        repository,
+        base_request=base_request,
+        settings=settings,
+    )
+    if payload is None:
+        return None
+    repository.add_calibration_snapshot(payload)
+    return payload
 
 

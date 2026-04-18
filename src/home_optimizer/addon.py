@@ -58,6 +58,12 @@ _OPTIONS_PATH: Path = Path("/data/options.json")
 #: Host to bind Uvicorn — bind to all interfaces inside the container.
 _BIND_HOST: str = "0.0.0.0"
 
+#: Automatic calibration interval [s] — slow background job over persisted telemetry.
+DEFAULT_CALIBRATION_INTERVAL_SECONDS: int = 6 * 3600
+
+#: Minimum telemetry history before the addon attempts offline calibration [h].
+DEFAULT_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
+
 log = logging.getLogger("home_optimizer.addon")
 
 
@@ -112,6 +118,36 @@ class AddonOptions(BaseModel):
             "Enable periodic MPC scheduling.  When False the MPC is only "
             "available via the POST /api/simulate endpoint (simulator mode)."
         ),
+    )
+    calibration_enabled: bool = Field(
+        True,
+        description="Enable periodic automatic calibration from persisted telemetry.",
+    )
+    calibration_interval_seconds: int = Field(
+        DEFAULT_CALIBRATION_INTERVAL_SECONDS,
+        gt=0,
+        description="How often the offline calibration pipeline runs [s].",
+    )
+    calibration_min_history_hours: float = Field(
+        DEFAULT_CALIBRATION_MIN_HISTORY_HOURS,
+        gt=0.0,
+        description="Minimum persisted telemetry history required before auto-calibration [h].",
+    )
+    calibration_enable_ufh_active: bool = Field(
+        True,
+        description="Enable automatic active-UFH RC calibration.",
+    )
+    calibration_enable_dhw_standby: bool = Field(
+        True,
+        description="Enable automatic DHW standby-loss calibration.",
+    )
+    calibration_enable_dhw_active: bool = Field(
+        True,
+        description="Enable automatic active-DHW stratification calibration.",
+    )
+    calibration_enable_cop: bool = Field(
+        True,
+        description="Enable automatic offline COP calibration.",
     )
 
     # --- MPC physical parameters (§15 of the theory document) ---
@@ -421,6 +457,19 @@ def _build_backend(opts: AddonOptions) -> HomeAssistantBackend:
     )
 
 
+def _build_automatic_calibration_settings(opts: AddonOptions):
+    """Build validated automatic-calibration scheduler settings from addon options."""
+    from .calibration.models import AutomaticCalibrationSettings  # noqa: PLC0415
+
+    return AutomaticCalibrationSettings(
+        min_history_hours=opts.calibration_min_history_hours,
+        enable_ufh_active=opts.calibration_enable_ufh_active,
+        enable_dhw_standby=opts.calibration_enable_dhw_standby,
+        enable_dhw_active=opts.calibration_enable_dhw_active,
+        enable_cop=opts.calibration_enable_cop,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -555,72 +604,124 @@ def main() -> None:
     forecast_persister.start(collector.scheduler, run_immediately=True)
     log.info("ForecastPersister started (hourly Open-Meteo updates)")
 
-    # ── 4c. Start periodic MPC (optional) ─────────────────────────────────
-    if opts.mpc_enabled:
-        from .optimizer import RunRequest  # noqa: PLC0415
+    # ── 4c. Build the shared baseline MPC/calibration input ───────────────
+    from .optimizer import RunRequest  # noqa: PLC0415
 
-        _defaults = RunRequest.model_validate({})
-        # price_cfg was already constructed above for the telemetry collector.
-        mpc_base_input = RunRequest(
+    _defaults = RunRequest.model_validate({})
+    # price_cfg was already constructed above for the telemetry collector.
+    mpc_base_input = RunRequest.model_validate(
+        {
             # ── UFH thermal model ───────────────────────────────────────────
-            C_r=opts.mpc_C_r,
-            C_b=opts.mpc_C_b,
-            R_br=opts.mpc_R_br,
-            R_ro=opts.mpc_R_ro,
-            alpha=opts.mpc_alpha,
-            eta=opts.mpc_eta,
-            A_glass=opts.mpc_A_glass,
+            "C_r": opts.mpc_C_r,
+            "C_b": opts.mpc_C_b,
+            "R_br": opts.mpc_R_br,
+            "R_ro": opts.mpc_R_ro,
+            "alpha": opts.mpc_alpha,
+            "eta": opts.mpc_eta,
+            "A_glass": opts.mpc_A_glass,
             # ── UFH initial conditions (overridden by backend at each step) ─
-            T_r_init=_defaults.T_r_init,
-            T_b_init=_defaults.T_b_init,
-            previous_power_kw=_defaults.previous_power_kw,
+            "T_r_init": _defaults.T_r_init,
+            "T_b_init": _defaults.T_b_init,
+            "previous_power_kw": _defaults.previous_power_kw,
             # ── MPC settings ─────────────────────────────────────────────────
-            horizon_hours=opts.mpc_horizon_hours,
-            dt_hours=opts.mpc_dt_hours,
-            Q_c=opts.mpc_Q_c,
-            R_c=opts.mpc_R_c,
-            Q_N=opts.mpc_Q_N,
-            P_max=opts.mpc_P_max,
-            delta_P_max=opts.mpc_delta_P_max,
-            T_min=opts.mpc_T_min,
-            T_max=opts.mpc_T_max,
-            T_ref=opts.mpc_T_ref,
+            "horizon_hours": opts.mpc_horizon_hours,
+            "dt_hours": opts.mpc_dt_hours,
+            "Q_c": opts.mpc_Q_c,
+            "R_c": opts.mpc_R_c,
+            "Q_N": opts.mpc_Q_N,
+            "P_max": opts.mpc_P_max,
+            "delta_P_max": opts.mpc_delta_P_max,
+            "T_min": opts.mpc_T_min,
+            "T_max": opts.mpc_T_max,
+            "T_ref": opts.mpc_T_ref,
             # ── UFH disturbance forecast ─────────────────────────────────────
-            outdoor_temperature_c=_defaults.outdoor_temperature_c,
-            price_config=price_cfg,
-            internal_gains_kw=_defaults.internal_gains_kw,
+            "outdoor_temperature_c": _defaults.outdoor_temperature_c,
+            "t_out_forecast": None,
+            "gti_window_forecast": None,
+            "gti_pv_forecast": None,
+            "price_config": price_cfg,
+            "internal_gains_kw": _defaults.internal_gains_kw,
             # ── PV ───────────────────────────────────────────────────────────
-            pv_enabled=_defaults.pv_enabled,
-            pv_peak_kw=_defaults.pv_peak_kw,
+            "pv_enabled": _defaults.pv_enabled,
+            "pv_peak_kw": _defaults.pv_peak_kw,
             # ── DHW ──────────────────────────────────────────────────────────
-            dhw_enabled=opts.mpc_dhw_enabled,
-            dhw_C_top=opts.boiler_tank_liters * 1.1628e-3 / 2.0,  # lambdaV_tank/2
-            dhw_C_bot=opts.boiler_tank_liters * 1.1628e-3 / 2.0,
-            dhw_R_strat=opts.mpc_dhw_R_strat,
-            dhw_R_loss=opts.mpc_dhw_R_loss,
-            dhw_T_top_init=_defaults.dhw_T_top_init,
-            dhw_T_bot_init=_defaults.dhw_T_bot_init,
-            dhw_P_max=opts.mpc_dhw_P_max,
-            dhw_delta_P_max=opts.mpc_dhw_delta_P_max,
-            dhw_T_min=opts.mpc_dhw_T_min,
-            dhw_T_legionella=opts.mpc_dhw_T_legionella,
-            dhw_legionella_period_steps=_defaults.dhw_legionella_period_steps,
-            dhw_legionella_duration_steps=_defaults.dhw_legionella_duration_steps,
-            dhw_v_tap_m3_per_h=_defaults.dhw_v_tap_m3_per_h,
-            dhw_t_mains_c=_defaults.dhw_t_mains_c,
-            dhw_t_amb_c=_defaults.dhw_t_amb_c,
+            "dhw_enabled": opts.mpc_dhw_enabled,
+            "dhw_C_top": opts.boiler_tank_liters * 1.1628e-3 / 2.0,
+            "dhw_C_bot": opts.boiler_tank_liters * 1.1628e-3 / 2.0,
+            "dhw_R_strat": opts.mpc_dhw_R_strat,
+            "dhw_R_loss": opts.mpc_dhw_R_loss,
+            "dhw_T_top_init": _defaults.dhw_T_top_init,
+            "dhw_T_bot_init": _defaults.dhw_T_bot_init,
+            "dhw_P_max": opts.mpc_dhw_P_max,
+            "dhw_delta_P_max": opts.mpc_dhw_delta_P_max,
+            "dhw_T_min": opts.mpc_dhw_T_min,
+            "dhw_T_legionella": opts.mpc_dhw_T_legionella,
+            "dhw_legionella_period_steps": _defaults.dhw_legionella_period_steps,
+            "dhw_legionella_duration_steps": _defaults.dhw_legionella_duration_steps,
+            "dhw_v_tap_m3_per_h": _defaults.dhw_v_tap_m3_per_h,
+            "dhw_t_mains_c": _defaults.dhw_t_mains_c,
+            "dhw_t_amb_c": _defaults.dhw_t_amb_c,
             # ── Shared WP electrical budget ──────────────────────────────────
-            P_hp_max_elec=opts.mpc_P_hp_max_elec,
+            "P_hp_max_elec": opts.mpc_P_hp_max_elec,
             # ── Carnot COP model ─────────────────────────────────────────────
-            eta_carnot=opts.mpc_eta_carnot,
-            delta_T_cond=opts.mpc_delta_T_cond,
-            delta_T_evap=opts.mpc_delta_T_evap,
-            T_supply_min=_defaults.T_supply_min,
-            T_ref_outdoor_curve=_defaults.T_ref_outdoor_curve,
-            heating_curve_slope=_defaults.heating_curve_slope,
-            cop_min=opts.mpc_cop_min,
-            cop_max=opts.mpc_cop_max,
+            "eta_carnot": opts.mpc_eta_carnot,
+            "delta_T_cond": opts.mpc_delta_T_cond,
+            "delta_T_evap": opts.mpc_delta_T_evap,
+            "T_supply_min": _defaults.T_supply_min,
+            "T_ref_outdoor_curve": _defaults.T_ref_outdoor_curve,
+            "heating_curve_slope": _defaults.heating_curve_slope,
+            "cop_min": opts.mpc_cop_min,
+            "cop_max": opts.mpc_cop_max,
+        }
+    )
+
+    # ── 4d. Start periodic automatic calibration (optional) ───────────────
+    if opts.calibration_enabled:
+        from .calibration.service import run_and_persist_automatic_calibration  # noqa: PLC0415
+
+        calibration_settings = _build_automatic_calibration_settings(opts)
+
+        def _run_calibration_job() -> None:
+            payload = run_and_persist_automatic_calibration(
+                repository,
+                base_request=mpc_base_input,
+                settings=calibration_settings,
+            )
+            if payload is None:
+                log.info(
+                    "Automatic calibration skipped — waiting for %.1f h of telemetry history.",
+                    calibration_settings.min_history_hours,
+                )
+                return
+            log.info(
+                "Automatic calibration snapshot stored at %s with %d effective overrides.",
+                payload.generated_at_utc.isoformat(),
+                len(payload.effective_parameters.as_run_request_updates()),
+            )
+
+        try:
+            _run_calibration_job()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Initial automatic calibration run failed: %s", exc)
+
+        collector.scheduler.add_job(
+            _run_calibration_job,
+            trigger="interval",
+            seconds=opts.calibration_interval_seconds,
+            id="calibration_periodic",
+            replace_existing=True,
+            misfire_grace_time=max(1, opts.calibration_interval_seconds // 2),
         )
+        log.info(
+            "Automatic calibration job scheduled: every %d s (%d min)",
+            opts.calibration_interval_seconds,
+            opts.calibration_interval_seconds // 60,
+        )
+    else:
+        log.info("Automatic calibration scheduling disabled (calibration_enabled=false).")
+
+    # ── 4e. Start periodic MPC (optional) ─────────────────────────────────
+    if opts.mpc_enabled:
         optimizer = Optimizer()
         optimizer.schedule_periodic(
             base_input=mpc_base_input,

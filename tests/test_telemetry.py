@@ -18,6 +18,7 @@ from home_optimizer.telemetry import (
     TelemetryRepository,
     aggregate_readings,
 )
+from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload
 
 
 class SequenceBackend(SensorBackend):
@@ -472,3 +473,31 @@ def test_forecast_persister_inserts_all_steps(tmp_path: Path) -> None:
     n_dupes = persister.persist_once()
     assert n_dupes == 0
     assert len(repository.list_forecast_snapshots()) == _N  # still 4, not 8
+
+
+def test_repository_round_trips_latest_calibration_snapshot(tmp_path: Path) -> None:
+    """Automatic calibration snapshots must persist and round-trip through SQLite."""
+    database_url = f"sqlite:///{tmp_path / 'calibration.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    payload = CalibrationSnapshotPayload(
+        generated_at_utc=datetime(2026, 4, 18, 8, 0, tzinfo=timezone.utc),
+        effective_parameters=CalibrationParameterOverrides(
+            C_r=7.1,
+            R_ro=8.4,
+            eta_carnot=0.41,
+            T_supply_min=26.0,
+        ),
+    )
+
+    repository.add_calibration_snapshot(payload)
+    round_tripped = repository.get_latest_calibration_snapshot()
+
+    assert round_tripped is not None
+    assert round_tripped.generated_at_utc == payload.generated_at_utc
+    assert round_tripped.effective_parameters.C_r == pytest.approx(7.1)
+    assert round_tripped.effective_parameters.R_ro == pytest.approx(8.4)
+    assert round_tripped.effective_parameters.eta_carnot == pytest.approx(0.41)
+    assert round_tripped.effective_parameters.T_supply_min == pytest.approx(26.0)
+

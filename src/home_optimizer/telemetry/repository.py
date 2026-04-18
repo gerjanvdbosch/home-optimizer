@@ -6,13 +6,15 @@ scheduler logic so that storage can be tested independently from APScheduler.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, select
+from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from .models import Base, ForecastSnapshot, MPCLog, TelemetryAggregate
+from ..types import CalibrationSnapshotPayload
+from .models import Base, CalibrationSnapshot, ForecastSnapshot, MPCLog, TelemetryAggregate
 
 
 class TelemetryRepository:
@@ -73,6 +75,27 @@ class TelemetryRepository:
             session.refresh(record)
         return record
 
+    def add_calibration_snapshot(self, payload: CalibrationSnapshotPayload) -> CalibrationSnapshot:
+        """Persist one automatic-calibration payload snapshot.
+
+        Args:
+            payload: Structured calibration snapshot with effective MPC overrides
+                and per-stage diagnostics.
+
+        Returns:
+            Persisted ORM row from ``calibration_snapshots``.
+        """
+        record = CalibrationSnapshot(
+            generated_at_utc=payload.generated_at_utc,
+            payload_json=payload.model_dump_json(),
+        )
+        with self._session_factory() as session:
+            session.add(record)
+            session.flush()
+            session.commit()
+            session.refresh(record)
+        return record
+
     def list_aggregates(self) -> list[TelemetryAggregate]:
         """Return all telemetry buckets ordered by their start timestamp."""
         with self._session_factory() as session:
@@ -84,6 +107,15 @@ class TelemetryRepository:
         with self._session_factory() as session:
             stmt = select(MPCLog).order_by(MPCLog.solve_time_utc.asc())
             return list(session.scalars(stmt).all())
+
+    def get_latest_calibration_snapshot(self) -> CalibrationSnapshotPayload | None:
+        """Return the newest persisted automatic-calibration payload, if any."""
+        with self._session_factory() as session:
+            stmt = select(CalibrationSnapshot).order_by(CalibrationSnapshot.generated_at_utc.desc()).limit(1)
+            row = session.scalars(stmt).first()
+            if row is None:
+                return None
+            return CalibrationSnapshotPayload.model_validate_json(row.payload_json)
 
     def bulk_add_forecast_snapshots(self, rows: list[dict[str, Any]]) -> int:
         """Insert a batch of forecast steps, silently skipping duplicates.
@@ -182,6 +214,16 @@ class TelemetryRepository:
         if fetched_at is None:
             return []
         return self.list_forecast_snapshots(fetched_at_utc=fetched_at)
+
+    def get_aggregate_time_bounds(self) -> tuple[datetime | None, datetime | None]:
+        """Return the oldest bucket start and newest bucket end in telemetry history."""
+        with self._session_factory() as session:
+            stmt = select(
+                func.min(TelemetryAggregate.bucket_start_utc),
+                func.max(TelemetryAggregate.bucket_end_utc),
+            )
+            min_start_utc, max_end_utc = session.execute(stmt).one()
+            return min_start_utc, max_end_utc
 
     def count(self) -> int:
         """Return the number of persisted telemetry buckets."""
