@@ -9,10 +9,43 @@ from fastapi.testclient import TestClient
 
 from home_optimizer.api import HomeOptimizerAPI, app
 from home_optimizer.optimizer import Optimizer, RunRequest
+from home_optimizer.sensors import LiveReadings, SensorBackend
 from home_optimizer.telemetry import TelemetryRepository
 from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload
 
 client = TestClient(app)
+
+
+def _live_readings(*, shutter_living_room_pct: float) -> LiveReadings:
+    """Return one complete live sensor snapshot for scheduled-input tests."""
+    return LiveReadings(
+        room_temperature_c=20.5,
+        outdoor_temperature_c=8.0,
+        hp_supply_temperature_c=31.0,
+        hp_supply_target_temperature_c=33.0,
+        hp_return_temperature_c=27.0,
+        hp_flow_lpm=9.0,
+        hp_electric_power_kw=2.0,
+        hp_mode="ufh",
+        p1_net_power_kw=1.4,
+        pv_output_kw=0.6,
+        thermostat_setpoint_c=20.5,
+        dhw_top_temperature_c=52.0,
+        dhw_bottom_temperature_c=45.0,
+        shutter_living_room_pct=shutter_living_room_pct,
+        defrost_active=False,
+        booster_heater_active=False,
+        boiler_ambient_temp_c=18.0,
+        refrigerant_condensation_temp_c=38.0,
+        refrigerant_liquid_line_temp_c=28.0,
+        discharge_temp_c=65.0,
+        t_mains_estimated_c=10.5,
+        timestamp=datetime(2026, 4, 18, 10, 0, tzinfo=timezone.utc),
+        pv_total_kwh=1000.0,
+        hp_electric_total_kwh=500.0,
+        p1_import_total_kwh=800.0,
+        p1_export_total_kwh=200.0,
+    )
 
 
 def test_simulate_exposes_pv_forecast_in_api_response() -> None:
@@ -76,6 +109,8 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-settings"' in html
     assert 'id="dhw-chart-card"' in html
     assert 'id="pv_enabled"' in html
+    assert 'id="shutter_living_room_pct"' in html
+    assert 'id="shutter_forecast"' in html
     assert "UFH + DHW + PV MPC" in html
     assert "fetch(apiUrl('/api/defaults'))" in html
     assert "applyRunRequestDefaults" in html
@@ -191,6 +226,86 @@ def test_optimizer_scheduled_input_ignores_invalid_ufh_calibration_tuple(tmp_pat
     assert scheduled_input.R_br == base_input.R_br
     assert scheduled_input.R_ro == base_input.R_ro
     assert scheduled_input.dhw_R_loss == 55.0
+
+
+def test_optimizer_scheduled_input_applies_live_shutter_position() -> None:
+    """Scheduled MPC input must use the latest shutter reading to scale UFH solar gains."""
+
+    class StaticBackend(SensorBackend):
+        def __init__(self, readings: LiveReadings) -> None:
+            self._readings = readings
+
+        def read_all(self) -> LiveReadings:
+            return self._readings
+
+        def close(self) -> None:
+            return None
+
+    base_input = RunRequest.model_validate({"horizon_hours": 8, "shutter_living_room_pct": 100.0})
+    scheduled_input = Optimizer._build_scheduled_input(
+        base_input=base_input,
+        backend=StaticBackend(_live_readings(shutter_living_room_pct=35.0)),
+        repository=None,
+    )
+
+    assert scheduled_input.shutter_living_room_pct == 35.0
+
+
+def test_optimizer_scheduled_input_keeps_explicit_shutter_forecast(tmp_path) -> None:
+    """A caller-supplied shutter forecast must survive scheduled live-sensor overrides."""
+
+    class StaticBackend(SensorBackend):
+        def __init__(self, readings: LiveReadings) -> None:
+            self._readings = readings
+
+        def read_all(self) -> LiveReadings:
+            return self._readings
+
+        def close(self) -> None:
+            return None
+
+    database_url = f"sqlite:///{tmp_path / 'optimizer-shutter-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    base_input = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "shutter_living_room_pct": 100.0,
+            "shutter_forecast": [100.0, 80.0, 40.0, 0.0],
+        }
+    )
+    scheduled_input = Optimizer._build_scheduled_input(
+        base_input=base_input,
+        backend=StaticBackend(_live_readings(shutter_living_room_pct=35.0)),
+        repository=repository,
+    )
+
+    assert scheduled_input.shutter_living_room_pct == 35.0
+    assert scheduled_input.shutter_forecast == [100.0, 80.0, 40.0, 0.0]
+
+
+def test_simulate_accepts_explicit_shutter_forecast() -> None:
+    """The API must accept a real horizon-wide shutter forecast supplied by the caller."""
+    response = client.post(
+        "/api/simulate",
+        json={
+            "horizon_hours": 4,
+            "dt_hours": 1.0,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "gti_window_forecast": [600.0, 600.0, 600.0, 600.0],
+            "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+            "shutter_living_room_pct": 100.0,
+            "shutter_forecast": [100.0, 50.0, 25.0, 0.0],
+            "pv_enabled": False,
+            "dhw_enabled": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"]
+    assert len(payload["control_labels"]) == 4
 
 
 def test_calibration_latest_returns_404_without_snapshot(monkeypatch, tmp_path) -> None:

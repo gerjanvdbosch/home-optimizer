@@ -113,6 +113,7 @@ Open na het starten van de runner:
 - Alle huisparameters instelbaar (C_r, C_b, R_br, R_ro, α, η, A_glass)
 - UFH + DHW + PV self-consumption
 - Carnot COP-model met stooklijn
+- Zoninstraling op de zuidramen kan optioneel met een **`shutter_forecast` over de hele horizon** worden gemoduleerd; zonder die array blijft de actuele `shutter_living_room_pct` de fallback voor alle MPC-stappen
 - Laadt bij openen eerst `GET /api/defaults`, dus de formuliervelden tonen automatisch de laatste calibrated defaults als die beschikbaar zijn
 - Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
 
@@ -131,6 +132,8 @@ De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederland
 | `GET` | `/api/forecast` | Live Open-Meteo forecast (query params: lat, lon, horizon, pv_tilt, …) |
 | `GET` | `/api/forecast/latest` | Meest recente forecast uit de database |
 | `POST` | `/api/simulate` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
+
+`RunRequest` ondersteunt naast de scalar `shutter_living_room_pct` ook een optionele `shutter_forecast: list[float]` met lengte `N`; deze array overschrijft de scalar fallback stap-voor-stap voor de UFH-zoninstraling.
 
 ---
 

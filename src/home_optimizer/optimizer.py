@@ -191,6 +191,23 @@ class RunRequest(BaseModel):
             "Raises ValueError when absent."
         ),
     )
+    shutter_living_room_pct: float = Field(
+        100.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "Living-room shutter opening [%]. 100 = fully open, 0 = fully closed. "
+            "The UFH solar-gain disturbance uses η_eff = η × (shutter / 100)."
+        ),
+    )
+    shutter_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Living-room shutter opening forecast [%], length N.  "
+            "When provided, this array overrides the scalar shutter_living_room_pct "
+            "for every MPC step.  100 = fully open, 0 = fully closed."
+        ),
+    )
     gti_pv_forecast: list[float] | None = Field(
         None,
         description=(
@@ -899,6 +916,15 @@ class Optimizer:
             values=req.gti_window_forecast,
             fallback_scalar=0.0,
         )
+        # Real shutter forecasts are optional. When absent, the latest measured
+        # or manually configured scalar shutter position is broadcast across the
+        # horizon, preserving the previous scheduled-MPC behavior.
+        shutter_pct = Optimizer._materialize_horizon_array(
+            name="shutter_forecast",
+            horizon_steps=N,
+            values=req.shutter_forecast,
+            fallback_scalar=req.shutter_living_room_pct,
+        )
 
         # ── PV generation — real Open-Meteo GTI_pv when PV enabled ──
         # P_pv = (GTI_pv [W/m²] / W_PER_KW) * pv_peak_kw [kW/kWp].
@@ -925,6 +951,7 @@ class Optimizer:
             room_temperature_ref_c=np.full(N + 1, req.T_ref),
             pv_kw=pv,
             cop_ufh_k=cop_ufh_k,
+            shutter_pct=shutter_pct,
         )
 
     @staticmethod
@@ -1037,6 +1064,7 @@ class Optimizer:
                     "T_r_init": readings.room_temperature_c,
                     "T_b_init": t_b_estimate,
                     "outdoor_temperature_c": readings.outdoor_temperature_c,
+                    "shutter_living_room_pct": readings.shutter_living_room_pct,
                 }
             )
 

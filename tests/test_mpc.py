@@ -9,6 +9,7 @@ import home_optimizer.mpc as mpc_module
 from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
 from home_optimizer.mpc import MPCController
+from home_optimizer.optimizer import Optimizer, RunRequest
 from home_optimizer.thermal_model import ThermalModel
 from home_optimizer.types import (
     CombinedMPCParameters,
@@ -409,6 +410,90 @@ def test_mpc_cost_uses_electrical_power() -> None:
     assert (
         cost_high_cop < cost_low_cop
     ), "Higher COP must yield lower objective (cheaper electrical energy)."
+
+
+def test_optimizer_build_ufh_forecast_scales_solar_gain_with_shutter() -> None:
+    """Optimizer UFH forecasts must scale solar disturbance with shutter openness."""
+    horizon_steps = 4
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": horizon_steps,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0] * horizon_steps,
+            "gti_window_forecast": [600.0] * horizon_steps,
+            "gti_pv_forecast": [0.0] * horizon_steps,
+            "shutter_living_room_pct": 25.0,
+            "pv_enabled": False,
+        }
+    )
+    forecast = Optimizer._build_ufh_forecast(
+        run_request,
+        start_hour=0,
+        cop_model=HeatPumpCOPModel(COP_PARAMS),
+    )
+
+    expected_shutter = np.full(horizon_steps, 25.0)
+    np.testing.assert_allclose(forecast.shutter_pct, expected_shutter)
+
+    fully_open_gain = THERMAL_PARAMS.A_glass * 600.0 * THERMAL_PARAMS.eta / 1000.0
+    np.testing.assert_allclose(
+        forecast.solar_gains_kw(THERMAL_PARAMS),
+        np.full(horizon_steps, fully_open_gain * 0.25),
+    )
+
+
+def test_optimizer_build_ufh_forecast_prefers_explicit_shutter_forecast() -> None:
+    """A real shutter forecast array must override the scalar live/manual fallback."""
+    horizon_steps = 4
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": horizon_steps,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0] * horizon_steps,
+            "gti_window_forecast": [600.0] * horizon_steps,
+            "gti_pv_forecast": [0.0] * horizon_steps,
+            "shutter_living_room_pct": 100.0,
+            "shutter_forecast": [100.0, 50.0, 25.0, 0.0],
+            "pv_enabled": False,
+        }
+    )
+
+    forecast = Optimizer._build_ufh_forecast(
+        run_request,
+        start_hour=0,
+        cop_model=HeatPumpCOPModel(COP_PARAMS),
+    )
+
+    np.testing.assert_allclose(forecast.shutter_pct, np.array([100.0, 50.0, 25.0, 0.0]))
+
+    fully_open_gain = THERMAL_PARAMS.A_glass * 600.0 * THERMAL_PARAMS.eta / 1000.0
+    np.testing.assert_allclose(
+        forecast.solar_gains_kw(THERMAL_PARAMS),
+        np.array([fully_open_gain, fully_open_gain * 0.5, fully_open_gain * 0.25, 0.0]),
+    )
+
+
+def test_optimizer_build_ufh_forecast_rejects_short_shutter_forecast() -> None:
+    """Explicit shutter forecasts must cover the full MPC horizon."""
+    horizon_steps = 4
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": horizon_steps,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0] * horizon_steps,
+            "gti_window_forecast": [600.0] * horizon_steps,
+            "gti_pv_forecast": [0.0] * horizon_steps,
+            "shutter_forecast": [100.0, 50.0],
+            "pv_enabled": False,
+        }
+    )
+
+    with pytest.raises(ValueError, match="shutter_forecast must provide at least 4 values"):
+        Optimizer._build_ufh_forecast(
+            run_request,
+            start_hour=0,
+            cop_model=HeatPumpCOPModel(COP_PARAMS),
+        )
 
 
 # ---------------------------------------------------------------------------

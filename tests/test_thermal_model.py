@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from home_optimizer.thermal_model import ThermalModel, solar_gain_kw
-from home_optimizer.types import ThermalParameters
+from home_optimizer.types import ForecastHorizon, ThermalParameters
 
 
 @pytest.fixture
@@ -39,6 +39,23 @@ def test_solar_gain_array_input() -> None:
     gti = np.array([0.0, 400.0, 800.0])
     result = solar_gain_kw(gti, glass_area_m2=10.0, transmittance=0.5)
     np.testing.assert_allclose(result, [0.0, 2.0, 4.0])
+
+
+def test_forecast_solar_gain_scales_with_shutter_position(params: ThermalParameters) -> None:
+    """ForecastHorizon must scale Q_solar with the living-room shutter opening [%]."""
+    forecast = ForecastHorizon(
+        outdoor_temperature_c=np.full(3, 8.0),
+        gti_w_per_m2=np.array([400.0, 400.0, 400.0]),
+        internal_gains_kw=np.full(3, 0.3),
+        price_eur_per_kwh=np.full(3, 0.25),
+        room_temperature_ref_c=np.full(4, 21.0),
+        shutter_pct=np.array([100.0, 50.0, 0.0]),
+    )
+
+    gains = forecast.solar_gains_kw(params)
+    fully_open_gain = params.A_glass * forecast.gti_w_per_m2[0] * params.eta / 1000.0
+
+    np.testing.assert_allclose(gains, [fully_open_gain, fully_open_gain * 0.5, 0.0])
 
 
 # ── state matrices ────────────────────────────────────────────────────────────
