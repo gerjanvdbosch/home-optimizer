@@ -8,8 +8,15 @@ from typing import cast
 
 from sqlalchemy import text
 
-from .dataset import build_ufh_active_calibration_dataset, build_ufh_off_calibration_dataset
+from .dataset import (
+    build_dhw_standby_calibration_dataset,
+    build_ufh_active_calibration_dataset,
+    build_ufh_off_calibration_dataset,
+)
 from .models import (
+    DHWStandbyCalibrationDataset,
+    DHWStandbyCalibrationResult,
+    DHWStandbyCalibrationSettings,
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationResult,
     UFHActiveCalibrationSettings,
@@ -17,6 +24,7 @@ from .models import (
     UFHOffCalibrationResult,
     UFHOffCalibrationSettings,
 )
+from .dhw_standby import calibrate_dhw_standby_loss
 from .ufh_active import calibrate_ufh_active_rc
 from .ufh_offline import calibrate_ufh_off_envelope
 from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
@@ -44,7 +52,11 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
             room_temperature_last_c,
             outdoor_temperature_mean_c,
             household_elec_power_mean_kw,
-            hp_thermal_power_mean_kw
+            hp_thermal_power_mean_kw,
+            dhw_top_temperature_last_c,
+            dhw_bottom_temperature_last_c,
+            boiler_ambient_temp_mean_c,
+            t_mains_estimated_mean_c
         FROM telemetry_aggregates
         ORDER BY bucket_end_utc ASC
         """
@@ -61,6 +73,10 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
             outdoor_temperature_mean_c=float(row["outdoor_temperature_mean_c"]),
             household_elec_power_mean_kw=float(row["household_elec_power_mean_kw"]),
             hp_thermal_power_mean_kw=float(row["hp_thermal_power_mean_kw"]),
+            dhw_top_temperature_last_c=float(row["dhw_top_temperature_last_c"]),
+            dhw_bottom_temperature_last_c=float(row["dhw_bottom_temperature_last_c"]),
+            boiler_ambient_temp_mean_c=float(row["boiler_ambient_temp_mean_c"]),
+            t_mains_estimated_mean_c=float(row["t_mains_estimated_mean_c"]),
         )
         for row in rows
     ]
@@ -98,6 +114,17 @@ def build_ufh_off_dataset_from_repository(
     )
 
 
+def build_dhw_standby_dataset_from_repository(
+    repository: TelemetryRepository,
+    settings: DHWStandbyCalibrationSettings,
+) -> DHWStandbyCalibrationDataset:
+    """Load telemetry history from the repository and build a DHW standby dataset."""
+    return build_dhw_standby_calibration_dataset(
+        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        settings=settings,
+    )
+
+
 def build_ufh_active_dataset_from_repository(
     repository: TelemetryRepository,
     settings: UFHActiveCalibrationSettings,
@@ -118,6 +145,15 @@ def calibrate_ufh_off_from_repository(
     effective_settings = settings or UFHOffCalibrationSettings()
     dataset = build_ufh_off_dataset_from_repository(repository, effective_settings)
     return calibrate_ufh_off_envelope(dataset, effective_settings)
+
+
+def calibrate_dhw_standby_from_repository(
+    repository: TelemetryRepository,
+    settings: DHWStandbyCalibrationSettings,
+) -> DHWStandbyCalibrationResult:
+    """Run the first-stage DHW standby-loss calibration from persisted telemetry."""
+    dataset = build_dhw_standby_dataset_from_repository(repository, settings)
+    return calibrate_dhw_standby_loss(dataset, settings)
 
 
 def calibrate_ufh_active_from_repository(

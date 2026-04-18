@@ -15,6 +15,14 @@ Physical model assumptions
 
 from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
 from .calibration import (
+    DHWStandbyCalibrationDataset,
+    DHWStandbyCalibrationResult,
+    DHWStandbyCalibrationSample,
+    DHWStandbyCalibrationSettings,
+    build_dhw_standby_calibration_dataset,
+    build_dhw_standby_dataset_from_repository,
+    calibrate_dhw_standby_from_repository,
+    calibrate_dhw_standby_loss,
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationResult,
     UFHActiveCalibrationSegmentQuality,
@@ -62,6 +70,10 @@ from .types import (
 
 __all__ = [
     "CombinedMPCParameters",
+    "DHWStandbyCalibrationDataset",
+    "DHWStandbyCalibrationResult",
+    "DHWStandbyCalibrationSample",
+    "DHWStandbyCalibrationSettings",
     "DHWForecastHorizon",
     "DHWKalmanFilter",
     "DHWMPCParameters",
@@ -98,8 +110,12 @@ __all__ = [
     "UFHKalmanFilter",
     "W_PER_KW",
     "aggregate_readings",
+    "build_dhw_standby_calibration_dataset",
+    "build_dhw_standby_dataset_from_repository",
     "build_ufh_active_calibration_dataset",
     "build_ufh_off_calibration_dataset",
+    "calibrate_dhw_standby_from_repository",
+    "calibrate_dhw_standby_loss",
     "calibrate_ufh_active_from_repository",
     "calibrate_ufh_active_rc",
     "calibrate_ufh_off_envelope",

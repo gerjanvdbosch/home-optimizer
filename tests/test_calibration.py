@@ -9,18 +9,25 @@ from typing import cast
 import numpy as np
 
 from home_optimizer.calibration import (
+    DHWStandbyCalibrationDataset,
+    DHWStandbyCalibrationSample,
+    DHWStandbyCalibrationSettings,
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationSample,
     UFHActiveCalibrationSettings,
     UFHCalibrationDataset,
     UFHCalibrationSample,
     UFHOffCalibrationSettings,
+    build_dhw_standby_calibration_dataset,
     build_ufh_active_calibration_dataset,
     calibrate_ufh_active_rc,
+    calibrate_dhw_standby_loss,
     build_ufh_off_calibration_dataset,
     calibrate_ufh_off_envelope,
 )
+from home_optimizer.dhw_model import DHWModel
 from home_optimizer.thermal_model import ThermalModel, solar_gain_kw
+from home_optimizer.types import DHWParameters
 from home_optimizer.types import ThermalParameters
 
 
@@ -123,6 +130,121 @@ def test_calibrate_ufh_off_envelope_recovers_synthetic_parameters() -> None:
     np.testing.assert_allclose(result.tau_house_hours, tau_true_hours, rtol=1e-2)
     np.testing.assert_allclose(result.suggested_r_ro_k_per_kw, tau_true_hours / 14.0, rtol=1e-2)
     assert result.rmse_room_temperature_c < 1e-6
+
+
+def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:
+    """Only non-DHW quasi-mixed windows may enter the first-stage standby dataset."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=50.2,
+            dhw_bottom_temperature_last_c=49.6,
+            boiler_ambient_temp_mean_c=20.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=49.9,
+            dhw_bottom_temperature_last_c=49.4,
+            boiler_ambient_temp_mean_c=20.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=49.7,
+            dhw_bottom_temperature_last_c=49.3,
+            boiler_ambient_temp_mean_c=20.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=54.0,
+            dhw_bottom_temperature_last_c=46.0,
+            boiler_ambient_temp_mean_c=20.0,
+        ),
+    ]
+
+    dataset = build_dhw_standby_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=DHWStandbyCalibrationSettings(
+            dt_hours=5.0 / 60.0,
+            reference_c_top_kwh_per_k=0.058,
+            reference_c_bot_kwh_per_k=0.058,
+            min_sample_count=2,
+            max_layer_temperature_spread_c=1.0,
+        ),
+    )
+
+    assert dataset.sample_count == 2
+    sample = dataset.samples[0]
+    assert sample.t_top_start_c == 50.2
+    assert sample.t_bot_end_c == 49.4
+    assert sample.boiler_ambient_mean_c == 20.0
+
+
+def test_calibrate_dhw_standby_loss_recovers_synthetic_r_loss() -> None:
+    """Standby DHW calibration must recover the standby time constant and R_loss."""
+    parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=10.0,
+        R_loss=50.0,
+    )
+    model = DHWModel(parameters)
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    state = np.array([55.0, 55.0], dtype=float)
+    ambient_c = 20.0
+    samples: list[DHWStandbyCalibrationSample] = []
+    for step_k in range(64):
+        interval_start = start + timedelta(hours=step_k * parameters.dt_hours)
+        interval_end = interval_start + timedelta(hours=parameters.dt_hours)
+        next_state = model.step(
+            state=state,
+            control_kw=0.0,
+            v_tap_m3_per_h=0.0,
+            t_mains_c=10.0,
+            t_amb_c=ambient_c,
+        )
+        samples.append(
+            DHWStandbyCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=parameters.dt_hours,
+                t_top_start_c=float(state[0]),
+                t_top_end_c=float(next_state[0]),
+                t_bot_start_c=float(state[1]),
+                t_bot_end_c=float(next_state[1]),
+                boiler_ambient_mean_c=ambient_c,
+            )
+        )
+        state = next_state
+
+    dataset = DHWStandbyCalibrationDataset(samples=tuple(samples))
+    settings = DHWStandbyCalibrationSettings(
+        dt_hours=parameters.dt_hours,
+        reference_c_top_kwh_per_k=parameters.C_top,
+        reference_c_bot_kwh_per_k=parameters.C_bot,
+        min_sample_count=16,
+        initial_tau_hours=4.0,
+    )
+
+    result = calibrate_dhw_standby_loss(dataset, settings)
+
+    expected_tau_hours = (parameters.C_top + parameters.C_bot) * parameters.R_loss / 2.0
+    np.testing.assert_allclose(result.tau_standby_hours, expected_tau_hours, rtol=1e-3)
+    np.testing.assert_allclose(result.suggested_r_loss_k_per_kw, parameters.R_loss, rtol=1e-3)
+    assert result.rmse_mean_tank_temperature_c < 1e-6
 
 
 def test_build_ufh_active_calibration_dataset_filters_to_excited_ufh_windows() -> None:

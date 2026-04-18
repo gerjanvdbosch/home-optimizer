@@ -20,6 +20,7 @@ from datetime import datetime
 
 DEFAULT_OFF_MODE_NAME: str = "off"
 DEFAULT_UFH_MODE_NAME: str = "ufh"
+DEFAULT_DHW_MODE_NAME: str = "dhw"
 DEFAULT_MAX_PAIR_DT_HOURS: float = 0.25
 DEFAULT_MAX_GTI_W_PER_M2: float = 25.0
 DEFAULT_ACTIVE_MAX_GTI_W_PER_M2: float = 1_500.0
@@ -55,6 +56,7 @@ DEFAULT_MIN_INITIAL_FLOOR_OFFSET_C: float = -15.0
 DEFAULT_MAX_INITIAL_FLOOR_OFFSET_C: float = 15.0
 DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT: float = 0.0
 DEFAULT_INITIAL_FLOOR_OFFSET_SCALE_C: float = 2.0
+DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 2.0
 
 from ..types import ThermalParameters
 
@@ -192,6 +194,164 @@ class UFHOffCalibrationResult:
             raise ValueError("reference_c_eff_kwh_per_k must be strictly positive when present.")
         if self.rmse_room_temperature_c < 0.0:
             raise ValueError("rmse_room_temperature_c must be non-negative.")
+        if self.max_abs_residual_c < 0.0:
+            raise ValueError("max_abs_residual_c must be non-negative.")
+        if self.sample_count <= 0:
+            raise ValueError("sample_count must be strictly positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class DHWStandbyCalibrationSample:
+    """One quasi-mixed standby DHW transition sample for loss calibration.
+
+    This conservative first DHW stage uses only windows where the tank is not in
+    ``dhw`` mode and the top/bottom layers remain close enough that the 2-node
+    tank can be approximated as a single mixed node for standby-loss fitting.
+
+    Attributes:
+        interval_start_utc: Start timestamp of the fitted transition [UTC].
+        interval_end_utc: End timestamp of the fitted transition [UTC].
+        dt_hours: Transition duration Δt [h].
+        t_top_start_c: Top-layer temperature at k [°C].
+        t_top_end_c: Top-layer temperature at k+1 [°C].
+        t_bot_start_c: Bottom-layer temperature at k [°C].
+        t_bot_end_c: Bottom-layer temperature at k+1 [°C].
+        boiler_ambient_mean_c: Mean boiler ambient temperature over the interval [°C].
+    """
+
+    interval_start_utc: datetime
+    interval_end_utc: datetime
+    dt_hours: float
+    t_top_start_c: float
+    t_top_end_c: float
+    t_bot_start_c: float
+    t_bot_end_c: float
+    boiler_ambient_mean_c: float
+
+    def __post_init__(self) -> None:
+        if self.dt_hours <= 0.0:
+            raise ValueError("dt_hours must be strictly positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class DHWStandbyCalibrationDataset:
+    """Collection of quasi-mixed standby DHW samples used for batch loss learning."""
+
+    samples: tuple[DHWStandbyCalibrationSample, ...]
+
+    def __post_init__(self) -> None:
+        if not self.samples:
+            raise ValueError("DHWStandbyCalibrationDataset requires at least one sample.")
+
+    @property
+    def sample_count(self) -> int:
+        """Number of standby transition samples in the dataset [-]."""
+        return len(self.samples)
+
+    @property
+    def start_utc(self) -> datetime:
+        """Earliest timestamp in the standby dataset [UTC]."""
+        return self.samples[0].interval_start_utc
+
+    @property
+    def end_utc(self) -> datetime:
+        """Latest timestamp in the standby dataset [UTC]."""
+        return self.samples[-1].interval_end_utc
+
+
+@dataclass(frozen=True, slots=True)
+class DHWStandbyCalibrationSettings:
+    """Validated settings for the first identifiable DHW standby-loss calibrator.
+
+    The fitted model is derived from the full 2-node DHW energy balance (§9.5)
+    under the conservative assumptions used by this stage:
+
+    * no DHW heating input over the interval (``hp_mode_last != dhw_mode_name``)
+    * quasi-mixed tank: ``T_top ≈ T_bot`` at both interval boundaries
+    * no explicit tap-flow fit in this stage
+
+    Under these assumptions the total tank energy follows the identifiable
+    one-state standby envelope:
+
+        dT_dhw/dt = -(T_dhw - T_amb) / tau_standby
+
+    with ``tau_standby = (C_top + C_bot) · R_loss / 2``.  Therefore this first
+    stage fits only ``tau_standby`` and derives ``R_loss`` from the injected
+    layer capacities.
+    """
+
+    dt_hours: float
+    reference_c_top_kwh_per_k: float
+    reference_c_bot_kwh_per_k: float
+    dhw_mode_name: str = DEFAULT_DHW_MODE_NAME
+    max_pair_dt_hours: float = DEFAULT_MAX_PAIR_DT_HOURS
+    dt_compatibility_tolerance_hours: float = DEFAULT_DT_COMPATIBILITY_TOLERANCE_HOURS
+    max_defrost_active_fraction: float = DEFAULT_MAX_DEFROST_ACTIVE_FRACTION
+    max_booster_active_fraction: float = DEFAULT_MAX_BOOSTER_ACTIVE_FRACTION
+    max_layer_temperature_spread_c: float = DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C
+    min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
+    initial_tau_hours: float = DEFAULT_INITIAL_TAU_HOURS
+    min_tau_hours: float = DEFAULT_MIN_TAU_HOURS
+    max_tau_hours: float = DEFAULT_MAX_TAU_HOURS
+
+    def __post_init__(self) -> None:
+        if not self.dhw_mode_name.strip():
+            raise ValueError("dhw_mode_name must not be blank.")
+        for name in (
+            "dt_hours",
+            "reference_c_top_kwh_per_k",
+            "reference_c_bot_kwh_per_k",
+            "max_pair_dt_hours",
+            "dt_compatibility_tolerance_hours",
+            "initial_tau_hours",
+            "min_tau_hours",
+            "max_tau_hours",
+        ):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be strictly positive.")
+        if self.max_defrost_active_fraction < 0.0 or self.max_defrost_active_fraction > 1.0:
+            raise ValueError("max_defrost_active_fraction must be in [0, 1].")
+        if self.max_booster_active_fraction < 0.0 or self.max_booster_active_fraction > 1.0:
+            raise ValueError("max_booster_active_fraction must be in [0, 1].")
+        if self.max_layer_temperature_spread_c < 0.0:
+            raise ValueError("max_layer_temperature_spread_c must be non-negative.")
+        if self.min_sample_count < 2:
+            raise ValueError("min_sample_count must be at least 2.")
+        if self.min_tau_hours >= self.max_tau_hours:
+            raise ValueError("min_tau_hours must be < max_tau_hours.")
+        if not (self.min_tau_hours <= self.initial_tau_hours <= self.max_tau_hours):
+            raise ValueError("initial_tau_hours must lie within its bounds.")
+
+    @property
+    def reference_c_total_kwh_per_k(self) -> float:
+        """Injected total DHW heat capacity ``C_top + C_bot`` [kWh/K]."""
+        return self.reference_c_top_kwh_per_k + self.reference_c_bot_kwh_per_k
+
+
+@dataclass(frozen=True, slots=True)
+class DHWStandbyCalibrationResult:
+    """Result of fitting the identifiable DHW standby time constant."""
+
+    tau_standby_hours: float
+    suggested_r_loss_k_per_kw: float
+    reference_c_total_kwh_per_k: float
+    rmse_mean_tank_temperature_c: float
+    max_abs_residual_c: float
+    sample_count: int
+    dataset_start_utc: datetime
+    dataset_end_utc: datetime
+    optimizer_status: str
+    optimizer_cost: float
+
+    def __post_init__(self) -> None:
+        if self.tau_standby_hours <= 0.0:
+            raise ValueError("tau_standby_hours must be strictly positive.")
+        if self.suggested_r_loss_k_per_kw <= 0.0:
+            raise ValueError("suggested_r_loss_k_per_kw must be strictly positive.")
+        if self.reference_c_total_kwh_per_k <= 0.0:
+            raise ValueError("reference_c_total_kwh_per_k must be strictly positive.")
+        if self.rmse_mean_tank_temperature_c < 0.0:
+            raise ValueError("rmse_mean_tank_temperature_c must be non-negative.")
         if self.max_abs_residual_c < 0.0:
             raise ValueError("max_abs_residual_c must be non-negative.")
         if self.sample_count <= 0:

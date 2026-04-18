@@ -9,18 +9,22 @@ from dataclasses import asdict
 from .models import (
     DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
+    DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_UFH_POWER_KW,
     DEFAULT_MIN_SEGMENT_SAMPLES,
     DEFAULT_MIN_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C,
     DEFAULT_MIN_SEGMENT_ROOM_TEMPERATURE_SPAN_C,
     DEFAULT_MIN_SEGMENT_SCORE,
     DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW,
+    DHWStandbyCalibrationSettings,
     UFHActiveCalibrationSettings,
     UFHOffCalibrationSettings,
 )
 from .service import (
+    build_dhw_standby_dataset_from_repository,
     build_ufh_active_dataset_from_repository,
     build_ufh_off_dataset_from_repository,
+    calibrate_dhw_standby_from_repository,
     calibrate_ufh_active_from_repository,
     calibrate_ufh_off_from_repository,
 )
@@ -37,9 +41,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stage",
-        choices=("off", "active-ufh"),
+        choices=("off", "active-ufh", "dhw-standby"),
         default="off",
-        help="Calibration stage to run: passive off-mode envelope fit or active UFH RC fit.",
+        help="Calibration stage to run: passive UFH off-envelope fit, active UFH RC fit, or passive DHW standby-loss fit.",
     )
     parser.add_argument(
         "--database-url",
@@ -54,6 +58,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--alpha", type=float, default=None, help="Reference solar split α [-].")
     parser.add_argument("--eta", type=float, default=None, help="Reference glazing transmittance η [-].")
     parser.add_argument("--a-glass", type=float, default=None, help="Reference glazing area A_glass [m²].")
+    parser.add_argument(
+        "--dhw-dt-hours",
+        type=float,
+        default=None,
+        help="Reference DHW standby-calibration time step Δt [h].",
+    )
+    parser.add_argument(
+        "--dhw-c-top",
+        type=float,
+        default=None,
+        help="Reference DHW top-layer capacity C_top [kWh/K].",
+    )
+    parser.add_argument(
+        "--dhw-c-bot",
+        type=float,
+        default=None,
+        help="Reference DHW bottom-layer capacity C_bot [kWh/K].",
+    )
+    parser.add_argument(
+        "--dhw-max-layer-spread-c",
+        type=float,
+        default=DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
+        help="Maximum allowed |T_top − T_bot| for a standby-mixed calibration sample [°C].",
+    )
     parser.add_argument(
         "--fit-c-r",
         action="store_true",
@@ -166,6 +194,25 @@ def _build_reference_parameters(args: argparse.Namespace) -> ThermalParameters:
     )
 
 
+def _build_dhw_standby_settings(args: argparse.Namespace) -> DHWStandbyCalibrationSettings:
+    """Build the required settings object for DHW standby-loss calibration."""
+    required_names = ("dhw_dt_hours", "dhw_c_top", "dhw_c_bot")
+    missing = [name for name in required_names if getattr(args, name) is None]
+    if missing:
+        joined = ", ".join(f"--{name.replace('_', '-')}" for name in missing)
+        raise ValueError(
+            "DHW standby calibration requires explicit reference capacities and time step: "
+            f"missing {joined}."
+        )
+    return DHWStandbyCalibrationSettings(
+        dt_hours=float(args.dhw_dt_hours),
+        reference_c_top_kwh_per_k=float(args.dhw_c_top),
+        reference_c_bot_kwh_per_k=float(args.dhw_c_bot),
+        min_sample_count=args.min_samples,
+        max_layer_temperature_spread_c=float(args.dhw_max_layer_spread_c),
+    )
+
+
 def main() -> None:
     """Run the requested offline calibration stage from telemetry history."""
     parser = _build_parser()
@@ -198,7 +245,7 @@ def main() -> None:
                 "dataset_end_utc": result.dataset_end_utc.isoformat(),
             },
         }
-    else:
+    elif args.stage == "active-ufh":
         max_gti_w_per_m2 = (
             DEFAULT_ACTIVE_MAX_GTI_W_PER_M2 if args.max_gti_w_per_m2 is None else args.max_gti_w_per_m2
         )
@@ -235,6 +282,23 @@ def main() -> None:
                 "dataset_end_utc": result.dataset_end_utc.isoformat(),
             },
         }
+    else:
+        settings = _build_dhw_standby_settings(args)
+        dataset = build_dhw_standby_dataset_from_repository(repository, settings)
+        result = calibrate_dhw_standby_from_repository(repository, settings)
+        payload = {
+            "stage": args.stage,
+            "dataset": {
+                "sample_count": dataset.sample_count,
+                "start_utc": dataset.start_utc.isoformat(),
+                "end_utc": dataset.end_utc.isoformat(),
+            },
+            "fit": {
+                **asdict(result),
+                "dataset_start_utc": result.dataset_start_utc.isoformat(),
+                "dataset_end_utc": result.dataset_end_utc.isoformat(),
+            },
+        }
 
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -249,6 +313,18 @@ def main() -> None:
         if result.suggested_r_ro_k_per_kw is not None:
             print(f"R_ro (derived)   : {result.suggested_r_ro_k_per_kw:.4f} K/kW")
         print(f"RMSE(T_room)     : {result.rmse_room_temperature_c:.5f} °C")
+        print(f"Max |residual|   : {result.max_abs_residual_c:.5f} °C")
+        print(f"Optimizer status : {result.optimizer_status}")
+        return
+
+    if args.stage == "dhw-standby":
+        print("DHW standby calibration")
+        print("=======================")
+        print(f"Samples          : {dataset.sample_count}")
+        print(f"Window           : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
+        print(f"tau_standby      : {result.tau_standby_hours:.4f} h")
+        print(f"R_loss (derived) : {result.suggested_r_loss_k_per_kw:.4f} K/kW")
+        print(f"RMSE(T_dhw)      : {result.rmse_mean_tank_temperature_c:.5f} °C")
         print(f"Max |residual|   : {result.max_abs_residual_c:.5f} °C")
         print(f"Optimizer status : {result.optimizer_status}")
         return

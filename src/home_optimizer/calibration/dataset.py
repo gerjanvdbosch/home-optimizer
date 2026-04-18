@@ -15,6 +15,9 @@ from typing import Sequence
 import numpy as np
 
 from .models import (
+    DHWStandbyCalibrationDataset,
+    DHWStandbyCalibrationSample,
+    DHWStandbyCalibrationSettings,
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationSegmentQuality,
     UFHActiveCalibrationSample,
@@ -133,6 +136,82 @@ def build_ufh_off_calibration_dataset(
             f"required >= {settings.min_sample_count}, found {len(samples)}."
         )
     return UFHCalibrationDataset(samples=tuple(samples))
+
+
+def build_dhw_standby_calibration_dataset(
+    aggregates: Sequence[TelemetryAggregate],
+    settings: DHWStandbyCalibrationSettings,
+) -> DHWStandbyCalibrationDataset:
+    """Build conservative quasi-mixed standby DHW samples for loss calibration.
+
+    This stage intentionally keeps only intervals where the tank is not in DHW
+    mode and both layer temperatures remain close together.  Under those
+    conditions the full 2-node DHW energy balance reduces to a one-state standby
+    envelope in the weighted mean tank temperature.
+
+    Args:
+        aggregates: Historical telemetry buckets ordered arbitrarily.
+        settings: Validated standby-calibration thresholds and reference capacities.
+
+    Returns:
+        Dataset containing validated standby DHW transition samples.
+
+    Raises:
+        ValueError: If fewer than ``settings.min_sample_count`` usable samples remain.
+    """
+    rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
+    samples: list[DHWStandbyCalibrationSample] = []
+
+    for previous_row, next_row in zip(rows, rows[1:]):
+        if previous_row.hp_mode_last == settings.dhw_mode_name:
+            continue
+        if next_row.hp_mode_last == settings.dhw_mode_name:
+            continue
+        if previous_row.defrost_active_fraction > settings.max_defrost_active_fraction:
+            continue
+        if next_row.defrost_active_fraction > settings.max_defrost_active_fraction:
+            continue
+        if previous_row.booster_heater_active_fraction > settings.max_booster_active_fraction:
+            continue
+        if next_row.booster_heater_active_fraction > settings.max_booster_active_fraction:
+            continue
+
+        dt_hours = (next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds() / _SECONDS_PER_HOUR
+        if dt_hours <= 0.0 or dt_hours > settings.max_pair_dt_hours:
+            continue
+        if abs(dt_hours - settings.dt_hours) > settings.dt_compatibility_tolerance_hours:
+            continue
+
+        layer_spread_start_c = abs(
+            float(previous_row.dhw_top_temperature_last_c) - float(previous_row.dhw_bottom_temperature_last_c)
+        )
+        layer_spread_end_c = abs(
+            float(next_row.dhw_top_temperature_last_c) - float(next_row.dhw_bottom_temperature_last_c)
+        )
+        if layer_spread_start_c > settings.max_layer_temperature_spread_c:
+            continue
+        if layer_spread_end_c > settings.max_layer_temperature_spread_c:
+            continue
+
+        samples.append(
+            DHWStandbyCalibrationSample(
+                interval_start_utc=previous_row.bucket_end_utc,
+                interval_end_utc=next_row.bucket_end_utc,
+                dt_hours=dt_hours,
+                t_top_start_c=float(previous_row.dhw_top_temperature_last_c),
+                t_top_end_c=float(next_row.dhw_top_temperature_last_c),
+                t_bot_start_c=float(previous_row.dhw_bottom_temperature_last_c),
+                t_bot_end_c=float(next_row.dhw_bottom_temperature_last_c),
+                boiler_ambient_mean_c=float(next_row.boiler_ambient_temp_mean_c),
+            )
+        )
+
+    if len(samples) < settings.min_sample_count:
+        raise ValueError(
+            "Not enough quasi-mixed standby DHW samples for calibration: "
+            f"required >= {settings.min_sample_count}, found {len(samples)}."
+        )
+    return DHWStandbyCalibrationDataset(samples=tuple(samples))
 
 
 def build_ufh_active_calibration_dataset(
