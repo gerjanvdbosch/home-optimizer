@@ -108,6 +108,7 @@ DEFAULT_COP_SEGMENT_SCORE_WEIGHT_ACTUAL_COP_SPAN: float = 1.0
 DEFAULT_COP_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN: float = 1.0
 DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TARGET_SPAN: float = 1.0
 DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TRACKING: float = 0.5
+DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO: float = 0.1
 COP_LEAST_SQUARES_LOSS_CHOICES: tuple[str, ...] = ("linear", "soft_l1", "huber", "cauchy", "arctan")
 DEFAULT_COP_HEATING_CURVE_LOSS_NAME: str = "soft_l1"
 DEFAULT_COP_ETA_LOSS_NAME: str = "soft_l1"
@@ -683,6 +684,7 @@ class COPCalibrationSettings:
     segment_score_weight_outdoor_temperature_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN
     segment_score_weight_supply_target_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TARGET_SPAN
     segment_score_weight_supply_tracking: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TRACKING
+    max_segment_boundary_gap_ratio: float = DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO
     initial_eta_carnot: float = DEFAULT_INITIAL_ETA_CARNOT
     min_eta_carnot: float = DEFAULT_MIN_ETA_CARNOT
     max_eta_carnot: float = DEFAULT_MAX_ETA_CARNOT
@@ -721,6 +723,7 @@ class COPCalibrationSettings:
             "segment_score_weight_outdoor_temperature_span",
             "segment_score_weight_supply_target_span",
             "segment_score_weight_supply_tracking",
+            "max_segment_boundary_gap_ratio",
             "initial_eta_carnot",
             "min_eta_carnot",
             "max_eta_carnot",

@@ -16,6 +16,7 @@ from .models import (
     DEFAULT_COP_ETA_LOSS_SCALE_KWH,
     DEFAULT_COP_HEATING_CURVE_LOSS_NAME,
     DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C,
+    DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO,
     DEFAULT_DELTA_T_COND_K,
     DEFAULT_DELTA_T_EVAP_K,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
@@ -226,6 +227,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional top-N cap on selected DHW COP segments after quality ranking [-].",
+    )
+    parser.add_argument(
+        "--cop-max-segment-boundary-gap-ratio",
+        type=float,
+        default=DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO,
+        help=(
+            "Maximum allowed inter-bucket boundary gap as a fraction of the shorter bucket Δt "
+            "when stitching same-mode COP segments [-]."
+        ),
     )
     parser.add_argument(
         "--cop-diagnostics",
@@ -494,6 +504,7 @@ def _build_cop_settings(args: argparse.Namespace) -> COPCalibrationSettings:
         min_segment_score=args.cop_min_segment_score,
         max_selected_ufh_segments=args.cop_max_selected_ufh_segments,
         max_selected_dhw_segments=args.cop_max_selected_dhw_segments,
+        max_segment_boundary_gap_ratio=args.cop_max_segment_boundary_gap_ratio,
         t_ref_outdoor_c=args.cop_t_ref_outdoor_c,
         delta_t_cond_k=args.cop_delta_t_cond_k,
         delta_t_evap_k=args.cop_delta_t_evap_k,

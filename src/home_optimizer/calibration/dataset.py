@@ -346,6 +346,26 @@ def _apply_cop_segment_caps(
     ]
 
 
+def _cop_samples_are_contiguous(
+    previous_sample: COPCalibrationSample,
+    current_sample: COPCalibrationSample,
+    settings: COPCalibrationSettings,
+) -> bool:
+    """Return whether two same-mode COP buckets belong to one continuous operating segment."""
+    if previous_sample.mode_name != current_sample.mode_name:
+        return False
+    gap_hours = (
+        current_sample.bucket_start_utc - previous_sample.bucket_end_utc
+    ).total_seconds() / _SECONDS_PER_HOUR
+    if gap_hours < 0.0:
+        return False
+    max_allowed_gap_hours = (
+        min(previous_sample.dt_hours, current_sample.dt_hours)
+        * settings.max_segment_boundary_gap_ratio
+    )
+    return gap_hours <= max_allowed_gap_hours
+
+
 def _collect_cop_segments(
     aggregates: Sequence[TelemetryAggregate],
     settings: COPCalibrationSettings,
@@ -438,9 +458,10 @@ def _collect_cop_segments(
             continue
         stage_counts["cop_accepted_count"] += 1
 
-        if current_segment and (
-            current_segment[-1].mode_name != sample.mode_name
-            or current_segment[-1].bucket_end_utc != sample.bucket_start_utc
+        if current_segment and not _cop_samples_are_contiguous(
+            current_segment[-1],
+            sample,
+            settings,
         ):
             rejection_counts["segment_break_mode_or_gap"] += 1
             flush_segment()

@@ -490,6 +490,70 @@ def test_build_cop_calibration_dataset_keeps_best_ufh_segments_when_capped() -> 
     assert dataset.samples[-1].outdoor_temperature_mean_c == 1.5
 
 
+def test_build_cop_calibration_dataset_keeps_same_mode_buckets_with_small_boundary_gap() -> None:
+    """Small telemetry sampling gaps between same-mode COP buckets must not split a segment."""
+    start = datetime(2026, 4, 17, 2, 40, tzinfo=timezone.utc)
+    gap_seconds = 10.0
+    bucket_duration = timedelta(minutes=5) - timedelta(seconds=gap_seconds)
+    aggregates = [
+        SimpleNamespace(
+            bucket_start_utc=start,
+            bucket_end_utc=start + bucket_duration,
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=8.0,
+            hp_supply_target_temperature_mean_c=35.0,
+            hp_supply_temperature_mean_c=34.7,
+            hp_thermal_power_mean_kw=3.2,
+            hp_electric_energy_delta_kwh=0.20,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=5),
+            bucket_end_utc=start + timedelta(minutes=5) + bucket_duration,
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=6.0,
+            hp_supply_target_temperature_mean_c=37.0,
+            hp_supply_temperature_mean_c=36.5,
+            hp_thermal_power_mean_kw=3.3,
+            hp_electric_energy_delta_kwh=0.20,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=10),
+            bucket_end_utc=start + timedelta(minutes=10) + bucket_duration,
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=4.0,
+            hp_supply_target_temperature_mean_c=39.5,
+            hp_supply_temperature_mean_c=38.9,
+            hp_thermal_power_mean_kw=3.5,
+            hp_electric_energy_delta_kwh=0.20,
+        ),
+    ]
+
+    dataset = build_cop_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=COPCalibrationSettings(
+            min_sample_count=3,
+            min_ufh_curve_sample_count=3,
+            min_segment_samples=3,
+            min_segment_thermal_energy_kwh=0.2,
+            min_segment_actual_cop_span=0.02,
+            min_ufh_segment_outdoor_temperature_span_c=1.0,
+            min_ufh_segment_supply_target_span_c=1.0,
+            max_segment_boundary_gap_ratio=0.1,
+        ),
+    )
+
+    assert dataset.sample_count == 3
+    assert dataset.raw_segment_count == 1
+    assert dataset.selected_segment_count == 1
+    assert dataset.dropped_segment_count == 0
+
+
 def test_diagnose_cop_calibration_dataset_reports_bucket_and_segment_dropoffs() -> None:
     """COP diagnostics must explain where rows and segments are rejected before fitting."""
     start = datetime(2026, 4, 17, 3, 0, tzinfo=timezone.utc)
