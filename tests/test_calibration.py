@@ -193,6 +193,10 @@ def test_build_ufh_active_calibration_dataset_filters_to_excited_ufh_windows() -
             reference_parameters=reference_parameters,
             min_sample_count=2,
             min_segment_samples=2,
+            min_segment_ufh_power_span_kw=0.01,
+            min_segment_room_temperature_span_c=0.01,
+            min_segment_outdoor_temperature_span_c=0.01,
+            min_segment_score=0.0,
             min_ufh_power_kw=0.1,
         ),
     )
@@ -309,6 +313,10 @@ def test_build_ufh_active_calibration_dataset_splits_contiguous_runs() -> None:
             reference_parameters=reference_parameters,
             min_sample_count=4,
             min_segment_samples=2,
+            min_segment_ufh_power_span_kw=0.01,
+            min_segment_room_temperature_span_c=0.01,
+            min_segment_outdoor_temperature_span_c=0.01,
+            min_segment_score=0.0,
             min_ufh_power_kw=0.1,
         ),
     )
