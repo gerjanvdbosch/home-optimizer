@@ -122,6 +122,60 @@ def _diagnostic_eta_carnot(
     return float(np.average(eta_samples, weights=weights))
 
 
+def _initial_eta_carnot_guess(
+    *,
+    actual_cop: np.ndarray,
+    ideal_carnot_cop: np.ndarray,
+    settings: COPCalibrationSettings,
+    weights: np.ndarray,
+) -> float:
+    """Return a fail-fast initial η guess for the clipped COP least-squares fit.
+
+    Why
+    ---
+    The optimisation objective in :func:`_fit_eta_carnot` uses the same clipped
+    COP model as the runtime MPC path. When the initial η lies on a region where
+    **all** selected samples clip to ``cop_max``, the residual Jacobian with
+    respect to η becomes zero and SciPy can terminate immediately at the
+    user-provided initial guess even though a lower, physically better η exists.
+
+    To avoid this flat-plateau failure mode, the initial guess is derived from
+    the weighted diagnostic ratio ``actual_cop / ideal_carnot_cop`` and then
+    projected strictly below the η threshold where every sample would saturate at
+    ``cop_max``.
+
+    Args:
+        actual_cop: Measured per-sample COP array [-], shape (N,).
+        ideal_carnot_cop: Unclipped ideal Carnot COP array [-], shape (N,).
+        settings: Validated COP calibration settings containing η and COP bounds.
+        weights: Positive weighted-least-squares sample weights [-], shape (N,).
+
+    Returns:
+        Initial η guess [-] for the one-dimensional least-squares optimisation.
+
+    Raises:
+        ValueError: If the configured ``[min_eta_carnot, max_eta_carnot]`` range
+            is fully clipped for all samples, making η unidentifiable under the
+            current ``cop_max`` bound.
+    """
+    diagnostic_eta = _diagnostic_eta_carnot(
+        actual_cop,
+        ideal_carnot_cop,
+        weights=weights,
+    )
+    max_eta_before_full_clip = float(np.max(settings.cop_max / ideal_carnot_cop))
+    if settings.min_eta_carnot >= max_eta_before_full_clip:
+        raise ValueError(
+            "eta_carnot is unidentifiable for the selected COP calibration samples: "
+            "all admissible eta values clip every sample to cop_max. Increase cop_max "
+            "or use calibration samples with a larger temperature lift."
+        )
+    eta_initial = float(np.clip(diagnostic_eta, settings.min_eta_carnot, settings.max_eta_carnot))
+    if eta_initial >= max_eta_before_full_clip:
+        eta_initial = float(np.nextafter(max_eta_before_full_clip, settings.min_eta_carnot))
+    return eta_initial
+
+
 def _as_arrays(dataset: COPCalibrationDataset) -> _CalibrationArrays:
     """Convert immutable COP sample objects into NumPy arrays for optimisation."""
     samples = dataset.samples
@@ -253,6 +307,18 @@ def _fit_eta_carnot(
         heating_curve_slope=heating_curve_slope,
     )
     weights = _normalised_energy_weights(arrays.thermal_energy_kwh)
+    actual_cop = arrays.thermal_energy_kwh / arrays.electric_energy_kwh
+    ideal_carnot_cop = _ideal_carnot_cop(
+        t_supply_c=predicted_supply_c,
+        t_out_c=arrays.outdoor_temperature_mean_c,
+        settings=settings,
+    )
+    initial_eta_carnot = _initial_eta_carnot_guess(
+        actual_cop=actual_cop,
+        ideal_carnot_cop=ideal_carnot_cop,
+        settings=settings,
+        weights=weights,
+    )
 
     def residuals(theta: np.ndarray) -> np.ndarray:
         eta_carnot = float(theta[0])
@@ -275,7 +341,7 @@ def _fit_eta_carnot(
 
     result = least_squares(
         residuals,
-        x0=np.array([settings.initial_eta_carnot], dtype=float),
+        x0=np.array([initial_eta_carnot], dtype=float),
         bounds=(
             np.array([settings.min_eta_carnot], dtype=float),
             np.array([settings.max_eta_carnot], dtype=float),

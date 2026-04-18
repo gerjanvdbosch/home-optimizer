@@ -880,6 +880,72 @@ def test_cop_calibration_settings_reject_invalid_loss_names() -> None:
         raise AssertionError("Expected invalid eta_loss_name to raise ValueError.")
 
 
+def test_calibrate_cop_model_uses_non_saturated_eta_initial_guess() -> None:
+    """The eta fit must escape a fully clipped cop_max plateau caused by a high initial η.
+
+    This regression covers the real-data failure mode where warm UFH samples and
+    a conservative ``cop_max`` make the least-squares objective locally flat at
+    the user-provided initial η. The fitter must derive a data-driven initial η
+    below the full-saturation threshold so the optimisation remains identifiable.
+    """
+    true_parameters = HeatPumpCOPParameters(
+        eta_carnot=0.27,
+        delta_T_cond=5.0,
+        delta_T_evap=5.0,
+        T_supply_min=25.0,
+        T_ref_outdoor=18.0,
+        heating_curve_slope=0.8,
+        cop_min=1.5,
+        cop_max=7.0,
+    )
+    model = HeatPumpCOPModel(true_parameters)
+    start = datetime(2026, 4, 17, 10, 0, tzinfo=timezone.utc)
+    dt_hours = 5.0 / 60.0
+    samples: list[COPCalibrationSample] = []
+
+    for step_k, t_out in enumerate(np.linspace(16.5, 20.0, 8)):
+        bucket_start = start + timedelta(hours=step_k * dt_hours)
+        bucket_end = bucket_start + timedelta(hours=dt_hours)
+        t_supply_target = float(model.heating_curve(np.array([t_out], dtype=float))[0])
+        thermal_energy_kwh = 0.38 + 0.015 * np.sin(step_k / 3.0)
+        actual_cop = float(model.cop_ufh(np.array([t_out], dtype=float))[0])
+        electric_energy_kwh = thermal_energy_kwh / actual_cop
+        samples.append(
+            COPCalibrationSample(
+                bucket_start_utc=bucket_start,
+                bucket_end_utc=bucket_end,
+                dt_hours=dt_hours,
+                mode_name="ufh",
+                outdoor_temperature_mean_c=float(t_out),
+                supply_target_temperature_mean_c=t_supply_target,
+                supply_temperature_mean_c=t_supply_target - 0.2,
+                thermal_energy_kwh=thermal_energy_kwh,
+                electric_energy_kwh=electric_energy_kwh,
+            )
+        )
+
+    dataset = COPCalibrationDataset(samples=tuple(samples))
+    settings = COPCalibrationSettings(
+        min_sample_count=8,
+        min_ufh_curve_sample_count=8,
+        initial_eta_carnot=0.45,
+        initial_t_supply_min_c=24.0,
+        initial_heating_curve_slope=1.0,
+        t_ref_outdoor_c=true_parameters.T_ref_outdoor,
+        delta_t_cond_k=true_parameters.delta_T_cond,
+        delta_t_evap_k=true_parameters.delta_T_evap,
+        cop_min=true_parameters.cop_min,
+        cop_max=true_parameters.cop_max,
+    )
+
+    result = calibrate_cop_model(dataset, settings)
+
+    assert result.fitted_parameters.eta_carnot < settings.initial_eta_carnot
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, rtol=2e-2)
+    np.testing.assert_allclose(result.diagnostic_eta_carnot_ufh, true_parameters.eta_carnot, rtol=2e-2)
+    assert result.rmse_actual_cop < 1e-6
+
+
 def test_calibrate_cop_model_soft_l1_is_more_robust_to_outliers_than_linear() -> None:
     """The configured robust COP losses must reduce parameter drift under bucket outliers."""
     true_parameters = HeatPumpCOPParameters(
