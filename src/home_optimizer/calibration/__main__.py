@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
+from typing import Any
 
 from .models import (
     COP_LEAST_SQUARES_LOSS_CHOICES,
@@ -17,6 +18,8 @@ from .models import (
     DEFAULT_COP_HEATING_CURVE_LOSS_NAME,
     DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C,
     DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO,
+    DEFAULT_COP_REAGGREGATE_MIN_BUCKET_COUNT,
+    DEFAULT_COP_REAGGREGATE_MIN_ELECTRIC_ENERGY_KWH,
     DEFAULT_DELTA_T_COND_K,
     DEFAULT_DELTA_T_EVAP_K,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
@@ -227,6 +230,24 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional top-N cap on selected DHW COP segments after quality ranking [-].",
+    )
+    parser.add_argument(
+        "--cop-reaggregate-min-electric-energy-kwh",
+        type=float,
+        default=DEFAULT_COP_REAGGREGATE_MIN_ELECTRIC_ENERGY_KWH,
+        help=(
+            "Minimum electrical energy targeted per COP calibration window after same-mode "
+            "re-aggregation [kWh]. Set 0 to disable re-aggregation."
+        ),
+    )
+    parser.add_argument(
+        "--cop-reaggregate-min-bucket-count",
+        type=int,
+        default=DEFAULT_COP_REAGGREGATE_MIN_BUCKET_COUNT,
+        help=(
+            "Minimum number of raw telemetry buckets merged into one COP calibration window "
+            "when re-aggregation is enabled [-]."
+        ),
     )
     parser.add_argument(
         "--cop-max-segment-boundary-gap-ratio",
@@ -504,6 +525,8 @@ def _build_cop_settings(args: argparse.Namespace) -> COPCalibrationSettings:
         min_segment_score=args.cop_min_segment_score,
         max_selected_ufh_segments=args.cop_max_selected_ufh_segments,
         max_selected_dhw_segments=args.cop_max_selected_dhw_segments,
+        reaggregate_min_electric_energy_kwh=args.cop_reaggregate_min_electric_energy_kwh,
+        reaggregate_min_bucket_count=args.cop_reaggregate_min_bucket_count,
         max_segment_boundary_gap_ratio=args.cop_max_segment_boundary_gap_ratio,
         t_ref_outdoor_c=args.cop_t_ref_outdoor_c,
         delta_t_cond_k=args.cop_delta_t_cond_k,
@@ -522,6 +545,8 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
     repository = TelemetryRepository(database_url=args.database_url)
+    dataset: Any = None
+    result: Any = None
 
     if args.stage == "off":
         max_gti_w_per_m2 = (

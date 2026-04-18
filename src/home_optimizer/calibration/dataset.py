@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from bisect import bisect_left
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
@@ -39,6 +40,33 @@ from .models import (
 from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
 
 _SECONDS_PER_HOUR: float = 3600.0
+
+
+@dataclass(frozen=True, slots=True)
+class _COPRawBucket:
+    """One admissible raw telemetry bucket prior to COP-only re-aggregation."""
+
+    bucket_start_utc: datetime
+    bucket_end_utc: datetime
+    dt_hours: float
+    mode_name: str
+    outdoor_temperature_mean_c: float
+    supply_target_temperature_mean_c: float
+    supply_temperature_mean_c: float
+    thermal_energy_kwh: float
+    electric_energy_kwh: float
+
+    @property
+    def has_valid_bucket_cop(self) -> bool:
+        """Return whether the raw bucket exposes a finite physical COP."""
+        return self.electric_energy_kwh > 0.0
+
+    @property
+    def actual_cop(self) -> float:
+        """Return the raw bucket COP when electric energy is strictly positive."""
+        if self.electric_energy_kwh <= 0.0:
+            raise ValueError("actual_cop is undefined when electric_energy_kwh <= 0.")
+        return self.thermal_energy_kwh / self.electric_energy_kwh
 
 
 def _dhw_total_energy_kwh(
@@ -207,21 +235,37 @@ def build_ufh_off_calibration_dataset(
     return UFHCalibrationDataset(samples=tuple(samples))
 
 
+def _cop_supply_tracking_rmse_c(raw_buckets: Sequence[_COPRawBucket]) -> float:
+    """Return the Δt-weighted supply-tracking RMSE over raw telemetry buckets [°C]."""
+    dt_hours = np.array([bucket.dt_hours for bucket in raw_buckets], dtype=float)
+    squared_errors = np.square(
+        np.array([bucket.supply_temperature_mean_c for bucket in raw_buckets], dtype=float)
+        - np.array([bucket.supply_target_temperature_mean_c for bucket in raw_buckets], dtype=float)
+    )
+    return float(np.sqrt(np.average(squared_errors, weights=dt_hours)))
+
+
 def _cop_segment_score(
-    samples: Sequence[COPCalibrationSample],
+    raw_buckets: Sequence[_COPRawBucket],
+    calibration_samples: Sequence[COPCalibrationSample],
     settings: COPCalibrationSettings,
 ) -> float:
     """Return a dimensionless quality score for one contiguous COP segment."""
-    sample_count = float(len(samples))
-    thermal_energy_kwh = float(sum(sample.thermal_energy_kwh for sample in samples))
-    actual_cops = np.array([sample.actual_cop for sample in samples], dtype=float)
-    outdoor_temperatures_c = np.array([sample.outdoor_temperature_mean_c for sample in samples], dtype=float)
-    supply_targets_c = np.array([sample.supply_target_temperature_mean_c for sample in samples], dtype=float)
-    supply_measured_c = np.array([sample.supply_temperature_mean_c for sample in samples], dtype=float)
-    actual_cop_span = float(np.ptp(actual_cops))
+    sample_count = float(len(raw_buckets))
+    thermal_energy_kwh = float(sum(bucket.thermal_energy_kwh for bucket in raw_buckets))
+    actual_cops = np.array([sample.actual_cop for sample in calibration_samples], dtype=float)
+    outdoor_temperatures_c = np.array(
+        [bucket.outdoor_temperature_mean_c for bucket in raw_buckets],
+        dtype=float,
+    )
+    supply_targets_c = np.array(
+        [bucket.supply_target_temperature_mean_c for bucket in raw_buckets],
+        dtype=float,
+    )
+    actual_cop_span = 0.0 if actual_cops.size == 0 else float(np.ptp(actual_cops))
     outdoor_span_c = float(np.ptp(outdoor_temperatures_c))
     supply_target_span_c = float(np.ptp(supply_targets_c))
-    supply_tracking_rmse_c = float(np.sqrt(np.mean(np.square(supply_measured_c - supply_targets_c))))
+    supply_tracking_rmse_c = _cop_supply_tracking_rmse_c(raw_buckets)
     tracking_margin = max(
         0.0,
         1.0 - supply_tracking_rmse_c / settings.max_segment_supply_tracking_rmse_c,
@@ -237,7 +281,7 @@ def _cop_segment_score(
         / settings.min_segment_actual_cop_span
         + settings.segment_score_weight_supply_tracking * tracking_margin
     )
-    if samples[0].mode_name == settings.ufh_mode_name:
+    if raw_buckets[0].mode_name == settings.ufh_mode_name:
         score += (
             settings.segment_score_weight_outdoor_temperature_span
             * outdoor_span_c
@@ -249,30 +293,139 @@ def _cop_segment_score(
     return float(score)
 
 
+def _aggregate_cop_window(raw_buckets: Sequence[_COPRawBucket]) -> COPCalibrationSample | None:
+    """Aggregate contiguous raw COP buckets into one calibration sample using Δt-weighted means."""
+    if not raw_buckets:
+        raise ValueError("raw_buckets must not be empty.")
+    electric_energy_kwh = float(sum(bucket.electric_energy_kwh for bucket in raw_buckets))
+    if electric_energy_kwh <= 0.0:
+        return None
+    dt_hours = float(sum(bucket.dt_hours for bucket in raw_buckets))
+    dt_weights = np.array([bucket.dt_hours for bucket in raw_buckets], dtype=float)
+    return COPCalibrationSample(
+        bucket_start_utc=raw_buckets[0].bucket_start_utc,
+        bucket_end_utc=raw_buckets[-1].bucket_end_utc,
+        dt_hours=dt_hours,
+        mode_name=raw_buckets[0].mode_name,
+        outdoor_temperature_mean_c=float(
+            np.average(
+                np.array([bucket.outdoor_temperature_mean_c for bucket in raw_buckets], dtype=float),
+                weights=dt_weights,
+            )
+        ),
+        supply_target_temperature_mean_c=float(
+            np.average(
+                np.array(
+                    [bucket.supply_target_temperature_mean_c for bucket in raw_buckets],
+                    dtype=float,
+                ),
+                weights=dt_weights,
+            )
+        ),
+        supply_temperature_mean_c=float(
+            np.average(
+                np.array([bucket.supply_temperature_mean_c for bucket in raw_buckets], dtype=float),
+                weights=dt_weights,
+            )
+        ),
+        thermal_energy_kwh=float(sum(bucket.thermal_energy_kwh for bucket in raw_buckets)),
+        electric_energy_kwh=electric_energy_kwh,
+        source_bucket_count=len(raw_buckets),
+    )
+
+
+def _effective_cop_sample_min_electric_energy_kwh(settings: COPCalibrationSettings) -> float:
+    """Return the effective post-reaggregation electric-energy threshold [kWh]."""
+    return max(settings.min_electric_energy_kwh, settings.reaggregate_min_electric_energy_kwh)
+
+
+def _reaggregate_cop_segment(
+    raw_buckets: Sequence[_COPRawBucket],
+    settings: COPCalibrationSettings,
+) -> list[COPCalibrationSample]:
+    """Greedily merge contiguous raw buckets into larger COP calibration windows."""
+    if not raw_buckets:
+        return []
+    target_electric_energy_kwh = settings.reaggregate_min_electric_energy_kwh
+    min_bucket_count = settings.reaggregate_min_bucket_count
+    if target_electric_energy_kwh <= 0.0 and min_bucket_count <= 1:
+        return [
+            sample
+            for sample in (_aggregate_cop_window((bucket,)) for bucket in raw_buckets)
+            if sample is not None
+        ]
+
+    grouped_windows: list[list[_COPRawBucket]] = []
+    current_window: list[_COPRawBucket] = []
+    current_electric_energy_kwh = 0.0
+    for bucket in raw_buckets:
+        current_window.append(bucket)
+        current_electric_energy_kwh += bucket.electric_energy_kwh
+        if (
+            current_electric_energy_kwh >= target_electric_energy_kwh
+            and len(current_window) >= min_bucket_count
+        ):
+            grouped_windows.append(list(current_window))
+            current_window = []
+            current_electric_energy_kwh = 0.0
+
+    if current_window:
+        if grouped_windows and (
+            current_electric_energy_kwh < target_electric_energy_kwh
+            or len(current_window) < min_bucket_count
+        ):
+            grouped_windows[-1].extend(current_window)
+        else:
+            grouped_windows.append(list(current_window))
+
+    effective_min_electric_energy_kwh = _effective_cop_sample_min_electric_energy_kwh(settings)
+    samples: list[COPCalibrationSample] = []
+    for grouped_window in grouped_windows:
+        sample = _aggregate_cop_window(grouped_window)
+        if sample is None:
+            continue
+        if sample.source_bucket_count < settings.reaggregate_min_bucket_count:
+            continue
+        if sample.electric_energy_kwh < effective_min_electric_energy_kwh:
+            continue
+        if sample.thermal_energy_kwh < settings.min_thermal_energy_kwh:
+            continue
+        if sample.actual_cop <= 1.0 or sample.actual_cop > settings.cop_max:
+            continue
+        samples.append(sample)
+    return samples
+
+
 def _cop_segment_quality(
-    samples: Sequence[COPCalibrationSample],
+    raw_buckets: Sequence[_COPRawBucket],
+    calibration_samples: Sequence[COPCalibrationSample],
     *,
     raw_segment_index: int,
     settings: COPCalibrationSettings,
 ) -> COPCalibrationSegmentQuality:
     """Summarise one raw contiguous COP segment before top-N selection."""
-    actual_cops = np.array([sample.actual_cop for sample in samples], dtype=float)
-    outdoor_temperatures_c = np.array([sample.outdoor_temperature_mean_c for sample in samples], dtype=float)
-    supply_targets_c = np.array([sample.supply_target_temperature_mean_c for sample in samples], dtype=float)
-    supply_measured_c = np.array([sample.supply_temperature_mean_c for sample in samples], dtype=float)
+    actual_cops = np.array([sample.actual_cop for sample in calibration_samples], dtype=float)
+    outdoor_temperatures_c = np.array(
+        [bucket.outdoor_temperature_mean_c for bucket in raw_buckets],
+        dtype=float,
+    )
+    supply_targets_c = np.array(
+        [bucket.supply_target_temperature_mean_c for bucket in raw_buckets],
+        dtype=float,
+    )
     quality = COPCalibrationSegmentQuality(
         raw_segment_index=raw_segment_index,
-        mode_name=samples[0].mode_name,
+        mode_name=raw_buckets[0].mode_name,
         selected=False,
-        sample_count=len(samples),
-        duration_hours=float(sum(sample.dt_hours for sample in samples)),
-        thermal_energy_kwh=float(sum(sample.thermal_energy_kwh for sample in samples)),
-        electric_energy_kwh=float(sum(sample.electric_energy_kwh for sample in samples)),
+        sample_count=len(raw_buckets),
+        duration_hours=float(sum(bucket.dt_hours for bucket in raw_buckets)),
+        thermal_energy_kwh=float(sum(bucket.thermal_energy_kwh for bucket in raw_buckets)),
+        electric_energy_kwh=float(sum(bucket.electric_energy_kwh for bucket in raw_buckets)),
         outdoor_temperature_span_c=float(np.ptp(outdoor_temperatures_c)),
         supply_target_temperature_span_c=float(np.ptp(supply_targets_c)),
-        actual_cop_span=float(np.ptp(actual_cops)),
-        supply_tracking_rmse_c=float(np.sqrt(np.mean(np.square(supply_measured_c - supply_targets_c)))),
-        score=_cop_segment_score(samples, settings),
+        actual_cop_span=0.0 if actual_cops.size == 0 else float(np.ptp(actual_cops)),
+        supply_tracking_rmse_c=_cop_supply_tracking_rmse_c(raw_buckets),
+        score=_cop_segment_score(raw_buckets, calibration_samples, settings),
     )
     hard_selected = (
         quality.sample_count >= settings.min_segment_samples
@@ -347,20 +500,20 @@ def _apply_cop_segment_caps(
 
 
 def _cop_samples_are_contiguous(
-    previous_sample: COPCalibrationSample,
-    current_sample: COPCalibrationSample,
+    previous_bucket: _COPRawBucket,
+    current_bucket: _COPRawBucket,
     settings: COPCalibrationSettings,
 ) -> bool:
     """Return whether two same-mode COP buckets belong to one continuous operating segment."""
-    if previous_sample.mode_name != current_sample.mode_name:
+    if previous_bucket.mode_name != current_bucket.mode_name:
         return False
     gap_hours = (
-        current_sample.bucket_start_utc - previous_sample.bucket_end_utc
+        current_bucket.bucket_start_utc - previous_bucket.bucket_end_utc
     ).total_seconds() / _SECONDS_PER_HOUR
     if gap_hours < 0.0:
         return False
     max_allowed_gap_hours = (
-        min(previous_sample.dt_hours, current_sample.dt_hours)
+        min(previous_bucket.dt_hours, current_bucket.dt_hours)
         * settings.max_segment_boundary_gap_ratio
     )
     return gap_hours <= max_allowed_gap_hours
@@ -369,11 +522,11 @@ def _cop_samples_are_contiguous(
 def _collect_cop_segments(
     aggregates: Sequence[TelemetryAggregate],
     settings: COPCalibrationSettings,
-) -> tuple[list[list[COPCalibrationSample]], Counter[str], Counter[str]]:
+) -> tuple[list[list[_COPRawBucket]], Counter[str], Counter[str]]:
     """Collect raw contiguous COP segments and bucket-level rejection counters."""
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
-    raw_segments: list[list[COPCalibrationSample]] = []
-    current_segment: list[COPCalibrationSample] = []
+    raw_segments: list[list[_COPRawBucket]] = []
+    current_segment: list[_COPRawBucket] = []
     accepted_modes = {settings.ufh_mode_name, settings.dhw_mode_name}
     stage_counts: Counter[str] = Counter(raw_row_count=len(rows))
     rejection_counts: Counter[str] = Counter()
@@ -419,12 +572,6 @@ def _collect_cop_segments(
             continue
         stage_counts["thermal_energy_accepted_count"] += 1
 
-        if electric_energy_kwh < settings.min_electric_energy_kwh:
-            rejection_counts["electric_energy_below_min"] += 1
-            flush_segment()
-            continue
-        stage_counts["electric_energy_accepted_count"] += 1
-
         supply_target_temperature_mean_c = float(row.hp_supply_target_temperature_mean_c)
         supply_temperature_mean_c = float(row.hp_supply_temperature_mean_c)
         if not np.isfinite(supply_target_temperature_mean_c):
@@ -437,7 +584,7 @@ def _collect_cop_segments(
             continue
         stage_counts["finite_supply_accepted_count"] += 1
 
-        sample = COPCalibrationSample(
+        raw_bucket = _COPRawBucket(
             bucket_start_utc=row.bucket_start_utc,
             bucket_end_utc=row.bucket_end_utc,
             dt_hours=dt_hours,
@@ -448,24 +595,26 @@ def _collect_cop_segments(
             thermal_energy_kwh=thermal_energy_kwh,
             electric_energy_kwh=electric_energy_kwh,
         )
-        if sample.actual_cop <= 1.0:
-            rejection_counts["actual_cop_leq_1"] += 1
-            flush_segment()
-            continue
-        if sample.actual_cop > settings.cop_max:
-            rejection_counts["actual_cop_above_cop_max"] += 1
-            flush_segment()
-            continue
-        stage_counts["cop_accepted_count"] += 1
+        if electric_energy_kwh >= settings.min_electric_energy_kwh:
+            stage_counts["electric_energy_accepted_count"] += 1
+        else:
+            rejection_counts["electric_energy_below_min"] += 1
+        if raw_bucket.has_valid_bucket_cop:
+            if 1.0 < raw_bucket.actual_cop <= settings.cop_max:
+                stage_counts["cop_accepted_count"] += 1
+            elif raw_bucket.actual_cop <= 1.0:
+                rejection_counts["actual_cop_leq_1"] += 1
+            else:
+                rejection_counts["actual_cop_above_cop_max"] += 1
 
         if current_segment and not _cop_samples_are_contiguous(
             current_segment[-1],
-            sample,
+            raw_bucket,
             settings,
         ):
             rejection_counts["segment_break_mode_or_gap"] += 1
             flush_segment()
-        current_segment.append(sample)
+        current_segment.append(raw_bucket)
 
     flush_segment()
     return raw_segments, stage_counts, rejection_counts
@@ -512,9 +661,19 @@ def diagnose_cop_calibration_dataset(
 ) -> COPCalibrationDiagnostics:
     """Diagnose COP bucket filtering and segment selection without requiring a fit-ready dataset."""
     raw_segments, stage_counts, rejection_counts = _collect_cop_segments(aggregates, settings)
+    reaggregated_segments = [
+        _reaggregate_cop_segment(raw_segment, settings) for raw_segment in raw_segments
+    ]
     uncapped_qualities = [
-        _cop_segment_quality(segment_samples, raw_segment_index=index, settings=settings)
-        for index, segment_samples in enumerate(raw_segments)
+        _cop_segment_quality(
+            raw_segment,
+            reaggregated_segment,
+            raw_segment_index=index,
+            settings=settings,
+        )
+        for index, (raw_segment, reaggregated_segment) in enumerate(
+            zip(raw_segments, reaggregated_segments, strict=True)
+        )
     ]
     capped_qualities = _apply_cop_segment_caps(list(uncapped_qualities), settings)
     selected_segment_indices = {
@@ -522,7 +681,7 @@ def diagnose_cop_calibration_dataset(
     }
     selected_samples = [
         sample
-        for segment_index, segment_samples in enumerate(raw_segments)
+        for segment_index, segment_samples in enumerate(reaggregated_segments)
         if segment_index in selected_segment_indices
         for sample in segment_samples
     ]
@@ -562,18 +721,27 @@ def build_cop_calibration_dataset(
 ) -> COPCalibrationDataset:
     """Build a filtered operating-bucket dataset for offline COP calibration.
 
-    The builder keeps only UFH and DHW buckets that are physically meaningful for
-    COP fitting: positive thermal/electrical energy, no defrost/booster overlap,
-    and measured bucket COP within the physically meaningful interval
-    ``(1, cop_max]``. Surviving buckets are then grouped into contiguous same-mode
-    segments, scored for excitation/supply tracking quality, and optionally capped
-    per mode before the final dataset is emitted.
+    The builder first filters out non-operating and physically invalid raw buckets,
+    then groups contiguous same-mode runs. Within each run it optionally re-aggregates
+    multiple persisted telemetry buckets into larger COP calibration windows so coarse
+    electrical counters remain usable. Segment scoring still evaluates the full raw
+    excitation, while the fitter consumes the re-aggregated windows.
     """
     raw_segments, _, _ = _collect_cop_segments(aggregates, settings)
+    reaggregated_segments = [
+        _reaggregate_cop_segment(raw_segment, settings) for raw_segment in raw_segments
+    ]
     segment_qualities = _apply_cop_segment_caps(
         [
-            _cop_segment_quality(segment_samples, raw_segment_index=index, settings=settings)
-            for index, segment_samples in enumerate(raw_segments)
+            _cop_segment_quality(
+                raw_segment,
+                reaggregated_segment,
+                raw_segment_index=index,
+                settings=settings,
+            )
+            for index, (raw_segment, reaggregated_segment) in enumerate(
+                zip(raw_segments, reaggregated_segments, strict=True)
+            )
         ],
         settings,
     )
@@ -582,7 +750,7 @@ def build_cop_calibration_dataset(
     }
     samples = [
         sample
-        for segment_index, segment_samples in enumerate(raw_segments)
+        for segment_index, segment_samples in enumerate(reaggregated_segments)
         if segment_index in selected_segment_indices
         for sample in segment_samples
     ]

@@ -108,6 +108,8 @@ DEFAULT_COP_SEGMENT_SCORE_WEIGHT_ACTUAL_COP_SPAN: float = 1.0
 DEFAULT_COP_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN: float = 1.0
 DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TARGET_SPAN: float = 1.0
 DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TRACKING: float = 0.5
+DEFAULT_COP_REAGGREGATE_MIN_ELECTRIC_ENERGY_KWH: float = 0.3
+DEFAULT_COP_REAGGREGATE_MIN_BUCKET_COUNT: int = 2
 DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO: float = 0.1
 COP_LEAST_SQUARES_LOSS_CHOICES: tuple[str, ...] = ("linear", "soft_l1", "huber", "cauchy", "arctan")
 DEFAULT_COP_HEATING_CURVE_LOSS_NAME: str = "soft_l1"
@@ -415,18 +417,19 @@ class DHWStandbyCalibrationResult:
 
 @dataclass(frozen=True, slots=True)
 class COPCalibrationSample:
-    """One filtered heat-pump operating bucket for offline COP calibration.
+    """One filtered heat-pump operating sample for offline COP calibration.
 
     Attributes:
-        bucket_start_utc: Start timestamp of the telemetry bucket [UTC].
-        bucket_end_utc: End timestamp of the telemetry bucket [UTC].
-        dt_hours: Bucket duration Δt [h].
+        bucket_start_utc: Start timestamp of the telemetry sample/window [UTC].
+        bucket_end_utc: End timestamp of the telemetry sample/window [UTC].
+        dt_hours: Sample/window duration Δt [h].
         mode_name: Heat-pump mode label (typically ``ufh`` or ``dhw``) [-].
-        outdoor_temperature_mean_c: Mean outdoor temperature over the bucket [°C].
+        outdoor_temperature_mean_c: Δt-weighted mean outdoor temperature over the sample/window [°C].
         supply_target_temperature_mean_c: Mean commanded/target supply temperature [°C].
         supply_temperature_mean_c: Mean measured hydraulic supply temperature [°C].
-        thermal_energy_kwh: Thermal energy delivered during the bucket [kWh].
-        electric_energy_kwh: Electrical energy consumed during the bucket [kWh].
+        thermal_energy_kwh: Thermal energy delivered during the sample/window [kWh].
+        electric_energy_kwh: Electrical energy consumed during the sample/window [kWh].
+        source_bucket_count: Number of persisted telemetry buckets merged into this calibration sample [-].
     """
 
     bucket_start_utc: datetime
@@ -438,6 +441,7 @@ class COPCalibrationSample:
     supply_temperature_mean_c: float
     thermal_energy_kwh: float
     electric_energy_kwh: float
+    source_bucket_count: int = 1
 
     def __post_init__(self) -> None:
         if self.dt_hours <= 0.0:
@@ -448,6 +452,8 @@ class COPCalibrationSample:
             raise ValueError("thermal_energy_kwh must be strictly positive.")
         if self.electric_energy_kwh <= 0.0:
             raise ValueError("electric_energy_kwh must be strictly positive.")
+        if self.source_bucket_count <= 0:
+            raise ValueError("source_bucket_count must be strictly positive.")
 
     @property
     def actual_cop(self) -> float:
@@ -577,9 +583,9 @@ class COPCalibrationDiagnostics:
         booster_accepted_count: Rows surviving the booster-fraction filter [-].
         dt_accepted_count: Rows with strictly positive bucket duration Δt [-].
         thermal_energy_accepted_count: Rows surviving the thermal-energy threshold [-].
-        electric_energy_accepted_count: Rows surviving the electric-energy threshold [-].
+        electric_energy_accepted_count: Rows whose raw electric delta individually meets the configured bucket threshold [-].
         finite_supply_accepted_count: Rows with finite target and measured supply temperatures [-].
-        cop_accepted_count: Rows surviving the physical COP bounds ``1 < COP <= cop_max`` [-].
+        cop_accepted_count: Rows whose raw bucket COP individually lies within ``1 < COP <= cop_max`` [-].
         raw_segment_count: Number of contiguous same-mode raw segments formed before scoring [-].
         selected_segment_count: Number of segments retained after thresholding and optional top-N caps [-].
         selected_sample_count: Number of bucket samples retained after final segment selection [-].
@@ -684,6 +690,8 @@ class COPCalibrationSettings:
     segment_score_weight_outdoor_temperature_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN
     segment_score_weight_supply_target_span: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TARGET_SPAN
     segment_score_weight_supply_tracking: float = DEFAULT_COP_SEGMENT_SCORE_WEIGHT_SUPPLY_TRACKING
+    reaggregate_min_electric_energy_kwh: float = DEFAULT_COP_REAGGREGATE_MIN_ELECTRIC_ENERGY_KWH
+    reaggregate_min_bucket_count: int = DEFAULT_COP_REAGGREGATE_MIN_BUCKET_COUNT
     max_segment_boundary_gap_ratio: float = DEFAULT_COP_MAX_SEGMENT_BOUNDARY_GAP_RATIO
     initial_eta_carnot: float = DEFAULT_INITIAL_ETA_CARNOT
     min_eta_carnot: float = DEFAULT_MIN_ETA_CARNOT
@@ -751,6 +759,8 @@ class COPCalibrationSettings:
             raise ValueError("min_segment_samples must be at least 2.")
         if self.min_segment_samples > self.min_sample_count:
             raise ValueError("min_segment_samples must be <= min_sample_count.")
+        if self.reaggregate_min_bucket_count <= 0:
+            raise ValueError("reaggregate_min_bucket_count must be strictly positive.")
         if self.min_segment_score < 0.0:
             raise ValueError("min_segment_score must be non-negative.")
         if self.max_selected_ufh_segments is not None and self.max_selected_ufh_segments <= 0:
