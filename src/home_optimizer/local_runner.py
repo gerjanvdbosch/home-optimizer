@@ -57,11 +57,13 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import app
+from .calibration import AutomaticCalibrationSettings, run_and_persist_automatic_calibration
 from .database import DATABASE_URL_DEFAULT, Database
 from .optimizer import Optimizer
 from .price_model import PriceConfig, PriceMode, build_price_model
+from .sensors.local_backend import LocalBackend
 from .sensors.open_meteo import OpenMeteoClient
-from .telemetry import ForecastPersister
+from .telemetry import BufferedTelemetryCollector, ForecastPersister, TelemetryCollectorSettings
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -83,6 +85,8 @@ _DEFAULT_PV_TILT: float = 50.0
 _DEFAULT_LATITUDE: float = 52.37
 #: Default site longitude [°E] — Amsterdam.
 _DEFAULT_LONGITUDE: float = 4.90
+_DEFAULT_CALIBRATION_INTERVAL_SECONDS: int = 6 * 3600
+_DEFAULT_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
 
 log = logging.getLogger("home_optimizer.local_runner")
 
@@ -256,6 +260,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Must contain all fields required by LocalBackend.from_json_file()."
         ),
     )
+    parser.add_argument(
+        "--calibration-interval",
+        type=int,
+        default=_DEFAULT_CALIBRATION_INTERVAL_SECONDS,
+        metavar="SECONDS",
+        help=(
+            "How often automatic calibration runs [s].  0 disables automatic calibration. "
+            "Calibration uses persisted telemetry from the local collector / existing database."
+        ),
+    )
+    parser.add_argument(
+        "--calibration-min-history-hours",
+        type=float,
+        default=_DEFAULT_CALIBRATION_MIN_HISTORY_HOURS,
+        metavar="HOURS",
+        help="Minimum persisted telemetry history required before automatic calibration [h].",
+    )
 
     # ── Electricity price model ───────────────────────────────────────────
     parser.add_argument(
@@ -375,7 +396,53 @@ def main(argv: list[str] | None = None) -> None:
         f"{args.pv_tilt}°/{args.pv_azimuth}°" if args.pv_tilt is not None else "disabled",
     )
 
-    # ── 4. ForecastPersister — fetch immediately + schedule hourly ─────────
+    # ── 4. Shared scheduler + optional local telemetry collection ──────────
+    scheduler = BackgroundScheduler(timezone="UTC")
+    telemetry_collector: BufferedTelemetryCollector | None = None
+    mpc_sensor_backend: LocalBackend | None = None
+
+    # Build price model from CLI arguments so both telemetry persistence and MPC
+    # cost evaluation use the same tariff assumptions (§14.2).
+    price_cfg = PriceConfig(
+        mode=PriceMode(args.price_mode),
+        flat_rate_eur_per_kwh=args.price_flat_rate,
+        high_rate_eur_per_kwh=args.price_high_rate,
+        low_rate_eur_per_kwh=args.price_low_rate,
+        feed_in_rate_eur_per_kwh=args.price_feed_in_rate,
+        nordpool_country_code=args.nordpool_country,
+        nordpool_vat_factor=args.nordpool_vat,
+    )
+    price_model = build_price_model(price_cfg)
+    log.info("Price model ready (mode=%s)", args.price_mode)
+
+    sensors_path: Path | None = Path(args.sensors_json).resolve() if args.sensors_json is not None else None
+    sensors_file_exists = sensors_path is not None and sensors_path.exists()
+    if sensors_file_exists and sensors_path is not None:
+        mpc_sensor_backend = LocalBackend.from_json_file(sensors_path)
+        telemetry_settings = TelemetryCollectorSettings(database_url=db.url)
+        telemetry_collector = BufferedTelemetryCollector(
+            backend=LocalBackend.from_json_file(sensors_path),
+            repository=repository,
+            settings=telemetry_settings,
+            scheduler=scheduler,
+            price_model=price_model,
+        )
+        telemetry_collector.start()
+        log.info(
+            "Local telemetry collector started from %s (sample=%ds, flush=%ds).",
+            sensors_path,
+            telemetry_settings.sampling_interval_seconds,
+            telemetry_settings.flush_interval_seconds,
+        )
+    else:
+        scheduler.start()
+        if sensors_path is not None:
+            log.info(
+                "No sensors-json file at %s — local telemetry collection disabled; existing database history remains available.",
+                sensors_path,
+            )
+
+    # ── 5. ForecastPersister — fetch immediately + schedule hourly ─────────
     persister = ForecastPersister(
         weather_client=weather_client,
         repository=repository,
@@ -390,77 +457,105 @@ def main(argv: list[str] | None = None) -> None:
         # Log but do not abort: the API will return 404 until the next retry.
         log.warning("Initial forecast fetch failed: %s", exc)
 
-    scheduler = BackgroundScheduler(timezone="UTC")
-    scheduler.start()
     persister.start(scheduler, run_immediately=False)  # already ran above
     log.info("Hourly forecast refresh scheduled.")
 
-    # ── 4b. Optional: schedule periodic MPC ───────────────────────────────
+    # ── 5b. Build shared baseline RunRequest for calibration + MPC ─────────
+    from .optimizer import RunRequest  # noqa: PLC0415
+
+    t_out_init = args.mpc_t_out
+    if mpc_sensor_backend is not None:
+        try:
+            readings = mpc_sensor_backend.read_all()
+            t_out_init = readings.outdoor_temperature_c
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "Could not read sensors.json at startup (will retry later): %s",
+                exc,
+            )
+
+    _defaults = RunRequest.model_validate({})
+    mpc_base_input = _defaults.model_copy(
+        update={
+            "outdoor_temperature_c": t_out_init,
+            "T_ref": args.mpc_t_ref,
+            "T_min": args.mpc_t_min,
+            "T_max": args.mpc_t_max,
+            "price_config": price_cfg,
+        }
+    )
+
+    # ── 5c. Automatic calibration on persisted telemetry ───────────────────
+    if args.calibration_interval > 0:
+        calibration_settings = AutomaticCalibrationSettings(
+            min_history_hours=args.calibration_min_history_hours,
+        )
+
+        def _run_calibration_job() -> None:
+            payload = run_and_persist_automatic_calibration(
+                repository,
+                base_request=mpc_base_input,
+                settings=calibration_settings,
+            )
+            if payload is None:
+                log.info(
+                    "Automatic calibration skipped — waiting for %.1f h of telemetry history.",
+                    calibration_settings.min_history_hours,
+                )
+                return
+            log.info(
+                "Automatic calibration snapshot stored at %s with %d effective overrides.",
+                payload.generated_at_utc.isoformat(),
+                len(payload.effective_parameters.as_run_request_updates()),
+            )
+
+        try:
+            _run_calibration_job()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Initial automatic calibration run failed: %s", exc)
+
+        scheduler.add_job(
+            _run_calibration_job,
+            trigger="interval",
+            seconds=args.calibration_interval,
+            id="calibration_periodic",
+            replace_existing=True,
+            misfire_grace_time=max(1, args.calibration_interval // 2),
+        )
+        log.info(
+            "Automatic calibration job scheduled: every %d s (%d min)",
+            args.calibration_interval,
+            args.calibration_interval // 60,
+        )
+    else:
+        log.info("Automatic calibration disabled (--calibration-interval=0).")
+
+    # ── 5d. Optional: schedule periodic MPC ───────────────────────────────
     # When --sensors-json is provided, the MPC reads live initial conditions
     # from the JSON file at every solve interval (LocalBackend re-reads the
     # file on each call, so values updated on disk are picked up immediately).
     # Without --sensors-json the MPC uses the fixed CLI defaults as initial
     # conditions — useful for smoke-testing without real sensor data.
     if args.mpc_interval > 0:
-        from .optimizer import RunRequest  # noqa: PLC0415
-        from .sensors.local_backend import LocalBackend  # noqa: PLC0415
-
-        # Build price model from CLI arguments so MPC cost function uses the
-        # correct electricity tariff (§14.2).
-        price_cfg = PriceConfig(
-            mode=PriceMode(args.price_mode),
-            flat_rate_eur_per_kwh=args.price_flat_rate,
-            high_rate_eur_per_kwh=args.price_high_rate,
-            low_rate_eur_per_kwh=args.price_low_rate,
-            feed_in_rate_eur_per_kwh=args.price_feed_in_rate,
-            nordpool_country_code=args.nordpool_country,
-            nordpool_vat_factor=args.nordpool_vat,
-        )
-        price_model = build_price_model(price_cfg)  # noqa: F841 — used via price_cfg in RunRequest
-        log.info("Price model ready (mode=%s)", args.price_mode)
-
         # Build the sensor backend when a sensors.json path is supplied.
-        if args.sensors_json is not None:
-            sensors_path = Path(args.sensors_json).resolve()
+        if sensors_path is not None:
             if not sensors_path.exists():
                 log.critical("sensors-json file not found: %s — aborting MPC setup.", sensors_path)
                 sys.exit(1)
-            local_backend: LocalBackend | None = LocalBackend.from_json_file(sensors_path)
+            local_backend = mpc_sensor_backend or LocalBackend.from_json_file(sensors_path)
             log.info("MPC sensor backend: LocalBackend reading %s", sensors_path)
-            # Read current outdoor temp from file to use as base_input default.
-            try:
-                readings = local_backend.read_all()
-                t_out_init = readings.outdoor_temperature_c
-            except Exception as exc:  # noqa: BLE001
-                log.warning(
-                    "Could not read sensors.json at startup (will retry at first MPC step): %s",
-                    exc,
-                )
-                t_out_init = args.mpc_t_out
         else:
             local_backend = None
-            t_out_init = args.mpc_t_out
             log.info(
                 "MPC sensor backend: none — using CLI defaults " "(T_out=%.1f C, T_ref=%.1f C).",
-                t_out_init,
+                mpc_base_input.outdoor_temperature_c,
                 args.mpc_t_ref,
             )
-
-        # Start from Pydantic defaults, then override runtime fields immutably.
-        _defaults = RunRequest.model_validate({})
-        mpc_base_input = _defaults.model_copy(
-            update={
-                "outdoor_temperature_c": t_out_init,
-                "T_ref": args.mpc_t_ref,
-                "T_min": args.mpc_t_min,
-                "T_max": args.mpc_t_max,
-                "price_config": price_cfg,
-            }
-        )
         optimizer = Optimizer()
         optimizer.schedule_periodic(
             base_input=mpc_base_input,
             backend=local_backend,
+            repository=repository,
             scheduler=scheduler,
             interval_seconds=args.mpc_interval,
             run_immediately=True,
@@ -511,9 +606,14 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         log.info("Uvicorn stopped — shutting down scheduler.")
         try:
-            scheduler.shutdown(wait=False)
+            if telemetry_collector is not None:
+                telemetry_collector.shutdown(flush=True, wait=False)
+            elif scheduler.running:
+                scheduler.shutdown(wait=False)
         except Exception:  # noqa: BLE001
             pass  # already stopped by SIGTERM handler — safe to ignore
+        if mpc_sensor_backend is not None:
+            mpc_sensor_backend.close()
 
 
 if __name__ == "__main__":

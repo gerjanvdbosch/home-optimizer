@@ -22,7 +22,12 @@ python -m pip install -e '.[dev]'
 
 ## Lokale ontwikkeling starten
 
-De lokale runner combineert de **ForecastPersister** (haalt Open-Meteo op, slaat op in SQLite) en de **FastAPI/Uvicorn** server in één proces:
+De lokale runner combineert in één proces:
+
+- de **ForecastPersister** (haalt Open-Meteo op, slaat op in SQLite),
+- optioneel de **telemetrycollector** uit `sensors.json`,
+- de **automatische calibratie** op basis van opgeslagen telemetrie,
+- en de **FastAPI/Uvicorn** server.
 
 ```bash
 python -m home_optimizer.local_runner
@@ -37,6 +42,17 @@ python -m home_optimizer.local_runner \
     --port 8000 \
     --horizon 48 \
     --pv-tilt 35
+```
+
+Met lokale telemetry + automatische calibratie:
+
+```bash
+python -m home_optimizer.local_runner \
+    --database ./dev_data/local.db \
+    --sensors-json ./sensors.json \
+    --mpc-interval 3600 \
+    --calibration-interval 21600 \
+    --calibration-min-history-hours 24
 ```
 
 Of via het geïnstalleerde script:
@@ -57,8 +73,12 @@ home-optimizer-local --database ./dev.db --pv-tilt 35
 | `--reload` | uit | Uvicorn auto-reload (handig bij template-ontwikkeling) |
 | `--horizon` | `48` | Forecast horizon [h] |
 | `--window-tilt` | `90` | Glas-oppervlak helling [°] (90 = verticaal) |
-| `--pv-tilt` | uit | PV-paneel helling [°]; weglaten = geen PV GTI |
+| `--pv-tilt` | `50` | PV-paneel helling [°] |
 | `--pv-azimuth` | `0` | PV-azimut [°] (0 = Zuid) |
+| `--sensors-json` | `sensors.json` | Lokale sensorbron voor telemetrycollector en MPC initial conditions |
+| `--mpc-interval` | `30` | Periodieke MPC-interval [s]; `0` schakelt MPC scheduling uit |
+| `--calibration-interval` | `21600` | Periodieke automatic calibration [s]; `0` schakelt calibratie uit |
+| `--calibration-min-history-hours` | `24` | Minimale telemetry-historie vóór automatic calibration [h] |
 
 ### Database-locatie configureren
 
@@ -93,6 +113,7 @@ Open na het starten van de runner:
 - Alle huisparameters instelbaar (C_r, C_b, R_br, R_ro, α, η, A_glass)
 - UFH + DHW + PV self-consumption
 - Carnot COP-model met stooklijn
+- Laadt bij openen eerst `GET /api/defaults`, dus de formuliervelden tonen automatisch de laatste calibrated defaults als die beschikbaar zijn
 - Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
 
 De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederlandse tussenwoning (ca. 2023)** met vloerverwarming, warmtepomp en ~7,5 m² zuidgericht glas.
@@ -105,7 +126,8 @@ De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederland
 |---|---|---|
 | `GET` | `/` | Operationeel dashboard (HTML) |
 | `GET` | `/simulator` | MPC-simulator (HTML) |
-| `GET` | `/api/defaults` | Standaard `RunRequest` als JSON |
+| `GET` | `/api/defaults` | `RunRequest` defaults als JSON, automatisch verrijkt met de laatste calibration snapshot |
+| `GET` | `/api/calibration/latest` | Laatste opgeslagen automatic calibration snapshot |
 | `GET` | `/api/forecast` | Live Open-Meteo forecast (query params: lat, lon, horizon, pv_tilt, …) |
 | `GET` | `/api/forecast/latest` | Meest recente forecast uit de database |
 | `POST` | `/api/simulate` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
@@ -139,6 +161,13 @@ De telemetrylaag samplet live sensoren vaker dan ze naar disk schrijft:
 - elke stap wordt als aparte rij opgeslagen (normaalvorm: één rij per stap per fetch)
 - duplicaten worden stilzwijgend genegeerd (veilig bij herstart)
 - het dashboard leest altijd de meest recente batch via `GET /api/forecast/latest`
+
+**Automatic calibration** (`calibration_snapshots`):
+
+- de lokale runner kan periodiek dezelfde calibratieflow draaien als de HA addon
+- snapshots worden persistent opgeslagen in SQLite
+- `GET /api/defaults` gebruikt de laatste snapshot als calibrated defaults voor de simulator
+- de scheduled MPC gebruikt dezelfde snapshot automatisch bij periodieke solves
 
 Lokale demo (leest uit `sensors.json`):
 
