@@ -302,7 +302,8 @@ class MPCLog(Base):
     * The **forecast inputs at step 0** that the MPC used — the "what did the
       MPC see?" record.  Comparing these with the nearest TelemetryAggregate row
       enables forecast-error analysis (§16, training requirement 7).
-    * The **solver status** to distinguish optimal solutions from greedy fallbacks.
+    * The **solver status** to distinguish successful convex solves from explicit
+      fail-fast solver errors or degraded backend outcomes.
 
     Relationship to TelemetryAggregate
     ------------------------------------
@@ -322,7 +323,7 @@ class MPCLog(Base):
     p_ufh_setpoint_kw: Mapped[float] = mapped_column(Float)
     #: DHW thermal power setpoint for the next Δt [kW].
     p_dhw_setpoint_kw: Mapped[float] = mapped_column(Float)
-    #: CVXPY solver status: "optimal", "infeasible", or "greedy_fallback".
+    #: CVXPY solver status, e.g. "optimal", "optimal_inaccurate", or "infeasible".
     solver_status: Mapped[str] = mapped_column(String(length=MAX_SOLVER_STATUS_LENGTH))
 
     # --- Forecast inputs "as seen by the MPC" at step 0 ------------------

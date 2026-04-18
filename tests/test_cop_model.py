@@ -346,9 +346,10 @@ def test_full_mpc_solve_with_physical_cop_model() -> None:
         ufh_forecast=forecast,
         previous_p_ufh_kw=0.5,
     )
-    # Accept both optimal and the greedy fallback (solver backend dependent)
+    # Canonical architecture: always solved through the convex CVXPY path.
     assert sol.ufh_control_sequence_kw.shape == (n,)
     assert np.all(sol.ufh_control_sequence_kw >= -1e-6)
     assert np.all(sol.ufh_control_sequence_kw <= mpc_params.P_max + 1e-6)
+    assert sol.used_fallback is False
     # The physical COP must have been used: cop_ufh_k is non-trivial (not all equal)
     assert forecast.cop_ufh_k is not None and forecast.cop_ufh_k.shape == (n,)

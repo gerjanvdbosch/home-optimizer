@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import home_optimizer.mpc as mpc_module
 from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
 from home_optimizer.mpc import MPCController
@@ -149,7 +150,7 @@ def test_mpc_prefers_cheap_hours() -> None:
 
 
 def test_mpc_always_returns_solution_when_physics_prevent_comfort() -> None:
-    """MPC must never raise; it should return best-effort with comfort violation reported."""
+    """Soft constraints keep the convex MPC feasible even when comfort cannot be met."""
     model = ThermalModel(THERMAL_PARAMS)
     tight_params = MPCParameters(
         horizon_steps=4,
@@ -186,6 +187,20 @@ def test_mpc_always_returns_solution_when_physics_prevent_comfort() -> None:
     assert sol.max_ufh_comfort_violation_c > 0.0
     # Controller must respond by requesting maximum heating
     assert sol.first_ufh_control_kw > 0.0
+
+
+def test_mpc_fail_fast_when_cvxpy_backend_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The controller must raise explicitly instead of switching to a hidden fallback."""
+    model = ThermalModel(THERMAL_PARAMS)
+    controller = MPCController(ufh_model=model, params=MPC_PARAMS)
+    monkeypatch.setattr(mpc_module, "_CVXPY_AVAILABLE", False)
+
+    with pytest.raises(RuntimeError, match="CVXPY is required"):
+        controller.solve(
+            initial_ufh_state_c=np.array([20.8, 24.0]),
+            ufh_forecast=_feasible_forecast(),
+            previous_p_ufh_kw=0.5,
+        )
 
 
 @pytest.mark.filterwarnings("ignore:Solution may be inaccurate:UserWarning")

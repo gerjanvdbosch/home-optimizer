@@ -53,9 +53,11 @@ Key design choices:
 
 Solver architecture
 -------------------
-1. **Primary**: CVXPY convex QP via OSQP backend (``_solve_convex``).
-2. **Fallback**: Greedy one-step-ahead heuristic (``_solve_greedy``) — used
-   automatically when CVXPY raises or is unavailable.
+The MPC has exactly one canonical execution path: a convex QP formulated in
+CVXPY. The configured backend is tried first (OSQP by default). When that
+backend stalls or returns a non-optimal status, the controller may retry with
+other installed CVXPY solvers, but it never switches to a heuristic control law.
+If no convex solver reaches an optimal status, the controller raises.
 
 Units: power [kW], energy [kWh], temperature [°C], time step [h], cost [€].
 """
@@ -86,6 +88,8 @@ except ImportError:  # pragma: no cover
     _CVXPY_AVAILABLE = False
 
 _AnyMPCParams = Union[MPCParameters, CombinedMPCParameters]
+_OPTIMAL_STATUSES = {"optimal", "optimal_inaccurate"}
+_CONVEX_SOLVER_RETRY_ORDER = ("CLARABEL", "HIGHS", "SCS")
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +113,8 @@ class MPCSolution:
     max_ufh_comfort_violation_c: Largest room-temperature soft-constraint violation [K].
     max_dhw_comfort_violation_c: Largest DHW top-layer soft-constraint violation [K].
     max_legionella_violation_c:  Largest legionella soft-constraint violation [K].
-    used_fallback:               True when the greedy fallback solver was used.
+    used_fallback:               Retained for result-schema stability; always
+                                 ``False`` in the canonical CVXPY-only architecture.
     """
 
     ufh_control_sequence_kw: np.ndarray
@@ -145,9 +150,8 @@ class MPCSolution:
 class MPCController:
     """Receding-horizon MPC controller for UFH or UFH + DHW combined.
 
-    This is the **single authoritative solver implementation**.  The same
-    convex-QP and greedy-fallback logic cover both UFH-only and combined
-    operation.
+    This is the **single authoritative solver implementation**.  Both UFH-only
+    and combined operation are solved through the same convex CVXPY model.
 
     Operating principle
     -------------------
@@ -342,24 +346,13 @@ class MPCController:
         else:
             x0 = x_ufh0
 
-        if _CVXPY_AVAILABLE:
-            try:
-                # Preferred path: solve the full convex QP in CVXPY.
-                # The fallback below is intentionally only used if CVXPY is
-                # unavailable or raises during solve/setup.
-                return self._solve_convex(
-                    x0,
-                    ufh_forecast,
-                    dhw_forecast,
-                    float(previous_p_ufh_kw),
-                    float(previous_p_dhw_kw),
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        if not _CVXPY_AVAILABLE:
+            raise RuntimeError(
+                "CVXPY is required for MPCController.solve(); the project architecture "
+                "does not provide a heuristic fallback solver."
+            )
 
-        # Fallback path: always return a feasible best-effort sequence so the
-        # control stack remains operational instead of crashing.
-        return self._solve_greedy(
+        return self._solve_convex(
             x0,
             ufh_forecast,
             dhw_forecast,
@@ -407,6 +400,40 @@ class MPCController:
             E_list.append(np.block([[E_ufh, np.zeros((2, 2))], [np.zeros((2, 3)), E_dhw_k]]))
 
         return A_list, B_mat, E_list, D_tot
+
+    def _convex_solver_candidates(self) -> list[str]:
+        """Return the ordered list of installed convex solvers to try.
+
+        The configured solver remains first choice. Additional candidates stay
+        within the CVXPY ecosystem; they are robustness retries, not heuristic
+        fallbacks.
+        """
+        assert cp is not None
+        installed = {name.upper() for name in cp.installed_solvers()}
+        ordered: list[str] = []
+        for solver_name in (self.solver.upper(), *_CONVEX_SOLVER_RETRY_ORDER):
+            if solver_name in installed and solver_name not in ordered:
+                ordered.append(solver_name)
+        if not ordered:
+            raise RuntimeError("No supported CVXPY solvers are installed for the MPC problem.")
+        return ordered
+
+    @staticmethod
+    def _solver_options(solver_name: str) -> dict[str, object]:
+        """Return backend-specific CVXPY solve options for a convex MPC solve."""
+        options: dict[str, object] = {"solver": solver_name, "warm_start": True, "verbose": False}
+        if solver_name == "OSQP":
+            options.update(
+                {
+                    "eps_abs": 1e-7,
+                    "eps_rel": 1e-7,
+                    "polishing": True,
+                    "max_iter": 200_000,
+                }
+            )
+        elif solver_name == "SCS":
+            options.update({"eps": 1e-6, "max_iters": 50_000})
+        return options
 
     def _solve_convex(
         self,
@@ -542,17 +569,25 @@ class MPCController:
         obj = cp.Minimize(cp.sum(cost_terms) + p_ufh.Q_N * cp.square(x[0, N] - refs[N]))
         problem = cp.Problem(obj, constraints)
 
-        # Tight OSQP tolerances improve physical consistency of the reported thermal
-        # powers and temperatures, especially for soft constraints near the bounds.
-        solve_kw: dict[str, object] = {"solver": self.solver, "warm_start": True, "verbose": False}
-        if self.solver.upper() == "OSQP":
-            solve_kw.update({"eps_abs": 1e-7, "eps_rel": 1e-7, "polishing": True})
-        problem.solve(**solve_kw)
+        attempt_log: list[str] = []
+        last_exception: Exception | None = None
+        for solver_name in self._convex_solver_candidates():
+            try:
+                problem.solve(**self._solver_options(solver_name))
+            except Exception as exc:  # noqa: BLE001
+                last_exception = exc
+                attempt_log.append(f"{solver_name}: {type(exc).__name__}({exc})")
+                continue
+            attempt_log.append(f"{solver_name}: {problem.status}")
+            if str(problem.status).lower() in _OPTIMAL_STATUSES:
+                break
+        else:
+            attempts = "; ".join(attempt_log)
+            raise RuntimeError(
+                "No convex solver reached an optimal MPC solution. "
+                f"Attempts: {attempts}"
+            ) from last_exception
 
-        # Hard fail here so the public `solve()` method can decide whether to use the
-        # greedy fallback instead of silently returning a malformed convex solution.
-        if problem.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
-            raise RuntimeError(f"Solver returned status '{problem.status}'.")
         if u_ufh.value is None or x.value is None:
             raise RuntimeError("Solver returned no variable values.")
 
@@ -568,157 +603,6 @@ class MPCController:
             status=str(problem.status),
             ufh_forecast=ufh_forecast,
             dhw_forecast=dhw_forecast,
-            used_fallback=False,
-        )
-
-    def _solve_greedy(
-        self,
-        x0: np.ndarray,
-        ufh_forecast: ForecastHorizon,
-        dhw_forecast: DHWForecastHorizon | None,
-        prev_u_ufh: float,
-        prev_u_dhw: float,
-    ) -> MPCSolution:
-        p_ufh = self._p_ufh
-        p_dhw = self._p_dhw
-        g = p_ufh.greedy
-        N = p_ufh.horizon_steps
-        dt = self.ufh_model.parameters.dt_hours
-        refs = ufh_forecast.room_temperature_ref_c
-        prices = ufh_forecast.price_eur_per_kwh
-        pv = ufh_forecast.pv_kw
-        rho_ufh = p_ufh.rho_factor * max(p_ufh.Q_c, 1.0)
-        leg_req = dhw_forecast.legionella_required if dhw_forecast is not None else None
-
-        # §14.1 Resolve COP arrays for the horizon
-        cop_ufh = self._resolve_cop_ufh(ufh_forecast)
-        cop_dhw = (
-            self._resolve_cop_dhw(dhw_forecast)
-            if self._dhw_enabled and dhw_forecast is not None
-            else None
-        )
-
-        A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
-
-        x = x0.copy()
-        xs = [x.copy()]
-        us_ufh: list[float] = []
-        us_dhw: list[float] = []
-        u_prev_ufh, u_prev_dhw = prev_u_ufh, prev_u_dhw
-
-        for k in range(N):
-            # Candidate UFH powers are clipped by actuator bounds and ramp-rate limits.
-            lo_ufh = max(0.0, u_prev_ufh - p_ufh.delta_P_max)
-            hi_ufh = min(p_ufh.P_max, u_prev_ufh + p_ufh.delta_P_max)
-            n_cand = min(
-                g.max_candidates,
-                max(
-                    g.min_candidates,
-                    int(
-                        (hi_ufh - lo_ufh)
-                        / max(p_ufh.delta_P_max / g.grid_divisor, g.min_grid_step_kw)
-                    )
-                    + 1,
-                ),
-            )
-            cands_ufh = np.linspace(lo_ufh, hi_ufh, n_cand)
-
-            if self._dhw_enabled and p_dhw is not None:
-                # DHW candidates use the same local grid idea but with DHW-specific
-                # actuator and ramp-rate limits.
-                lo_dhw = max(0.0, u_prev_dhw - p_dhw.delta_P_dhw_max)
-                hi_dhw = min(p_dhw.P_dhw_max, u_prev_dhw + p_dhw.delta_P_dhw_max)
-                cands_dhw = np.linspace(lo_dhw, hi_dhw, n_cand)
-            else:
-                cands_dhw = np.array([0.0])
-
-            best_score = np.inf
-            best_u_ufh, best_u_dhw, best_xn = cands_ufh[0], 0.0, None
-
-            inv_cop_ufh_k = 1.0 / float(cop_ufh[k])
-            inv_cop_dhw_k = 1.0 / float(cop_dhw[k]) if cop_dhw is not None else 0.0
-
-            for c_ufh in cands_ufh:
-                for c_dhw in cands_dhw:
-                    # §14 Shared WP constraint (electrical):
-                    #   P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec
-                    p_elec_k = c_ufh * inv_cop_ufh_k + c_dhw * inv_cop_dhw_k
-                    if self._dhw_enabled and p_elec_k > self._p_hp_max_elec + 1e-9:
-                        continue
-                    u_vec = np.array([c_ufh, c_dhw]) if self._dhw_enabled else np.array([c_ufh])
-                    xn = A_list[k] @ x + B_mat @ u_vec + E_list[k] @ D_tot[k]
-
-                    # Net grid import after PV offset (electrical power basis)
-                    p_import_k = max(0.0, p_elec_k - float(pv[k]))
-
-                    # The greedy score approximates the convex objective: room comfort,
-                    # electricity cost, actuator regularisation and comfort slacks.
-                    # Use xn[0] (predicted next state) — not x[0] (current state) —
-                    # for the comfort term so that applying UFH power is rewarded when
-                    # the room is below the setpoint.  x[0] is fixed at step k and
-                    # identical for all candidates, making the comfort term zero-gradient
-                    # w.r.t. the action and causing the greedy to always choose P_UFH=0.
-                    s_lo_ufh = max(p_ufh.T_min - xn[0], 0.0)
-                    s_hi_ufh = max(xn[0] - p_ufh.T_max, 0.0)
-                    score = (
-                        p_ufh.Q_c * (xn[0] - refs[k + 1]) ** 2
-                        + prices[k] * p_import_k * dt  # electrical energy cost [€]
-                        + p_ufh.R_c * c_ufh**2
-                        + rho_ufh * (s_lo_ufh**2 + s_hi_ufh**2)
-                    )
-                    if self._dhw_enabled and p_dhw is not None:
-                        s_dhw_k = max(p_dhw.T_dhw_min - xn[2], 0.0)
-                        leg_active = leg_req is not None and leg_req[k]
-                        s_leg_k = max(p_dhw.T_legionella - xn[2], 0.0) if leg_active else 0.0
-                        score += (
-                            p_dhw.comfort_rho_factor * s_dhw_k**2
-                            + p_dhw.legionella_rho_factor * s_leg_k**2
-                        )
-                    if k == N - 1:
-                        score += p_ufh.Q_N * (xn[0] - refs[N]) ** 2
-
-                    if score < best_score:
-                        best_score = score
-                        best_u_ufh, best_u_dhw = float(c_ufh), float(c_dhw)
-                        best_xn = xn
-
-            # Because at least one candidate always respects the local actuator bounds,
-            # the greedy loop should always select a next state.
-            assert best_xn is not None
-            us_ufh.append(best_u_ufh)
-            us_dhw.append(best_u_dhw)
-            x = best_xn
-            xs.append(x.copy())
-            u_prev_ufh, u_prev_dhw = best_u_ufh, best_u_dhw
-
-        xs_arr = np.array(xs, dtype=float)
-        us_ufh_arr = np.array(us_ufh, dtype=float)
-        us_dhw_arr = np.array(us_dhw, dtype=float)
-
-        objective = 0.0
-        for k in range(N):
-            # Reconstruct electrical import for objective accounting so the reported
-            # objective has the same unit interpretation as the convex formulation.
-            p_elec_k = float(us_ufh_arr[k]) / float(cop_ufh[k])
-            if cop_dhw is not None:
-                p_elec_k += float(us_dhw_arr[k]) / float(cop_dhw[k])
-            p_import_k = max(0.0, p_elec_k - float(pv[k]))
-            objective += (
-                p_ufh.Q_c * (xs_arr[k + 1, 0] - refs[k + 1]) ** 2
-                + prices[k] * p_import_k * dt
-                + p_ufh.R_c * us_ufh_arr[k] ** 2
-            )
-        objective += p_ufh.Q_N * (xs_arr[N, 0] - refs[N]) ** 2
-
-        return self._package_solution(
-            x_val=xs_arr,
-            u_ufh_val=us_ufh_arr,
-            u_dhw_val=us_dhw_arr,
-            objective=objective,
-            status="greedy-fallback",
-            ufh_forecast=ufh_forecast,
-            dhw_forecast=dhw_forecast,
-            used_fallback=True,
         )
 
     def _package_solution(
@@ -730,7 +614,6 @@ class MPCController:
         status: str,
         ufh_forecast: ForecastHorizon,
         dhw_forecast: DHWForecastHorizon | None,
-        used_fallback: bool,
     ) -> MPCSolution:
         p_ufh = self._p_ufh
         p_dhw = self._p_dhw
@@ -770,5 +653,5 @@ class MPCController:
             max_ufh_comfort_violation_c=ufh_viol,
             max_dhw_comfort_violation_c=dhw_viol,
             max_legionella_violation_c=leg_viol,
-            used_fallback=used_fallback,
+            used_fallback=False,
         )

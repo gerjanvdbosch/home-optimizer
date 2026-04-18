@@ -15,7 +15,13 @@ Physical model assumptions
 
 from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
-from .kalman import DHWKalmanFilter, KalmanEstimate, LinearKalmanFilter, UFHKalmanFilter
+from .kalman import (
+    DHWKalmanFilter,
+    ExtendedKalmanFilter,
+    KalmanEstimate,
+    LinearKalmanFilter,
+    UFHKalmanFilter,
+)
 from .mpc import MPCController, MPCSolution
 from .telemetry import (
     BufferedTelemetryCollector,
@@ -32,7 +38,6 @@ from .types import (
     DHWMPCParameters,
     DHWParameters,
     ForecastHorizon,
-    GreedySolverConfig,
     KalmanNoiseParameters,
     MPCParameters,
     ThermalParameters,
@@ -45,8 +50,8 @@ __all__ = [
     "DHWMPCParameters",
     "DHWModel",
     "DHWParameters",
+    "ExtendedKalmanFilter",
     "ForecastHorizon",
-    "GreedySolverConfig",
     "HeatPumpCOPModel",
     "HeatPumpCOPParameters",
     "KalmanEstimate",

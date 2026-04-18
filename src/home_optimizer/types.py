@@ -14,7 +14,7 @@ Flow rate            : m³/h
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -149,45 +149,6 @@ class DHWParameters:
 
 
 # ---------------------------------------------------------------------------
-# Greedy solver configuration (tuning parameters for the fallback solver)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class GreedySolverConfig:
-    """Numerical tuning parameters for the greedy fallback solver.
-
-    All values are dimensionless algorithmic settings, not physical constants.
-
-    Parameters
-    ----------
-    lookahead_weight:   Multiplier on Q_N for next-step lookahead term.
-    grid_divisor:       Divides delta_P_max to obtain the candidate grid step.
-    min_grid_step_kw:   Floor on the grid step to prevent division-by-zero [kW].
-    min_candidates:     Minimum number of power-level candidates per step.
-    max_candidates:     Maximum number of power-level candidates per step.
-    """
-
-    lookahead_weight: float = 5.0
-    grid_divisor: float = 10.0
-    min_grid_step_kw: float = 0.01
-    min_candidates: int = 21
-    max_candidates: int = 51
-
-    def __post_init__(self) -> None:
-        if self.lookahead_weight < 0.0:
-            raise ValueError("lookahead_weight must be non-negative.")
-        if self.grid_divisor <= 0.0:
-            raise ValueError("grid_divisor must be strictly positive.")
-        if self.min_grid_step_kw <= 0.0:
-            raise ValueError("min_grid_step_kw must be strictly positive.")
-        if self.min_candidates < 2:
-            raise ValueError("min_candidates must be >= 2.")
-        if self.max_candidates < self.min_candidates:
-            raise ValueError("max_candidates must be >= min_candidates.")
-
-
-# ---------------------------------------------------------------------------
 # MPC parameters — UFH
 # ---------------------------------------------------------------------------
 
@@ -212,7 +173,6 @@ class MPCParameters:
     cop_max:         Upper bound on COP for Fail-Fast validation [dimensionless].
                      A COP above this value indicates a sensor or model error.
     rho_factor:      Soft-constraint penalty multiplier: ρ = rho_factor × max(Q_c, 1).
-    greedy:          Numerical tuning for the greedy fallback solver.
     """
 
     horizon_steps: int
@@ -226,7 +186,6 @@ class MPCParameters:
     cop_ufh: float
     cop_max: float
     rho_factor: float = 1000.0
-    greedy: GreedySolverConfig = field(default_factory=GreedySolverConfig)
 
     def __post_init__(self) -> None:
         if self.horizon_steps <= 0:

@@ -179,6 +179,45 @@ def test_ekf_vtap_nonnegative(
     ), "V_tap estimate must never be negative (§12 Step 4 fail-fast clamp)."
 
 
+def test_ekf_jacobian_eval_point(ekf: DHWExtendedKalmanFilter) -> None:
+    """EKF covariance prediction must use the Jacobian at ``x̂[k-1]`` (§12.4).
+
+    The test verifies two things:
+    1. The analytical Jacobian matches a first-order finite-difference expansion
+       of the nonlinear propagation at the *pre-propagation* estimate.
+    2. The predicted covariance equals ``F[k-1] P[k-1] F[k-1]^T + Q_aug`` using
+       that same pre-propagation Jacobian.
+    """
+    control_kw = 0.8
+    t_amb_c = 20.0
+    t_mains_c = 10.0
+    disturbance = np.array([t_amb_c, t_mains_c], dtype=float)
+    x_before = ekf.estimate.mean.copy()
+    P_before = ekf.estimate.covariance.copy()
+
+    F_before = ekf._jacobian_from_state(x_before, control_kw, disturbance)  # noqa: SLF001
+    delta_x = np.array([1e-6, -2e-6, 1e-7], dtype=float)
+    f_ref = ekf._state_transition(x_before, control_kw, disturbance)  # noqa: SLF001
+    f_perturbed = ekf._state_transition(x_before + delta_x, control_kw, disturbance)  # noqa: SLF001
+
+    np.testing.assert_allclose(
+        F_before @ delta_x,
+        f_perturbed - f_ref,
+        rtol=1e-5,
+        atol=1e-8,
+        err_msg="Jacobian must linearise the nonlinear propagation at x̂[k-1].",
+    )
+
+    ekf.predict(control_kw=control_kw, t_mains_c=t_mains_c, t_amb_c=t_amb_c)
+    np.testing.assert_allclose(
+        ekf.estimate.covariance,
+        F_before @ P_before @ F_before.T + ekf._noise.Q_aug,  # noqa: SLF001
+        rtol=1e-10,
+        atol=1e-10,
+        err_msg="Predict covariance must use the Jacobian evaluated before propagation.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # test_ekf_vtap_detection  (§16.3)
 # ---------------------------------------------------------------------------

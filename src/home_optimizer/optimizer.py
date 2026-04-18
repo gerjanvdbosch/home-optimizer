@@ -314,7 +314,7 @@ class MPCStepResult:
     can reuse the same core solver without duplicating logic.
 
     Attributes:
-        solution:       Raw CVXPY/greedy solution with full control sequences.
+        solution:       Raw convex-MPC solution with full control sequences.
         ufh_forecast:   Forecast horizon used for UFH (contains COP array).
         dhw_forecast:   Forecast horizon used for DHW, or ``None`` when disabled.
         p_ufh_kw:       Clipped UFH thermal power array [kW], length N.
@@ -372,7 +372,7 @@ class Optimizer:
     3. Compute time-varying COP arrays over the MPC horizon.
     4. Construct UFH and DHW :class:`~home_optimizer.types.ForecastHorizon` objects.
     5. Optionally build the :class:`~home_optimizer.dhw_model.DHWModel`.
-    6. Solve the QP via :class:`~home_optimizer.mpc.MPCController` (CVXPY / greedy).
+    6. Solve the QP via :class:`~home_optimizer.mpc.MPCController` (CVXPY only).
     7. Compute energy and electricity-cost summaries.
 
     The class is *stateless* between calls: no mutable attributes are
@@ -408,9 +408,8 @@ class Optimizer:
 
         Raises:
             ValueError: If any derived parameter violates a physical constraint
-                (e.g. COP ≤ 1 after Carnot pre-calculation, or CVXPY reports
-                an infeasible problem that the greedy fallback cannot recover
-                from).
+                (e.g. COP ≤ 1 after Carnot pre-calculation, or no convex solver
+                reaches an optimal MPC solution).
         """
         start_hour = datetime.now(tz=timezone.utc).hour
         N = req.horizon_hours
@@ -490,7 +489,7 @@ class Optimizer:
             dhw_forecast = self._build_dhw_forecast(req, N, cop_model)
             initial_dhw_state = np.array([req.dhw_T_top_init, req.dhw_T_bot_init])
 
-        # ── Step 6: Solve MPC (CVXPY / greedy fallback) ─────────────────
+        # ── Step 6: Solve MPC through the canonical CVXPY formulation ───
         controller = MPCController(
             ufh_model=ufh_model,
             params=controller_params,
@@ -669,6 +668,47 @@ class Optimizer:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _materialize_horizon_array(
+        *,
+        name: str,
+        horizon_steps: int,
+        values: list[float] | None,
+        fallback_scalar: float | None = None,
+    ) -> np.ndarray:
+        """Return a full-horizon forecast array with fail-fast length validation.
+
+        Args:
+            name: Human-readable forecast name for error messages.
+            horizon_steps: Required horizon length ``N`` [-].
+            values: Optional explicit forecast samples. When provided, the array
+                must contain at least ``N`` values; only the first ``N`` are used.
+            fallback_scalar: Optional scalar value that is broadcast to length ``N``
+                when ``values`` is absent. This is reserved for request fields that
+                are explicitly scalar by design (e.g. current outdoor temperature).
+
+        Returns:
+            NumPy array with shape ``(N,)`` and dtype ``float``.
+
+        Raises:
+            ValueError: If the provided forecast is not one-dimensional or does not
+                contain enough samples for the MPC horizon.
+        """
+        if values is None:
+            if fallback_scalar is None:
+                raise ValueError(f"{name} forecast is required for the full MPC horizon.")
+            return np.full(horizon_steps, fallback_scalar, dtype=float)
+
+        arr = np.asarray(values, dtype=float)
+        if arr.ndim != 1:
+            raise ValueError(f"{name} must be a 1-D forecast array.")
+        if arr.size < horizon_steps:
+            raise ValueError(
+                f"{name} must provide at least {horizon_steps} values for the MPC horizon; "
+                f"received {arr.size}."
+            )
+        return arr[:horizon_steps].copy()
+
+    @staticmethod
     def _build_cop_model(req: RunRequest) -> HeatPumpCOPModel:
         """Construct the Carnot COP model from the user request.
 
@@ -727,37 +767,36 @@ class Optimizer:
         prices = price_model.prices(start_hour, N)
 
         # ── Outdoor temperature ──────────────────────────────────────────
-        # Use real Open-Meteo forecast when available; scalar sensor fallback otherwise.
-        if req.t_out_forecast is not None:
-            t_out_arr = np.array(req.t_out_forecast[:N], dtype=float)
-            if len(t_out_arr) < N:
-                t_out_arr = np.pad(t_out_arr, (0, N - len(t_out_arr)), mode="edge")
-        else:
-            t_out_arr = np.full(N, req.outdoor_temperature_c)
+        # Use the explicit forecast when available; otherwise broadcast the scalar
+        # outdoor reading across the horizon. Short forecasts are rejected to avoid
+        # silently inventing data via padding.
+        t_out_arr = Optimizer._materialize_horizon_array(
+            name="t_out_forecast",
+            horizon_steps=N,
+            values=req.t_out_forecast,
+            fallback_scalar=req.outdoor_temperature_c,
+        )
 
         # ── Solar gain through windows — real Open-Meteo GTI preferred ───
-        # Fall back to zero GTI (no solar gain) when no forecast is available.
-        # This is physically valid (cloudy sky, night) and keeps the scheduler
-        # operational even before the first Open-Meteo batch has been persisted.
-        if req.gti_window_forecast is None:
-            gti = np.zeros(N, dtype=float)
-        else:
-            gti = np.array(req.gti_window_forecast[:N], dtype=float)
-        if len(gti) < N:
-            gti = np.pad(gti, (0, N - len(gti)), mode="constant")
+        gti = Optimizer._materialize_horizon_array(
+            name="gti_window_forecast",
+            horizon_steps=N,
+            values=req.gti_window_forecast,
+            fallback_scalar=0.0,
+        )
 
         # ── PV generation — real Open-Meteo GTI_pv when PV enabled ──
         # P_pv = (GTI_pv [W/m²] / W_PER_KW) * pv_peak_kw [kW/kWp].
-        # Falls back to zeros when no GTI PV forecast is available yet.
         if req.pv_enabled:
-            if req.gti_pv_forecast is None:
-                pv = np.zeros(N)
-            else:
-                from .types import W_PER_KW  # noqa: PLC0415
-                gti_pv = np.array(req.gti_pv_forecast[:N], dtype=float)
-                if len(gti_pv) < N:
-                    gti_pv = np.pad(gti_pv, (0, N - len(gti_pv)), mode="constant")
-                pv = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
+            from .types import W_PER_KW  # noqa: PLC0415
+
+            gti_pv = Optimizer._materialize_horizon_array(
+                name="gti_pv_forecast",
+                horizon_steps=N,
+                values=req.gti_pv_forecast,
+                fallback_scalar=0.0,
+            )
+            pv = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
         else:
             pv = np.zeros(N)
         # §14.1: Time-varying COP from the Carnot model + heating curve.
@@ -794,13 +833,12 @@ class Optimizer:
             :class:`~home_optimizer.types.DHWForecastHorizon` with N steps,
             including the COP array.
         """
-        # Use real Open-Meteo outdoor temperature when available; scalar fallback otherwise.
-        if req.t_out_forecast is not None:
-            t_out_arr = np.array(req.t_out_forecast[:N], dtype=float)
-            if len(t_out_arr) < N:
-                t_out_arr = np.pad(t_out_arr, (0, N - len(t_out_arr)), mode="edge")
-        else:
-            t_out_arr = np.full(N, req.outdoor_temperature_c)
+        t_out_arr = Optimizer._materialize_horizon_array(
+            name="t_out_forecast",
+            horizon_steps=N,
+            values=req.t_out_forecast,
+            fallback_scalar=req.outdoor_temperature_c,
+        )
         # DHW supply temperature ≈ comfort setpoint T_dhw_min (normal operation).
         # During a legionella cycle the effective supply temp would be T_legionella;
         # the legionella scheduler adjusts the constraint, not the COP model here.
