@@ -468,7 +468,6 @@
         <label>P_HP,max <strong>elektrisch</strong> [kW] <span id="vPhpMaxElec">2.5</span></label>
         <input type="number" id="P_hp_max_elec" value="2.5" min="0.5" max="30" step="0.5" oninput="upd('vPhpMaxElec', this.value)" />
       </div>
-      <div class="hint">Begrenst gedeeld elektrisch WP-vermogen: P_UFH/COP_UFH + P_dhw/COP_dhw &le; P_HP,max,elec</div>
     </div>
 
     <button class="btn" id="run-btn" onclick="runOptimize()">&#9654; Optimaliseer</button>
@@ -534,10 +533,101 @@
   })();
   function apiUrl(path) { return _BASE + path; }
 
+  const DISPLAY_TARGETS = {
+    horizon_hours: 'vN',
+    dt_hours: 'vDt',
+    C_r: 'vCr',
+    C_b: 'vCb',
+    R_br: 'vRbr',
+    R_ro: 'vRro',
+    alpha: 'vAlpha',
+    eta: 'vEta',
+    A_glass: 'vAglass',
+    T_r_init: 'vTri',
+    T_b_init: 'vTbi',
+    previous_power_kw: 'vPprev',
+    T_ref: 'vTref',
+    T_min: 'vTmin',
+    T_max: 'vTmax',
+    P_max: 'vPmax',
+    delta_P_max: 'vDPmax',
+    Q_c: 'vQc',
+    R_c: 'vRc',
+    Q_N: 'vQn',
+    internal_gains_kw: 'vQint',
+    price_flat_rate: 'vFlatRate',
+    price_high_rate: 'vHighRate',
+    price_low_rate: 'vLowRate',
+    price_feed_in_rate: 'vFeedIn',
+    nordpool_vat_factor: 'vVat',
+    pv_peak_kw: 'vPvPeak',
+    eta_carnot: 'vEtaCarnot',
+    delta_T_cond: 'vDTcond',
+    delta_T_evap: 'vDTevap',
+    T_supply_min: 'vTsupMin',
+    T_ref_outdoor_curve: 'vTrefCurve',
+    heating_curve_slope: 'vHcSlope',
+    cop_min: 'vCopMin',
+    cop_max: 'vCopMax',
+    dhw_C_top: 'vDhwCtop',
+    dhw_C_bot: 'vDhwCbot',
+    dhw_R_strat: 'vDhwRstrat',
+    dhw_R_loss: 'vDhwRloss',
+    dhw_T_top_init: 'vDhwTtop',
+    dhw_T_bot_init: 'vDhwTbot',
+    dhw_P_max: 'vDhwPmax',
+    dhw_delta_P_max: 'vDhwDPmax',
+    dhw_T_min: 'vDhwTmin',
+    dhw_T_legionella: 'vDhwTleg',
+    dhw_legionella_period_steps: 'vDhwLegP',
+    dhw_legionella_duration_steps: 'vDhwLegD',
+    dhw_v_tap_m3_per_h: 'vDhwVtap',
+    dhw_t_mains_c: 'vDhwTmains',
+    dhw_t_amb_c: 'vDhwTamb',
+    P_hp_max_elec: 'vPhpMaxElec',
+  };
+
   function upd(id, val) {
     const v = parseFloat(val);
     if (Number.isNaN(v)) return;
     document.getElementById(id).textContent = v.toFixed(v < 1 && val !== '0' ? 2 : 1);
+  }
+
+  function setInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === null || value === undefined) return;
+    if (el.type === 'checkbox') {
+      el.checked = Boolean(value);
+      return;
+    }
+    el.value = String(value);
+    const displayId = DISPLAY_TARGETS[id];
+    if (displayId) upd(displayId, el.value);
+  }
+
+  function applyRunRequestDefaults(defaults) {
+    Object.entries(defaults).forEach(([key, value]) => {
+      if (key === 'price_config' || key.endsWith('_forecast')) return;
+      setInputValue(key, value);
+    });
+    const priceConfig = defaults.price_config || {};
+    setInputValue('price_mode', priceConfig.mode || 'flat');
+    setInputValue('price_flat_rate', priceConfig.flat_rate_eur_per_kwh);
+    setInputValue('price_high_rate', priceConfig.high_rate_eur_per_kwh);
+    setInputValue('price_low_rate', priceConfig.low_rate_eur_per_kwh);
+    setInputValue('price_feed_in_rate', priceConfig.feed_in_rate_eur_per_kwh);
+    setInputValue('nordpool_country_code', priceConfig.nordpool_country_code);
+    setInputValue('nordpool_vat_factor', priceConfig.nordpool_vat_factor);
+    syncVisibility();
+  }
+
+  async function loadRunRequestDefaults() {
+    const resp = await fetch(apiUrl('/api/defaults'));
+    if (!resp.ok) {
+      const payload = await resp.json().catch(() => ({}));
+      throw new Error(payload.detail || resp.statusText || 'Kon defaults niet laden');
+    }
+    applyRunRequestDefaults(await resp.json());
   }
 
   function setVisible(id, isVisible) {
@@ -694,8 +784,15 @@
     }
   }
 
-  window.addEventListener('load', () => {
-    syncVisibility();
+  window.addEventListener('load', async () => {
+    try {
+      await loadRunRequestDefaults();
+    } catch (e) {
+      const warn = document.getElementById('warn');
+      warn.textContent = '⚠ Defaults laden mislukt; statische formulierwaarden worden gebruikt. ' + e.message;
+      warn.style.display = 'block';
+      syncVisibility();
+    }
     runOptimize();
   });
 </script>

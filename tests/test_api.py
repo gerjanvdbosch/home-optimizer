@@ -77,6 +77,8 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-chart-card"' in html
     assert 'id="pv_enabled"' in html
     assert "UFH + DHW + PV MPC" in html
+    assert "fetch(apiUrl('/api/defaults'))" in html
+    assert "applyRunRequestDefaults" in html
 
 
 def test_dashboard_html_contains_optimizer_mpc_forecast_section() -> None:
@@ -195,6 +197,51 @@ def test_calibration_latest_returns_latest_snapshot(monkeypatch, tmp_path) -> No
     assert payload["effective_parameters"]["R_ro"] == 9.1
     assert payload["effective_parameters"]["eta_carnot"] == 0.42
     assert payload["effective_parameters"]["dhw_R_loss"] == 55.0
+
+
+def test_defaults_returns_static_runrequest_without_calibration_snapshot(monkeypatch, tmp_path) -> None:
+    """/api/defaults must fall back to plain RunRequest defaults when no snapshot exists."""
+    database_url = f"sqlite:///{tmp_path / 'defaults-empty.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    response = client.get("/api/defaults")
+
+    assert response.status_code == 200
+    payload = response.json()
+    defaults = RunRequest.model_validate({})
+    assert payload["C_r"] == defaults.C_r
+    assert payload["eta_carnot"] == defaults.eta_carnot
+    assert payload["T_supply_min"] == defaults.T_supply_min
+
+
+def test_defaults_returns_latest_calibration_snapshot_over_static_defaults(monkeypatch, tmp_path) -> None:
+    """/api/defaults must expose calibrated values when a snapshot is available."""
+    database_url = f"sqlite:///{tmp_path / 'defaults-calibrated.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                C_r=7.4,
+                C_b=11.2,
+                eta_carnot=0.38,
+                T_supply_min=26.8,
+            ),
+        )
+    )
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    response = client.get("/api/defaults")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["C_r"] == 7.4
+    assert payload["C_b"] == 11.2
+    assert payload["eta_carnot"] == 0.38
+    assert payload["T_supply_min"] == 26.8
 
 
 def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(

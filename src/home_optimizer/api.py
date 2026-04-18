@@ -134,8 +134,15 @@ class HomeOptimizerAPI:
         return HTMLResponse(self._template_simulator.read_text(encoding="utf-8"))
 
     async def defaults(self) -> RunRequest:
-        """Return the default ``RunRequest`` as JSON."""
-        return RunRequest.model_validate({})
+        """Return calibrated ``RunRequest`` defaults when a snapshot is available."""
+        defaults = RunRequest.model_validate({})
+        try:
+            snapshot = self._get_repository().get_latest_calibration_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Database error: {exc}") from exc
+        if snapshot is None or not snapshot.has_effective_parameters:
+            return defaults
+        return defaults.model_copy(update=snapshot.effective_parameters.as_run_request_updates())
 
 
     async def get_latest_forecast(self) -> ForecastResponse:
@@ -181,9 +188,11 @@ class HomeOptimizerAPI:
         request before solving (for any array not already supplied by the
         caller).  Raises 502 on DB error, 422 when no forecast rows exist.
         """
+        repository = self._get_repository()
+
         if req.gti_window_forecast is None or req.t_out_forecast is None:
             try:
-                rows = self._get_repository().get_latest_forecast_batch()
+                rows = repository.get_latest_forecast_batch()
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(
                     status_code=502,
@@ -206,6 +215,7 @@ class HomeOptimizerAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return self._build_optimize_response(req=req, result=result)
+
 
 
     async def latest_optimizer_result(self) -> OptimizeResponse:
