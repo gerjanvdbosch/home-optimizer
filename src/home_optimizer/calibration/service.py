@@ -12,12 +12,14 @@ from .dataset import (
     build_cop_calibration_dataset,
     build_dhw_active_calibration_dataset,
     build_dhw_standby_calibration_dataset,
+    diagnose_cop_calibration_dataset,
     build_ufh_active_calibration_dataset,
     build_ufh_off_calibration_dataset,
 )
 from .cop_offline import calibrate_cop_model
 from .dhw_active import calibrate_dhw_active_stratification
 from .models import (
+    COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationResult,
     COPCalibrationSettings,
@@ -138,6 +140,17 @@ def build_cop_dataset_from_repository(
 ) -> COPCalibrationDataset:
     """Load telemetry history from the repository and build a COP calibration dataset."""
     return build_cop_calibration_dataset(
+        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        settings=settings,
+    )
+
+
+def diagnose_cop_dataset_from_repository(
+    repository: TelemetryRepository,
+    settings: COPCalibrationSettings,
+) -> COPCalibrationDiagnostics:
+    """Load telemetry history and return COP dataset-filter diagnostics without fitting."""
+    return diagnose_cop_calibration_dataset(
         aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
         settings=settings,
     )

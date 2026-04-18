@@ -9,6 +9,7 @@ from typing import cast
 import numpy as np
 
 from home_optimizer.calibration import (
+    COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationSample,
     COPCalibrationSettings,
@@ -20,6 +21,7 @@ from home_optimizer.calibration import (
     DHWStandbyCalibrationSettings,
     build_cop_calibration_dataset,
     build_dhw_active_calibration_dataset,
+    diagnose_cop_calibration_dataset,
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationSample,
     UFHActiveCalibrationSettings,
@@ -486,6 +488,124 @@ def test_build_cop_calibration_dataset_keeps_best_ufh_segments_when_capped() -> 
     assert selected_scores[0] > dropped_scores[0]
     assert dataset.samples[0].mode_name == "dhw"
     assert dataset.samples[-1].outdoor_temperature_mean_c == 1.5
+
+
+def test_diagnose_cop_calibration_dataset_reports_bucket_and_segment_dropoffs() -> None:
+    """COP diagnostics must explain where rows and segments are rejected before fitting."""
+    start = datetime(2026, 4, 17, 3, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_start_utc=start,
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=6.0,
+            hp_supply_target_temperature_mean_c=37.0,
+            hp_supply_temperature_mean_c=36.5,
+            hp_thermal_power_mean_kw=3.2,
+            hp_electric_energy_delta_kwh=0.20,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=5),
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=4.0,
+            hp_supply_target_temperature_mean_c=40.0,
+            hp_supply_temperature_mean_c=39.3,
+            hp_thermal_power_mean_kw=3.4,
+            hp_electric_energy_delta_kwh=0.22,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=10),
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=5.0,
+            hp_supply_target_temperature_mean_c=25.0,
+            hp_supply_temperature_mean_c=25.0,
+            hp_thermal_power_mean_kw=0.0,
+            hp_electric_energy_delta_kwh=0.0,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=15),
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=6.0,
+            hp_supply_target_temperature_mean_c=55.0,
+            hp_supply_temperature_mean_c=54.0,
+            hp_thermal_power_mean_kw=2.6,
+            hp_electric_energy_delta_kwh=0.18,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=20),
+            bucket_end_utc=start + timedelta(minutes=25),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=5.8,
+            hp_supply_target_temperature_mean_c=55.0,
+            hp_supply_temperature_mean_c=54.1,
+            hp_thermal_power_mean_kw=2.7,
+            hp_electric_energy_delta_kwh=0.18,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=25),
+            bucket_end_utc=start + timedelta(minutes=30),
+            hp_mode_last="ufh",
+            defrost_active_fraction=1.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=3.5,
+            hp_supply_target_temperature_mean_c=41.0,
+            hp_supply_temperature_mean_c=40.2,
+            hp_thermal_power_mean_kw=3.4,
+            hp_electric_energy_delta_kwh=0.22,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=30),
+            bucket_end_utc=start + timedelta(minutes=35),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=3.4,
+            hp_supply_target_temperature_mean_c=41.2,
+            hp_supply_temperature_mean_c=40.6,
+            hp_thermal_power_mean_kw=2.0,
+            hp_electric_energy_delta_kwh=0.15,
+        ),
+    ]
+    settings = COPCalibrationSettings(
+        min_sample_count=2,
+        min_ufh_curve_sample_count=2,
+        min_thermal_energy_kwh=0.1,
+        min_electric_energy_kwh=0.05,
+        min_segment_samples=2,
+        min_segment_thermal_energy_kwh=0.2,
+        min_segment_actual_cop_span=0.02,
+        min_ufh_segment_outdoor_temperature_span_c=0.5,
+        min_ufh_segment_supply_target_span_c=0.5,
+    )
+
+    diagnostics = diagnose_cop_calibration_dataset(cast(list, aggregates), settings)
+
+    assert isinstance(diagnostics, COPCalibrationDiagnostics)
+    assert diagnostics.raw_row_count == 7
+    assert diagnostics.mode_accepted_count == 6
+    assert diagnostics.cop_accepted_count == 5
+    assert diagnostics.raw_segment_count == 3
+    assert diagnostics.selected_segment_count == 2
+    assert diagnostics.selected_sample_count == 4
+    assert diagnostics.selected_ufh_sample_count == 2
+    assert diagnostics.selected_dhw_sample_count == 2
+    assert ("mode_not_ufh_or_dhw", 1) in diagnostics.bucket_rejection_counts
+    assert ("defrost_fraction", 1) in diagnostics.bucket_rejection_counts
+    assert ("sample_count", 1) in diagnostics.segment_failure_counts
+    assert ("actual_cop_span", 1) in diagnostics.segment_failure_counts
 
 
 def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:

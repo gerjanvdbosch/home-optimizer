@@ -9,12 +9,14 @@ identifiable, but the aggregate envelope loss and effective thermal capacity are
 from __future__ import annotations
 
 from bisect import bisect_left
+from collections import Counter
 from datetime import datetime
 from typing import Sequence
 
 import numpy as np
 
 from .models import (
+    COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationSegmentQuality,
     COPCalibrationSample,
@@ -344,23 +346,17 @@ def _apply_cop_segment_caps(
     ]
 
 
-def build_cop_calibration_dataset(
+def _collect_cop_segments(
     aggregates: Sequence[TelemetryAggregate],
     settings: COPCalibrationSettings,
-) -> COPCalibrationDataset:
-    """Build a filtered operating-bucket dataset for offline COP calibration.
-
-    The builder keeps only UFH and DHW buckets that are physically meaningful for
-    COP fitting: positive thermal/electrical energy, no defrost/booster overlap,
-    and measured bucket COP within the physically meaningful interval
-    ``(1, cop_max]``. Surviving buckets are then grouped into contiguous same-mode
-    segments, scored for excitation/supply tracking quality, and optionally capped
-    per mode before the final dataset is emitted.
-    """
+) -> tuple[list[list[COPCalibrationSample]], Counter[str], Counter[str]]:
+    """Collect raw contiguous COP segments and bucket-level rejection counters."""
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
     raw_segments: list[list[COPCalibrationSample]] = []
     current_segment: list[COPCalibrationSample] = []
     accepted_modes = {settings.ufh_mode_name, settings.dhw_mode_name}
+    stage_counts: Counter[str] = Counter(raw_row_count=len(rows))
+    rejection_counts: Counter[str] = Counter()
 
     def flush_segment() -> None:
         nonlocal current_segment
@@ -371,37 +367,55 @@ def build_cop_calibration_dataset(
     for row in rows:
         mode_name = str(row.hp_mode_last)
         if mode_name not in accepted_modes:
+            rejection_counts["mode_not_ufh_or_dhw"] += 1
             flush_segment()
             continue
+        stage_counts["mode_accepted_count"] += 1
+
         if float(row.defrost_active_fraction) > settings.max_defrost_active_fraction:
+            rejection_counts["defrost_fraction"] += 1
             flush_segment()
             continue
+        stage_counts["defrost_accepted_count"] += 1
+
         if float(row.booster_heater_active_fraction) > settings.max_booster_active_fraction:
+            rejection_counts["booster_fraction"] += 1
             flush_segment()
             continue
+        stage_counts["booster_accepted_count"] += 1
 
         dt_hours = (row.bucket_end_utc - row.bucket_start_utc).total_seconds() / _SECONDS_PER_HOUR
         if dt_hours <= 0.0:
+            rejection_counts["non_positive_dt"] += 1
             flush_segment()
             continue
+        stage_counts["dt_accepted_count"] += 1
 
         thermal_energy_kwh = float(row.hp_thermal_power_mean_kw) * dt_hours
         electric_energy_kwh = float(row.hp_electric_energy_delta_kwh)
         if thermal_energy_kwh < settings.min_thermal_energy_kwh:
+            rejection_counts["thermal_energy_below_min"] += 1
             flush_segment()
             continue
+        stage_counts["thermal_energy_accepted_count"] += 1
+
         if electric_energy_kwh < settings.min_electric_energy_kwh:
+            rejection_counts["electric_energy_below_min"] += 1
             flush_segment()
             continue
+        stage_counts["electric_energy_accepted_count"] += 1
 
         supply_target_temperature_mean_c = float(row.hp_supply_target_temperature_mean_c)
         supply_temperature_mean_c = float(row.hp_supply_temperature_mean_c)
         if not np.isfinite(supply_target_temperature_mean_c):
+            rejection_counts["target_supply_not_finite"] += 1
             flush_segment()
             continue
         if not np.isfinite(supply_temperature_mean_c):
+            rejection_counts["measured_supply_not_finite"] += 1
             flush_segment()
             continue
+        stage_counts["finite_supply_accepted_count"] += 1
 
         sample = COPCalibrationSample(
             bucket_start_utc=row.bucket_start_utc,
@@ -415,20 +429,126 @@ def build_cop_calibration_dataset(
             electric_energy_kwh=electric_energy_kwh,
         )
         if sample.actual_cop <= 1.0:
+            rejection_counts["actual_cop_leq_1"] += 1
             flush_segment()
             continue
         if sample.actual_cop > settings.cop_max:
+            rejection_counts["actual_cop_above_cop_max"] += 1
             flush_segment()
             continue
+        stage_counts["cop_accepted_count"] += 1
+
         if current_segment and (
             current_segment[-1].mode_name != sample.mode_name
             or current_segment[-1].bucket_end_utc != sample.bucket_start_utc
         ):
+            rejection_counts["segment_break_mode_or_gap"] += 1
             flush_segment()
         current_segment.append(sample)
 
     flush_segment()
+    return raw_segments, stage_counts, rejection_counts
 
+
+def _cop_segment_failure_counts(
+    *,
+    uncapped_qualities: Sequence[COPCalibrationSegmentQuality],
+    capped_qualities: Sequence[COPCalibrationSegmentQuality],
+    settings: COPCalibrationSettings,
+) -> Counter[str]:
+    """Return counters for the exact segment-selection rules that rejected each segment."""
+    failure_counts: Counter[str] = Counter()
+    for uncapped_quality, capped_quality in zip(uncapped_qualities, capped_qualities, strict=True):
+        if capped_quality.selected:
+            continue
+        if uncapped_quality.selected and not capped_quality.selected:
+            failure_counts["top_n_cap"] += 1
+            continue
+        if uncapped_quality.sample_count < settings.min_segment_samples:
+            failure_counts["sample_count"] += 1
+        if uncapped_quality.thermal_energy_kwh < settings.min_segment_thermal_energy_kwh:
+            failure_counts["thermal_energy"] += 1
+        if uncapped_quality.actual_cop_span < settings.min_segment_actual_cop_span:
+            failure_counts["actual_cop_span"] += 1
+        if uncapped_quality.supply_tracking_rmse_c > settings.max_segment_supply_tracking_rmse_c:
+            failure_counts["supply_tracking_rmse"] += 1
+        if uncapped_quality.mode_name == settings.ufh_mode_name:
+            if uncapped_quality.outdoor_temperature_span_c < settings.min_ufh_segment_outdoor_temperature_span_c:
+                failure_counts["ufh_outdoor_span"] += 1
+            if (
+                uncapped_quality.supply_target_temperature_span_c
+                < settings.min_ufh_segment_supply_target_span_c
+            ):
+                failure_counts["ufh_supply_target_span"] += 1
+        if uncapped_quality.score < settings.min_segment_score:
+            failure_counts["score"] += 1
+    return failure_counts
+
+
+def diagnose_cop_calibration_dataset(
+    aggregates: Sequence[TelemetryAggregate],
+    settings: COPCalibrationSettings,
+) -> COPCalibrationDiagnostics:
+    """Diagnose COP bucket filtering and segment selection without requiring a fit-ready dataset."""
+    raw_segments, stage_counts, rejection_counts = _collect_cop_segments(aggregates, settings)
+    uncapped_qualities = [
+        _cop_segment_quality(segment_samples, raw_segment_index=index, settings=settings)
+        for index, segment_samples in enumerate(raw_segments)
+    ]
+    capped_qualities = _apply_cop_segment_caps(list(uncapped_qualities), settings)
+    selected_segment_indices = {
+        quality.raw_segment_index for quality in capped_qualities if quality.selected
+    }
+    selected_samples = [
+        sample
+        for segment_index, segment_samples in enumerate(raw_segments)
+        if segment_index in selected_segment_indices
+        for sample in segment_samples
+    ]
+    segment_failure_counts = _cop_segment_failure_counts(
+        uncapped_qualities=uncapped_qualities,
+        capped_qualities=capped_qualities,
+        settings=settings,
+    )
+    return COPCalibrationDiagnostics(
+        raw_row_count=stage_counts["raw_row_count"],
+        mode_accepted_count=stage_counts["mode_accepted_count"],
+        defrost_accepted_count=stage_counts["defrost_accepted_count"],
+        booster_accepted_count=stage_counts["booster_accepted_count"],
+        dt_accepted_count=stage_counts["dt_accepted_count"],
+        thermal_energy_accepted_count=stage_counts["thermal_energy_accepted_count"],
+        electric_energy_accepted_count=stage_counts["electric_energy_accepted_count"],
+        finite_supply_accepted_count=stage_counts["finite_supply_accepted_count"],
+        cop_accepted_count=stage_counts["cop_accepted_count"],
+        raw_segment_count=len(raw_segments),
+        selected_segment_count=sum(quality.selected for quality in capped_qualities),
+        selected_sample_count=len(selected_samples),
+        selected_ufh_sample_count=sum(
+            sample.mode_name == settings.ufh_mode_name for sample in selected_samples
+        ),
+        selected_dhw_sample_count=sum(
+            sample.mode_name == settings.dhw_mode_name for sample in selected_samples
+        ),
+        bucket_rejection_counts=tuple(sorted(rejection_counts.items())),
+        segment_failure_counts=tuple(sorted(segment_failure_counts.items())),
+        segment_qualities=tuple(capped_qualities),
+    )
+
+
+def build_cop_calibration_dataset(
+    aggregates: Sequence[TelemetryAggregate],
+    settings: COPCalibrationSettings,
+) -> COPCalibrationDataset:
+    """Build a filtered operating-bucket dataset for offline COP calibration.
+
+    The builder keeps only UFH and DHW buckets that are physically meaningful for
+    COP fitting: positive thermal/electrical energy, no defrost/booster overlap,
+    and measured bucket COP within the physically meaningful interval
+    ``(1, cop_max]``. Surviving buckets are then grouped into contiguous same-mode
+    segments, scored for excitation/supply tracking quality, and optionally capped
+    per mode before the final dataset is emitted.
+    """
+    raw_segments, _, _ = _collect_cop_segments(aggregates, settings)
     segment_qualities = _apply_cop_segment_caps(
         [
             _cop_segment_quality(segment_samples, raw_segment_index=index, settings=settings)

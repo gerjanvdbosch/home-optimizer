@@ -63,6 +63,7 @@ from .service import (
     calibrate_dhw_standby_from_repository,
     calibrate_ufh_active_from_repository,
     calibrate_ufh_off_from_repository,
+    diagnose_cop_dataset_from_repository,
 )
 from ..telemetry.repository import TelemetryRepository
 from ..types import DHWParameters, ThermalParameters
@@ -225,6 +226,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional top-N cap on selected DHW COP segments after quality ranking [-].",
+    )
+    parser.add_argument(
+        "--cop-diagnostics",
+        action="store_true",
+        help="Inspect COP bucket/segment rejection counts without running the fitter.",
     )
     parser.add_argument(
         "--cop-t-ref-outdoor-c",
@@ -534,29 +540,39 @@ def main() -> None:
         }
     elif args.stage == "cop":
         settings = _build_cop_settings(args)
-        dataset = build_cop_dataset_from_repository(repository, settings)
-        result = calibrate_cop_from_repository(repository, settings)
-        payload = {
-            "stage": args.stage,
-            "dataset": {
-                "sample_count": dataset.sample_count,
-                "ufh_sample_count": dataset.ufh_sample_count,
-                "dhw_sample_count": dataset.dhw_sample_count,
-                "selected_segment_count": dataset.selected_segment_count,
-                "selected_ufh_segment_count": dataset.selected_ufh_segment_count,
-                "selected_dhw_segment_count": dataset.selected_dhw_segment_count,
-                "raw_segment_count": dataset.raw_segment_count,
-                "dropped_segment_count": dataset.dropped_segment_count,
-                "segment_qualities": [asdict(quality) for quality in dataset.segment_qualities],
-                "start_utc": dataset.start_utc.isoformat(),
-                "end_utc": dataset.end_utc.isoformat(),
-            },
-            "fit": {
-                **asdict(result),
-                "dataset_start_utc": result.dataset_start_utc.isoformat(),
-                "dataset_end_utc": result.dataset_end_utc.isoformat(),
-            },
-        }
+        if args.cop_diagnostics:
+            diagnostics = diagnose_cop_dataset_from_repository(repository, settings)
+            payload = {
+                "stage": args.stage,
+                "diagnostics": {
+                    **asdict(diagnostics),
+                    "segment_qualities": [asdict(quality) for quality in diagnostics.segment_qualities],
+                },
+            }
+        else:
+            dataset = build_cop_dataset_from_repository(repository, settings)
+            result = calibrate_cop_from_repository(repository, settings)
+            payload = {
+                "stage": args.stage,
+                "dataset": {
+                    "sample_count": dataset.sample_count,
+                    "ufh_sample_count": dataset.ufh_sample_count,
+                    "dhw_sample_count": dataset.dhw_sample_count,
+                    "selected_segment_count": dataset.selected_segment_count,
+                    "selected_ufh_segment_count": dataset.selected_ufh_segment_count,
+                    "selected_dhw_segment_count": dataset.selected_dhw_segment_count,
+                    "raw_segment_count": dataset.raw_segment_count,
+                    "dropped_segment_count": dataset.dropped_segment_count,
+                    "segment_qualities": [asdict(quality) for quality in dataset.segment_qualities],
+                    "start_utc": dataset.start_utc.isoformat(),
+                    "end_utc": dataset.end_utc.isoformat(),
+                },
+                "fit": {
+                    **asdict(result),
+                    "dataset_start_utc": result.dataset_start_utc.isoformat(),
+                    "dataset_end_utc": result.dataset_end_utc.isoformat(),
+                },
+            }
     elif args.stage == "active-ufh":
         max_gti_w_per_m2 = (
             DEFAULT_ACTIVE_MAX_GTI_W_PER_M2 if args.max_gti_w_per_m2 is None else args.max_gti_w_per_m2
@@ -664,6 +680,26 @@ def main() -> None:
         return
 
     if args.stage == "cop":
+        if args.cop_diagnostics:
+            diagnostics = payload["diagnostics"]
+            print("COP dataset diagnostics")
+            print("=======================")
+            print(f"Raw rows             : {diagnostics['raw_row_count']}")
+            print(f"Mode-accepted rows   : {diagnostics['mode_accepted_count']}")
+            print(f"COP-accepted rows    : {diagnostics['cop_accepted_count']}")
+            print(f"Raw segments         : {diagnostics['raw_segment_count']}")
+            print(f"Selected segments    : {diagnostics['selected_segment_count']}")
+            print(f"Selected samples     : {diagnostics['selected_sample_count']}")
+            print(f"Selected UFH samples : {diagnostics['selected_ufh_sample_count']}")
+            print(f"Selected DHW samples : {diagnostics['selected_dhw_sample_count']}")
+            print("Bucket rejections    :")
+            for reason, count in diagnostics["bucket_rejection_counts"]:
+                print(f"  - {reason}: {count}")
+            print("Segment failures     :")
+            for reason, count in diagnostics["segment_failure_counts"]:
+                print(f"  - {reason}: {count}")
+            return
+
         print("COP calibration")
         print("===============")
         print(f"Samples              : {dataset.sample_count}")

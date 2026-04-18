@@ -566,6 +566,81 @@ class COPCalibrationDataset:
 
 
 @dataclass(frozen=True, slots=True)
+class COPCalibrationDiagnostics:
+    """Diagnostics for COP bucket filtering and segment-quality selection.
+
+    Attributes:
+        raw_row_count: Total telemetry rows evaluated before any COP filtering [-].
+        mode_accepted_count: Rows surviving the UFH/DHW mode filter [-].
+        defrost_accepted_count: Rows surviving the defrost-fraction filter [-].
+        booster_accepted_count: Rows surviving the booster-fraction filter [-].
+        dt_accepted_count: Rows with strictly positive bucket duration Δt [-].
+        thermal_energy_accepted_count: Rows surviving the thermal-energy threshold [-].
+        electric_energy_accepted_count: Rows surviving the electric-energy threshold [-].
+        finite_supply_accepted_count: Rows with finite target and measured supply temperatures [-].
+        cop_accepted_count: Rows surviving the physical COP bounds ``1 < COP <= cop_max`` [-].
+        raw_segment_count: Number of contiguous same-mode raw segments formed before scoring [-].
+        selected_segment_count: Number of segments retained after thresholding and optional top-N caps [-].
+        selected_sample_count: Number of bucket samples retained after final segment selection [-].
+        selected_ufh_sample_count: Number of retained UFH samples after final segment selection [-].
+        selected_dhw_sample_count: Number of retained DHW samples after final segment selection [-].
+        bucket_rejection_counts: Sorted ``(reason, count)`` pairs for bucket-level rejections [-].
+        segment_failure_counts: Sorted ``(reason, count)`` pairs for segment-level rejections [-].
+        segment_qualities: Final segment-quality objects after optional top-N capping [-].
+    """
+
+    raw_row_count: int
+    mode_accepted_count: int
+    defrost_accepted_count: int
+    booster_accepted_count: int
+    dt_accepted_count: int
+    thermal_energy_accepted_count: int
+    electric_energy_accepted_count: int
+    finite_supply_accepted_count: int
+    cop_accepted_count: int
+    raw_segment_count: int
+    selected_segment_count: int
+    selected_sample_count: int
+    selected_ufh_sample_count: int
+    selected_dhw_sample_count: int
+    bucket_rejection_counts: tuple[tuple[str, int], ...]
+    segment_failure_counts: tuple[tuple[str, int], ...]
+    segment_qualities: tuple[COPCalibrationSegmentQuality, ...]
+
+    def __post_init__(self) -> None:
+        for name in (
+            "raw_row_count",
+            "mode_accepted_count",
+            "defrost_accepted_count",
+            "booster_accepted_count",
+            "dt_accepted_count",
+            "thermal_energy_accepted_count",
+            "electric_energy_accepted_count",
+            "finite_supply_accepted_count",
+            "cop_accepted_count",
+            "raw_segment_count",
+            "selected_segment_count",
+            "selected_sample_count",
+            "selected_ufh_sample_count",
+            "selected_dhw_sample_count",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative.")
+        if self.selected_segment_count > self.raw_segment_count:
+            raise ValueError("selected_segment_count may not exceed raw_segment_count.")
+        if self.selected_ufh_sample_count + self.selected_dhw_sample_count != self.selected_sample_count:
+            raise ValueError(
+                "selected_ufh_sample_count + selected_dhw_sample_count must equal selected_sample_count."
+            )
+        for collection_name in ("bucket_rejection_counts", "segment_failure_counts"):
+            for reason, count in getattr(self, collection_name):
+                if not reason.strip():
+                    raise ValueError(f"{collection_name} reasons must not be blank.")
+                if count < 0:
+                    raise ValueError(f"{collection_name} counts must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
 class COPCalibrationSettings:
     """Validated settings for offline Carnot COP calibration.
 

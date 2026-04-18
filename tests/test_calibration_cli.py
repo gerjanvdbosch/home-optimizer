@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from home_optimizer.calibration import (
+    COPCalibrationDiagnostics,
     COPCalibrationDataset,
     COPCalibrationResult,
     COPCalibrationSample,
@@ -113,6 +114,30 @@ def _build_cop_cli_result(dataset: COPCalibrationDataset) -> COPCalibrationResul
     )
 
 
+def _build_cop_cli_diagnostics() -> COPCalibrationDiagnostics:
+    """Return a deterministic COP diagnostics object for CLI assertions."""
+    dataset = _build_cop_cli_dataset()
+    return COPCalibrationDiagnostics(
+        raw_row_count=8,
+        mode_accepted_count=5,
+        defrost_accepted_count=5,
+        booster_accepted_count=5,
+        dt_accepted_count=5,
+        thermal_energy_accepted_count=4,
+        electric_energy_accepted_count=3,
+        finite_supply_accepted_count=3,
+        cop_accepted_count=2,
+        raw_segment_count=2,
+        selected_segment_count=1,
+        selected_sample_count=1,
+        selected_ufh_sample_count=1,
+        selected_dhw_sample_count=0,
+        bucket_rejection_counts=(("electric_energy_below_min", 1), ("mode_not_ufh_or_dhw", 3)),
+        segment_failure_counts=(("actual_cop_span", 1), ("sample_count", 1)),
+        segment_qualities=dataset.segment_qualities,
+    )
+
+
 def test_calibration_cli_cop_json_reports_segment_and_mode_diagnostics(
     monkeypatch,
     capsys,
@@ -174,4 +199,37 @@ def test_calibration_cli_cop_text_reports_mode_metrics_and_segment_counts(
     assert "DHW RMSE(COP)" in output
     assert "UFH diagnostic eta" in output
     assert "Heating-curve loss   : soft_l1" in output
+
+
+def test_calibration_cli_cop_diagnostics_json_reports_rejection_counts(
+    monkeypatch,
+    capsys,
+) -> None:
+    """The COP diagnostics CLI must expose bucket and segment rejection counts in JSON."""
+    diagnostics = _build_cop_cli_diagnostics()
+    monkeypatch.setattr(
+        calibration_main,
+        "diagnose_cop_dataset_from_repository",
+        lambda repository, settings: diagnostics,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["home-optimizer-calibration", "--stage", "cop", "--cop-diagnostics", "--json"],
+    )
+
+    calibration_main.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["diagnostics"]["raw_row_count"] == diagnostics.raw_row_count
+    assert payload["diagnostics"]["selected_segment_count"] == diagnostics.selected_segment_count
+    assert payload["diagnostics"]["bucket_rejection_counts"] == [
+        ["electric_energy_below_min", 1],
+        ["mode_not_ufh_or_dhw", 3],
+    ]
+    assert payload["diagnostics"]["segment_failure_counts"] == [
+        ["actual_cop_span", 1],
+        ["sample_count", 1],
+    ]
+
 
