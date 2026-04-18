@@ -1,0 +1,225 @@
+"""Tests for the ML-based runtime forecasting layer."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import numpy as np
+
+from home_optimizer.forecasting import ForecastService, ShutterForecaster
+from home_optimizer.optimizer import Optimizer, RunRequest
+from home_optimizer.sensors import LiveReadings
+from home_optimizer.telemetry import TelemetryRepository, aggregate_readings
+
+
+def _reading(
+    timestamp: datetime,
+    *,
+    shutter_living_room_pct: float,
+    outdoor_temperature_c: float,
+) -> LiveReadings:
+    """Create one fully populated telemetry sample for forecasting tests."""
+    return LiveReadings(
+        room_temperature_c=20.5,
+        outdoor_temperature_c=outdoor_temperature_c,
+        hp_supply_temperature_c=31.0,
+        hp_supply_target_temperature_c=33.0,
+        hp_return_temperature_c=27.0,
+        hp_flow_lpm=9.0,
+        hp_electric_power_kw=2.0,
+        hp_mode="ufh",
+        p1_net_power_kw=1.4,
+        pv_output_kw=0.6,
+        thermostat_setpoint_c=20.5,
+        dhw_top_temperature_c=52.0,
+        dhw_bottom_temperature_c=45.0,
+        shutter_living_room_pct=shutter_living_room_pct,
+        defrost_active=False,
+        booster_heater_active=False,
+        boiler_ambient_temp_c=18.0,
+        refrigerant_condensation_temp_c=38.0,
+        refrigerant_liquid_line_temp_c=28.0,
+        discharge_temp_c=65.0,
+        t_mains_estimated_c=10.5,
+        timestamp=timestamp,
+        pv_total_kwh=1000.0,
+        hp_electric_total_kwh=500.0,
+        p1_import_total_kwh=800.0,
+        p1_export_total_kwh=200.0,
+    )
+
+
+def _synthetic_gti_w_per_m2(valid_at_utc: datetime) -> float:
+    """Deterministic irradiance profile used to train a predictable shutter pattern."""
+    hour = valid_at_utc.hour
+    if 11 <= hour <= 14:
+        return 650.0
+    if 8 <= hour <= 10 or 15 <= hour <= 17:
+        return 180.0
+    return 0.0
+
+
+def _synthetic_shutter_pct(gti_w_per_m2: float) -> float:
+    """Behavior rule used to generate training data for the ML model."""
+    if gti_w_per_m2 >= 500.0:
+        return 20.0
+    if gti_w_per_m2 > 0.0:
+        return 65.0
+    return 100.0
+
+
+def _populate_shutter_history(repository: TelemetryRepository, *, start_utc: datetime, hours: int) -> None:
+    """Populate telemetry history plus aligned weather rows for shutter-model training."""
+    for step in range(hours):
+        valid_at_utc = start_utc + timedelta(hours=step)
+        gti_w_per_m2 = _synthetic_gti_w_per_m2(valid_at_utc)
+        shutter_pct = _synthetic_shutter_pct(gti_w_per_m2)
+        outdoor_temperature_c = 5.0 + 0.25 * valid_at_utc.hour
+        aggregate = aggregate_readings(
+            [
+                _reading(
+                    valid_at_utc - timedelta(minutes=5),
+                    shutter_living_room_pct=shutter_pct,
+                    outdoor_temperature_c=outdoor_temperature_c,
+                ),
+                _reading(
+                    valid_at_utc,
+                    shutter_living_room_pct=shutter_pct,
+                    outdoor_temperature_c=outdoor_temperature_c,
+                ),
+            ]
+        )
+        aggregate.update(
+            {
+                "electricity_price_mean_eur_per_kwh": 0.25,
+                "electricity_price_last_eur_per_kwh": 0.25,
+                "feed_in_price_eur_per_kwh": 0.0,
+            }
+        )
+        repository.add_aggregate(aggregate)
+        repository.bulk_add_forecast_snapshots(
+            [
+                {
+                    "fetched_at_utc": valid_at_utc,
+                    "valid_at_utc": valid_at_utc,
+                    "step_k": 0,
+                    "dt_hours": 1.0,
+                    "t_out_c": outdoor_temperature_c,
+                    "gti_w_per_m2": gti_w_per_m2,
+                    "gti_pv_w_per_m2": 0.0,
+                }
+            ]
+        )
+
+
+def _add_future_forecast_batch(
+    repository: TelemetryRepository,
+    *,
+    fetched_at_utc: datetime,
+    gti_profile_w_per_m2: list[float],
+) -> None:
+    """Persist one future hourly forecast batch for inference-time testing."""
+    repository.bulk_add_forecast_snapshots(
+        [
+            {
+                "fetched_at_utc": fetched_at_utc,
+                "valid_at_utc": fetched_at_utc + timedelta(hours=step_k),
+                "step_k": step_k,
+                "dt_hours": 1.0,
+                "t_out_c": 6.0 + 0.5 * step_k,
+                "gti_w_per_m2": gti_w_per_m2,
+                "gti_pv_w_per_m2": 0.0,
+            }
+            for step_k, gti_w_per_m2 in enumerate(gti_profile_w_per_m2)
+        ]
+    )
+
+
+def test_shutter_forecaster_learns_daylight_closure_pattern(tmp_path) -> None:
+    """Sunny hours should yield a lower predicted shutter opening than dark hours."""
+    database_url = f"sqlite:///{tmp_path / 'shutter-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    _populate_shutter_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=72)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 180.0, 650.0, 650.0, 180.0, 0.0],
+    )
+
+    rows = repository.get_latest_forecast_batch()
+    prediction = ShutterForecaster().predict_from_repository(
+        repository=repository,
+        weather_rows=rows,
+        horizon_steps=6,
+        initial_shutter_pct=100.0,
+    )
+
+    assert prediction is not None
+    assert prediction.shape == (6,)
+    assert np.all(prediction >= 0.0)
+    assert np.all(prediction <= 100.0)
+    assert prediction[2] < prediction[0]
+    assert prediction[3] < prediction[5]
+    assert float(np.mean(prediction[2:4])) < float(np.mean(prediction[[0, 5]]))
+
+
+def test_forecast_service_returns_no_shutter_override_without_enough_history(tmp_path) -> None:
+    """The ML service must fail safe and keep scalar fallback behavior on sparse data."""
+    database_url = f"sqlite:///{tmp_path / 'shutter-forecast-sparse.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    _populate_shutter_history(repository, start_utc=history_start_utc, hours=8)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=8)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 180.0, 650.0, 0.0],
+    )
+
+    rows = repository.get_latest_forecast_batch()
+    overrides = ForecastService().build_missing_overrides(
+        request_data={
+            "horizon_hours": 4,
+            "shutter_living_room_pct": 100.0,
+            "shutter_forecast": None,
+        },
+        repository=repository,
+        weather_rows=rows,
+        current_overrides={},
+    )
+
+    assert overrides == {}
+
+
+def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None:
+    """Scheduled optimizer input must add ML shutter forecasts when none are supplied."""
+    database_url = f"sqlite:///{tmp_path / 'scheduled-shutter-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    _populate_shutter_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=72)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 180.0, 650.0, 650.0, 180.0, 0.0],
+    )
+
+    base_input = RunRequest.model_validate({"horizon_hours": 6, "shutter_living_room_pct": 100.0})
+    scheduled_input = Optimizer._build_scheduled_input(
+        base_input=base_input,
+        backend=None,
+        repository=repository,
+    )
+
+    assert scheduled_input.shutter_forecast is not None
+    assert len(scheduled_input.shutter_forecast) == 6
+    assert scheduled_input.shutter_forecast[2] < scheduled_input.shutter_forecast[0]
+    assert scheduled_input.shutter_forecast[3] < scheduled_input.shutter_forecast[5]

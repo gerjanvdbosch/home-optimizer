@@ -21,7 +21,7 @@ from .optimizer import (
     MPCStepResult,
     Optimizer,
     RunRequest,
-    inject_forecast_overrides,
+    build_repository_forecast_overrides,
     merge_run_request_updates,
     sanitize_calibration_overrides,
 )
@@ -198,15 +198,15 @@ class HomeOptimizerAPI:
         """
         repository = self._get_repository()
 
-        if req.gti_window_forecast is None or req.t_out_forecast is None:
-            try:
-                rows = repository.get_latest_forecast_batch()
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Kon forecast niet uit de database lezen: {exc}",
-                ) from exc
+        try:
+            rows, forecast_overrides = build_repository_forecast_overrides(req, repository)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"Kon forecast niet uit de database lezen: {exc}",
+            ) from exc
 
+        if req.gti_window_forecast is None or req.t_out_forecast is None:
             if not rows:
                 raise HTTPException(
                     status_code=422,
@@ -216,7 +216,11 @@ class HomeOptimizerAPI:
                         "voordat je /api/simulate aanroept."
                     ),
                 )
-            req = merge_run_request_updates(req, inject_forecast_overrides(rows, req.horizon_hours))
+        elif req.shutter_forecast is not None or not rows:
+            forecast_overrides = {}
+
+        if forecast_overrides:
+            req = merge_run_request_updates(req, forecast_overrides)
 
         try:
             result = Optimizer().solve(req)

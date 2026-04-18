@@ -44,6 +44,7 @@ from pydantic import BaseModel, Field
 
 from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from .dhw_model import DHWModel
+from .forecasting import ForecastService
 from .mpc import MPCController, MPCSolution
 from .price_model import BasePriceModel, PriceConfig, build_price_model  # noqa: F401 — PriceConfig re-exported via RunRequest
 from .thermal_model import ThermalModel
@@ -65,6 +66,7 @@ if TYPE_CHECKING:
     from .telemetry.repository import TelemetryRepository
 
 log = logging.getLogger("home_optimizer.optimizer")
+_FORECAST_SERVICE = ForecastService()
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,52 @@ def inject_forecast_overrides(
     if "gti_pv_forecast" not in existing:
         overrides["gti_pv_forecast"] = [r.gti_pv_w_per_m2 for r in slice_]
     return overrides
+
+
+def build_repository_forecast_overrides(
+    request: "RunRequest",
+    repository: "TelemetryRepository",
+    existing: "dict | None" = None,
+) -> tuple[list, dict]:
+    """Load persisted weather data and derived ML forecasts for one runtime request.
+
+    Args:
+        request: Runtime request whose horizon length and explicit user forecasts
+            determine what still needs to be injected.
+        repository: Telemetry repository containing persisted forecast rows and
+            the historical telemetry used to train ML enrichments.
+        existing: Optional overrides already accumulated by the caller.
+
+    Returns:
+        Tuple ``(rows, overrides)`` where ``rows`` is the latest forecast batch and
+        ``overrides`` contains weather arrays plus any additional ML forecasts such
+        as ``shutter_forecast``.
+    """
+
+    current_overrides = dict(existing or {})
+    rows = repository.get_latest_forecast_batch()
+    if not rows:
+        return [], {}
+
+    explicit_request_fields = request.model_dump(mode="python", exclude_none=True)
+    forecast_overrides = inject_forecast_overrides(
+        rows,
+        request.horizon_hours,
+        existing={**explicit_request_fields, **current_overrides},
+    )
+    current_overrides.update(forecast_overrides)
+    materialized_request_data = {
+        **request.model_dump(mode="python"),
+        **current_overrides,
+    }
+    ml_overrides = _FORECAST_SERVICE.build_missing_overrides(
+        request_data=materialized_request_data,
+        repository=repository,
+        weather_rows=rows[: request.horizon_hours],
+        current_overrides=current_overrides,
+    )
+    forecast_overrides.update(ml_overrides)
+    return rows, forecast_overrides
 
 
 
@@ -1077,11 +1125,12 @@ class Optimizer:
         # ── 3. Open-Meteo forecast arrays from database ──────────────────
         if repository is not None:
             try:
-                rows = repository.get_latest_forecast_batch()
+                rows, forecast_overrides = build_repository_forecast_overrides(
+                    base_input,
+                    repository,
+                    existing=overrides,
+                )
                 if rows:
-                    forecast_overrides = inject_forecast_overrides(
-                        rows, base_input.horizon_hours, existing=overrides
-                    )
                     overrides.update(forecast_overrides)
                     log.debug(
                         "Injected Open-Meteo forecast (%d steps) into MPC run.", len(rows[:base_input.horizon_hours])

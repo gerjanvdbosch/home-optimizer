@@ -9,6 +9,7 @@ Python-implementatie van een gecombineerd thermisch model voor **vloerverwarming
 - Carnot COP-model met stooklijn voor tijdsvariabele efficiëntie;
 - **FastAPI webinterface** met operationeel dashboard (Open-Meteo forecast) en MPC-simulator;
 - **telemetrylaag** (SQLite + SQLAlchemy + APScheduler) voor sensor- en forecastopslag.
+- **ML-forecastlaag** (scikit-learn) voor gedragsafhankelijke horizon-signalen zoals `shutter_forecast`, uitbreidbaar naar een latere baseload-voorspelling.
 
 ---
 
@@ -114,6 +115,7 @@ Open na het starten van de runner:
 - UFH + DHW + PV self-consumption
 - Carnot COP-model met stooklijn
 - Zoninstraling op de zuidramen kan optioneel met een **`shutter_forecast` over de hele horizon** worden gemoduleerd; zonder die array blijft de actuele `shutter_living_room_pct` de fallback voor alle MPC-stappen
+- Als geen expliciete `shutter_forecast` wordt meegegeven, kan de runtime automatisch een eenvoudige **scikit-learn shutter-voorspelling** afleiden uit historische telemetry + de laatste weerforecast; bij te weinig historie blijft de scalar fallback actief
 - Laadt bij openen eerst `GET /api/defaults`, dus de formuliervelden tonen automatisch de laatste calibrated defaults als die beschikbaar zijn
 - Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
 
@@ -134,6 +136,8 @@ De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederland
 | `POST` | `/api/simulate` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
 
 `RunRequest` ondersteunt naast de scalar `shutter_living_room_pct` ook een optionele `shutter_forecast: list[float]` met lengte `N`; deze array overschrijft de scalar fallback stap-voor-stap voor de UFH-zoninstraling.
+
+De forecastservice is provider-gebaseerd opgezet: vandaag vult hij `shutter_forecast`, later kan dezelfde laag ook een `baseload`- of `internal_gains`-voorspelling toevoegen zonder de optimizer-API te breken.
 
 ---
 
