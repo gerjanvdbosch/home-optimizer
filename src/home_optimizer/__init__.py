@@ -14,6 +14,15 @@ Physical model assumptions
 """
 
 from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
+from .calibration import (
+    UFHCalibrationDataset,
+    UFHCalibrationSample,
+    UFHOffCalibrationResult,
+    UFHOffCalibrationSettings,
+    build_ufh_off_calibration_dataset,
+    calibrate_ufh_off_envelope,
+    calibrate_ufh_off_from_repository,
+)
 from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from .kalman import (
     DHWKalmanFilter,
@@ -68,9 +77,16 @@ __all__ = [
     "TelemetryRepository",
     "ThermalModel",
     "ThermalParameters",
+    "UFHCalibrationDataset",
+    "UFHCalibrationSample",
+    "UFHOffCalibrationResult",
+    "UFHOffCalibrationSettings",
     "BufferedTelemetryCollector",
     "UFHKalmanFilter",
     "W_PER_KW",
     "aggregate_readings",
+    "build_ufh_off_calibration_dataset",
+    "calibrate_ufh_off_envelope",
+    "calibrate_ufh_off_from_repository",
     "solar_gain_kw",
 ]

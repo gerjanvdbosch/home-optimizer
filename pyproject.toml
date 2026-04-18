@@ -13,6 +13,7 @@ authors = [
 ]
 dependencies = [
   "numpy>=1.26,<3.0",
+  "scipy>=1.11,<2.0",
   "cvxpy>=1.5,<2.0",
   "fastapi>=0.110",
   "uvicorn>=0.29",
@@ -35,6 +36,7 @@ dev = [
 home-optimizer-demo = "home_optimizer.__main__:main"
 home-optimizer-addon = "home_optimizer.addon:main"
 home-optimizer-local = "home_optimizer.local_runner:main"
+home-optimizer-calibration = "home_optimizer.calibration.__main__:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
