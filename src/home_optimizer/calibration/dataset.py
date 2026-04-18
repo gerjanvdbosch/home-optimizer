@@ -157,40 +157,55 @@ def build_ufh_active_calibration_dataset(
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
     forecast_lookup = _ForecastLookup(forecast_rows)
     samples: list[UFHActiveCalibrationSample] = []
+    current_segment_samples: list[UFHActiveCalibrationSample] = []
+    segment_index = 0
     dt_reference_hours = settings.reference_parameters.dt_hours
 
+    def flush_current_segment() -> None:
+        nonlocal current_segment_samples
+        nonlocal segment_index
+        if len(current_segment_samples) >= settings.min_segment_samples:
+            samples.extend(current_segment_samples)
+            segment_index += 1
+        current_segment_samples = []
+
     for previous_row, next_row in zip(rows, rows[1:]):
+        pair_is_valid = True
         if previous_row.hp_mode_last != settings.active_mode_name:
-            continue
+            pair_is_valid = False
         if next_row.hp_mode_last != settings.active_mode_name:
-            continue
+            pair_is_valid = False
         if previous_row.defrost_active_fraction > settings.max_defrost_active_fraction:
-            continue
+            pair_is_valid = False
         if next_row.defrost_active_fraction > settings.max_defrost_active_fraction:
-            continue
+            pair_is_valid = False
         if previous_row.booster_heater_active_fraction > settings.max_booster_active_fraction:
-            continue
+            pair_is_valid = False
         if next_row.booster_heater_active_fraction > settings.max_booster_active_fraction:
-            continue
+            pair_is_valid = False
 
         dt_hours = (next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds() / _SECONDS_PER_HOUR
         if dt_hours <= 0.0 or dt_hours > settings.max_pair_dt_hours:
-            continue
+            pair_is_valid = False
         if abs(dt_hours - dt_reference_hours) > settings.dt_compatibility_tolerance_hours:
-            continue
+            pair_is_valid = False
         if float(next_row.hp_thermal_power_mean_kw) < settings.min_ufh_power_kw:
-            continue
+            pair_is_valid = False
 
         forecast = forecast_lookup.nearest(
             next_row.bucket_end_utc,
             tolerance_hours=settings.forecast_alignment_tolerance_hours,
         )
         if forecast is None:
-            continue
-        if float(forecast.gti_w_per_m2) > settings.max_gti_w_per_m2:
+            pair_is_valid = False
+        elif float(forecast.gti_w_per_m2) > settings.max_gti_w_per_m2:
+            pair_is_valid = False
+
+        if not pair_is_valid:
+            flush_current_segment()
             continue
 
-        samples.append(
+        current_segment_samples.append(
             UFHActiveCalibrationSample(
                 interval_start_utc=previous_row.bucket_end_utc,
                 interval_end_utc=next_row.bucket_end_utc,
@@ -201,8 +216,11 @@ def build_ufh_active_calibration_dataset(
                 gti_w_per_m2=float(forecast.gti_w_per_m2),
                 internal_gain_proxy_kw=float(next_row.household_elec_power_mean_kw),
                 ufh_power_mean_kw=float(next_row.hp_thermal_power_mean_kw),
+                segment_index=segment_index,
             )
         )
+
+    flush_current_segment()
 
     if len(samples) < settings.min_sample_count:
         raise ValueError(

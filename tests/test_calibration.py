@@ -192,15 +192,128 @@ def test_build_ufh_active_calibration_dataset_filters_to_excited_ufh_windows() -
         settings=UFHActiveCalibrationSettings(
             reference_parameters=reference_parameters,
             min_sample_count=2,
+            min_segment_samples=2,
             min_ufh_power_kw=0.1,
         ),
     )
 
     assert dataset.sample_count == 2
+    assert dataset.segment_count == 1
     sample = dataset.samples[0]
     assert sample.room_temperature_start_c == 20.0
     assert sample.room_temperature_end_c == 20.1
     assert sample.ufh_power_mean_kw == 0.5
+    assert sample.segment_index == 0
+
+
+def test_build_ufh_active_calibration_dataset_splits_contiguous_runs() -> None:
+    """A gap in valid UFH replay pairs must start a new calibration segment."""
+    reference_parameters = ThermalParameters(
+        dt_hours=5.0 / 60.0,
+        C_r=3.0,
+        C_b=18.0,
+        R_br=2.5,
+        R_ro=4.0,
+        alpha=0.35,
+        eta=0.62,
+        A_glass=12.0,
+    )
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.0,
+            outdoor_temperature_mean_c=9.5,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.4,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.1,
+            outdoor_temperature_mean_c=9.6,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.45,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.18,
+            outdoor_temperature_mean_c=9.7,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.5,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.1,
+            outdoor_temperature_mean_c=9.7,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.2,
+            outdoor_temperature_mean_c=9.8,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.55,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=25),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.3,
+            outdoor_temperature_mean_c=9.9,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.6,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=30),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            room_temperature_last_c=20.45,
+            outdoor_temperature_mean_c=10.0,
+            household_elec_power_mean_kw=0.25,
+            hp_thermal_power_mean_kw=0.65,
+        ),
+    ]
+    forecasts = [
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=5), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=10), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=15), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=20), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=25), gti_w_per_m2=0.0),
+        SimpleNamespace(valid_at_utc=start + timedelta(minutes=30), gti_w_per_m2=0.0),
+    ]
+
+    dataset = build_ufh_active_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        forecast_rows=cast(list, forecasts),
+        settings=UFHActiveCalibrationSettings(
+            reference_parameters=reference_parameters,
+            min_sample_count=4,
+            min_segment_samples=2,
+            min_ufh_power_kw=0.1,
+        ),
+    )
+
+    assert dataset.sample_count == 4
+    assert dataset.segment_count == 2
+    assert [sample.segment_index for sample in dataset.samples] == [0, 0, 1, 1]
 
 
 def test_calibrate_ufh_active_rc_recovers_synthetic_parameters() -> None:
@@ -262,6 +375,7 @@ def test_calibrate_ufh_active_rc_recovers_synthetic_parameters() -> None:
                 gti_w_per_m2=gti_w_per_m2,
                 internal_gain_proxy_kw=internal_gain_kw,
                 ufh_power_mean_kw=control_kw,
+                segment_index=0,
             )
         )
         state = next_state
@@ -285,6 +399,91 @@ def test_calibrate_ufh_active_rc_recovers_synthetic_parameters() -> None:
     np.testing.assert_allclose(result.fitted_parameters.R_br, true_parameters.R_br, rtol=6e-2)
     np.testing.assert_allclose(result.fitted_parameters.R_ro, true_parameters.R_ro, rtol=6e-2)
     np.testing.assert_allclose(result.fitted_parameters.C_r, true_parameters.C_r, rtol=1e-12)
+    assert result.segment_count == 1
+    assert result.rmse_room_temperature_c < 1e-5
+
+
+def test_calibrate_ufh_active_rc_fits_initial_floor_offset_across_segments() -> None:
+    """The optional nuisance floor-offset parameter must be recovered across replay resets."""
+    true_parameters = ThermalParameters(
+        dt_hours=5.0 / 60.0,
+        C_r=3.2,
+        C_b=19.0,
+        R_br=2.1,
+        R_ro=5.8,
+        alpha=0.3,
+        eta=0.58,
+        A_glass=10.5,
+    )
+    true_floor_offset_c = 3.6
+    model = ThermalModel(true_parameters)
+    start = datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc)
+    segment_lengths = (72, 60)
+    samples: list[UFHActiveCalibrationSample] = []
+
+    elapsed_hours = 0.0
+    for segment_index, segment_length in enumerate(segment_lengths):
+        room_temperature_c = 20.0 + 0.2 * segment_index
+        state = np.array([room_temperature_c, room_temperature_c + true_floor_offset_c], dtype=float)
+        for local_step in range(segment_length):
+            interval_start = start + timedelta(hours=elapsed_hours)
+            interval_end = interval_start + timedelta(hours=true_parameters.dt_hours)
+            global_step = sum(segment_lengths[:segment_index]) + local_step
+            control_kw = 1.1 + 0.45 * np.sin(global_step / 5.0)
+            outdoor_temperature_c = 3.0 + 2.5 * np.cos(global_step / 13.0)
+            gti_w_per_m2 = 0.0
+            internal_gain_kw = 0.22 + 0.05 * np.cos(global_step / 7.0)
+            next_state = model.step(
+                state=state,
+                control_kw=control_kw,
+                outdoor_temperature_c=outdoor_temperature_c,
+                solar_gain_kw_value=0.0,
+                internal_gain_kw=internal_gain_kw,
+            )
+            samples.append(
+                UFHActiveCalibrationSample(
+                    interval_start_utc=interval_start,
+                    interval_end_utc=interval_end,
+                    dt_hours=true_parameters.dt_hours,
+                    room_temperature_start_c=float(state[0]),
+                    room_temperature_end_c=float(next_state[0]),
+                    outdoor_temperature_mean_c=outdoor_temperature_c,
+                    gti_w_per_m2=gti_w_per_m2,
+                    internal_gain_proxy_kw=internal_gain_kw,
+                    ufh_power_mean_kw=control_kw,
+                    segment_index=segment_index,
+                )
+            )
+            state = next_state
+            elapsed_hours += true_parameters.dt_hours
+        elapsed_hours += true_parameters.dt_hours
+
+    dataset = UFHActiveCalibrationDataset(samples=tuple(samples))
+    settings = UFHActiveCalibrationSettings(
+        reference_parameters=true_parameters,
+        min_sample_count=32,
+        min_segment_samples=16,
+        fit_initial_floor_temperature_offset=True,
+        initial_floor_temperature_offset_c=1.0,
+        min_initial_floor_temperature_offset_c=-1.0,
+        max_initial_floor_temperature_offset_c=6.0,
+        min_parameter_ratio=0.999,
+        max_parameter_ratio=1.001,
+        initial_room_covariance_k2=1e-4,
+        initial_floor_covariance_k2=1e-2,
+        process_noise_room_k2=1e-8,
+        process_noise_floor_k2=1e-8,
+        measurement_variance_k2=1e-8,
+    )
+
+    result = calibrate_ufh_active_rc(dataset, settings)
+
+    np.testing.assert_allclose(
+        result.fitted_initial_floor_temperature_offset_c,
+        true_floor_offset_c,
+        rtol=5e-2,
+    )
+    assert result.segment_count == 2
     assert result.rmse_room_temperature_c < 1e-5
 
 

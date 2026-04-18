@@ -42,6 +42,11 @@ DEFAULT_MIN_PARAMETER_RATIO: float = 0.25
 DEFAULT_MAX_PARAMETER_RATIO: float = 4.0
 DEFAULT_REGULARIZATION_WEIGHT: float = 0.0
 DEFAULT_REGULARIZATION_SCALE_RATIO: float = 0.25
+DEFAULT_MIN_SEGMENT_SAMPLES: int = 4
+DEFAULT_MIN_INITIAL_FLOOR_OFFSET_C: float = -15.0
+DEFAULT_MAX_INITIAL_FLOOR_OFFSET_C: float = 15.0
+DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT: float = 0.0
+DEFAULT_INITIAL_FLOOR_OFFSET_SCALE_C: float = 2.0
 
 from ..types import ThermalParameters
 
@@ -199,6 +204,7 @@ class UFHActiveCalibrationSample:
         gti_w_per_m2: Forecast GTI aligned to the interval end [W/m²].
         internal_gain_proxy_kw: Mean household electric power proxy for Q_int [kW].
         ufh_power_mean_kw: Mean UFH thermal power over the interval [kW].
+        segment_index: Index of the contiguous UFH replay run this sample belongs to [-].
     """
 
     interval_start_utc: datetime
@@ -210,6 +216,7 @@ class UFHActiveCalibrationSample:
     gti_w_per_m2: float
     internal_gain_proxy_kw: float
     ufh_power_mean_kw: float
+    segment_index: int
 
     def __post_init__(self) -> None:
         if self.dt_hours <= 0.0:
@@ -218,6 +225,8 @@ class UFHActiveCalibrationSample:
             raise ValueError("ufh_power_mean_kw must be non-negative.")
         if self.gti_w_per_m2 < 0.0:
             raise ValueError("gti_w_per_m2 must be non-negative.")
+        if self.segment_index < 0:
+            raise ValueError("segment_index must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +238,14 @@ class UFHActiveCalibrationDataset:
     def __post_init__(self) -> None:
         if not self.samples:
             raise ValueError("UFHActiveCalibrationDataset requires at least one sample.")
+        segment_indices = [sample.segment_index for sample in self.samples]
+        if segment_indices[0] != 0:
+            raise ValueError("UFHActiveCalibrationDataset segment_index must start at 0.")
+        for previous_index, next_index in zip(segment_indices, segment_indices[1:]):
+            if next_index < previous_index:
+                raise ValueError("segment_index must be non-decreasing across the dataset.")
+            if next_index - previous_index > 1:
+                raise ValueError("segment_index increments may not skip values.")
 
     @property
     def sample_count(self) -> int:
@@ -244,6 +261,11 @@ class UFHActiveCalibrationDataset:
     def end_utc(self) -> datetime:
         """Latest timestamp in the active replay dataset [UTC]."""
         return self.samples[-1].interval_end_utc
+
+    @property
+    def segment_count(self) -> int:
+        """Number of contiguous UFH replay runs represented in the dataset [-]."""
+        return self.samples[-1].segment_index + 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,10 +290,17 @@ class UFHActiveCalibrationSettings:
         forecast_alignment_tolerance_hours: Max UTC mismatch between forecast and
             telemetry timestamps for GTI lookup [h].
         min_sample_count: Minimum replay samples required before fitting [-].
+        min_segment_samples: Minimum replay samples per contiguous UFH run [-].
         min_ufh_power_kw: Minimum mean UFH power to keep a bucket in the active set [kW].
         fit_c_r: Whether to fit ``C_r`` in addition to ``C_b``, ``R_br`` and ``R_ro`` [-].
+        fit_initial_floor_temperature_offset: Whether to fit a global nuisance
+            offset applied to every segment start for the hidden floor state [-].
         initial_floor_temperature_offset_c: Initial floor-state guess relative to the
-            first measured room temperature [°C].
+            first measured room temperature of each replay segment [°C].
+        min_initial_floor_temperature_offset_c: Lower bound on the fitted or fixed
+            initial floor offset [°C].
+        max_initial_floor_temperature_offset_c: Upper bound on the fitted or fixed
+            initial floor offset [°C].
         initial_room_covariance_k2: Initial Kalman variance for ``T_r`` [K²].
         initial_floor_covariance_k2: Initial Kalman variance for ``T_b`` [K²].
         process_noise_room_k2: Kalman process noise variance for ``T_r`` [K²].
@@ -285,6 +314,10 @@ class UFHActiveCalibrationSettings:
             reference parameter set [-].
         regularization_scale_ratio: Relative scale used to normalise the optional
             regularisation residuals [-].
+        initial_floor_offset_regularization_weight: Optional Tikhonov weight on the
+            nuisance floor-offset parameter [-].
+        initial_floor_offset_scale_c: Scale used to normalise floor-offset
+            regularisation residuals [°C].
     """
 
     reference_parameters: ThermalParameters
@@ -296,9 +329,13 @@ class UFHActiveCalibrationSettings:
     max_booster_active_fraction: float = DEFAULT_MAX_BOOSTER_ACTIVE_FRACTION
     forecast_alignment_tolerance_hours: float = DEFAULT_FORECAST_ALIGNMENT_TOLERANCE_HOURS
     min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
+    min_segment_samples: int = DEFAULT_MIN_SEGMENT_SAMPLES
     min_ufh_power_kw: float = DEFAULT_MIN_UFH_POWER_KW
     fit_c_r: bool = False
+    fit_initial_floor_temperature_offset: bool = False
     initial_floor_temperature_offset_c: float = DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C
+    min_initial_floor_temperature_offset_c: float = DEFAULT_MIN_INITIAL_FLOOR_OFFSET_C
+    max_initial_floor_temperature_offset_c: float = DEFAULT_MAX_INITIAL_FLOOR_OFFSET_C
     initial_room_covariance_k2: float = DEFAULT_INITIAL_ROOM_COVARIANCE_K2
     initial_floor_covariance_k2: float = DEFAULT_INITIAL_FLOOR_COVARIANCE_K2
     process_noise_room_k2: float = DEFAULT_PROCESS_NOISE_ROOM_K2
@@ -308,6 +345,8 @@ class UFHActiveCalibrationSettings:
     max_parameter_ratio: float = DEFAULT_MAX_PARAMETER_RATIO
     regularization_weight: float = DEFAULT_REGULARIZATION_WEIGHT
     regularization_scale_ratio: float = DEFAULT_REGULARIZATION_SCALE_RATIO
+    initial_floor_offset_regularization_weight: float = DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT
+    initial_floor_offset_scale_c: float = DEFAULT_INITIAL_FLOOR_OFFSET_SCALE_C
 
     def __post_init__(self) -> None:
         if not self.active_mode_name.strip():
@@ -317,6 +356,7 @@ class UFHActiveCalibrationSettings:
             "dt_compatibility_tolerance_hours",
             "forecast_alignment_tolerance_hours",
             "min_ufh_power_kw",
+            "max_initial_floor_temperature_offset_c",
             "initial_room_covariance_k2",
             "initial_floor_covariance_k2",
             "process_noise_room_k2",
@@ -325,6 +365,7 @@ class UFHActiveCalibrationSettings:
             "min_parameter_ratio",
             "max_parameter_ratio",
             "regularization_scale_ratio",
+            "initial_floor_offset_scale_c",
         ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be strictly positive.")
@@ -336,10 +377,28 @@ class UFHActiveCalibrationSettings:
             raise ValueError("max_booster_active_fraction must be in [0, 1].")
         if self.min_sample_count < 2:
             raise ValueError("min_sample_count must be at least 2.")
+        if self.min_segment_samples < 2:
+            raise ValueError("min_segment_samples must be at least 2.")
+        if self.min_segment_samples > self.min_sample_count:
+            raise ValueError("min_segment_samples must be <= min_sample_count.")
         if self.min_parameter_ratio >= self.max_parameter_ratio:
             raise ValueError("min_parameter_ratio must be < max_parameter_ratio.")
         if self.regularization_weight < 0.0:
             raise ValueError("regularization_weight must be non-negative.")
+        if self.initial_floor_temperature_offset_c < self.min_initial_floor_temperature_offset_c:
+            raise ValueError(
+                "initial_floor_temperature_offset_c must be >= min_initial_floor_temperature_offset_c."
+            )
+        if self.initial_floor_temperature_offset_c > self.max_initial_floor_temperature_offset_c:
+            raise ValueError(
+                "initial_floor_temperature_offset_c must be <= max_initial_floor_temperature_offset_c."
+            )
+        if self.min_initial_floor_temperature_offset_c >= self.max_initial_floor_temperature_offset_c:
+            raise ValueError(
+                "min_initial_floor_temperature_offset_c must be < max_initial_floor_temperature_offset_c."
+            )
+        if self.initial_floor_offset_regularization_weight < 0.0:
+            raise ValueError("initial_floor_offset_regularization_weight must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,15 +407,20 @@ class UFHActiveCalibrationResult:
 
     fitted_parameters: ThermalParameters
     fit_c_r: bool
+    fit_initial_floor_temperature_offset: bool
+    fitted_initial_floor_temperature_offset_c: float
     rmse_room_temperature_c: float
     max_abs_innovation_c: float
     sample_count: int
+    segment_count: int
     dataset_start_utc: datetime
     dataset_end_utc: datetime
     optimizer_status: str
     optimizer_cost: float
 
     def __post_init__(self) -> None:
+        if self.segment_count <= 0:
+            raise ValueError("segment_count must be strictly positive.")
         if self.rmse_room_temperature_c < 0.0:
             raise ValueError("rmse_room_temperature_c must be non-negative.")
         if self.max_abs_innovation_c < 0.0:

@@ -8,7 +8,9 @@ from dataclasses import asdict
 
 from .models import (
     DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
+    DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
     DEFAULT_MIN_UFH_POWER_KW,
+    DEFAULT_MIN_SEGMENT_SAMPLES,
     UFHActiveCalibrationSettings,
     UFHOffCalibrationSettings,
 )
@@ -54,10 +56,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also fit C_r during the active UFH stage instead of keeping it fixed.",
     )
     parser.add_argument(
+        "--fit-initial-floor-offset",
+        action="store_true",
+        help="Fit a global initial floor-temperature offset that is applied at every UFH segment start.",
+    )
+    parser.add_argument(
+        "--initial-floor-offset-c",
+        type=float,
+        default=DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
+        help="Initial/fixed floor-temperature offset relative to room temperature at segment starts [°C].",
+    )
+    parser.add_argument(
         "--min-ufh-power-kw",
         type=float,
         default=DEFAULT_MIN_UFH_POWER_KW,
         help="Minimum mean UFH thermal power for an active sample [kW].",
+    )
+    parser.add_argument(
+        "--min-segment-samples",
+        type=int,
+        default=DEFAULT_MIN_SEGMENT_SAMPLES,
+        help="Minimum number of replay samples per contiguous UFH run [-].",
     )
     parser.add_argument(
         "--max-gti-w-per-m2",
@@ -153,8 +172,11 @@ def main() -> None:
             reference_parameters=_build_reference_parameters(args),
             max_gti_w_per_m2=max_gti_w_per_m2,
             min_sample_count=args.min_samples,
+            min_segment_samples=args.min_segment_samples,
             min_ufh_power_kw=args.min_ufh_power_kw,
             fit_c_r=bool(args.fit_c_r),
+            fit_initial_floor_temperature_offset=bool(args.fit_initial_floor_offset),
+            initial_floor_temperature_offset_c=args.initial_floor_offset_c,
         )
         dataset = build_ufh_active_dataset_from_repository(repository, settings)
         result = calibrate_ufh_active_from_repository(repository, settings)
@@ -192,12 +214,15 @@ def main() -> None:
     print("UFH active RC calibration")
     print("=========================")
     print(f"Samples          : {dataset.sample_count}")
+    print(f"Segments         : {dataset.segment_count}")
     print(f"Window           : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
     print(f"fit C_r          : {result.fit_c_r}")
+    print(f"fit T_b offset   : {result.fit_initial_floor_temperature_offset}")
     print(f"C_r              : {result.fitted_parameters.C_r:.6f} kWh/K")
     print(f"C_b              : {result.fitted_parameters.C_b:.6f} kWh/K")
     print(f"R_br             : {result.fitted_parameters.R_br:.6f} K/kW")
     print(f"R_ro             : {result.fitted_parameters.R_ro:.6f} K/kW")
+    print(f"T_b offset       : {result.fitted_initial_floor_temperature_offset_c:.6f} °C")
     print(f"RMSE(T_room)     : {result.rmse_room_temperature_c:.5f} °C")
     print(f"Max |innovation| : {result.max_abs_innovation_c:.5f} °C")
     print(f"Optimizer status : {result.optimizer_status}")
