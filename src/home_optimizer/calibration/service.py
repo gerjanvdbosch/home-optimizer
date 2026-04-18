@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
+from typing import cast
 
 from sqlalchemy import text
 
-from .dataset import build_ufh_off_calibration_dataset
-from .models import UFHCalibrationDataset, UFHOffCalibrationResult, UFHOffCalibrationSettings
+from .dataset import build_ufh_active_calibration_dataset, build_ufh_off_calibration_dataset
+from .models import (
+    UFHActiveCalibrationDataset,
+    UFHActiveCalibrationResult,
+    UFHActiveCalibrationSettings,
+    UFHCalibrationDataset,
+    UFHOffCalibrationResult,
+    UFHOffCalibrationSettings,
+)
+from .ufh_active import calibrate_ufh_active_rc
 from .ufh_offline import calibrate_ufh_off_envelope
+from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
 from ..telemetry.repository import TelemetryRepository
 
 
@@ -23,7 +33,7 @@ def _parse_utc(value: object) -> datetime:
 
 
 def _load_calibration_aggregates(repository: TelemetryRepository) -> list[SimpleNamespace]:
-    """Load only the telemetry columns required by the first-stage UFH calibrator."""
+    """Load the telemetry columns required by the offline UFH calibrators."""
     statement = text(
         """
         SELECT
@@ -33,7 +43,8 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
             booster_heater_active_fraction,
             room_temperature_last_c,
             outdoor_temperature_mean_c,
-            household_elec_power_mean_kw
+            household_elec_power_mean_kw,
+            hp_thermal_power_mean_kw
         FROM telemetry_aggregates
         ORDER BY bucket_end_utc ASC
         """
@@ -49,6 +60,7 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
             room_temperature_last_c=float(row["room_temperature_last_c"]),
             outdoor_temperature_mean_c=float(row["outdoor_temperature_mean_c"]),
             household_elec_power_mean_kw=float(row["household_elec_power_mean_kw"]),
+            hp_thermal_power_mean_kw=float(row["hp_thermal_power_mean_kw"]),
         )
         for row in rows
     ]
@@ -80,8 +92,20 @@ def build_ufh_off_dataset_from_repository(
 ) -> UFHCalibrationDataset:
     """Load telemetry history from the repository and build a UFH off-mode dataset."""
     return build_ufh_off_calibration_dataset(
-        aggregates=_load_calibration_aggregates(repository),
-        forecast_rows=_load_calibration_forecasts(repository),
+        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        forecast_rows=cast(list[ForecastSnapshot], _load_calibration_forecasts(repository)),
+        settings=settings,
+    )
+
+
+def build_ufh_active_dataset_from_repository(
+    repository: TelemetryRepository,
+    settings: UFHActiveCalibrationSettings,
+) -> UFHActiveCalibrationDataset:
+    """Load telemetry history from the repository and build an active UFH replay dataset."""
+    return build_ufh_active_calibration_dataset(
+        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
+        forecast_rows=cast(list[ForecastSnapshot], _load_calibration_forecasts(repository)),
         settings=settings,
     )
 
@@ -94,4 +118,14 @@ def calibrate_ufh_off_from_repository(
     effective_settings = settings or UFHOffCalibrationSettings()
     dataset = build_ufh_off_dataset_from_repository(repository, effective_settings)
     return calibrate_ufh_off_envelope(dataset, effective_settings)
+
+
+def calibrate_ufh_active_from_repository(
+    repository: TelemetryRepository,
+    settings: UFHActiveCalibrationSettings,
+) -> UFHActiveCalibrationResult:
+    """Run the active UFH RC calibration from persisted telemetry history."""
+    dataset = build_ufh_active_dataset_from_repository(repository, settings)
+    return calibrate_ufh_active_rc(dataset, settings)
+
 

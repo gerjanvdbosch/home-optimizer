@@ -6,9 +6,20 @@ import argparse
 import json
 from dataclasses import asdict
 
-from .models import UFHOffCalibrationSettings
-from .service import build_ufh_off_dataset_from_repository, calibrate_ufh_off_from_repository
+from .models import (
+    DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
+    DEFAULT_MIN_UFH_POWER_KW,
+    UFHActiveCalibrationSettings,
+    UFHOffCalibrationSettings,
+)
+from .service import (
+    build_ufh_active_dataset_from_repository,
+    build_ufh_off_dataset_from_repository,
+    calibrate_ufh_active_from_repository,
+    calibrate_ufh_off_from_repository,
+)
 from ..telemetry.repository import TelemetryRepository
+from ..types import ThermalParameters
 
 DEFAULT_DATABASE_URL: str = "sqlite:///database.sqlite3"
 
@@ -19,15 +30,43 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Fit first-stage thermal parameters from persisted telemetry history.",
     )
     parser.add_argument(
+        "--stage",
+        choices=("off", "active-ufh"),
+        default="off",
+        help="Calibration stage to run: passive off-mode envelope fit or active UFH RC fit.",
+    )
+    parser.add_argument(
         "--database-url",
         default=DEFAULT_DATABASE_URL,
         help="SQLAlchemy database URL containing telemetry history.",
     )
+    parser.add_argument("--dt-hours", type=float, default=None, help="Reference UFH model time step Δt [h].")
+    parser.add_argument("--c-r", type=float, default=None, help="Reference room capacity C_r [kWh/K].")
+    parser.add_argument("--c-b", type=float, default=None, help="Reference floor capacity C_b [kWh/K].")
+    parser.add_argument("--r-br", type=float, default=None, help="Reference floor-room resistance R_br [K/kW].")
+    parser.add_argument("--r-ro", type=float, default=None, help="Reference room-outdoor resistance R_ro [K/kW].")
+    parser.add_argument("--alpha", type=float, default=None, help="Reference solar split α [-].")
+    parser.add_argument("--eta", type=float, default=None, help="Reference glazing transmittance η [-].")
+    parser.add_argument("--a-glass", type=float, default=None, help="Reference glazing area A_glass [m²].")
+    parser.add_argument(
+        "--fit-c-r",
+        action="store_true",
+        help="Also fit C_r during the active UFH stage instead of keeping it fixed.",
+    )
+    parser.add_argument(
+        "--min-ufh-power-kw",
+        type=float,
+        default=DEFAULT_MIN_UFH_POWER_KW,
+        help="Minimum mean UFH thermal power for an active sample [kW].",
+    )
     parser.add_argument(
         "--max-gti-w-per-m2",
         type=float,
-        default=UFHOffCalibrationSettings().max_gti_w_per_m2,
-        help="Upper GTI threshold for low-solar off-mode selection [W/m²].",
+        default=None,
+        help=(
+            "Optional GTI threshold [W/m²]. Defaults to the low-solar off-mode cutoff for "
+            "stage=off and to a wide acceptance range for stage=active-ufh."
+        ),
     )
     parser.add_argument(
         "--min-samples",
@@ -52,44 +91,115 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_reference_parameters(args: argparse.Namespace) -> ThermalParameters:
+    """Build the required reference UFH parameter object for active calibration."""
+    required_names = ("dt_hours", "c_r", "c_b", "r_br", "r_ro", "alpha", "eta", "a_glass")
+    missing = [name for name in required_names if getattr(args, name) is None]
+    if missing:
+        joined = ", ".join(f"--{name.replace('_', '-')}" for name in missing)
+        raise ValueError(
+            "Active UFH calibration requires explicit reference thermal parameters: "
+            f"missing {joined}."
+        )
+    return ThermalParameters(
+        dt_hours=float(args.dt_hours),
+        C_r=float(args.c_r),
+        C_b=float(args.c_b),
+        R_br=float(args.r_br),
+        R_ro=float(args.r_ro),
+        alpha=float(args.alpha),
+        eta=float(args.eta),
+        A_glass=float(args.a_glass),
+    )
+
+
 def main() -> None:
-    """Run the first-stage offline UFH envelope calibration from telemetry history."""
+    """Run the requested offline calibration stage from telemetry history."""
     parser = _build_parser()
     args = parser.parse_args()
-
-    settings = UFHOffCalibrationSettings(
-        max_gti_w_per_m2=args.max_gti_w_per_m2,
-        min_sample_count=args.min_samples,
-        reference_c_eff_kwh_per_k=args.reference_c_eff_kwh_per_k,
-    )
     repository = TelemetryRepository(database_url=args.database_url)
-    dataset = build_ufh_off_dataset_from_repository(repository, settings)
-    result = calibrate_ufh_off_from_repository(repository, settings)
-    payload = {
-        "dataset": {
-            "sample_count": dataset.sample_count,
-            "start_utc": dataset.start_utc.isoformat(),
-            "end_utc": dataset.end_utc.isoformat(),
-        },
-        "fit": {
-            **asdict(result),
-            "dataset_start_utc": result.dataset_start_utc.isoformat(),
-            "dataset_end_utc": result.dataset_end_utc.isoformat(),
-        },
-    }
+
+    if args.stage == "off":
+        max_gti_w_per_m2 = (
+            UFHOffCalibrationSettings().max_gti_w_per_m2
+            if args.max_gti_w_per_m2 is None
+            else args.max_gti_w_per_m2
+        )
+        settings = UFHOffCalibrationSettings(
+            max_gti_w_per_m2=max_gti_w_per_m2,
+            min_sample_count=args.min_samples,
+            reference_c_eff_kwh_per_k=args.reference_c_eff_kwh_per_k,
+        )
+        dataset = build_ufh_off_dataset_from_repository(repository, settings)
+        result = calibrate_ufh_off_from_repository(repository, settings)
+        payload = {
+            "stage": args.stage,
+            "dataset": {
+                "sample_count": dataset.sample_count,
+                "start_utc": dataset.start_utc.isoformat(),
+                "end_utc": dataset.end_utc.isoformat(),
+            },
+            "fit": {
+                **asdict(result),
+                "dataset_start_utc": result.dataset_start_utc.isoformat(),
+                "dataset_end_utc": result.dataset_end_utc.isoformat(),
+            },
+        }
+    else:
+        max_gti_w_per_m2 = (
+            DEFAULT_ACTIVE_MAX_GTI_W_PER_M2 if args.max_gti_w_per_m2 is None else args.max_gti_w_per_m2
+        )
+        settings = UFHActiveCalibrationSettings(
+            reference_parameters=_build_reference_parameters(args),
+            max_gti_w_per_m2=max_gti_w_per_m2,
+            min_sample_count=args.min_samples,
+            min_ufh_power_kw=args.min_ufh_power_kw,
+            fit_c_r=bool(args.fit_c_r),
+        )
+        dataset = build_ufh_active_dataset_from_repository(repository, settings)
+        result = calibrate_ufh_active_from_repository(repository, settings)
+        payload = {
+            "stage": args.stage,
+            "dataset": {
+                "sample_count": dataset.sample_count,
+                "start_utc": dataset.start_utc.isoformat(),
+                "end_utc": dataset.end_utc.isoformat(),
+            },
+            "fit": {
+                **asdict(result),
+                "dataset_start_utc": result.dataset_start_utc.isoformat(),
+                "dataset_end_utc": result.dataset_end_utc.isoformat(),
+            },
+        }
+
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return
 
-    print("UFH off-mode calibration")
-    print("========================")
+    if args.stage == "off":
+        print("UFH off-mode calibration")
+        print("========================")
+        print(f"Samples          : {dataset.sample_count}")
+        print(f"Window           : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
+        print(f"tau_house        : {result.tau_house_hours:.4f} h")
+        if result.suggested_r_ro_k_per_kw is not None:
+            print(f"R_ro (derived)   : {result.suggested_r_ro_k_per_kw:.4f} K/kW")
+        print(f"RMSE(T_room)     : {result.rmse_room_temperature_c:.5f} °C")
+        print(f"Max |residual|   : {result.max_abs_residual_c:.5f} °C")
+        print(f"Optimizer status : {result.optimizer_status}")
+        return
+
+    print("UFH active RC calibration")
+    print("=========================")
     print(f"Samples          : {dataset.sample_count}")
     print(f"Window           : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
-    print(f"tau_house        : {result.tau_house_hours:.4f} h")
-    if result.suggested_r_ro_k_per_kw is not None:
-        print(f"R_ro (derived)   : {result.suggested_r_ro_k_per_kw:.4f} K/kW")
+    print(f"fit C_r          : {result.fit_c_r}")
+    print(f"C_r              : {result.fitted_parameters.C_r:.6f} kWh/K")
+    print(f"C_b              : {result.fitted_parameters.C_b:.6f} kWh/K")
+    print(f"R_br             : {result.fitted_parameters.R_br:.6f} K/kW")
+    print(f"R_ro             : {result.fitted_parameters.R_ro:.6f} K/kW")
     print(f"RMSE(T_room)     : {result.rmse_room_temperature_c:.5f} °C")
-    print(f"Max |residual|   : {result.max_abs_residual_c:.5f} °C")
+    print(f"Max |innovation| : {result.max_abs_innovation_c:.5f} °C")
     print(f"Optimizer status : {result.optimizer_status}")
 
 
