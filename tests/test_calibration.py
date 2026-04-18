@@ -9,12 +9,16 @@ from typing import cast
 import numpy as np
 
 from home_optimizer.calibration import (
+    COPCalibrationDataset,
+    COPCalibrationSample,
+    COPCalibrationSettings,
     DHWActiveCalibrationDataset,
     DHWActiveCalibrationSample,
     DHWActiveCalibrationSettings,
     DHWStandbyCalibrationDataset,
     DHWStandbyCalibrationSample,
     DHWStandbyCalibrationSettings,
+    build_cop_calibration_dataset,
     build_dhw_active_calibration_dataset,
     UFHActiveCalibrationDataset,
     UFHActiveCalibrationSample,
@@ -25,11 +29,13 @@ from home_optimizer.calibration import (
     build_dhw_standby_calibration_dataset,
     build_ufh_active_calibration_dataset,
     calibrate_ufh_active_rc,
+    calibrate_cop_model,
     calibrate_dhw_active_stratification,
     calibrate_dhw_standby_loss,
     build_ufh_off_calibration_dataset,
     calibrate_ufh_off_envelope,
 )
+from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
 from home_optimizer.thermal_model import ThermalModel, solar_gain_kw
 from home_optimizer.types import DHWParameters
@@ -135,6 +141,179 @@ def test_calibrate_ufh_off_envelope_recovers_synthetic_parameters() -> None:
     np.testing.assert_allclose(result.tau_house_hours, tau_true_hours, rtol=1e-2)
     np.testing.assert_allclose(result.suggested_r_ro_k_per_kw, tau_true_hours / 14.0, rtol=1e-2)
     assert result.rmse_room_temperature_c < 1e-6
+
+
+def test_build_cop_calibration_dataset_filters_to_valid_operating_buckets() -> None:
+    """Only physically meaningful UFH/DHW operating buckets may enter the COP dataset."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_start_utc=start,
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=8.0,
+            hp_supply_target_temperature_mean_c=35.0,
+            hp_supply_temperature_mean_c=34.0,
+            hp_thermal_power_mean_kw=3.6,
+            hp_electric_energy_delta_kwh=0.25,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=5),
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=8.0,
+            hp_supply_target_temperature_mean_c=55.0,
+            hp_supply_temperature_mean_c=54.0,
+            hp_thermal_power_mean_kw=2.4,
+            hp_electric_energy_delta_kwh=0.18,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=10),
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="off",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=8.0,
+            hp_supply_target_temperature_mean_c=25.0,
+            hp_supply_temperature_mean_c=25.0,
+            hp_thermal_power_mean_kw=0.0,
+            hp_electric_energy_delta_kwh=0.0,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=15),
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="ufh",
+            defrost_active_fraction=1.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=8.0,
+            hp_supply_target_temperature_mean_c=36.0,
+            hp_supply_temperature_mean_c=35.0,
+            hp_thermal_power_mean_kw=3.0,
+            hp_electric_energy_delta_kwh=0.25,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=20),
+            bucket_end_utc=start + timedelta(minutes=25),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=8.0,
+            hp_supply_target_temperature_mean_c=36.0,
+            hp_supply_temperature_mean_c=35.0,
+            hp_thermal_power_mean_kw=1.3,
+            hp_electric_energy_delta_kwh=0.06,
+        ),
+    ]
+
+    dataset = build_cop_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=COPCalibrationSettings(
+            min_sample_count=2,
+            min_ufh_curve_sample_count=2,
+            min_thermal_energy_kwh=0.1,
+            min_electric_energy_kwh=0.05,
+        ),
+    )
+
+    assert dataset.sample_count == 3
+    assert dataset.ufh_sample_count == 2
+    assert dataset.dhw_sample_count == 1
+    assert all(sample.actual_cop > 1.0 for sample in dataset.samples)
+
+
+def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:
+    """Offline COP calibration must recover synthetic heating-curve and eta parameters."""
+    true_parameters = HeatPumpCOPParameters(
+        eta_carnot=0.47,
+        delta_T_cond=5.0,
+        delta_T_evap=5.0,
+        T_supply_min=27.0,
+        T_ref_outdoor=18.0,
+        heating_curve_slope=0.9,
+        cop_min=1.5,
+        cop_max=7.0,
+    )
+    model = HeatPumpCOPModel(true_parameters)
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    dt_hours = 5.0 / 60.0
+    samples: list[COPCalibrationSample] = []
+
+    for step_k in range(48):
+        bucket_start = start + timedelta(hours=step_k * dt_hours)
+        bucket_end = bucket_start + timedelta(hours=dt_hours)
+        t_out = 8.0 - 0.25 * step_k
+        t_supply_target = float(model.heating_curve(np.array([t_out], dtype=float))[0])
+        thermal_energy_kwh = 0.26 + 0.03 * np.sin(step_k / 5.0)
+        predicted_cop = float(model.cop_ufh(np.array([t_out], dtype=float))[0])
+        electric_energy_kwh = thermal_energy_kwh / predicted_cop
+        samples.append(
+            COPCalibrationSample(
+                bucket_start_utc=bucket_start,
+                bucket_end_utc=bucket_end,
+                dt_hours=dt_hours,
+                mode_name="ufh",
+                outdoor_temperature_mean_c=t_out,
+                supply_target_temperature_mean_c=t_supply_target,
+                supply_temperature_mean_c=t_supply_target - 0.5,
+                thermal_energy_kwh=thermal_energy_kwh,
+                electric_energy_kwh=electric_energy_kwh,
+            )
+        )
+
+    for step_k in range(32):
+        bucket_start = start + timedelta(hours=(48 + step_k) * dt_hours)
+        bucket_end = bucket_start + timedelta(hours=dt_hours)
+        t_out = 4.0 + 0.15 * step_k
+        t_supply_target = 55.0
+        thermal_energy_kwh = 0.22 + 0.02 * np.cos(step_k / 4.0)
+        predicted_cop = float(model.cop_dhw(np.array([t_out], dtype=float), t_dhw_supply=t_supply_target)[0])
+        electric_energy_kwh = thermal_energy_kwh / predicted_cop
+        samples.append(
+            COPCalibrationSample(
+                bucket_start_utc=bucket_start,
+                bucket_end_utc=bucket_end,
+                dt_hours=dt_hours,
+                mode_name="dhw",
+                outdoor_temperature_mean_c=t_out,
+                supply_target_temperature_mean_c=t_supply_target,
+                supply_temperature_mean_c=t_supply_target - 0.7,
+                thermal_energy_kwh=thermal_energy_kwh,
+                electric_energy_kwh=electric_energy_kwh,
+            )
+        )
+
+    dataset = COPCalibrationDataset(samples=tuple(samples))
+    settings = COPCalibrationSettings(
+        min_sample_count=16,
+        min_ufh_curve_sample_count=12,
+        initial_eta_carnot=0.4,
+        initial_t_supply_min_c=24.0,
+        initial_heating_curve_slope=1.2,
+        t_ref_outdoor_c=true_parameters.T_ref_outdoor,
+        delta_t_cond_k=true_parameters.delta_T_cond,
+        delta_t_evap_k=true_parameters.delta_T_evap,
+        cop_min=true_parameters.cop_min,
+        cop_max=true_parameters.cop_max,
+    )
+
+    result = calibrate_cop_model(dataset, settings)
+
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, rtol=2e-2)
+    np.testing.assert_allclose(result.fitted_parameters.T_supply_min, true_parameters.T_supply_min, rtol=2e-2)
+    np.testing.assert_allclose(
+        result.fitted_parameters.heating_curve_slope,
+        true_parameters.heating_curve_slope,
+        rtol=2e-2,
+    )
+    assert result.ufh_sample_count == 48
+    assert result.dhw_sample_count == 32
+    assert result.rmse_supply_temperature_c < 1e-6
+    assert result.rmse_electric_energy_kwh < 1e-6
+    assert result.rmse_actual_cop < 1e-6
 
 
 def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:

@@ -15,6 +15,9 @@ from typing import Sequence
 import numpy as np
 
 from .models import (
+    COPCalibrationDataset,
+    COPCalibrationSample,
+    COPCalibrationSettings,
     DHWActiveCalibrationDataset,
     DHWActiveCalibrationSegmentQuality,
     DHWActiveCalibrationSample,
@@ -199,6 +202,79 @@ def build_ufh_off_calibration_dataset(
             f"required >= {settings.min_sample_count}, found {len(samples)}."
         )
     return UFHCalibrationDataset(samples=tuple(samples))
+
+
+def build_cop_calibration_dataset(
+    aggregates: Sequence[TelemetryAggregate],
+    settings: COPCalibrationSettings,
+) -> COPCalibrationDataset:
+    """Build a filtered operating-bucket dataset for offline COP calibration.
+
+    The builder keeps only UFH and DHW buckets that are physically meaningful for
+    COP fitting: positive thermal/electrical energy, no defrost/booster overlap,
+    and measured bucket COP within the physically meaningful interval
+    ``(1, cop_max]``.
+    """
+    rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
+    samples: list[COPCalibrationSample] = []
+    accepted_modes = {settings.ufh_mode_name, settings.dhw_mode_name}
+
+    for row in rows:
+        mode_name = str(row.hp_mode_last)
+        if mode_name not in accepted_modes:
+            continue
+        if float(row.defrost_active_fraction) > settings.max_defrost_active_fraction:
+            continue
+        if float(row.booster_heater_active_fraction) > settings.max_booster_active_fraction:
+            continue
+
+        dt_hours = (row.bucket_end_utc - row.bucket_start_utc).total_seconds() / _SECONDS_PER_HOUR
+        if dt_hours <= 0.0:
+            continue
+
+        thermal_energy_kwh = float(row.hp_thermal_power_mean_kw) * dt_hours
+        electric_energy_kwh = float(row.hp_electric_energy_delta_kwh)
+        if thermal_energy_kwh < settings.min_thermal_energy_kwh:
+            continue
+        if electric_energy_kwh < settings.min_electric_energy_kwh:
+            continue
+
+        supply_target_temperature_mean_c = float(row.hp_supply_target_temperature_mean_c)
+        supply_temperature_mean_c = float(row.hp_supply_temperature_mean_c)
+        if not np.isfinite(supply_target_temperature_mean_c):
+            continue
+        if not np.isfinite(supply_temperature_mean_c):
+            continue
+
+        sample = COPCalibrationSample(
+            bucket_start_utc=row.bucket_start_utc,
+            bucket_end_utc=row.bucket_end_utc,
+            dt_hours=dt_hours,
+            mode_name=mode_name,
+            outdoor_temperature_mean_c=float(row.outdoor_temperature_mean_c),
+            supply_target_temperature_mean_c=supply_target_temperature_mean_c,
+            supply_temperature_mean_c=supply_temperature_mean_c,
+            thermal_energy_kwh=thermal_energy_kwh,
+            electric_energy_kwh=electric_energy_kwh,
+        )
+        if sample.actual_cop <= 1.0:
+            continue
+        if sample.actual_cop > settings.cop_max:
+            continue
+        samples.append(sample)
+
+    if len(samples) < settings.min_sample_count:
+        raise ValueError(
+            "Not enough valid operating buckets for COP calibration: "
+            f"required >= {settings.min_sample_count}, found {len(samples)}."
+        )
+    dataset = COPCalibrationDataset(samples=tuple(samples))
+    if dataset.ufh_sample_count < settings.min_ufh_curve_sample_count:
+        raise ValueError(
+            "Not enough UFH buckets for heating-curve calibration: "
+            f"required >= {settings.min_ufh_curve_sample_count}, found {dataset.ufh_sample_count}."
+        )
+    return dataset
 
 
 def build_dhw_standby_calibration_dataset(

@@ -9,13 +9,18 @@ from typing import cast
 from sqlalchemy import text
 
 from .dataset import (
+    build_cop_calibration_dataset,
     build_dhw_active_calibration_dataset,
     build_dhw_standby_calibration_dataset,
     build_ufh_active_calibration_dataset,
     build_ufh_off_calibration_dataset,
 )
+from .cop_offline import calibrate_cop_model
 from .dhw_active import calibrate_dhw_active_stratification
 from .models import (
+    COPCalibrationDataset,
+    COPCalibrationResult,
+    COPCalibrationSettings,
     DHWActiveCalibrationDataset,
     DHWActiveCalibrationResult,
     DHWActiveCalibrationSettings,
@@ -50,14 +55,18 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
     statement = text(
         """
         SELECT
+            bucket_start_utc,
             bucket_end_utc,
             hp_mode_last,
             defrost_active_fraction,
             booster_heater_active_fraction,
             room_temperature_last_c,
             outdoor_temperature_mean_c,
+            hp_supply_temperature_mean_c,
+            hp_supply_target_temperature_mean_c,
             household_elec_power_mean_kw,
             hp_thermal_power_mean_kw,
+            hp_electric_energy_delta_kwh,
             dhw_top_temperature_last_c,
             dhw_bottom_temperature_last_c,
             boiler_ambient_temp_mean_c,
@@ -70,14 +79,18 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
         rows = connection.execute(statement).mappings().all()
     return [
         SimpleNamespace(
+            bucket_start_utc=_parse_utc(row["bucket_start_utc"]),
             bucket_end_utc=_parse_utc(row["bucket_end_utc"]),
             hp_mode_last=str(row["hp_mode_last"]),
             defrost_active_fraction=float(row["defrost_active_fraction"]),
             booster_heater_active_fraction=float(row["booster_heater_active_fraction"]),
             room_temperature_last_c=float(row["room_temperature_last_c"]),
             outdoor_temperature_mean_c=float(row["outdoor_temperature_mean_c"]),
+            hp_supply_temperature_mean_c=float(row["hp_supply_temperature_mean_c"]),
+            hp_supply_target_temperature_mean_c=float(row["hp_supply_target_temperature_mean_c"]),
             household_elec_power_mean_kw=float(row["household_elec_power_mean_kw"]),
             hp_thermal_power_mean_kw=float(row["hp_thermal_power_mean_kw"]),
+            hp_electric_energy_delta_kwh=float(row["hp_electric_energy_delta_kwh"]),
             dhw_top_temperature_last_c=float(row["dhw_top_temperature_last_c"]),
             dhw_bottom_temperature_last_c=float(row["dhw_bottom_temperature_last_c"]),
             boiler_ambient_temp_mean_c=float(row["boiler_ambient_temp_mean_c"]),
@@ -115,6 +128,17 @@ def build_ufh_off_dataset_from_repository(
     return build_ufh_off_calibration_dataset(
         aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
         forecast_rows=cast(list[ForecastSnapshot], _load_calibration_forecasts(repository)),
+        settings=settings,
+    )
+
+
+def build_cop_dataset_from_repository(
+    repository: TelemetryRepository,
+    settings: COPCalibrationSettings,
+) -> COPCalibrationDataset:
+    """Load telemetry history from the repository and build a COP calibration dataset."""
+    return build_cop_calibration_dataset(
+        aggregates=cast(list[TelemetryAggregate], _load_calibration_aggregates(repository)),
         settings=settings,
     )
 
@@ -161,6 +185,15 @@ def calibrate_ufh_off_from_repository(
     effective_settings = settings or UFHOffCalibrationSettings()
     dataset = build_ufh_off_dataset_from_repository(repository, effective_settings)
     return calibrate_ufh_off_envelope(dataset, effective_settings)
+
+
+def calibrate_cop_from_repository(
+    repository: TelemetryRepository,
+    settings: COPCalibrationSettings,
+) -> COPCalibrationResult:
+    """Run the offline COP calibration from persisted telemetry."""
+    dataset = build_cop_dataset_from_repository(repository, settings)
+    return calibrate_cop_model(dataset, settings)
 
 
 def calibrate_dhw_standby_from_repository(

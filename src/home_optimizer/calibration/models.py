@@ -75,7 +75,26 @@ DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_BOTTOM_TEMPERATURE_RISE: float = 1.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TOP_TEMPERATURE_RISE: float = 0.5
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN: float = 0.5
 
+from ..cop_model import HeatPumpCOPParameters
 from ..types import DHWParameters, ThermalParameters
+
+DEFAULT_INITIAL_ETA_CARNOT: float = 0.45
+DEFAULT_MIN_ETA_CARNOT: float = 0.1
+DEFAULT_MAX_ETA_CARNOT: float = 0.99
+DEFAULT_INITIAL_T_SUPPLY_MIN_C: float = 25.0
+DEFAULT_MIN_T_SUPPLY_MIN_C: float = 15.0
+DEFAULT_MAX_T_SUPPLY_MIN_C: float = 45.0
+DEFAULT_INITIAL_HEATING_CURVE_SLOPE: float = 1.0
+DEFAULT_MIN_HEATING_CURVE_SLOPE: float = 0.0
+DEFAULT_MAX_HEATING_CURVE_SLOPE: float = 3.0
+DEFAULT_MIN_THERMAL_ENERGY_KWH: float = 0.05
+DEFAULT_MIN_ELECTRIC_ENERGY_KWH: float = 0.01
+DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT: int = 8
+DEFAULT_T_REF_OUTDOOR_C: float = 18.0
+DEFAULT_DELTA_T_COND_K: float = 5.0
+DEFAULT_DELTA_T_EVAP_K: float = 5.0
+DEFAULT_COP_MIN: float = 1.5
+DEFAULT_COP_MAX: float = 7.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +392,217 @@ class DHWStandbyCalibrationResult:
             raise ValueError("max_abs_residual_c must be non-negative.")
         if self.sample_count <= 0:
             raise ValueError("sample_count must be strictly positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class COPCalibrationSample:
+    """One filtered heat-pump operating bucket for offline COP calibration.
+
+    Attributes:
+        bucket_start_utc: Start timestamp of the telemetry bucket [UTC].
+        bucket_end_utc: End timestamp of the telemetry bucket [UTC].
+        dt_hours: Bucket duration Δt [h].
+        mode_name: Heat-pump mode label (typically ``ufh`` or ``dhw``) [-].
+        outdoor_temperature_mean_c: Mean outdoor temperature over the bucket [°C].
+        supply_target_temperature_mean_c: Mean commanded/target supply temperature [°C].
+        supply_temperature_mean_c: Mean measured hydraulic supply temperature [°C].
+        thermal_energy_kwh: Thermal energy delivered during the bucket [kWh].
+        electric_energy_kwh: Electrical energy consumed during the bucket [kWh].
+    """
+
+    bucket_start_utc: datetime
+    bucket_end_utc: datetime
+    dt_hours: float
+    mode_name: str
+    outdoor_temperature_mean_c: float
+    supply_target_temperature_mean_c: float
+    supply_temperature_mean_c: float
+    thermal_energy_kwh: float
+    electric_energy_kwh: float
+
+    def __post_init__(self) -> None:
+        if self.dt_hours <= 0.0:
+            raise ValueError("dt_hours must be strictly positive.")
+        if not self.mode_name.strip():
+            raise ValueError("mode_name must not be blank.")
+        if self.thermal_energy_kwh <= 0.0:
+            raise ValueError("thermal_energy_kwh must be strictly positive.")
+        if self.electric_energy_kwh <= 0.0:
+            raise ValueError("electric_energy_kwh must be strictly positive.")
+
+    @property
+    def actual_cop(self) -> float:
+        """Measured bucket COP = thermal energy / electrical energy [-]."""
+        return self.thermal_energy_kwh / self.electric_energy_kwh
+
+
+@dataclass(frozen=True, slots=True)
+class COPCalibrationDataset:
+    """Collection of filtered operating buckets used for offline COP calibration."""
+
+    samples: tuple[COPCalibrationSample, ...]
+
+    def __post_init__(self) -> None:
+        if not self.samples:
+            raise ValueError("COPCalibrationDataset requires at least one sample.")
+
+    @property
+    def sample_count(self) -> int:
+        """Number of operating buckets in the COP calibration dataset [-]."""
+        return len(self.samples)
+
+    @property
+    def ufh_sample_count(self) -> int:
+        """Number of UFH-mode buckets in the dataset [-]."""
+        return sum(sample.mode_name == DEFAULT_UFH_MODE_NAME for sample in self.samples)
+
+    @property
+    def dhw_sample_count(self) -> int:
+        """Number of DHW-mode buckets in the dataset [-]."""
+        return sum(sample.mode_name == DEFAULT_DHW_MODE_NAME for sample in self.samples)
+
+    @property
+    def start_utc(self) -> datetime:
+        """Earliest timestamp in the COP calibration dataset [UTC]."""
+        return self.samples[0].bucket_start_utc
+
+    @property
+    def end_utc(self) -> datetime:
+        """Latest timestamp in the COP calibration dataset [UTC]."""
+        return self.samples[-1].bucket_end_utc
+
+
+@dataclass(frozen=True, slots=True)
+class COPCalibrationSettings:
+    """Validated settings for offline Carnot COP calibration.
+
+    The current offline stage learns three parameters from historical buckets:
+
+    * ``T_supply_min`` [°C] — UFH heating-curve intercept
+    * ``heating_curve_slope`` [K/K] — UFH heating-curve slope
+    * ``eta_carnot`` [-] — shared Carnot efficiency factor
+
+    The remaining COP-model parameters stay fixed for identifiability and to
+    preserve the convex MPC pre-calculation assumptions from §14.1:
+
+    * ``T_ref_outdoor``
+    * ``delta_T_cond``
+    * ``delta_T_evap``
+    * ``cop_min``
+    * ``cop_max``
+    """
+
+    ufh_mode_name: str = DEFAULT_UFH_MODE_NAME
+    dhw_mode_name: str = DEFAULT_DHW_MODE_NAME
+    max_defrost_active_fraction: float = DEFAULT_MAX_DEFROST_ACTIVE_FRACTION
+    max_booster_active_fraction: float = DEFAULT_MAX_BOOSTER_ACTIVE_FRACTION
+    min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
+    min_ufh_curve_sample_count: int = DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT
+    min_thermal_energy_kwh: float = DEFAULT_MIN_THERMAL_ENERGY_KWH
+    min_electric_energy_kwh: float = DEFAULT_MIN_ELECTRIC_ENERGY_KWH
+    initial_eta_carnot: float = DEFAULT_INITIAL_ETA_CARNOT
+    min_eta_carnot: float = DEFAULT_MIN_ETA_CARNOT
+    max_eta_carnot: float = DEFAULT_MAX_ETA_CARNOT
+    initial_t_supply_min_c: float = DEFAULT_INITIAL_T_SUPPLY_MIN_C
+    min_t_supply_min_c: float = DEFAULT_MIN_T_SUPPLY_MIN_C
+    max_t_supply_min_c: float = DEFAULT_MAX_T_SUPPLY_MIN_C
+    initial_heating_curve_slope: float = DEFAULT_INITIAL_HEATING_CURVE_SLOPE
+    min_heating_curve_slope: float = DEFAULT_MIN_HEATING_CURVE_SLOPE
+    max_heating_curve_slope: float = DEFAULT_MAX_HEATING_CURVE_SLOPE
+    t_ref_outdoor_c: float = DEFAULT_T_REF_OUTDOOR_C
+    delta_t_cond_k: float = DEFAULT_DELTA_T_COND_K
+    delta_t_evap_k: float = DEFAULT_DELTA_T_EVAP_K
+    cop_min: float = DEFAULT_COP_MIN
+    cop_max: float = DEFAULT_COP_MAX
+
+    def __post_init__(self) -> None:
+        if not self.ufh_mode_name.strip():
+            raise ValueError("ufh_mode_name must not be blank.")
+        if not self.dhw_mode_name.strip():
+            raise ValueError("dhw_mode_name must not be blank.")
+        for name in (
+            "min_thermal_energy_kwh",
+            "min_electric_energy_kwh",
+            "initial_eta_carnot",
+            "min_eta_carnot",
+            "max_eta_carnot",
+            "initial_t_supply_min_c",
+            "min_t_supply_min_c",
+            "max_t_supply_min_c",
+            "initial_heating_curve_slope",
+            "max_heating_curve_slope",
+            "cop_min",
+            "cop_max",
+        ):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be strictly positive.")
+        if self.max_defrost_active_fraction < 0.0 or self.max_defrost_active_fraction > 1.0:
+            raise ValueError("max_defrost_active_fraction must be in [0, 1].")
+        if self.max_booster_active_fraction < 0.0 or self.max_booster_active_fraction > 1.0:
+            raise ValueError("max_booster_active_fraction must be in [0, 1].")
+        if self.min_sample_count < 2:
+            raise ValueError("min_sample_count must be at least 2.")
+        if self.min_ufh_curve_sample_count < 2:
+            raise ValueError("min_ufh_curve_sample_count must be at least 2.")
+        if not (self.min_eta_carnot <= self.initial_eta_carnot <= self.max_eta_carnot):
+            raise ValueError("initial_eta_carnot must lie within its bounds.")
+        if self.min_eta_carnot >= self.max_eta_carnot:
+            raise ValueError("min_eta_carnot must be < max_eta_carnot.")
+        if not (self.min_t_supply_min_c <= self.initial_t_supply_min_c <= self.max_t_supply_min_c):
+            raise ValueError("initial_t_supply_min_c must lie within its bounds.")
+        if self.min_t_supply_min_c >= self.max_t_supply_min_c:
+            raise ValueError("min_t_supply_min_c must be < max_t_supply_min_c.")
+        if self.min_heating_curve_slope < 0.0:
+            raise ValueError("min_heating_curve_slope must be non-negative.")
+        if not (
+            self.min_heating_curve_slope
+            <= self.initial_heating_curve_slope
+            <= self.max_heating_curve_slope
+        ):
+            raise ValueError("initial_heating_curve_slope must lie within its bounds.")
+        if self.min_heating_curve_slope >= self.max_heating_curve_slope:
+            raise ValueError("min_heating_curve_slope must be < max_heating_curve_slope.")
+        if self.delta_t_cond_k < 0.0:
+            raise ValueError("delta_t_cond_k must be non-negative.")
+        if self.delta_t_evap_k < 0.0:
+            raise ValueError("delta_t_evap_k must be non-negative.")
+        if self.cop_min <= 1.0:
+            raise ValueError("cop_min must be > 1.")
+        if self.cop_max <= self.cop_min:
+            raise ValueError("cop_max must be strictly greater than cop_min.")
+
+
+@dataclass(frozen=True, slots=True)
+class COPCalibrationResult:
+    """Result of fitting the offline Carnot COP model parameters."""
+
+    fitted_parameters: HeatPumpCOPParameters
+    rmse_supply_temperature_c: float
+    rmse_electric_energy_kwh: float
+    rmse_actual_cop: float
+    sample_count: int
+    ufh_sample_count: int
+    dhw_sample_count: int
+    dataset_start_utc: datetime
+    dataset_end_utc: datetime
+    heating_curve_optimizer_status: str
+    eta_optimizer_status: str
+    heating_curve_optimizer_cost: float
+    eta_optimizer_cost: float
+
+    def __post_init__(self) -> None:
+        if self.rmse_supply_temperature_c < 0.0:
+            raise ValueError("rmse_supply_temperature_c must be non-negative.")
+        if self.rmse_electric_energy_kwh < 0.0:
+            raise ValueError("rmse_electric_energy_kwh must be non-negative.")
+        if self.rmse_actual_cop < 0.0:
+            raise ValueError("rmse_actual_cop must be non-negative.")
+        if self.sample_count <= 0:
+            raise ValueError("sample_count must be strictly positive.")
+        if self.ufh_sample_count <= 0:
+            raise ValueError("ufh_sample_count must be strictly positive.")
+        if self.dhw_sample_count < 0:
+            raise ValueError("dhw_sample_count must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)

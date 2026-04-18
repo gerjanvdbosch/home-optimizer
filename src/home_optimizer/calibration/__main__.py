@@ -7,9 +7,15 @@ import json
 from dataclasses import asdict
 
 from .models import (
+    COPCalibrationSettings,
     DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
+    DEFAULT_COP_MAX,
+    DEFAULT_COP_MIN,
+    DEFAULT_DELTA_T_COND_K,
+    DEFAULT_DELTA_T_EVAP_K,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
+    DEFAULT_MIN_ELECTRIC_ENERGY_KWH,
     DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_DHW_POWER_KW,
     DEFAULT_MIN_DHW_SEGMENT_SAMPLES,
@@ -19,6 +25,8 @@ from .models import (
     DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C,
     DEFAULT_MIN_DHW_SEGMENT_SCORE,
     DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C,
+    DEFAULT_MIN_THERMAL_ENERGY_KWH,
+    DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT,
     DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_UFH_POWER_KW,
     DEFAULT_MIN_SEGMENT_SAMPLES,
@@ -26,16 +34,19 @@ from .models import (
     DEFAULT_MIN_SEGMENT_ROOM_TEMPERATURE_SPAN_C,
     DEFAULT_MIN_SEGMENT_SCORE,
     DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW,
+    DEFAULT_T_REF_OUTDOOR_C,
     DHWActiveCalibrationSettings,
     DHWStandbyCalibrationSettings,
     UFHActiveCalibrationSettings,
     UFHOffCalibrationSettings,
 )
 from .service import (
+    build_cop_dataset_from_repository,
     build_dhw_active_dataset_from_repository,
     build_dhw_standby_dataset_from_repository,
     build_ufh_active_dataset_from_repository,
     build_ufh_off_dataset_from_repository,
+    calibrate_cop_from_repository,
     calibrate_dhw_active_from_repository,
     calibrate_dhw_standby_from_repository,
     calibrate_ufh_active_from_repository,
@@ -54,9 +65,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stage",
-        choices=("off", "active-ufh", "dhw-standby", "active-dhw"),
+        choices=("off", "active-ufh", "dhw-standby", "active-dhw", "cop"),
         default="off",
-        help="Calibration stage to run: passive UFH off-envelope fit, active UFH RC fit, passive DHW standby-loss fit, or active DHW stratification fit.",
+        help="Calibration stage to run: passive UFH off-envelope fit, active UFH RC fit, passive DHW standby-loss fit, active DHW stratification fit, or offline COP fit.",
     )
     parser.add_argument(
         "--database-url",
@@ -130,6 +141,54 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MIN_DHW_SEGMENT_SAMPLES,
         help="Minimum number of replay samples per contiguous active DHW run [-].",
+    )
+    parser.add_argument(
+        "--cop-min-thermal-energy-kwh",
+        type=float,
+        default=DEFAULT_MIN_THERMAL_ENERGY_KWH,
+        help="Minimum thermal energy required in a bucket before using it for COP calibration [kWh].",
+    )
+    parser.add_argument(
+        "--cop-min-electric-energy-kwh",
+        type=float,
+        default=DEFAULT_MIN_ELECTRIC_ENERGY_KWH,
+        help="Minimum electrical energy required in a bucket before using it for COP calibration [kWh].",
+    )
+    parser.add_argument(
+        "--cop-min-ufh-samples",
+        type=int,
+        default=DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT,
+        help="Minimum UFH buckets required to fit the heating curve in the COP stage [-].",
+    )
+    parser.add_argument(
+        "--cop-t-ref-outdoor-c",
+        type=float,
+        default=DEFAULT_T_REF_OUTDOOR_C,
+        help="Fixed heating-curve reference outdoor temperature used by the COP stage [°C].",
+    )
+    parser.add_argument(
+        "--cop-delta-t-cond-k",
+        type=float,
+        default=DEFAULT_DELTA_T_COND_K,
+        help="Fixed condenser approach temperature used by the COP stage [K].",
+    )
+    parser.add_argument(
+        "--cop-delta-t-evap-k",
+        type=float,
+        default=DEFAULT_DELTA_T_EVAP_K,
+        help="Fixed evaporator approach temperature used by the COP stage [K].",
+    )
+    parser.add_argument(
+        "--cop-min",
+        type=float,
+        default=DEFAULT_COP_MIN,
+        help="Physical lower COP bound enforced during COP calibration [-].",
+    )
+    parser.add_argument(
+        "--cop-max",
+        type=float,
+        default=DEFAULT_COP_MAX,
+        help="Physical upper COP bound enforced during COP calibration [-].",
     )
     parser.add_argument(
         "--dhw-min-segment-delivered-energy-kwh",
@@ -323,6 +382,21 @@ def _build_dhw_reference_parameters(args: argparse.Namespace) -> DHWParameters:
     )
 
 
+def _build_cop_settings(args: argparse.Namespace) -> COPCalibrationSettings:
+    """Build the settings object for offline COP calibration."""
+    return COPCalibrationSettings(
+        min_sample_count=args.min_samples,
+        min_ufh_curve_sample_count=args.cop_min_ufh_samples,
+        min_thermal_energy_kwh=args.cop_min_thermal_energy_kwh,
+        min_electric_energy_kwh=args.cop_min_electric_energy_kwh,
+        t_ref_outdoor_c=args.cop_t_ref_outdoor_c,
+        delta_t_cond_k=args.cop_delta_t_cond_k,
+        delta_t_evap_k=args.cop_delta_t_evap_k,
+        cop_min=args.cop_min,
+        cop_max=args.cop_max,
+    )
+
+
 def main() -> None:
     """Run the requested offline calibration stage from telemetry history."""
     parser = _build_parser()
@@ -346,6 +420,25 @@ def main() -> None:
             "stage": args.stage,
             "dataset": {
                 "sample_count": dataset.sample_count,
+                "start_utc": dataset.start_utc.isoformat(),
+                "end_utc": dataset.end_utc.isoformat(),
+            },
+            "fit": {
+                **asdict(result),
+                "dataset_start_utc": result.dataset_start_utc.isoformat(),
+                "dataset_end_utc": result.dataset_end_utc.isoformat(),
+            },
+        }
+    elif args.stage == "cop":
+        settings = _build_cop_settings(args)
+        dataset = build_cop_dataset_from_repository(repository, settings)
+        result = calibrate_cop_from_repository(repository, settings)
+        payload = {
+            "stage": args.stage,
+            "dataset": {
+                "sample_count": dataset.sample_count,
+                "ufh_sample_count": dataset.ufh_sample_count,
+                "dhw_sample_count": dataset.dhw_sample_count,
                 "start_utc": dataset.start_utc.isoformat(),
                 "end_utc": dataset.end_utc.isoformat(),
             },
@@ -459,6 +552,23 @@ def main() -> None:
         print(f"RMSE(T_room)     : {result.rmse_room_temperature_c:.5f} °C")
         print(f"Max |residual|   : {result.max_abs_residual_c:.5f} °C")
         print(f"Optimizer status : {result.optimizer_status}")
+        return
+
+    if args.stage == "cop":
+        print("COP calibration")
+        print("===============")
+        print(f"Samples              : {dataset.sample_count}")
+        print(f"UFH samples          : {dataset.ufh_sample_count}")
+        print(f"DHW samples          : {dataset.dhw_sample_count}")
+        print(f"Window               : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
+        print(f"eta_carnot           : {result.fitted_parameters.eta_carnot:.6f} [-]")
+        print(f"T_supply_min         : {result.fitted_parameters.T_supply_min:.6f} °C")
+        print(f"heating_curve_slope  : {result.fitted_parameters.heating_curve_slope:.6f} K/K")
+        print(f"RMSE(T_supply)       : {result.rmse_supply_temperature_c:.5f} °C")
+        print(f"RMSE(E_elec)         : {result.rmse_electric_energy_kwh:.5f} kWh")
+        print(f"RMSE(COP)            : {result.rmse_actual_cop:.5f} [-]")
+        print(f"Heating-curve status : {result.heating_curve_optimizer_status}")
+        print(f"Eta status           : {result.eta_optimizer_status}")
         return
 
     if args.stage == "dhw-standby":
