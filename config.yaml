@@ -68,11 +68,11 @@ options:
 
   # Power (kW; set scale=0.001 if HA reports W)
   sensor_hp_electric_power: "sensor.warmtepomp_geschat_vermogen"
-  sensor_hp_electric_power_scale: 1.0
+  sensor_hp_electric_power_scale: 0.001
   sensor_p1_net_power: "sensor.p1_meter_power"
-  sensor_p1_net_power_scale: 1.0
+  sensor_p1_net_power_scale: 0.001
   sensor_pv_output: "sensor.pv_output"
-  sensor_pv_output_scale: 1.0
+  sensor_pv_output_scale: 0.001
 
   # Text / categorical
   sensor_hp_mode: "sensor.warmtepomp_mode"
