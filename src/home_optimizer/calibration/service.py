@@ -316,127 +316,123 @@ def build_automatic_calibration_snapshot(
         "cop": None,
     }
 
-    if settings.enable_ufh_active:
-        try:
-            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
-            ufh_reference_parameters = ThermalParameters(
+    try:
+        effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+        ufh_reference_parameters = ThermalParameters(
+            dt_hours=effective_request.dt_hours,
+            C_r=effective_request.C_r,
+            C_b=effective_request.C_b,
+            R_br=effective_request.R_br,
+            R_ro=effective_request.R_ro,
+            alpha=effective_request.alpha,
+            eta=effective_request.eta,
+            A_glass=effective_request.A_glass,
+        )
+        result = calibrate_ufh_active_from_repository(
+            repository,
+            UFHActiveCalibrationSettings(reference_parameters=ufh_reference_parameters),
+        )
+        overrides = CalibrationParameterOverrides(
+            C_r=result.fitted_parameters.C_r,
+            C_b=result.fitted_parameters.C_b,
+            R_br=result.fitted_parameters.R_br,
+            R_ro=result.fitted_parameters.R_ro,
+        )
+        effective_parameters = effective_parameters.merged_with(overrides)
+        stage_results["ufh_active"] = _stage_success(
+            "ufh_active",
+            f"UFH active RC calibrated (RMSE={result.rmse_room_temperature_c:.4f} °C).",
+            overrides=overrides,
+            sample_count=result.sample_count,
+            segment_count=result.segment_count,
+            dataset_start_utc=result.dataset_start_utc,
+            dataset_end_utc=result.dataset_end_utc,
+            optimizer_status=result.optimizer_status,
+        )
+    except Exception as exc:  # noqa: BLE001
+        stage_results["ufh_active"] = _stage_failure("ufh_active", str(exc))
+
+    try:
+        effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+        result = calibrate_dhw_standby_from_repository(
+            repository,
+            DHWStandbyCalibrationSettings(
                 dt_hours=effective_request.dt_hours,
-                C_r=effective_request.C_r,
-                C_b=effective_request.C_b,
-                R_br=effective_request.R_br,
-                R_ro=effective_request.R_ro,
-                alpha=effective_request.alpha,
-                eta=effective_request.eta,
-                A_glass=effective_request.A_glass,
-            )
-            result = calibrate_ufh_active_from_repository(
-                repository,
-                UFHActiveCalibrationSettings(reference_parameters=ufh_reference_parameters),
-            )
-            overrides = CalibrationParameterOverrides(
-                C_r=result.fitted_parameters.C_r,
-                C_b=result.fitted_parameters.C_b,
-                R_br=result.fitted_parameters.R_br,
-                R_ro=result.fitted_parameters.R_ro,
-            )
-            effective_parameters = effective_parameters.merged_with(overrides)
-            stage_results["ufh_active"] = _stage_success(
-                "ufh_active",
-                f"UFH active RC calibrated (RMSE={result.rmse_room_temperature_c:.4f} °C).",
-                overrides=overrides,
-                sample_count=result.sample_count,
-                segment_count=result.segment_count,
-                dataset_start_utc=result.dataset_start_utc,
-                dataset_end_utc=result.dataset_end_utc,
-                optimizer_status=result.optimizer_status,
-            )
-        except Exception as exc:  # noqa: BLE001
-            stage_results["ufh_active"] = _stage_failure("ufh_active", str(exc))
+                reference_c_top_kwh_per_k=effective_request.dhw_C_top,
+                reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
+            ),
+        )
+        overrides = CalibrationParameterOverrides(dhw_R_loss=result.suggested_r_loss_k_per_kw)
+        effective_parameters = effective_parameters.merged_with(overrides)
+        stage_results["dhw_standby"] = _stage_success(
+            "dhw_standby",
+            f"DHW standby calibrated (R_loss={result.suggested_r_loss_k_per_kw:.4f} K/kW).",
+            overrides=overrides,
+            sample_count=result.sample_count,
+            dataset_start_utc=result.dataset_start_utc,
+            dataset_end_utc=result.dataset_end_utc,
+            optimizer_status=result.optimizer_status,
+        )
+    except Exception as exc:  # noqa: BLE001
+        stage_results["dhw_standby"] = _stage_failure("dhw_standby", str(exc))
 
-    if settings.enable_dhw_standby:
-        try:
-            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
-            result = calibrate_dhw_standby_from_repository(
-                repository,
-                DHWStandbyCalibrationSettings(
-                    dt_hours=effective_request.dt_hours,
-                    reference_c_top_kwh_per_k=effective_request.dhw_C_top,
-                    reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
-                ),
-            )
-            overrides = CalibrationParameterOverrides(dhw_R_loss=result.suggested_r_loss_k_per_kw)
-            effective_parameters = effective_parameters.merged_with(overrides)
-            stage_results["dhw_standby"] = _stage_success(
-                "dhw_standby",
-                f"DHW standby calibrated (R_loss={result.suggested_r_loss_k_per_kw:.4f} K/kW).",
-                overrides=overrides,
-                sample_count=result.sample_count,
-                dataset_start_utc=result.dataset_start_utc,
-                dataset_end_utc=result.dataset_end_utc,
-                optimizer_status=result.optimizer_status,
-            )
-        except Exception as exc:  # noqa: BLE001
-            stage_results["dhw_standby"] = _stage_failure("dhw_standby", str(exc))
+    try:
+        effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+        dhw_reference_parameters = DHWParameters(
+            dt_hours=effective_request.dt_hours,
+            C_top=effective_request.dhw_C_top,
+            C_bot=effective_request.dhw_C_bot,
+            R_strat=effective_request.dhw_R_strat,
+            R_loss=effective_request.dhw_R_loss,
+        )
+        result = calibrate_dhw_active_from_repository(
+            repository,
+            DHWActiveCalibrationSettings(reference_parameters=dhw_reference_parameters),
+        )
+        overrides = CalibrationParameterOverrides(dhw_R_strat=result.fitted_parameters.R_strat)
+        effective_parameters = effective_parameters.merged_with(overrides)
+        stage_results["dhw_active"] = _stage_success(
+            "dhw_active",
+            f"DHW active stratification calibrated (RMSE_top={result.rmse_t_top_c:.4f} °C).",
+            overrides=overrides,
+            sample_count=result.sample_count,
+            segment_count=result.segment_count,
+            dataset_start_utc=result.dataset_start_utc,
+            dataset_end_utc=result.dataset_end_utc,
+            optimizer_status=result.optimizer_status,
+        )
+    except Exception as exc:  # noqa: BLE001
+        stage_results["dhw_active"] = _stage_failure("dhw_active", str(exc))
 
-    if settings.enable_dhw_active:
-        try:
-            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
-            dhw_reference_parameters = DHWParameters(
-                dt_hours=effective_request.dt_hours,
-                C_top=effective_request.dhw_C_top,
-                C_bot=effective_request.dhw_C_bot,
-                R_strat=effective_request.dhw_R_strat,
-                R_loss=effective_request.dhw_R_loss,
-            )
-            result = calibrate_dhw_active_from_repository(
-                repository,
-                DHWActiveCalibrationSettings(reference_parameters=dhw_reference_parameters),
-            )
-            overrides = CalibrationParameterOverrides(dhw_R_strat=result.fitted_parameters.R_strat)
-            effective_parameters = effective_parameters.merged_with(overrides)
-            stage_results["dhw_active"] = _stage_success(
-                "dhw_active",
-                f"DHW active stratification calibrated (RMSE_top={result.rmse_t_top_c:.4f} °C).",
-                overrides=overrides,
-                sample_count=result.sample_count,
-                segment_count=result.segment_count,
-                dataset_start_utc=result.dataset_start_utc,
-                dataset_end_utc=result.dataset_end_utc,
-                optimizer_status=result.optimizer_status,
-            )
-        except Exception as exc:  # noqa: BLE001
-            stage_results["dhw_active"] = _stage_failure("dhw_active", str(exc))
-
-    if settings.enable_cop:
-        try:
-            effective_request = _apply_calibration_overrides(base_request, effective_parameters)
-            result = calibrate_cop_from_repository(
-                repository,
-                COPCalibrationSettings(
-                    t_ref_outdoor_c=effective_request.T_ref_outdoor_curve,
-                    delta_t_cond_k=effective_request.delta_T_cond,
-                    delta_t_evap_k=effective_request.delta_T_evap,
-                    cop_min=effective_request.cop_min,
-                    cop_max=effective_request.cop_max,
-                ),
-            )
-            overrides = CalibrationParameterOverrides(
-                eta_carnot=result.fitted_parameters.eta_carnot,
-                T_supply_min=result.fitted_parameters.T_supply_min,
-                heating_curve_slope=result.fitted_parameters.heating_curve_slope,
-            )
-            effective_parameters = effective_parameters.merged_with(overrides)
-            stage_results["cop"] = _stage_success(
-                "cop",
-                f"COP calibrated (RMSE_COP={result.rmse_actual_cop:.4f}).",
-                overrides=overrides,
-                sample_count=result.sample_count,
-                dataset_start_utc=result.dataset_start_utc,
-                dataset_end_utc=result.dataset_end_utc,
-                optimizer_status=result.eta_optimizer_status,
-            )
-        except Exception as exc:  # noqa: BLE001
-            stage_results["cop"] = _stage_failure("cop", str(exc))
+    try:
+        effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+        result = calibrate_cop_from_repository(
+            repository,
+            COPCalibrationSettings(
+                t_ref_outdoor_c=effective_request.T_ref_outdoor_curve,
+                delta_t_cond_k=effective_request.delta_T_cond,
+                delta_t_evap_k=effective_request.delta_T_evap,
+                cop_min=effective_request.cop_min,
+                cop_max=effective_request.cop_max,
+            ),
+        )
+        overrides = CalibrationParameterOverrides(
+            eta_carnot=result.fitted_parameters.eta_carnot,
+            T_supply_min=result.fitted_parameters.T_supply_min,
+            heating_curve_slope=result.fitted_parameters.heating_curve_slope,
+        )
+        effective_parameters = effective_parameters.merged_with(overrides)
+        stage_results["cop"] = _stage_success(
+            "cop",
+            f"COP calibrated (RMSE_COP={result.rmse_actual_cop:.4f}).",
+            overrides=overrides,
+            sample_count=result.sample_count,
+            dataset_start_utc=result.dataset_start_utc,
+            dataset_end_utc=result.dataset_end_utc,
+            optimizer_status=result.eta_optimizer_status,
+        )
+    except Exception as exc:  # noqa: BLE001
+        stage_results["cop"] = _stage_failure("cop", str(exc))
 
     return CalibrationSnapshotPayload(
         generated_at_utc=snapshot_time_utc,

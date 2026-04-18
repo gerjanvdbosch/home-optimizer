@@ -808,28 +808,17 @@ class AutomaticCalibrationSettings:
     """Scheduler/runtime settings for automatic in-addon calibration.
 
     The addon executes the offline calibrators against persisted telemetry only
-    after a minimum history window is available. Each stage can be toggled
-    independently so deployments may phase in UFH, COP, and DHW calibration.
+    after a minimum history window is available. Once enabled, the automatic
+    calibration cycle always attempts all supported stages (UFH, DHW standby,
+    DHW active, and COP) and retains the previous successful snapshot whenever a
+    particular stage fails.
     """
 
     min_history_hours: float = DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS
-    enable_ufh_active: bool = True
-    enable_dhw_standby: bool = True
-    enable_dhw_active: bool = True
-    enable_cop: bool = True
 
     def __post_init__(self) -> None:
         if self.min_history_hours <= 0.0:
             raise ValueError("min_history_hours must be strictly positive.")
-        if not any(
-            (
-                self.enable_ufh_active,
-                self.enable_dhw_standby,
-                self.enable_dhw_active,
-                self.enable_cop,
-            )
-        ):
-            raise ValueError("At least one automatic calibration stage must be enabled.")
 
 
 @dataclass(frozen=True, slots=True)

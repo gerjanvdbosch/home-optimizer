@@ -51,10 +51,6 @@ options:
   calibration_enabled: true
   calibration_interval_seconds: 21600
   calibration_min_history_hours: 24.0
-  calibration_enable_ufh_active: true
-  calibration_enable_dhw_standby: true
-  calibration_enable_dhw_active: true
-  calibration_enable_cop: true
 
   # --- Sensor entity IDs ---
   # Temperatures (°C — no scaling needed)
@@ -161,10 +157,6 @@ schema:
   calibration_enabled: bool
   calibration_interval_seconds: int
   calibration_min_history_hours: float
-  calibration_enable_ufh_active: bool
-  calibration_enable_dhw_standby: bool
-  calibration_enable_dhw_active: bool
-  calibration_enable_cop: bool
 
   sensor_room_temperature: str
   sensor_outdoor_temperature: str

@@ -1105,13 +1105,7 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
     snapshot = build_automatic_calibration_snapshot(
         repository=cast(TelemetryRepository, cast(object, repository)),
         base_request=RunRequest.model_validate({}),
-        settings=AutomaticCalibrationSettings(
-            min_history_hours=12.0,
-            enable_ufh_active=True,
-            enable_dhw_standby=False,
-            enable_dhw_active=False,
-            enable_cop=True,
-        ),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
     )
 
     assert snapshot is not None

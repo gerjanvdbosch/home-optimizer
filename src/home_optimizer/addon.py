@@ -133,22 +133,6 @@ class AddonOptions(BaseModel):
         gt=0.0,
         description="Minimum persisted telemetry history required before auto-calibration [h].",
     )
-    calibration_enable_ufh_active: bool = Field(
-        True,
-        description="Enable automatic active-UFH RC calibration.",
-    )
-    calibration_enable_dhw_standby: bool = Field(
-        True,
-        description="Enable automatic DHW standby-loss calibration.",
-    )
-    calibration_enable_dhw_active: bool = Field(
-        True,
-        description="Enable automatic active-DHW stratification calibration.",
-    )
-    calibration_enable_cop: bool = Field(
-        True,
-        description="Enable automatic offline COP calibration.",
-    )
 
     # --- MPC physical parameters (§15 of the theory document) ---
     # These are the house / heat-pump parameters used by the periodic runner.
@@ -463,10 +447,6 @@ def _build_automatic_calibration_settings(opts: AddonOptions):
 
     return AutomaticCalibrationSettings(
         min_history_hours=opts.calibration_min_history_hours,
-        enable_ufh_active=opts.calibration_enable_ufh_active,
-        enable_dhw_standby=opts.calibration_enable_dhw_standby,
-        enable_dhw_active=opts.calibration_enable_dhw_active,
-        enable_cop=opts.calibration_enable_cop,
     )
 
 
@@ -609,8 +589,8 @@ def main() -> None:
 
     _defaults = RunRequest.model_validate({})
     # price_cfg was already constructed above for the telemetry collector.
-    mpc_base_input = RunRequest.model_validate(
-        {
+    mpc_base_input = _defaults.model_copy(
+        update={
             # ── UFH thermal model ───────────────────────────────────────────
             "C_r": opts.mpc_C_r,
             "C_b": opts.mpc_C_b,
