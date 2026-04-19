@@ -280,7 +280,7 @@ class RunRequest(BaseModel):
     pv_enabled: bool = Field(
         True, description="Enable PV self-consumption (reduces net grid cost)"
     )
-    pv_peak_kw: float = Field(4.0, ge=0.0, le=20.0, description="PV system peak capacity [kW]")
+    pv_peak_kw: float = Field(2.0, ge=0.0, le=20.0, description="PV system peak capacity [kW]")
 
     # ── DHW: two-node stratification tank (§7–§11) ───────────────────────
     dhw_enabled: bool = Field(True, description="Enable DHW (domestic hot water) control")
