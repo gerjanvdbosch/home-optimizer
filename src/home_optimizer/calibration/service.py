@@ -450,6 +450,70 @@ def _validate_automatic_ufh_active_fit(
         )
 
 
+def _validate_automatic_dhw_standby_fit(
+    result: DHWStandbyCalibrationResult,
+    *,
+    standby_settings: DHWStandbyCalibrationSettings,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> None:
+    """Fail fast when an automatic DHW standby-loss fit converges to its box bounds.
+
+    The standby stage identifies a one-state envelope time constant ``tau_standby``.
+    When the fit lands on its optimiser bounds, the implied ``R_loss`` is not
+    trustworthy enough to become a runtime MPC override.
+    """
+    lower_bound = standby_settings.min_tau_hours
+    upper_bound = standby_settings.max_tau_hours
+    fitted_value = result.tau_standby_hours
+    tolerance_ratio = automatic_settings.dhw_standby_bound_tolerance_ratio
+    if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
+        raise ValueError(
+            "Automatic DHW standby fit rejected: tau_standby converged to the lower bound. "
+            f"tau_standby={fitted_value:.6g} h, lower bound={lower_bound:.6g} h."
+        )
+    if fitted_value >= upper_bound * (1.0 - tolerance_ratio):
+        raise ValueError(
+            "Automatic DHW standby fit rejected: tau_standby converged to the upper bound. "
+            f"tau_standby={fitted_value:.6g} h, upper bound={upper_bound:.6g} h."
+        )
+
+
+def _validate_automatic_dhw_active_fit(
+    result: DHWActiveCalibrationResult,
+    *,
+    active_settings: DHWActiveCalibrationSettings,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> None:
+    """Fail fast when an automatic active-DHW ``R_strat`` fit is under-identified.
+
+    The active DHW stage should only become a runtime override when enough selected
+    no-draw charging segments are available and the fitted ``R_strat`` remains well
+    inside the physical optimiser box.
+    """
+    if result.segment_count < automatic_settings.dhw_active_min_selected_segments:
+        raise ValueError(
+            "Automatic DHW active fit rejected: insufficient active DHW excitation. "
+            f"Selected segments={result.segment_count}, required >= "
+            f"{automatic_settings.dhw_active_min_selected_segments}."
+        )
+
+    reference_r_strat = active_settings.reference_parameters.R_strat
+    lower_bound = reference_r_strat * active_settings.min_parameter_ratio
+    upper_bound = reference_r_strat * active_settings.max_parameter_ratio
+    fitted_value = result.fitted_parameters.R_strat
+    tolerance_ratio = automatic_settings.dhw_active_bound_tolerance_ratio
+    if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
+        raise ValueError(
+            "Automatic DHW active fit rejected: R_strat converged to the lower bound. "
+            f"R_strat={fitted_value:.6g} K/kW, lower bound={lower_bound:.6g} K/kW."
+        )
+    if fitted_value >= upper_bound * (1.0 - tolerance_ratio):
+        raise ValueError(
+            "Automatic DHW active fit rejected: R_strat converged to the upper bound. "
+            f"R_strat={fitted_value:.6g} K/kW, upper bound={upper_bound:.6g} K/kW."
+        )
+
+
 def build_automatic_calibration_snapshot(
     repository: TelemetryRepository,
     *,
@@ -553,13 +617,19 @@ def build_automatic_calibration_snapshot(
     else:
         try:
             effective_request = _apply_calibration_overrides(base_request, effective_parameters)
+            dhw_standby_settings = build_dhw_standby_calibration_settings(
+                dt_hours=calibration_replay_dt_hours,
+                reference_c_top_kwh_per_k=effective_request.dhw_C_top,
+                reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
+            )
             result = calibrate_dhw_standby_from_repository(
                 repository,
-                build_dhw_standby_calibration_settings(
-                    dt_hours=calibration_replay_dt_hours,
-                    reference_c_top_kwh_per_k=effective_request.dhw_C_top,
-                    reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
-                ),
+                dhw_standby_settings,
+            )
+            _validate_automatic_dhw_standby_fit(
+                result,
+                standby_settings=dhw_standby_settings,
+                automatic_settings=settings,
             )
             overrides = CalibrationParameterOverrides(dhw_R_loss=result.suggested_r_loss_k_per_kw)
             effective_parameters = _merge_runtime_safe_stage_overrides(
@@ -594,9 +664,17 @@ def build_automatic_calibration_snapshot(
                 R_strat=effective_request.dhw_R_strat,
                 R_loss=effective_request.dhw_R_loss,
             )
+            dhw_active_settings = build_dhw_active_calibration_settings(
+                reference_parameters=dhw_reference_parameters
+            )
             result = calibrate_dhw_active_from_repository(
                 repository,
-                build_dhw_active_calibration_settings(reference_parameters=dhw_reference_parameters),
+                dhw_active_settings,
+            )
+            _validate_automatic_dhw_active_fit(
+                result,
+                active_settings=dhw_active_settings,
+                automatic_settings=settings,
             )
             overrides = CalibrationParameterOverrides(dhw_R_strat=result.fitted_parameters.R_strat)
             effective_parameters = _merge_runtime_safe_stage_overrides(

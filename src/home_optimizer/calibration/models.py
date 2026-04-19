@@ -120,6 +120,9 @@ DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
 DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS: int = 2
 DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO: float = 1e-6
 DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO: float = 4.0
+DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS: int = 2
+DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO: float = 1e-6
+DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO: float = 1e-6
 
 
 @dataclass(frozen=True, slots=True)
@@ -831,12 +834,26 @@ class AutomaticCalibrationSettings:
             mismatch between the active-UFH fitted ``R_ro`` and the passive
             off-mode envelope-derived ``R_ro`` [-]. Larger disagreement means the
             active replay fit is not physically self-consistent across stages.
+        dhw_active_min_selected_segments: Minimum number of selected active-DHW
+            replay segments required before the fitted ``R_strat`` is trusted [-].
+            One contiguous DHW charging run is often too weak to distinguish
+            stratification dynamics from measurement noise and residual no-draw
+            model mismatch.
+        dhw_standby_bound_tolerance_ratio: Relative tolerance used when deciding
+            whether the fitted DHW standby ``tau_standby`` / derived ``R_loss`` is
+            effectively sitting on its optimizer bounds [-].
+        dhw_active_bound_tolerance_ratio: Relative tolerance used when deciding
+            whether the fitted active-DHW ``R_strat`` is effectively sitting on its
+            optimizer bounds [-].
     """
 
     min_history_hours: float = DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS
     ufh_active_min_selected_segments: int = DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS
     ufh_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO
     ufh_active_max_r_ro_mismatch_ratio: float = DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO
+    dhw_active_min_selected_segments: int = DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS
+    dhw_standby_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO
+    dhw_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO
 
     def __post_init__(self) -> None:
         if self.min_history_hours <= 0.0:
@@ -847,6 +864,12 @@ class AutomaticCalibrationSettings:
             raise ValueError("ufh_active_bound_tolerance_ratio must be non-negative.")
         if self.ufh_active_max_r_ro_mismatch_ratio < 1.0:
             raise ValueError("ufh_active_max_r_ro_mismatch_ratio must be >= 1.")
+        if self.dhw_active_min_selected_segments <= 0:
+            raise ValueError("dhw_active_min_selected_segments must be strictly positive.")
+        if self.dhw_standby_bound_tolerance_ratio < 0.0:
+            raise ValueError("dhw_standby_bound_tolerance_ratio must be non-negative.")
+        if self.dhw_active_bound_tolerance_ratio < 0.0:
+            raise ValueError("dhw_active_bound_tolerance_ratio must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)
