@@ -493,6 +493,40 @@ def _ufh_effective_envelope_capacity_kwh_per_k(parameters: ThermalParameters) ->
     return parameters.C_r + parameters.C_b
 
 
+def _bound_tolerance_width(*, lower_bound: float, upper_bound: float, tolerance_ratio: float) -> float:
+    """Return the absolute near-bound tolerance derived from a bounded interval.
+
+    The automatic calibration gates use a relative tolerance stored in
+    :class:`AutomaticCalibrationSettings`. For signed parameters such as sensor
+    biases, multiplicative bound checks are not meaningful because the lower bound
+    may be negative. This helper converts the ratio to an absolute tolerance based
+    on the full interval width.
+    """
+    if upper_bound <= lower_bound:
+        raise ValueError("upper_bound must be strictly greater than lower_bound.")
+    if tolerance_ratio < 0.0:
+        raise ValueError("tolerance_ratio must be non-negative.")
+    return tolerance_ratio * (upper_bound - lower_bound)
+
+
+def _hits_lower_bound(*, fitted_value: float, lower_bound: float, upper_bound: float, tolerance_ratio: float) -> bool:
+    """Return ``True`` when a fitted value is at/near its lower bound."""
+    return fitted_value <= lower_bound + _bound_tolerance_width(
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        tolerance_ratio=tolerance_ratio,
+    )
+
+
+def _hits_upper_bound(*, fitted_value: float, lower_bound: float, upper_bound: float, tolerance_ratio: float) -> bool:
+    """Return ``True`` when a fitted value is at/near its upper bound."""
+    return fitted_value >= upper_bound - _bound_tolerance_width(
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        tolerance_ratio=tolerance_ratio,
+    )
+
+
 def _ufh_active_bound_violations(
     result: UFHActiveCalibrationResult,
     settings: UFHActiveCalibrationSettings,
@@ -526,11 +560,21 @@ def _ufh_active_bound_violations(
             reference_value = getattr(settings.reference_parameters, parameter_name)
             lower_bound = reference_value * settings.min_parameter_ratio
             upper_bound = reference_value * settings.max_parameter_ratio
-        if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
+        if _hits_lower_bound(
+            fitted_value=fitted_value,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
             violations.append(
                 f"{parameter_name}={fitted_value:.6g} is at/near the lower bound {lower_bound:.6g}."
             )
-        elif fitted_value >= upper_bound * (1.0 - tolerance_ratio):
+        elif _hits_upper_bound(
+            fitted_value=fitted_value,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
             violations.append(
                 f"{parameter_name}={fitted_value:.6g} is at/near the upper bound {upper_bound:.6g}."
             )
@@ -538,13 +582,45 @@ def _ufh_active_bound_violations(
         lower_bound = settings.min_internal_gains_heat_fraction
         upper_bound = settings.max_internal_gains_heat_fraction
         fitted_value = float(getattr(result, "fitted_internal_gains_heat_fraction"))
-        if fitted_value <= lower_bound + tolerance_ratio:
+        if _hits_lower_bound(
+            fitted_value=fitted_value,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
             violations.append(
                 f"internal_gains_heat_fraction={fitted_value:.6g} is at/near the lower bound {lower_bound:.6g}."
             )
-        elif fitted_value >= upper_bound - tolerance_ratio:
+        elif _hits_upper_bound(
+            fitted_value=fitted_value,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
             violations.append(
                 f"internal_gains_heat_fraction={fitted_value:.6g} is at/near the upper bound {upper_bound:.6g}."
+            )
+    if bool(getattr(result, "fit_room_temperature_bias", False)):
+        lower_bound = settings.min_room_temperature_bias_c
+        upper_bound = settings.max_room_temperature_bias_c
+        fitted_value = float(getattr(result, "fitted_room_temperature_bias_c"))
+        if _hits_lower_bound(
+            fitted_value=fitted_value,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            violations.append(
+                f"room_temperature_bias_c={fitted_value:.6g} is at/near the lower bound {lower_bound:.6g}."
+            )
+        elif _hits_upper_bound(
+            fitted_value=fitted_value,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            violations.append(
+                f"room_temperature_bias_c={fitted_value:.6g} is at/near the upper bound {upper_bound:.6g}."
             )
     return tuple(violations)
 
@@ -659,7 +735,12 @@ def _validate_automatic_dhw_standby_fit(
     upper_bound = standby_settings.max_tau_hours
     fitted_value = result.tau_standby_hours
     tolerance_ratio = automatic_settings.dhw_standby_bound_tolerance_ratio
-    if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
+    if _hits_lower_bound(
+        fitted_value=fitted_value,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        tolerance_ratio=tolerance_ratio,
+    ):
         raise _CalibrationValidationError(
             "Automatic DHW standby fit rejected: tau_standby converged to the lower bound. "
             f"tau_standby={fitted_value:.6g} h, lower bound={lower_bound:.6g} h.",
@@ -669,7 +750,12 @@ def _validate_automatic_dhw_standby_fit(
                 automatic_settings=automatic_settings,
             ),
         )
-    if fitted_value >= upper_bound * (1.0 - tolerance_ratio):
+    if _hits_upper_bound(
+        fitted_value=fitted_value,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        tolerance_ratio=tolerance_ratio,
+    ):
         raise _CalibrationValidationError(
             "Automatic DHW standby fit rejected: tau_standby converged to the upper bound. "
             f"tau_standby={fitted_value:.6g} h, upper bound={upper_bound:.6g} h.",
@@ -679,6 +765,30 @@ def _validate_automatic_dhw_standby_fit(
                 automatic_settings=automatic_settings,
             ),
         )
+    if bool(getattr(result, "fit_ambient_temperature_bias", False)):
+        bias_lower_bound = standby_settings.min_ambient_temperature_bias_c
+        bias_upper_bound = standby_settings.max_ambient_temperature_bias_c
+        fitted_bias_c = float(getattr(result, "fitted_ambient_temperature_bias_c"))
+        if _hits_lower_bound(
+            fitted_value=fitted_bias_c,
+            lower_bound=bias_lower_bound,
+            upper_bound=bias_upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ) or _hits_upper_bound(
+            fitted_value=fitted_bias_c,
+            lower_bound=bias_lower_bound,
+            upper_bound=bias_upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            raise _CalibrationValidationError(
+                "Automatic DHW standby fit rejected: ambient sensor bias converged to its bound. "
+                f"ambient_bias={fitted_bias_c:.6g} °C, bounds=[{bias_lower_bound:.6g}, {bias_upper_bound:.6g}] °C.",
+                diagnostics=_build_dhw_standby_diagnostics(
+                    result,
+                    standby_settings=standby_settings,
+                    automatic_settings=automatic_settings,
+                ),
+            )
     return _build_dhw_standby_diagnostics(
         result,
         standby_settings=standby_settings,
@@ -714,7 +824,12 @@ def _validate_automatic_dhw_active_fit(
     fitted_value = result.fitted_parameters.R_strat
     tolerance_ratio = automatic_settings.dhw_active_bound_tolerance_ratio
     lower_bound_represents_nearly_perfect_mixing = lower_bound <= DEFAULT_MIN_DHW_R_STRAT_K_PER_KW * (1.0 + tolerance_ratio)
-    if fitted_value <= lower_bound * (1.0 + tolerance_ratio) and not lower_bound_represents_nearly_perfect_mixing:
+    if _hits_lower_bound(
+        fitted_value=fitted_value,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        tolerance_ratio=tolerance_ratio,
+    ) and not lower_bound_represents_nearly_perfect_mixing:
         raise _CalibrationValidationError(
             "Automatic DHW active fit rejected: R_strat converged to the lower bound. "
             f"R_strat={fitted_value:.6g} K/kW, lower bound={lower_bound:.6g} K/kW.",
@@ -724,7 +839,12 @@ def _validate_automatic_dhw_active_fit(
                 automatic_settings=automatic_settings,
             ),
         )
-    if fitted_value >= upper_bound * (1.0 - tolerance_ratio):
+    if _hits_upper_bound(
+        fitted_value=fitted_value,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        tolerance_ratio=tolerance_ratio,
+    ):
         raise _CalibrationValidationError(
             "Automatic DHW active fit rejected: R_strat converged to the upper bound. "
             f"R_strat={fitted_value:.6g} K/kW, upper bound={upper_bound:.6g} K/kW.",
@@ -734,6 +854,73 @@ def _validate_automatic_dhw_active_fit(
                 automatic_settings=automatic_settings,
             ),
         )
+    if bool(getattr(result, "fit_capacity_split", False)):
+        c_top_fraction = float(getattr(result, "fitted_c_top_fraction"))
+        if _hits_lower_bound(
+            fitted_value=c_top_fraction,
+            lower_bound=active_settings.min_c_top_fraction,
+            upper_bound=active_settings.max_c_top_fraction,
+            tolerance_ratio=tolerance_ratio,
+        ) or _hits_upper_bound(
+            fitted_value=c_top_fraction,
+            lower_bound=active_settings.min_c_top_fraction,
+            upper_bound=active_settings.max_c_top_fraction,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            raise _CalibrationValidationError(
+                "Automatic DHW active fit rejected: C_top_fraction converged to its bound. "
+                f"C_top_fraction={c_top_fraction:.6g}, bounds=[{active_settings.min_c_top_fraction:.6g}, {active_settings.max_c_top_fraction:.6g}].",
+                diagnostics=_build_dhw_active_diagnostics(
+                    result,
+                    active_settings=active_settings,
+                    automatic_settings=automatic_settings,
+                ),
+            )
+    if bool(getattr(result, "fit_temperature_biases", False)):
+        bias_lower_bound = active_settings.min_temperature_bias_c
+        bias_upper_bound = active_settings.max_temperature_bias_c
+        fitted_t_top_bias_c = float(getattr(result, "fitted_t_top_bias_c"))
+        fitted_t_bot_bias_c = float(getattr(result, "fitted_t_bot_bias_c"))
+        if _hits_lower_bound(
+            fitted_value=fitted_t_top_bias_c,
+            lower_bound=bias_lower_bound,
+            upper_bound=bias_upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ) or _hits_upper_bound(
+            fitted_value=fitted_t_top_bias_c,
+            lower_bound=bias_lower_bound,
+            upper_bound=bias_upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            raise _CalibrationValidationError(
+                "Automatic DHW active fit rejected: T_top sensor bias converged to its bound. "
+                f"T_top_bias={fitted_t_top_bias_c:.6g} °C, bounds=[{bias_lower_bound:.6g}, {bias_upper_bound:.6g}] °C.",
+                diagnostics=_build_dhw_active_diagnostics(
+                    result,
+                    active_settings=active_settings,
+                    automatic_settings=automatic_settings,
+                ),
+            )
+        if _hits_lower_bound(
+            fitted_value=fitted_t_bot_bias_c,
+            lower_bound=bias_lower_bound,
+            upper_bound=bias_upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ) or _hits_upper_bound(
+            fitted_value=fitted_t_bot_bias_c,
+            lower_bound=bias_lower_bound,
+            upper_bound=bias_upper_bound,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            raise _CalibrationValidationError(
+                "Automatic DHW active fit rejected: T_bot sensor bias converged to its bound. "
+                f"T_bot_bias={fitted_t_bot_bias_c:.6g} °C, bounds=[{bias_lower_bound:.6g}, {bias_upper_bound:.6g}] °C.",
+                diagnostics=_build_dhw_active_diagnostics(
+                    result,
+                    active_settings=active_settings,
+                    automatic_settings=automatic_settings,
+                ),
+            )
     return _build_dhw_active_diagnostics(
         result,
         active_settings=active_settings,
