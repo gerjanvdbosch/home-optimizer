@@ -143,6 +143,21 @@ def test_dashboard_html_uses_api_solar_figure_for_gti_chart() -> None:
     assert "function buildSolarFig(labels, gtiWindow, gtiPv)" not in html
 
 
+def test_run_request_exposes_canonical_internal_gains_heat_fraction_field() -> None:
+    """RunRequest must only expose the canonical internal_gains_heat_fraction field name."""
+    request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "internal_gains_heat_fraction": 0.45,
+        }
+    )
+
+    assert request.internal_gains_heat_fraction == 0.45
+    dumped = request.model_dump(mode="python")
+    assert dumped["internal_gains_heat_fraction"] == 0.45
+    assert "baseload_internal_gains_heat_fraction" not in dumped
+
+
 def test_optimizer_latest_returns_404_without_scheduled_run() -> None:
     """Operational endpoint must fail clearly until a periodic run has succeeded."""
     Optimizer.clear_latest_scheduled_snapshot()

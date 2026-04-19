@@ -91,10 +91,7 @@ options:
 
   # Fraction of learned household electrical baseload that ends up as useful
   # sensible heat indoors (used when mapping baseload_forecast -> Q_int).
-  mpc_baseload_internal_gains_heat_fraction: 0.70
-  # Always-on electrical baseload floor [kW].  Only the excess above this
-  # reference is translated into additional time-varying internal heat gains.
-  mpc_baseload_internal_gains_reference_kw: 0.30
+  internal_gains_heat_fraction: 0.70
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
@@ -193,8 +190,7 @@ schema:
   sensor_shutter_living_room: str
   sensor_defrost_active: str
   sensor_booster_heater_active: str
-  mpc_baseload_internal_gains_heat_fraction: float
-  mpc_baseload_internal_gains_reference_kw: float
+  internal_gains_heat_fraction: float
 
   pv_tilt: float
   pv_azimuth: float

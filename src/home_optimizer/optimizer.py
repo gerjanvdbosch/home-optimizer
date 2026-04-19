@@ -298,7 +298,7 @@ class RunRequest(BaseModel):
             "When provided, this array overrides the scalar internal_gains_kw."
         ),
     )
-    baseload_internal_gains_heat_fraction: float = Field(
+    internal_gains_heat_fraction: float = Field(
         0.70,
         ge=0.0,
         le=1.0,
@@ -306,15 +306,6 @@ class RunRequest(BaseModel):
             "Fraction of the electrical household baseload forecast that becomes useful indoor "
             "heat gain [-].  Used only when baseload_forecast is available and explicit "
             "internal_gains_forecast is absent."
-        ),
-    )
-    baseload_internal_gains_reference_kw: float = Field(
-        0.30,
-        ge=0.0,
-        description=(
-            "Always-on electrical baseload reference [kW] that is treated as already covered by "
-            "the baseline internal_gains_kw.  Only the excess baseload above this reference is "
-            "mapped to additional sensible indoor heat gains when baseload_forecast is used."
         ),
     )
 
@@ -1059,15 +1050,16 @@ class Optimizer:
 
         Precedence:
         1. explicit ``internal_gains_forecast``
-        2. baseline ``internal_gains_kw`` + ``baseload_internal_gains_heat_fraction`` ×
-           ``max(baseload_forecast - baseload_internal_gains_reference_kw, 0)``
+        2. ``max(internal_gains_kw, internal_gains_heat_fraction × baseload_forecast)``
         3. scalar ``internal_gains_kw`` broadcast across the horizon
 
         The baseload mapping expresses that only a fraction of electrical household
         demand becomes useful sensible heat in the conditioned zone, while the
         scalar baseline captures occupant/metabolic and other non-forecast gains.
-        The reference term avoids double-counting always-on plug loads that are
-        already absorbed into the baseline internal-gains assumption.
+        To avoid a second free tuning knob, the electrical baseload reference is
+        derived implicitly from ``internal_gains_kw`` and
+        ``internal_gains_heat_fraction`` instead of being exposed as a
+        separate user parameter.
         """
 
         if req.internal_gains_forecast is not None:
@@ -1083,6 +1075,8 @@ class Optimizer:
         baseline_internal_gains = np.full(horizon_steps, req.internal_gains_kw, dtype=float)
         if req.baseload_forecast is None:
             return baseline_internal_gains
+        if req.internal_gains_heat_fraction == 0.0:
+            return baseline_internal_gains
 
         baseload_profile = Optimizer._materialize_horizon_array(
             name="baseload_forecast",
@@ -1091,33 +1085,39 @@ class Optimizer:
         )
         return baseline_internal_gains + Optimizer._map_baseload_to_internal_gains_increment(
             baseload_profile_kw=baseload_profile,
-            reference_kw=req.baseload_internal_gains_reference_kw,
-            heat_fraction=req.baseload_internal_gains_heat_fraction,
+            baseline_internal_gains_kw=req.internal_gains_kw,
+            heat_fraction=req.internal_gains_heat_fraction,
         )
 
     @staticmethod
     def _map_baseload_to_internal_gains_increment(
         *,
         baseload_profile_kw: np.ndarray,
-        reference_kw: float,
+        baseline_internal_gains_kw: float,
         heat_fraction: float,
     ) -> np.ndarray:
         """Return the incremental sensible heat gain implied by the electrical baseload.
 
         Implements the optimizer-side mapping
 
-        ``Q_int,extra[k] = heat_fraction * max(P_baseload[k] - P_reference, 0)``
+        ``Q_int[k] = max(Q_int,baseline, heat_fraction * P_baseload[k])``
 
         from the project-specific grey-box interpretation of internal gains.  The
-        reference removes the approximately constant standby / always-on part of the
-        electrical load so the time-varying increment represents occupant-driven
-        activity more accurately than a direct 1:1 mapping.
+        implicit electrical baseload reference is derived as
+
+        ``P_reference = Q_int,baseline / heat_fraction``
+
+        for ``heat_fraction > 0``. This keeps only one tuned baseline term in the
+        request model and avoids separate calibration of two overlapping background
+        offsets. The returned increment therefore equals
+
+        ``max(heat_fraction * P_baseload[k] - Q_int,baseline, 0)``.
 
         Args:
             baseload_profile_kw: Forecast non-heat-pump household electrical demand
                 over the horizon [kW], shape ``(N,)``.
-            reference_kw: Electrical baseload floor already represented by the
-                scalar background internal gains [kW].
+            baseline_internal_gains_kw: Scalar background internal-gains level
+                already present in the UFH disturbance model [kW].
             heat_fraction: Fraction of the excess electrical demand that appears
                 indoors as useful sensible heat [-].
 
@@ -1125,16 +1125,22 @@ class Optimizer:
             Incremental internal-gains profile [kW], shape ``(N,)``.
 
         Raises:
-            ValueError: If the baseload profile contains negative values.
+            ValueError: If the baseload profile contains negative values or when
+                ``heat_fraction`` is negative.
         """
 
         if np.any(baseload_profile_kw < 0.0):
             raise ValueError("baseload_forecast must remain non-negative [kW].")
+        if heat_fraction < 0.0:
+            raise ValueError("internal_gains_heat_fraction must remain non-negative [-].")
+        if heat_fraction == 0.0:
+            return np.zeros_like(baseload_profile_kw)
 
-        # Implements the refined UFH disturbance mapping: only excess baseload
-        # above the configurable always-on reference adds time-varying heat.
-        excess_baseload_kw = np.maximum(baseload_profile_kw - reference_kw, 0.0)
-        return heat_fraction * excess_baseload_kw
+        # Implements the derived-reference mapping: the implied electrical floor
+        # is Q_int,baseline / heat_fraction, which is algebraically equivalent to
+        # max(heat_fraction * P_baseload - Q_int,baseline, 0) for the increment.
+        useful_baseload_heat_kw = heat_fraction * baseload_profile_kw
+        return np.maximum(useful_baseload_heat_kw - baseline_internal_gains_kw, 0.0)
 
     @staticmethod
     def _build_dhw_forecast(

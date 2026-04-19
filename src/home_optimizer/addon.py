@@ -166,19 +166,11 @@ class AddonOptions(BaseModel):
     mpc_alpha: float = Field(0.25, ge=0.0, le=1.0, description="Solar fraction to room air α [-]")
     mpc_eta: float = Field(0.55, ge=0.0, le=1.0, description="Window transmittance η [-]")
     mpc_A_glass: float = Field(7.5, gt=0.0, description="South-facing glazing area [m²]")
-    mpc_baseload_internal_gains_heat_fraction: float = Field(
+    mpc_internal_gains_heat_fraction: float = Field(
         0.70,
         ge=0.0,
         le=1.0,
         description="Fraction of household baseload that becomes useful indoor heat gains [-]",
-    )
-    mpc_baseload_internal_gains_reference_kw: float = Field(
-        0.30,
-        ge=0.0,
-        description=(
-            "Always-on household electrical baseload reference [kW] that is treated as already "
-            "represented by the scalar background internal gains."
-        ),
     )
     mpc_P_max: float = Field(4.5, gt=0.0, description="Max UFH thermal power P_UFH,max [kW]")
     mpc_delta_P_max: float = Field(1.0, gt=0.0, description="Max UFH ramp-rate [kW/step]")
@@ -657,8 +649,7 @@ def main() -> None:
             "gti_pv_forecast": None,
             "price_config": price_cfg,
             "internal_gains_kw": _defaults.internal_gains_kw,
-            "baseload_internal_gains_heat_fraction": opts.mpc_baseload_internal_gains_heat_fraction,
-            "baseload_internal_gains_reference_kw": opts.mpc_baseload_internal_gains_reference_kw,
+            "internal_gains_heat_fraction": opts.mpc_internal_gains_heat_fraction,
             # ── PV ───────────────────────────────────────────────────────────
             "pv_enabled": _defaults.pv_enabled,
             "pv_peak_kw": _defaults.pv_peak_kw,
