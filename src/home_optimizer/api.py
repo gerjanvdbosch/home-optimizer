@@ -84,7 +84,7 @@ class HomeOptimizerAPI:
                 "Gecombineerd thermisch model (UFH + DHW) met MPC-optimalisatie, "
                 "Carnot COP-model, Kalman-filter toestandschatting en PV self-consumption."
             ),
-            version="0.3.0",
+            version="0.9",
         )
         self._template_dashboard = Path(__file__).parent / "templates" / "dashboard.html"
         self._template_simulator = Path(__file__).parent / "templates" / "simulator.html"
