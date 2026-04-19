@@ -519,17 +519,23 @@ def main(argv: list[str] | None = None) -> None:
 
         def _run_forecast_training_job() -> None:
             results = forecast_service.train_and_persist_models(repository=repository)
-            shutter_result = results.get("shutter_forecast")
-            if shutter_result is None:
-                log.info("Forecast-model training skipped — insufficient history for shutter_forecast.")
+            successful_models = 0
+            for field_name, model_result in results.items():
+                if model_result is None:
+                    log.info("Forecast-model training skipped — insufficient history for %s.", field_name)
+                    continue
+                successful_models += 1
+                trained_at_utc = getattr(model_result, "trained_at_utc", None)
+                sample_count = getattr(model_result, "sample_count", None)
+                log.info(
+                    "Forecast model stored: %s trained at %s with %d samples.",
+                    field_name,
+                    trained_at_utc.isoformat() if trained_at_utc is not None else "unknown",
+                    sample_count if sample_count is not None else -1,
+                )
+            if successful_models == 0:
+                log.info("Forecast-model training produced no persisted artifacts this run.")
                 return
-            trained_at_utc = getattr(shutter_result, "trained_at_utc", None)
-            sample_count = getattr(shutter_result, "sample_count", None)
-            log.info(
-                "Forecast model stored: shutter_forecast trained at %s with %d samples.",
-                trained_at_utc.isoformat() if trained_at_utc is not None else "unknown",
-                sample_count if sample_count is not None else -1,
-            )
 
         try:
             _run_forecast_training_job()

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from .baseload import BaseloadForecaster
 from .models import ForecastServiceSettings
 from .shutter import ShutterForecaster
 
@@ -58,12 +59,16 @@ class ShutterForecastProvider(ForecastProvider):
         horizon_raw = request_data.get("horizon_hours")
         if horizon_raw is None:
             raise ValueError("request_data must contain horizon_hours for shutter forecasting.")
-        horizon_steps = int(horizon_raw)
+        if not isinstance(horizon_raw, (int, float)):
+            raise ValueError("horizon_hours must be numeric for shutter forecasting.")
+        horizon_steps = int(cast(int | float, horizon_raw))
 
         shutter_raw = current_overrides.get("shutter_living_room_pct")
         if shutter_raw is None:
             shutter_raw = request_data.get("shutter_living_room_pct", 100.0)
-        initial_shutter_pct = float(shutter_raw)
+        if not isinstance(shutter_raw, (int, float)):
+            raise ValueError("shutter_living_room_pct must be numeric for shutter forecasting.")
+        initial_shutter_pct = float(cast(int | float, shutter_raw))
         predicted = self._forecaster.predict_from_repository(
             repository=repository,
             weather_rows=weather_rows,
@@ -80,6 +85,54 @@ class ShutterForecastProvider(ForecastProvider):
         return self._forecaster.train_and_persist_from_repository(repository=repository)
 
 
+class BaseloadForecastProvider(ForecastProvider):
+    """Predict a persisted household baseload forecast and optional internal-gains proxy."""
+
+    def __init__(self, forecaster: BaseloadForecaster | None = None) -> None:
+        self._forecaster = forecaster or BaseloadForecaster()
+
+    def build_overrides(
+        self,
+        *,
+        request_data: Mapping[str, object],
+        repository: "TelemetryRepository",
+        weather_rows: Sequence[Any],
+        current_overrides: Mapping[str, object],
+    ) -> dict[str, object]:
+        explicit_baseload = request_data.get("baseload_forecast")
+        horizon_raw = request_data.get("horizon_hours")
+        if horizon_raw is None:
+            raise ValueError("request_data must contain horizon_hours for baseload forecasting.")
+        if not isinstance(horizon_raw, (int, float)):
+            raise ValueError("horizon_hours must be numeric for baseload forecasting.")
+        horizon_steps = int(cast(int | float, horizon_raw))
+        if explicit_baseload is not None or "baseload_forecast" in current_overrides:
+            baseload_forecast = current_overrides.get("baseload_forecast", explicit_baseload)
+        else:
+            baseload_prediction = self._forecaster.predict_from_repository(
+                repository=repository,
+                weather_rows=weather_rows,
+                horizon_steps=horizon_steps,
+            )
+            if baseload_prediction is None:
+                return {}
+            baseload_forecast = baseload_prediction.tolist()
+
+        overrides: dict[str, object] = {"baseload_forecast": baseload_forecast}
+        explicit_internal_gains = request_data.get("internal_gains_forecast")
+        if explicit_internal_gains is None and "internal_gains_forecast" not in current_overrides:
+            # household_elec_power_mean_kw is already persisted as a Q_int proxy in telemetry,
+            # so the learned baseload forecast is a physically consistent default proxy for
+            # time-varying internal gains when no explicit thermal-gains forecast exists.
+            overrides["internal_gains_forecast"] = baseload_forecast
+        return overrides
+
+    def train_and_persist(self, *, repository: "TelemetryRepository") -> object | None:
+        """Train and persist the disk-backed baseload model artifact."""
+
+        return self._forecaster.train_and_persist_from_repository(repository=repository)
+
+
 class ForecastService:
     """Compose multiple ML forecast providers into one runtime enrichment step.
 
@@ -90,6 +143,7 @@ class ForecastService:
     def __init__(self, settings: ForecastServiceSettings | None = None) -> None:
         effective_settings = settings or ForecastServiceSettings()
         self._providers: tuple[tuple[str, ForecastProvider], ...] = (
+            ("baseload_forecast", BaseloadForecastProvider(BaseloadForecaster(effective_settings.baseload))),
             ("shutter_forecast", ShutterForecastProvider(ShutterForecaster(effective_settings.shutter))),
         )
 

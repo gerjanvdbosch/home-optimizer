@@ -272,8 +272,23 @@ class RunRequest(BaseModel):
             "See PriceConfig for all sub-fields."
         ),
     )
+    baseload_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Forecast household baseload / non-heat-pump electrical demand [kW], length N.  "
+            "This signal is learned from telemetry and can serve as a proxy for "
+            "time-varying internal gains when internal_gains_forecast is absent."
+        ),
+    )
     internal_gains_kw: float = Field(
         0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]"
+    )
+    internal_gains_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Forecast internal gains Q_int [kW], length N.  "
+            "When provided, this array overrides the scalar internal_gains_kw."
+        ),
     )
 
     # ── PV self-consumption ───────────────────────────────────────────────
@@ -964,6 +979,20 @@ class Optimizer:
             values=req.gti_window_forecast,
             fallback_scalar=0.0,
         )
+        if req.internal_gains_forecast is not None:
+            internal_gains = Optimizer._materialize_horizon_array(
+                name="internal_gains_forecast",
+                horizon_steps=N,
+                values=req.internal_gains_forecast,
+            )
+        elif req.baseload_forecast is not None:
+            internal_gains = Optimizer._materialize_horizon_array(
+                name="baseload_forecast",
+                horizon_steps=N,
+                values=req.baseload_forecast,
+            )
+        else:
+            internal_gains = np.full(N, req.internal_gains_kw, dtype=float)
         # Real shutter forecasts are optional. When absent, the latest measured
         # or manually configured scalar shutter position is broadcast across the
         # horizon, preserving the previous scheduled-MPC behavior.
@@ -994,7 +1023,7 @@ class Optimizer:
         return ForecastHorizon(
             outdoor_temperature_c=t_out_arr,
             gti_w_per_m2=gti,
-            internal_gains_kw=np.full(N, req.internal_gains_kw),
+            internal_gains_kw=internal_gains,
             price_eur_per_kwh=prices,
             room_temperature_ref_c=np.full(N + 1, req.T_ref),
             pv_kw=pv,

@@ -9,7 +9,7 @@ Python-implementatie van een gecombineerd thermisch model voor **vloerverwarming
 - Carnot COP-model met stooklijn voor tijdsvariabele efficiëntie;
 - **FastAPI webinterface** met operationeel dashboard (Open-Meteo forecast) en MPC-simulator;
 - **telemetrylaag** (SQLite + SQLAlchemy + APScheduler) voor sensor- en forecastopslag.
-- **ML-forecastlaag** (scikit-learn) voor gedragsafhankelijke horizon-signalen zoals `shutter_forecast`, uitbreidbaar naar een latere baseload-voorspelling.
+- **ML-forecastlaag** (scikit-learn) voor gedragsafhankelijke horizon-signalen zoals `shutter_forecast` en `baseload_forecast`.
 - Persistente ML-modelartifacts worden naast de SQLite database opgeslagen; runtime inference laadt deze artifacts zonder live retraining in het MPC-pad.
 
 ---
@@ -29,7 +29,7 @@ De lokale runner combineert in één proces:
 - de **ForecastPersister** (haalt Open-Meteo op, slaat op in SQLite),
 - optioneel de **telemetrycollector** uit `sensors.json`,
 - de **automatische calibratie** op basis van opgeslagen telemetrie,
-- de **nachtelijke ML forecast-modeltraining** (momenteel voor `shutter_forecast`),
+- de **nachtelijke ML forecast-modeltraining** (momenteel voor `shutter_forecast` en `baseload_forecast`),
 - en de **FastAPI/Uvicorn** server.
 
 ```bash
@@ -121,6 +121,7 @@ Open na het starten van de runner:
 - Carnot COP-model met stooklijn
 - Zoninstraling op de zuidramen kan optioneel met een **`shutter_forecast` over de hele horizon** worden gemoduleerd; zonder die array blijft de actuele `shutter_living_room_pct` de fallback voor alle MPC-stappen
 - Als geen expliciete `shutter_forecast` wordt meegegeven, kan de runtime automatisch een eenvoudige **scikit-learn shutter-voorspelling** afleiden uit historische telemetry + de laatste weerforecast; bij te weinig historie blijft de scalar fallback actief
+- Als geen expliciete `internal_gains_forecast` wordt meegegeven, kan de runtime automatisch een persistente **`baseload_forecast`** afleiden uit historische telemetry + de laatste weerforecast; die forecast dient dan als standaard proxy voor tijdsvariabele `Q_int`
 - Die shutter-voorspelling wordt niet meer live getraind tijdens een solve: de runner/addon traint het model bij startup en daarna dagelijks op een vast UTC-tijdstip, schrijft het artifact weg naast de database, en runtime inference laadt vervolgens het laatst getrainde model
 - Laadt bij openen eerst `GET /api/defaults`, dus de formuliervelden tonen automatisch de laatste calibrated defaults als die beschikbaar zijn
 - Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
@@ -141,9 +142,9 @@ De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederland
 | `GET` | `/api/forecast/latest` | Meest recente forecast uit de database |
 | `POST` | `/api/simulate` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
 
-`RunRequest` ondersteunt naast de scalar `shutter_living_room_pct` ook een optionele `shutter_forecast: list[float]` met lengte `N`; deze array overschrijft de scalar fallback stap-voor-stap voor de UFH-zoninstraling.
+`RunRequest` ondersteunt naast de scalar `shutter_living_room_pct` ook een optionele `shutter_forecast: list[float]` met lengte `N`; deze array overschrijft de scalar fallback stap-voor-stap voor de UFH-zoninstraling. Daarnaast bestaan nu `baseload_forecast: list[float]` en `internal_gains_forecast: list[float]`; als alleen `baseload_forecast` beschikbaar is, gebruikt de UFH-forecast deze standaard als tijdsvariabele proxy voor `Q_int`.
 
-De forecastservice is provider-gebaseerd opgezet: vandaag vult hij `shutter_forecast`, later kan dezelfde laag ook een `baseload`- of `internal_gains`-voorspelling toevoegen zonder de optimizer-API te breken.
+De forecastservice is provider-gebaseerd opgezet: vandaag vult hij `shutter_forecast`, `baseload_forecast` en waar nodig `internal_gains_forecast`, en dezelfde laag kan later verder worden uitgebreid zonder de optimizer-API te breken.
 
 ---
 
@@ -184,7 +185,7 @@ De telemetrylaag samplet live sensoren vaker dan ze naar disk schrijft:
 
 **Persistente forecast-modellen** (disk artifacts naast SQLite):
 
-- de ML-forecastlaag traint het `shutter_forecast` model bij startup en daarna dagelijks opnieuw
+- de ML-forecastlaag traint de modellen voor `shutter_forecast` en `baseload_forecast` bij startup en daarna dagelijks opnieuw
 - artifacts worden atomisch weggeschreven naast het SQLite-bestand, zodat runtime inference nooit een half geschreven model leest
 - de runtime laadt het laatste artifact in-memory en hergebruikt het totdat er een nieuwer artifact is
 

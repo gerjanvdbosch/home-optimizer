@@ -18,8 +18,11 @@ def _reading(
     *,
     shutter_living_room_pct: float,
     outdoor_temperature_c: float,
+    household_elec_power_kw: float = 0.0,
 ) -> LiveReadings:
     """Create one fully populated telemetry sample for forecasting tests."""
+    hp_electric_power_kw = 2.0
+    pv_output_kw = 0.6
     return LiveReadings(
         room_temperature_c=20.5,
         outdoor_temperature_c=outdoor_temperature_c,
@@ -27,10 +30,10 @@ def _reading(
         hp_supply_target_temperature_c=33.0,
         hp_return_temperature_c=27.0,
         hp_flow_lpm=9.0,
-        hp_electric_power_kw=2.0,
+        hp_electric_power_kw=hp_electric_power_kw,
         hp_mode="ufh",
-        p1_net_power_kw=1.4,
-        pv_output_kw=0.6,
+        p1_net_power_kw=household_elec_power_kw + hp_electric_power_kw - pv_output_kw,
+        pv_output_kw=pv_output_kw,
         thermostat_setpoint_c=20.5,
         dhw_top_temperature_c=52.0,
         dhw_bottom_temperature_c=45.0,
@@ -82,11 +85,13 @@ def _populate_shutter_history(repository: TelemetryRepository, *, start_utc: dat
                     valid_at_utc - timedelta(minutes=5),
                     shutter_living_room_pct=shutter_pct,
                     outdoor_temperature_c=outdoor_temperature_c,
+                    household_elec_power_kw=0.4,
                 ),
                 _reading(
                     valid_at_utc,
                     shutter_living_room_pct=shutter_pct,
                     outdoor_temperature_c=outdoor_temperature_c,
+                    household_elec_power_kw=0.4,
                 ),
             ]
         )
@@ -136,9 +141,76 @@ def _add_future_forecast_batch(
     )
 
 
+def _synthetic_baseload_kw(valid_at_utc: datetime) -> float:
+    """Deterministic daily electrical baseload profile [kW]."""
+    hour = valid_at_utc.hour
+    if 6 <= hour <= 8:
+        return 0.85
+    if 18 <= hour <= 22:
+        return 1.25
+    if 0 <= hour <= 5:
+        return 0.30
+    return 0.55
+
+
+def _populate_baseload_history(repository: TelemetryRepository, *, start_utc: datetime, hours: int) -> None:
+    """Populate telemetry history plus aligned weather rows for baseload-model training."""
+    for step in range(hours):
+        valid_at_utc = start_utc + timedelta(hours=step)
+        gti_w_per_m2 = _synthetic_gti_w_per_m2(valid_at_utc)
+        baseload_kw = _synthetic_baseload_kw(valid_at_utc)
+        outdoor_temperature_c = 5.0 + 0.25 * valid_at_utc.hour
+        aggregate = aggregate_readings(
+            [
+                _reading(
+                    valid_at_utc - timedelta(minutes=5),
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=outdoor_temperature_c,
+                    household_elec_power_kw=baseload_kw,
+                ),
+                _reading(
+                    valid_at_utc,
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=outdoor_temperature_c,
+                    household_elec_power_kw=baseload_kw,
+                ),
+            ]
+        )
+        aggregate.update(
+            {
+                "electricity_price_mean_eur_per_kwh": 0.25,
+                "electricity_price_last_eur_per_kwh": 0.25,
+                "feed_in_price_eur_per_kwh": 0.0,
+            }
+        )
+        repository.add_aggregate(aggregate)
+        repository.bulk_add_forecast_snapshots(
+            [
+                {
+                    "fetched_at_utc": valid_at_utc,
+                    "valid_at_utc": valid_at_utc,
+                    "step_k": 0,
+                    "dt_hours": 1.0,
+                    "t_out_c": outdoor_temperature_c,
+                    "gti_w_per_m2": gti_w_per_m2,
+                    "gti_pv_w_per_m2": 0.0,
+                }
+            ]
+        )
+
+
 def _train_persisted_shutter_model(repository: TelemetryRepository) -> object:
     """Train and persist one shutter artifact for runtime inference tests."""
     metadata = ShutterForecaster().train_and_persist_from_repository(repository=repository)
+    assert metadata is not None
+    return metadata
+
+
+def _train_persisted_baseload_model(repository: TelemetryRepository) -> object:
+    """Train and persist one baseload artifact for runtime inference tests."""
+    from home_optimizer.forecasting import BaseloadForecaster
+
+    metadata = BaseloadForecaster().train_and_persist_from_repository(repository=repository)
     assert metadata is not None
     return metadata
 
@@ -233,6 +305,78 @@ def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None
     assert len(scheduled_input.shutter_forecast) == 6
     assert scheduled_input.shutter_forecast[2] < scheduled_input.shutter_forecast[0]
     assert scheduled_input.shutter_forecast[3] < scheduled_input.shutter_forecast[5]
+
+
+def test_forecast_service_injects_baseload_and_internal_gains_proxy(tmp_path) -> None:
+    """The ML service must provide a baseload forecast and reuse it as internal-gains proxy."""
+    database_url = f"sqlite:///{tmp_path / 'baseload-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    _populate_baseload_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=72)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 0.0, 120.0, 120.0, 0.0, 0.0],
+    )
+    _train_persisted_baseload_model(repository)
+
+    rows = repository.get_latest_forecast_batch()
+    overrides = ForecastService().build_missing_overrides(
+        request_data={
+            "horizon_hours": 6,
+            "shutter_living_room_pct": 100.0,
+            "shutter_forecast": None,
+            "baseload_forecast": None,
+            "internal_gains_forecast": None,
+        },
+        repository=repository,
+        weather_rows=rows,
+        current_overrides={},
+    )
+
+    assert "baseload_forecast" in overrides
+    assert "internal_gains_forecast" in overrides
+    baseload_forecast = np.asarray(overrides["baseload_forecast"], dtype=float)
+    internal_gains_forecast = np.asarray(overrides["internal_gains_forecast"], dtype=float)
+    assert baseload_forecast.shape == (6,)
+    np.testing.assert_allclose(baseload_forecast, internal_gains_forecast)
+    assert np.all(baseload_forecast >= 0.0)
+
+
+def test_optimizer_uses_baseload_forecast_as_internal_gains_proxy() -> None:
+    """UFH forecast construction must use baseload_forecast when no explicit internal-gains forecast exists."""
+    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+            "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+            "baseload_forecast": [0.35, 0.45, 0.95, 1.10],
+            "pv_enabled": False,
+        }
+    )
+    cop_model = HeatPumpCOPModel(
+        HeatPumpCOPParameters(
+            eta_carnot=run_request.eta_carnot,
+            delta_T_cond=run_request.delta_T_cond,
+            delta_T_evap=run_request.delta_T_evap,
+            T_supply_min=run_request.T_supply_min,
+            T_ref_outdoor=run_request.T_ref_outdoor_curve,
+            heating_curve_slope=run_request.heating_curve_slope,
+            cop_min=run_request.cop_min,
+            cop_max=run_request.cop_max,
+        )
+    )
+
+    forecast = Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
+
+    np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.35, 0.45, 0.95, 1.10]))
 
 
 def test_shutter_forecaster_reuses_cached_model_for_unchanged_history(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

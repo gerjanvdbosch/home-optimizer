@@ -24,6 +24,13 @@ DEFAULT_SHUTTER_RANDOM_STATE: int = 7
 DEFAULT_SHUTTER_TREE_COUNT: int = 64
 DEFAULT_SHUTTER_TREE_MAX_DEPTH: int = 6
 DEFAULT_SHUTTER_MIN_SAMPLES_LEAF: int = 2
+DEFAULT_BASELOAD_MIN_TRAINING_SAMPLES: int = 24
+DEFAULT_BASELOAD_MAX_HISTORY_GAP_HOURS: float = 2.0
+DEFAULT_BASELOAD_FORECAST_ALIGNMENT_TOLERANCE_HOURS: float = 0.5
+DEFAULT_BASELOAD_RANDOM_STATE: int = 11
+DEFAULT_BASELOAD_TREE_COUNT: int = 64
+DEFAULT_BASELOAD_TREE_MAX_DEPTH: int = 6
+DEFAULT_BASELOAD_MIN_SAMPLES_LEAF: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +80,41 @@ class ForecastServiceSettings:
 
     Attributes:
         shutter: Settings for the current shutter-forecast provider.
+        baseload: Settings for the baseload forecast provider.
     """
 
     shutter: ShutterForecastSettings = field(default_factory=ShutterForecastSettings)
+    baseload: "BaseloadForecastSettings" = field(default_factory=lambda: BaseloadForecastSettings())
+
+
+@dataclass(frozen=True, slots=True)
+class BaseloadForecastSettings:
+    """Hyperparameters and fail-fast limits for the ML baseload forecaster.
+
+    The target is the electrical household baseload proxy from telemetry,
+    expressed in kW. This signal can be propagated to the UFH model as a
+    time-varying ``internal_gains_forecast`` when no explicit thermal-gains
+    forecast is supplied.
+    """
+
+    min_training_samples: int = DEFAULT_BASELOAD_MIN_TRAINING_SAMPLES
+    max_history_gap_hours: float = DEFAULT_BASELOAD_MAX_HISTORY_GAP_HOURS
+    alignment_tolerance_hours: float = DEFAULT_BASELOAD_FORECAST_ALIGNMENT_TOLERANCE_HOURS
+    random_state: int = DEFAULT_BASELOAD_RANDOM_STATE
+    tree_count: int = DEFAULT_BASELOAD_TREE_COUNT
+    tree_max_depth: int = DEFAULT_BASELOAD_TREE_MAX_DEPTH
+    min_samples_leaf: int = DEFAULT_BASELOAD_MIN_SAMPLES_LEAF
+
+    def __post_init__(self) -> None:
+        if self.min_training_samples <= 0:
+            raise ValueError("min_training_samples must be strictly positive.")
+        if self.max_history_gap_hours <= 0.0:
+            raise ValueError("max_history_gap_hours must be strictly positive.")
+        if self.alignment_tolerance_hours < 0.0:
+            raise ValueError("alignment_tolerance_hours must be non-negative.")
+        if self.tree_count <= 0:
+            raise ValueError("tree_count must be strictly positive.")
+        if self.tree_max_depth <= 0:
+            raise ValueError("tree_max_depth must be strictly positive.")
+        if self.min_samples_leaf <= 0:
+            raise ValueError("min_samples_leaf must be strictly positive.")
