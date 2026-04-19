@@ -4,12 +4,12 @@ This stage fits the subset of COP-model parameters that are practically
 identifiable from the currently persisted telemetry:
 
 * ``T_supply_min`` [°C] — UFH heating-curve intercept
+* ``T_ref_outdoor`` [°C] — UFH heating-curve balance-point / breakpoint
 * ``heating_curve_slope`` [K/K] — UFH heating-curve slope
 * ``eta_carnot`` [-] — shared Carnot efficiency factor
 
 The remaining COP-model parameters stay fixed in this stage:
 
-* ``T_ref_outdoor`` [°C]
 * ``delta_T_cond`` [K]
 * ``delta_T_evap`` [K]
 * ``cop_min`` [-]
@@ -29,6 +29,13 @@ That is sufficient to fit the UFH heating-curve shape against target-supply
 telemetry and then fit one shared Carnot efficiency factor against measured
 energy use.  It is *not* sufficient to robustly identify all approach
 temperatures and per-mode efficiencies simultaneously without strong collinearity.
+
+The UFH breakpoint ``T_ref_outdoor`` is fitted only when the retained UFH samples
+excite **both** sides of the breakpoint candidate. Without warm-side samples
+(``T_out >= T_ref_outdoor``), the heating curve collapses to a single line and
+``T_supply_min`` / ``T_ref_outdoor`` become structurally non-identifiable. In
+that case the fitter keeps ``T_ref_outdoor`` fixed at the configured reference
+value and reports this explicitly in the result metadata.
 """
 
 from __future__ import annotations
@@ -66,6 +73,8 @@ class _HeatingCurveFit:
 
     t_supply_min_c: float
     heating_curve_slope: float
+    t_ref_outdoor_c: float
+    t_ref_outdoor_was_fitted: bool
     optimizer_status: str
     optimizer_cost: float
     rmse_supply_temperature_c: float
@@ -194,6 +203,44 @@ def _as_arrays(dataset: COPCalibrationDataset) -> _CalibrationArrays:
     )
 
 
+def _predict_heating_curve_supply_temperature_c(
+    *,
+    t_out_c: np.ndarray,
+    t_supply_min_c: float,
+    t_ref_outdoor_c: float,
+    heating_curve_slope: float,
+) -> np.ndarray:
+    """Return the UFH heating-curve supply target [°C] for one outdoor profile.
+
+    Implements the runtime heating curve
+
+        T_supply = T_supply_min + slope · max(T_ref_outdoor - T_out, 0)
+
+    from ``cop_model.py`` so the offline fitter stays algebraically identical to
+    the runtime COP pre-calculation.
+    """
+    return t_supply_min_c + heating_curve_slope * np.maximum(t_ref_outdoor_c - t_out_c, 0.0)
+
+
+def _has_t_ref_outdoor_excitation(
+    t_out_ufh: np.ndarray,
+    settings: COPCalibrationSettings,
+) -> bool:
+    """Return whether the UFH dataset can identify the heating-curve breakpoint.
+
+    ``T_ref_outdoor`` is only structurally observable when the retained UFH data
+    include samples on both sides of the breakpoint candidate: warm-side samples
+    constrain the flat ``T_supply_min`` branch, while cold-side samples constrain
+    the sloped branch.
+    """
+    warm_side_sample_count = int(np.count_nonzero(t_out_ufh >= settings.t_ref_outdoor_c))
+    cold_side_sample_count = int(np.count_nonzero(t_out_ufh < settings.t_ref_outdoor_c))
+    return (
+        warm_side_sample_count >= settings.min_ufh_t_ref_side_sample_count
+        and cold_side_sample_count >= settings.min_ufh_t_ref_side_sample_count
+    )
+
+
 def _fit_heating_curve(
     arrays: _CalibrationArrays,
     settings: COPCalibrationSettings,
@@ -204,27 +251,61 @@ def _fit_heating_curve(
     t_supply_target_ufh = arrays.supply_target_temperature_mean_c[ufh_mask]
     weights_ufh = _normalised_energy_weights(arrays.thermal_energy_kwh[ufh_mask])
 
+    t_ref_outdoor_is_identifiable = settings.fit_t_ref_outdoor and _has_t_ref_outdoor_excitation(
+        t_out_ufh,
+        settings,
+    )
+
     def residuals(theta: np.ndarray) -> np.ndarray:
         t_supply_min_c = float(theta[0])
         heating_curve_slope = float(theta[1])
-        predicted_supply_c = t_supply_min_c + heating_curve_slope * np.maximum(
-            settings.t_ref_outdoor_c - t_out_ufh,
-            0.0,
+        t_ref_outdoor_c = float(theta[2]) if t_ref_outdoor_is_identifiable else settings.t_ref_outdoor_c
+        predicted_supply_c = _predict_heating_curve_supply_temperature_c(
+            t_out_c=t_out_ufh,
+            t_supply_min_c=t_supply_min_c,
+            t_ref_outdoor_c=t_ref_outdoor_c,
+            heating_curve_slope=heating_curve_slope,
         )
         return _weighted_residuals(predicted_supply_c - t_supply_target_ufh, weights=weights_ufh)
 
-    initial_theta = np.array(
-        [settings.initial_t_supply_min_c, settings.initial_heating_curve_slope],
-        dtype=float,
-    )
-    lower_bounds = np.array(
-        [settings.min_t_supply_min_c, settings.min_heating_curve_slope],
-        dtype=float,
-    )
-    upper_bounds = np.array(
-        [settings.max_t_supply_min_c, settings.max_heating_curve_slope],
-        dtype=float,
-    )
+    if t_ref_outdoor_is_identifiable:
+        initial_theta = np.array(
+            [
+                settings.initial_t_supply_min_c,
+                settings.initial_heating_curve_slope,
+                settings.t_ref_outdoor_c,
+            ],
+            dtype=float,
+        )
+        lower_bounds = np.array(
+            [
+                settings.min_t_supply_min_c,
+                settings.min_heating_curve_slope,
+                settings.min_t_ref_outdoor_c,
+            ],
+            dtype=float,
+        )
+        upper_bounds = np.array(
+            [
+                settings.max_t_supply_min_c,
+                settings.max_heating_curve_slope,
+                settings.max_t_ref_outdoor_c,
+            ],
+            dtype=float,
+        )
+    else:
+        initial_theta = np.array(
+            [settings.initial_t_supply_min_c, settings.initial_heating_curve_slope],
+            dtype=float,
+        )
+        lower_bounds = np.array(
+            [settings.min_t_supply_min_c, settings.min_heating_curve_slope],
+            dtype=float,
+        )
+        upper_bounds = np.array(
+            [settings.max_t_supply_min_c, settings.max_heating_curve_slope],
+            dtype=float,
+        )
 
     result = least_squares(
         residuals,
@@ -237,15 +318,26 @@ def _fit_heating_curve(
     if not result.success:
         raise RuntimeError(f"COP heating-curve calibration failed: {result.message}")
 
-    predicted_supply_c = float(result.x[0]) + float(result.x[1]) * np.maximum(
-        settings.t_ref_outdoor_c - t_out_ufh,
-        0.0,
+    fitted_t_ref_outdoor_c = float(result.x[2]) if t_ref_outdoor_is_identifiable else settings.t_ref_outdoor_c
+    predicted_supply_c = _predict_heating_curve_supply_temperature_c(
+        t_out_c=t_out_ufh,
+        t_supply_min_c=float(result.x[0]),
+        t_ref_outdoor_c=fitted_t_ref_outdoor_c,
+        heating_curve_slope=float(result.x[1]),
     )
     rmse_supply_temperature_c = _rmse(predicted_supply_c - t_supply_target_ufh)
+    optimizer_status = str(result.message)
+    if not t_ref_outdoor_is_identifiable:
+        optimizer_status = (
+            f"{optimizer_status} | T_ref_outdoor kept fixed at {settings.t_ref_outdoor_c:.3f} °C "
+            "because the retained UFH samples do not excite both sides of the breakpoint."
+        )
     return _HeatingCurveFit(
         t_supply_min_c=float(result.x[0]),
         heating_curve_slope=float(result.x[1]),
-        optimizer_status=str(result.message),
+        t_ref_outdoor_c=fitted_t_ref_outdoor_c,
+        t_ref_outdoor_was_fitted=t_ref_outdoor_is_identifiable,
+        optimizer_status=optimizer_status,
         optimizer_cost=float(result.cost),
         rmse_supply_temperature_c=rmse_supply_temperature_c,
     )
@@ -256,6 +348,7 @@ def _predicted_supply_temperature_c(
     settings: COPCalibrationSettings,
     *,
     t_supply_min_c: float,
+    t_ref_outdoor_c: float,
     heating_curve_slope: float,
 ) -> np.ndarray:
     """Return the per-sample supply temperature used by the COP model [°C].
@@ -265,9 +358,11 @@ def _predicted_supply_temperature_c(
     """
     predicted_supply_c = arrays.supply_target_temperature_mean_c.copy()
     ufh_mask = arrays.mode_name == settings.ufh_mode_name
-    predicted_supply_c[ufh_mask] = t_supply_min_c + heating_curve_slope * np.maximum(
-        settings.t_ref_outdoor_c - arrays.outdoor_temperature_mean_c[ufh_mask],
-        0.0,
+    predicted_supply_c[ufh_mask] = _predict_heating_curve_supply_temperature_c(
+        t_out_c=arrays.outdoor_temperature_mean_c[ufh_mask],
+        t_supply_min_c=t_supply_min_c,
+        t_ref_outdoor_c=t_ref_outdoor_c,
+        heating_curve_slope=heating_curve_slope,
     )
     return predicted_supply_c
 
@@ -277,6 +372,7 @@ def _build_cop_parameters(
     *,
     eta_carnot: float,
     t_supply_min_c: float,
+    t_ref_outdoor_c: float,
     heating_curve_slope: float,
 ) -> HeatPumpCOPParameters:
     """Construct the calibrated COP-parameter object with fixed approach terms."""
@@ -285,7 +381,7 @@ def _build_cop_parameters(
         delta_T_cond=settings.delta_t_cond_k,
         delta_T_evap=settings.delta_t_evap_k,
         T_supply_min=t_supply_min_c,
-        T_ref_outdoor=settings.t_ref_outdoor_c,
+        T_ref_outdoor=t_ref_outdoor_c,
         heating_curve_slope=heating_curve_slope,
         cop_min=settings.cop_min,
         cop_max=settings.cop_max,
@@ -297,6 +393,7 @@ def _fit_eta_carnot(
     settings: COPCalibrationSettings,
     *,
     t_supply_min_c: float,
+    t_ref_outdoor_c: float,
     heating_curve_slope: float,
 ) -> _EtaFit:
     """Fit the shared Carnot efficiency factor against measured electrical energy."""
@@ -304,6 +401,7 @@ def _fit_eta_carnot(
         arrays,
         settings,
         t_supply_min_c=t_supply_min_c,
+        t_ref_outdoor_c=t_ref_outdoor_c,
         heating_curve_slope=heating_curve_slope,
     )
     weights = _normalised_energy_weights(arrays.thermal_energy_kwh)
@@ -326,6 +424,7 @@ def _fit_eta_carnot(
             settings,
             eta_carnot=eta_carnot,
             t_supply_min_c=t_supply_min_c,
+            t_ref_outdoor_c=t_ref_outdoor_c,
             heating_curve_slope=heating_curve_slope,
         )
         model = HeatPumpCOPModel(params)
@@ -390,12 +489,14 @@ def calibrate_cop_model(
         arrays,
         settings,
         t_supply_min_c=heating_curve_fit.t_supply_min_c,
+        t_ref_outdoor_c=heating_curve_fit.t_ref_outdoor_c,
         heating_curve_slope=heating_curve_fit.heating_curve_slope,
     )
     fitted_parameters = _build_cop_parameters(
         settings,
         eta_carnot=eta_fit.eta_carnot,
         t_supply_min_c=heating_curve_fit.t_supply_min_c,
+        t_ref_outdoor_c=heating_curve_fit.t_ref_outdoor_c,
         heating_curve_slope=heating_curve_fit.heating_curve_slope,
     )
     model = HeatPumpCOPModel(fitted_parameters)
@@ -403,6 +504,7 @@ def calibrate_cop_model(
         arrays,
         settings,
         t_supply_min_c=fitted_parameters.T_supply_min,
+        t_ref_outdoor_c=fitted_parameters.T_ref_outdoor,
         heating_curve_slope=fitted_parameters.heating_curve_slope,
     )
     predicted_cop = model.cop_from_temperatures(
@@ -441,6 +543,7 @@ def calibrate_cop_model(
 
     return COPCalibrationResult(
         fitted_parameters=fitted_parameters,
+        t_ref_outdoor_was_fitted=heating_curve_fit.t_ref_outdoor_was_fitted,
         rmse_supply_temperature_c=heating_curve_fit.rmse_supply_temperature_c,
         rmse_electric_energy_kwh=_rmse(predicted_electric_energy_kwh - arrays.electric_energy_kwh),
         rmse_actual_cop=_rmse(predicted_cop - actual_cop),

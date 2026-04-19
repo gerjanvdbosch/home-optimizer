@@ -421,6 +421,7 @@ _DHW_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = ("dhw_R_strat", "dhw_R_loss"
 _COP_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
     "eta_carnot",
     "T_supply_min",
+    "T_ref_outdoor_curve",
     "heating_curve_slope",
 )
 

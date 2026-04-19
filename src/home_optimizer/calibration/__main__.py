@@ -271,7 +271,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--cop-t-ref-outdoor-c",
         type=float,
         default=DEFAULT_T_REF_OUTDOOR_C,
-        help="Fixed heating-curve reference outdoor temperature used by the COP stage [°C].",
+        help=(
+            "Heating-curve reference outdoor temperature used as the initial/fallback COP-stage "
+            "breakpoint [°C]. The fitter calibrates this breakpoint when the retained UFH data "
+            "excite both sides of the curve; otherwise it is kept fixed at this value."
+        ),
     )
     parser.add_argument(
         "--cop-delta-t-cond-k",
@@ -752,7 +756,9 @@ def main() -> None:
         print(f"Window               : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
         print(f"eta_carnot           : {result.fitted_parameters.eta_carnot:.6f} [-]")
         print(f"T_supply_min         : {result.fitted_parameters.T_supply_min:.6f} °C")
+        print(f"T_ref_outdoor        : {result.fitted_parameters.T_ref_outdoor:.6f} °C")
         print(f"heating_curve_slope  : {result.fitted_parameters.heating_curve_slope:.6f} K/K")
+        print(f"T_ref fitted         : {result.t_ref_outdoor_was_fitted}")
         print(f"Heating-curve loss   : {settings.heating_curve_loss_name}")
         print(f"Eta-fit loss         : {settings.eta_loss_name}")
         print(f"RMSE(T_supply)       : {result.rmse_supply_temperature_c:.5f} °C")

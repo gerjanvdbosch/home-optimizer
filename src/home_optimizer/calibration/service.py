@@ -901,6 +901,7 @@ def build_automatic_calibration_snapshot(
         overrides = CalibrationParameterOverrides(
             eta_carnot=result.fitted_parameters.eta_carnot,
             T_supply_min=result.fitted_parameters.T_supply_min,
+            T_ref_outdoor_curve=result.fitted_parameters.T_ref_outdoor,
             heating_curve_slope=result.fitted_parameters.heating_curve_slope,
         )
         effective_parameters = _merge_runtime_safe_stage_overrides(

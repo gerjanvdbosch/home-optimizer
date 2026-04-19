@@ -78,6 +78,10 @@ class CalibrationParameterOverrides(BaseModel):
         default=None,
         description="UFH minimum supply temperature T_supply_min [°C]",
     )
+    T_ref_outdoor_curve: float | None = Field(
+        default=None,
+        description="UFH heating-curve balance-point outdoor temperature T_ref_outdoor [°C]",
+    )
     heating_curve_slope: float | None = Field(
         default=None,
         ge=0.0,

@@ -90,6 +90,10 @@ DEFAULT_MAX_T_SUPPLY_MIN_C: float = 45.0
 DEFAULT_INITIAL_HEATING_CURVE_SLOPE: float = 1.0
 DEFAULT_MIN_HEATING_CURVE_SLOPE: float = 0.0
 DEFAULT_MAX_HEATING_CURVE_SLOPE: float = 3.0
+DEFAULT_MIN_T_REF_OUTDOOR_C: float = 5.0
+DEFAULT_MAX_T_REF_OUTDOOR_C: float = 25.0
+DEFAULT_FIT_T_REF_OUTDOOR: bool = True
+DEFAULT_MIN_UFH_T_REF_SIDE_SAMPLE_COUNT: int = 2
 DEFAULT_MIN_THERMAL_ENERGY_KWH: float = 0.05
 DEFAULT_MIN_ELECTRIC_ENERGY_KWH: float = 0.01
 DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT: int = 8
@@ -661,16 +665,17 @@ class COPCalibrationDiagnostics:
 class COPCalibrationSettings:
     """Validated settings for offline Carnot COP calibration.
 
-    The current offline stage learns three parameters from historical buckets:
+    The current offline stage learns the UFH heating-curve shape plus the shared
+    Carnot efficiency factor from historical buckets:
 
     * ``T_supply_min`` [°C] — UFH heating-curve intercept
+    * ``T_ref_outdoor`` [°C] — UFH heating-curve balance-point / breakpoint
     * ``heating_curve_slope`` [K/K] — UFH heating-curve slope
     * ``eta_carnot`` [-] — shared Carnot efficiency factor
 
-    The remaining COP-model parameters stay fixed for identifiability and to
+    The approach temperatures and COP clamps stay fixed for identifiability and to
     preserve the convex MPC pre-calculation assumptions from §14.1:
 
-    * ``T_ref_outdoor``
     * ``delta_T_cond``
     * ``delta_T_evap``
     * ``cop_min``
@@ -712,7 +717,11 @@ class COPCalibrationSettings:
     initial_heating_curve_slope: float = DEFAULT_INITIAL_HEATING_CURVE_SLOPE
     min_heating_curve_slope: float = DEFAULT_MIN_HEATING_CURVE_SLOPE
     max_heating_curve_slope: float = DEFAULT_MAX_HEATING_CURVE_SLOPE
+    fit_t_ref_outdoor: bool = DEFAULT_FIT_T_REF_OUTDOOR
     t_ref_outdoor_c: float = DEFAULT_T_REF_OUTDOOR_C
+    min_t_ref_outdoor_c: float = DEFAULT_MIN_T_REF_OUTDOOR_C
+    max_t_ref_outdoor_c: float = DEFAULT_MAX_T_REF_OUTDOOR_C
+    min_ufh_t_ref_side_sample_count: int = DEFAULT_MIN_UFH_T_REF_SIDE_SAMPLE_COUNT
     delta_t_cond_k: float = DEFAULT_DELTA_T_COND_K
     delta_t_evap_k: float = DEFAULT_DELTA_T_EVAP_K
     cop_min: float = DEFAULT_COP_MIN
@@ -749,6 +758,9 @@ class COPCalibrationSettings:
             "min_t_supply_min_c",
             "max_t_supply_min_c",
             "initial_heating_curve_slope",
+            "t_ref_outdoor_c",
+            "min_t_ref_outdoor_c",
+            "max_t_ref_outdoor_c",
             "max_heating_curve_slope",
             "cop_min",
             "cop_max",
@@ -795,6 +807,12 @@ class COPCalibrationSettings:
             raise ValueError("initial_heating_curve_slope must lie within its bounds.")
         if self.min_heating_curve_slope >= self.max_heating_curve_slope:
             raise ValueError("min_heating_curve_slope must be < max_heating_curve_slope.")
+        if not (self.min_t_ref_outdoor_c <= self.t_ref_outdoor_c <= self.max_t_ref_outdoor_c):
+            raise ValueError("t_ref_outdoor_c must lie within its bounds.")
+        if self.min_t_ref_outdoor_c >= self.max_t_ref_outdoor_c:
+            raise ValueError("min_t_ref_outdoor_c must be < max_t_ref_outdoor_c.")
+        if self.min_ufh_t_ref_side_sample_count <= 0:
+            raise ValueError("min_ufh_t_ref_side_sample_count must be strictly positive.")
         if self.delta_t_cond_k < 0.0:
             raise ValueError("delta_t_cond_k must be non-negative.")
         if self.delta_t_evap_k < 0.0:
@@ -880,6 +898,7 @@ class COPCalibrationResult:
     """Result of fitting the offline Carnot COP model parameters."""
 
     fitted_parameters: HeatPumpCOPParameters
+    t_ref_outdoor_was_fitted: bool
     rmse_supply_temperature_c: float
     rmse_electric_energy_kwh: float
     rmse_actual_cop: float

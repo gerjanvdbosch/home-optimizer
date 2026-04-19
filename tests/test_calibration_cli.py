@@ -91,6 +91,7 @@ def _build_cop_cli_result(dataset: COPCalibrationDataset) -> COPCalibrationResul
             cop_min=1.5,
             cop_max=7.0,
         ),
+        t_ref_outdoor_was_fitted=True,
         rmse_supply_temperature_c=0.25,
         rmse_electric_energy_kwh=0.03,
         rmse_actual_cop=0.12,
@@ -168,6 +169,7 @@ def test_calibration_cli_cop_json_reports_segment_and_mode_diagnostics(
     assert payload["fit"]["ufh_rmse_electric_energy_kwh"] == result.ufh_rmse_electric_energy_kwh
     assert payload["fit"]["dhw_rmse_actual_cop"] == result.dhw_rmse_actual_cop
     assert payload["fit"]["diagnostic_eta_carnot_dhw"] == result.diagnostic_eta_carnot_dhw
+    assert payload["fit"]["t_ref_outdoor_was_fitted"] is True
 
 
 def test_calibration_cli_cop_text_reports_mode_metrics_and_segment_counts(
@@ -198,6 +200,8 @@ def test_calibration_cli_cop_text_reports_mode_metrics_and_segment_counts(
     assert "UFH RMSE(E_elec)" in output
     assert "DHW RMSE(COP)" in output
     assert "UFH diagnostic eta" in output
+    assert "T_ref_outdoor" in output
+    assert "T_ref fitted         : True" in output
     assert "Heating-curve loss   : soft_l1" in output
 
 

@@ -846,11 +846,13 @@ def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:
 
     np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, rtol=2e-2)
     np.testing.assert_allclose(result.fitted_parameters.T_supply_min, true_parameters.T_supply_min, rtol=2e-2)
+    np.testing.assert_allclose(result.fitted_parameters.T_ref_outdoor, true_parameters.T_ref_outdoor, rtol=1e-9)
     np.testing.assert_allclose(
         result.fitted_parameters.heating_curve_slope,
         true_parameters.heating_curve_slope,
         rtol=2e-2,
     )
+    assert result.t_ref_outdoor_was_fitted is False
     assert result.ufh_sample_count == 48
     assert result.dhw_sample_count == 32
     assert result.rmse_supply_temperature_c < 1e-6
@@ -865,6 +867,93 @@ def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:
     np.testing.assert_allclose(result.diagnostic_eta_carnot_ufh, true_parameters.eta_carnot, rtol=2e-2)
     assert result.diagnostic_eta_carnot_dhw is not None
     np.testing.assert_allclose(result.diagnostic_eta_carnot_dhw, true_parameters.eta_carnot, rtol=2e-2)
+
+
+def test_calibrate_cop_model_recovers_t_ref_outdoor_when_ufh_data_spans_breakpoint() -> None:
+    """COP calibration must fit T_ref_outdoor when UFH data excite both curve branches."""
+    true_parameters = HeatPumpCOPParameters(
+        eta_carnot=0.44,
+        delta_T_cond=5.0,
+        delta_T_evap=5.0,
+        T_supply_min=26.5,
+        T_ref_outdoor=17.5,
+        heating_curve_slope=0.85,
+        cop_min=1.5,
+        cop_max=7.0,
+    )
+    model = HeatPumpCOPModel(true_parameters)
+    start = datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc)
+    dt_hours = 5.0 / 60.0
+    samples: list[COPCalibrationSample] = []
+
+    ufh_outdoor_profile = np.linspace(22.0, -4.0, 60)
+    for step_k, t_out in enumerate(ufh_outdoor_profile):
+        bucket_start = start + timedelta(hours=step_k * dt_hours)
+        bucket_end = bucket_start + timedelta(hours=dt_hours)
+        t_supply_target = float(model.heating_curve(np.array([t_out], dtype=float))[0])
+        thermal_energy_kwh = 0.24 + 0.04 * np.sin(step_k / 6.0)
+        predicted_cop = float(model.cop_ufh(np.array([t_out], dtype=float))[0])
+        electric_energy_kwh = thermal_energy_kwh / predicted_cop
+        samples.append(
+            COPCalibrationSample(
+                bucket_start_utc=bucket_start,
+                bucket_end_utc=bucket_end,
+                dt_hours=dt_hours,
+                mode_name="ufh",
+                outdoor_temperature_mean_c=float(t_out),
+                supply_target_temperature_mean_c=t_supply_target,
+                supply_temperature_mean_c=t_supply_target - 0.3,
+                thermal_energy_kwh=thermal_energy_kwh,
+                electric_energy_kwh=electric_energy_kwh,
+            )
+        )
+
+    for step_k, t_out in enumerate(np.linspace(8.0, -1.0, 24), start=len(samples)):
+        bucket_start = start + timedelta(hours=step_k * dt_hours)
+        bucket_end = bucket_start + timedelta(hours=dt_hours)
+        t_supply_target = 55.0
+        thermal_energy_kwh = 0.20 + 0.02 * np.cos(step_k / 4.0)
+        predicted_cop = float(model.cop_dhw(np.array([t_out], dtype=float), t_dhw_supply=t_supply_target)[0])
+        electric_energy_kwh = thermal_energy_kwh / predicted_cop
+        samples.append(
+            COPCalibrationSample(
+                bucket_start_utc=bucket_start,
+                bucket_end_utc=bucket_end,
+                dt_hours=dt_hours,
+                mode_name="dhw",
+                outdoor_temperature_mean_c=float(t_out),
+                supply_target_temperature_mean_c=t_supply_target,
+                supply_temperature_mean_c=t_supply_target - 0.5,
+                thermal_energy_kwh=thermal_energy_kwh,
+                electric_energy_kwh=electric_energy_kwh,
+            )
+        )
+
+    result = calibrate_cop_model(
+        COPCalibrationDataset(samples=tuple(samples)),
+        COPCalibrationSettings(
+            min_sample_count=24,
+            min_ufh_curve_sample_count=24,
+            initial_eta_carnot=0.40,
+            initial_t_supply_min_c=24.0,
+            initial_heating_curve_slope=1.0,
+            t_ref_outdoor_c=18.0,
+            min_t_ref_outdoor_c=10.0,
+            max_t_ref_outdoor_c=22.0,
+            delta_t_cond_k=true_parameters.delta_T_cond,
+            delta_t_evap_k=true_parameters.delta_T_evap,
+            cop_min=true_parameters.cop_min,
+            cop_max=true_parameters.cop_max,
+        ),
+    )
+
+    assert result.t_ref_outdoor_was_fitted is True
+    np.testing.assert_allclose(result.fitted_parameters.T_ref_outdoor, true_parameters.T_ref_outdoor, atol=1e-3)
+    np.testing.assert_allclose(result.fitted_parameters.T_supply_min, true_parameters.T_supply_min, atol=1e-3)
+    np.testing.assert_allclose(result.fitted_parameters.heating_curve_slope, true_parameters.heating_curve_slope, atol=1e-3)
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, atol=1e-3)
+    assert result.rmse_supply_temperature_c < 1e-6
+    assert result.rmse_actual_cop < 1e-6
 
 
 def test_cop_calibration_settings_reject_invalid_loss_names() -> None:
@@ -1129,6 +1218,7 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
     assert snapshot.effective_parameters.R_ro == 8.8
     assert snapshot.effective_parameters.eta_carnot == 0.41
     assert snapshot.effective_parameters.T_supply_min == 26.2
+    assert snapshot.effective_parameters.T_ref_outdoor_curve == 18.0
     assert snapshot.effective_parameters.heating_curve_slope == 0.9
     assert snapshot.effective_parameters.dhw_R_loss == 52.0
     assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
