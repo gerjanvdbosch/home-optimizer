@@ -166,7 +166,7 @@ class AddonOptions(BaseModel):
     mpc_alpha: float = Field(0.25, ge=0.0, le=1.0, description="Solar fraction to room air α [-]")
     mpc_eta: float = Field(0.55, ge=0.0, le=1.0, description="Window transmittance η [-]")
     mpc_A_glass: float = Field(7.5, gt=0.0, description="South-facing glazing area [m²]")
-    mpc_internal_gains_heat_fraction: float = Field(
+    internal_gains_heat_fraction: float = Field(
         0.70,
         ge=0.0,
         le=1.0,
@@ -649,7 +649,7 @@ def main() -> None:
             "gti_pv_forecast": None,
             "price_config": price_cfg,
             "internal_gains_kw": _defaults.internal_gains_kw,
-            "internal_gains_heat_fraction": opts.mpc_internal_gains_heat_fraction,
+            "internal_gains_heat_fraction": opts.internal_gains_heat_fraction,
             # ── PV ───────────────────────────────────────────────────────────
             "pv_enabled": _defaults.pv_enabled,
             "pv_peak_kw": _defaults.pv_peak_kw,
