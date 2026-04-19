@@ -31,6 +31,7 @@ from enum import StrEnum
 from pathlib import Path
 import re
 from statistics import median
+from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
@@ -52,6 +53,16 @@ from home_optimizer.types import DHWParameters, LITERS_PER_CUBIC_METER
 
 DEFAULT_CONFIG_PATH: str = "config.yaml"
 DEFAULT_TANK_VOLUME_REGEX: str = r"^\s*boiler_tank_liters:\s*(?P<liters>[-+]?\d+(?:\.\d+)?)\s*$"
+DEFAULT_FLOW_SCALE_MULTIPLIERS: tuple[float, ...] = (
+    1.0 / 16.667,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.0 + 0.25,
+    16.667,
+)
 
 
 class CapacityScenario(StrEnum):
@@ -167,6 +178,28 @@ class StoredThermalPowerAudit:
     mean_instantaneous_power_cop: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class FlowScaleSensitivityPoint:
+    """One candidate multiplicative correction on stored DHW thermal power.
+
+    Attributes:
+        scale_multiplier: Multiplicative factor applied to the stored
+            ``hp_thermal_power_mean_kw`` [-].
+        no_draw_pair_count: Number of retained no-draw DHW charging pairs [-].
+        no_draw_weighted_charge_gain_ratio: Weighted ratio
+            ``sum(inferred_tank_injection_kw) / sum(rescaled_hp_thermal_power_kw)`` [-].
+        no_draw_median_power_bias_kw: Median common-mode power bias over retained
+            no-draw pairs [kW].
+        mean_counter_cop: Mean counter-based COP after the same thermal-power rescale [-].
+    """
+
+    scale_multiplier: float
+    no_draw_pair_count: int
+    no_draw_weighted_charge_gain_ratio: float
+    no_draw_median_power_bias_kw: float
+    mean_counter_cop: float | None
+
+
 LITERS_PER_MINUTE_TO_M3_PER_HOUR: float = 60.0 / LITERS_PER_CUBIC_METER
 
 
@@ -257,6 +290,113 @@ def _audit_stored_thermal_power(
             float(np.mean(np.array(instantaneous_power_cops, dtype=float))) if instantaneous_power_cops else None
         ),
     )
+
+
+def _rescaled_charge_rows(
+    *,
+    rows: list[TelemetryAggregate],
+    scale_multiplier: float,
+) -> list[TelemetryAggregate]:
+    """Return calibration rows with ``hp_thermal_power_mean_kw`` scaled linearly.
+
+    This helper lets the diagnostic ask a counterfactual question: if the stored
+    hydraulic power were uniformly higher or lower because of a flow-scale issue,
+    would the active-DHW common-mode mismatch disappear?
+    """
+
+    if scale_multiplier <= 0.0:
+        raise ValueError("scale_multiplier must be strictly positive.")
+    scaled_rows: list[TelemetryAggregate] = []
+    for row in rows:
+        payload = dict(row.__dict__)
+        payload["hp_thermal_power_mean_kw"] = scale_multiplier * float(row.hp_thermal_power_mean_kw)
+        scaled_rows.append(cast(TelemetryAggregate, SimpleNamespace(**payload)))
+    return scaled_rows
+
+
+def _scaled_mean_counter_cop(
+    *,
+    rows: list[TelemetryAggregate],
+    mode_name: str,
+    scale_multiplier: float,
+) -> float | None:
+    """Return the mean counter-based COP under a multiplicative thermal-power rescale."""
+
+    cop_values: list[float] = []
+    for row in rows:
+        if row.hp_mode_last != mode_name:
+            continue
+        if float(row.hp_electric_energy_delta_kwh) <= 0.0:
+            continue
+        dt_hours = (row.bucket_end_utc - row.bucket_start_utc).total_seconds() / 3600.0
+        if dt_hours <= 0.0:
+            continue
+        cop_values.append(
+            scale_multiplier * float(row.hp_thermal_power_mean_kw) * dt_hours / float(row.hp_electric_energy_delta_kwh)
+        )
+    if not cop_values:
+        return None
+    return float(np.mean(np.array(cop_values, dtype=float)))
+
+
+def _flow_scale_sensitivity(
+    *,
+    rows: list[TelemetryAggregate],
+    full_aggregate_rows: list[TelemetryAggregate],
+    repository: TelemetryRepository,
+    dt_hours: float,
+    default_request: RunRequest,
+    scenario: CapacityScenario,
+    configured_tank_volume_liters: float,
+    scale_multipliers: tuple[float, ...],
+) -> list[FlowScaleSensitivityPoint]:
+    """Return no-draw mismatch summaries for multiple linear power-scale factors."""
+
+    capacity = _build_reference_parameters(
+        repository=repository,
+        dt_hours=dt_hours,
+        default_request=default_request,
+        scenario=scenario,
+        configured_tank_volume_liters=configured_tank_volume_liters,
+    )
+    reference_parameters = DHWParameters(
+        dt_hours=dt_hours,
+        C_top=capacity.c_top_kwh_per_k,
+        C_bot=capacity.c_bot_kwh_per_k,
+        R_strat=default_request.dhw_R_strat,
+        R_loss=capacity.reference_r_loss_k_per_kw,
+        lambda_water=default_request.dhw_lambda_water_kwh_per_m3k,
+    )
+    settings = build_dhw_active_calibration_settings(reference_parameters=reference_parameters)
+
+    sensitivity_points: list[FlowScaleSensitivityPoint] = []
+    for scale_multiplier in scale_multipliers:
+        scaled_rows = _rescaled_charge_rows(rows=rows, scale_multiplier=scale_multiplier)
+        scaled_pairs = _iter_charge_pairs(
+            rows=scaled_rows,
+            default_request=default_request,
+            reference_parameters=reference_parameters,
+        )
+        scaled_no_draw_pairs = [
+            pair for pair in scaled_pairs if pair.implied_v_tap_m3_per_h <= settings.max_implied_tap_m3_per_h
+        ]
+        if not scaled_no_draw_pairs:
+            continue
+        no_draw_summary = _summarize_pairs(label="scaled_no_draw_charge_pairs", pairs=scaled_no_draw_pairs)
+        sensitivity_points.append(
+            FlowScaleSensitivityPoint(
+                scale_multiplier=scale_multiplier,
+                no_draw_pair_count=no_draw_summary.pair_count,
+                no_draw_weighted_charge_gain_ratio=no_draw_summary.weighted_charge_gain_ratio,
+                no_draw_median_power_bias_kw=no_draw_summary.median_power_bias_kw,
+                mean_counter_cop=_scaled_mean_counter_cop(
+                    rows=full_aggregate_rows,
+                    mode_name="dhw",
+                    scale_multiplier=scale_multiplier,
+                ),
+            )
+        )
+    return sensitivity_points
 
 
 def _build_reference_parameters(
@@ -515,6 +655,19 @@ def _print_scenario_diagnostic(diagnostic: ScenarioDiagnostic) -> None:
     print()
 
 
+def _print_flow_scale_sensitivity(
+    *,
+    scenario_name: str,
+    sensitivity_points: list[FlowScaleSensitivityPoint],
+) -> None:
+    """Render the flow-scale sensitivity sweep for one DHW capacity scenario."""
+
+    print(f"flow_scale_sensitivity scenario={scenario_name}")
+    for point in sensitivity_points:
+        print(asdict(point))
+    print()
+
+
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments for the common-mode mismatch diagnostic."""
 
@@ -585,6 +738,19 @@ def main() -> None:
             configured_tank_volume_liters=configured_tank_volume_liters,
         )
         _print_scenario_diagnostic(diagnostic)
+        _print_flow_scale_sensitivity(
+            scenario_name=diagnostic.capacity.scenario_name,
+            sensitivity_points=_flow_scale_sensitivity(
+                rows=rows,
+                full_aggregate_rows=full_aggregate_rows,
+                repository=repository,
+                dt_hours=dt_hours,
+                default_request=default_request,
+                scenario=scenario,
+                configured_tank_volume_liters=configured_tank_volume_liters,
+                scale_multipliers=DEFAULT_FLOW_SCALE_MULTIPLIERS,
+            ),
+        )
 
 
 if __name__ == "__main__":
