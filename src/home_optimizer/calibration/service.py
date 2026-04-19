@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timezone
+from math import isfinite
 from types import SimpleNamespace
 from typing import cast
 
@@ -337,6 +338,118 @@ def _stage_success(
     )
 
 
+def _ufh_effective_envelope_capacity_kwh_per_k(parameters: ThermalParameters) -> float:
+    """Return the conservative effective UFH envelope capacity proxy ``C_r + C_b`` [kWh/K].
+
+    The passive off-mode stage identifies ``tau_house = C_eff * R_ro``. To compare
+    the active two-state UFH fit against that passive estimate, this helper uses the
+    total fitted two-state heat capacity as the closest grey-box proxy for
+    ``C_eff``. This is intentionally conservative: it avoids comparing the passive
+    envelope time constant against room-air capacity alone, which would overstate
+    the implied passive ``R_ro``.
+    """
+    return parameters.C_r + parameters.C_b
+
+
+def _ufh_active_bound_violations(
+    result: UFHActiveCalibrationResult,
+    settings: UFHActiveCalibrationSettings,
+    *,
+    tolerance_ratio: float,
+) -> tuple[str, ...]:
+    """Return any UFH active-fit parameters that effectively sit on optimizer bounds.
+
+    Args:
+        result: Fitted active-UFH RC result to validate.
+        settings: Active-UFH optimiser settings defining the reference tuple and
+            relative min/max parameter bounds.
+        tolerance_ratio: Relative tolerance used to classify near-bound solutions [-].
+
+    Returns:
+        Tuple with human-readable violation messages. Empty tuple means the fit is
+        safely interior to the allowed parameter box.
+    """
+    fitted_parameter_names = ("C_r", "C_b", "R_br", "R_ro") if result.fit_c_r else ("C_b", "R_br", "R_ro")
+    violations: list[str] = []
+    for parameter_name in fitted_parameter_names:
+        reference_value = getattr(settings.reference_parameters, parameter_name)
+        fitted_value = getattr(result.fitted_parameters, parameter_name)
+        lower_bound = reference_value * settings.min_parameter_ratio
+        upper_bound = reference_value * settings.max_parameter_ratio
+        if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
+            violations.append(
+                f"{parameter_name}={fitted_value:.6g} is at/near the lower bound {lower_bound:.6g}."
+            )
+        elif fitted_value >= upper_bound * (1.0 - tolerance_ratio):
+            violations.append(
+                f"{parameter_name}={fitted_value:.6g} is at/near the upper bound {upper_bound:.6g}."
+            )
+    return tuple(violations)
+
+
+def _validate_automatic_ufh_active_fit(
+    repository: TelemetryRepository,
+    result: UFHActiveCalibrationResult,
+    *,
+    active_settings: UFHActiveCalibrationSettings,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> None:
+    """Fail fast when an automatic active-UFH RC fit is physically untrustworthy.
+
+    The active replay stage can achieve a small one-step room-temperature RMSE even
+    when the RC tuple is under-identified, for example when only one short segment
+    is available or when multiple parameters are pushed onto their box constraints.
+    This post-fit gate rejects such solutions before they can become runtime MPC
+    overrides.
+
+    Validation criteria:
+
+    1. Enough selected active UFH segments are present.
+    2. No fitted active-UFH parameter sits on its optimiser bounds.
+    3. The active fitted ``R_ro`` remains reasonably consistent with the passive
+       off-mode envelope fit derived from the same telemetry history.
+    """
+    if result.segment_count < automatic_settings.ufh_active_min_selected_segments:
+        raise ValueError(
+            "Automatic UFH RC fit rejected: insufficient active excitation. "
+            f"Selected segments={result.segment_count}, required >= "
+            f"{automatic_settings.ufh_active_min_selected_segments}."
+        )
+
+    bound_violations = _ufh_active_bound_violations(
+        result,
+        active_settings,
+        tolerance_ratio=automatic_settings.ufh_active_bound_tolerance_ratio,
+    )
+    if bound_violations:
+        raise ValueError(
+            "Automatic UFH RC fit rejected: optimiser converged to parameter bounds. "
+            + " ".join(bound_violations)
+        )
+
+    passive_result = calibrate_ufh_off_from_repository(
+        repository,
+        UFHOffCalibrationSettings(
+            reference_c_eff_kwh_per_k=_ufh_effective_envelope_capacity_kwh_per_k(result.fitted_parameters)
+        ),
+    )
+    passive_r_ro = passive_result.suggested_r_ro_k_per_kw
+    if passive_r_ro is None or not isfinite(passive_r_ro) or passive_r_ro <= 0.0:
+        raise ValueError(
+            "Automatic UFH RC fit rejected: passive off-mode envelope stage did not produce a finite R_ro."
+        )
+
+    active_r_ro = result.fitted_parameters.R_ro
+    mismatch_ratio = max(active_r_ro / passive_r_ro, passive_r_ro / active_r_ro)
+    if mismatch_ratio > automatic_settings.ufh_active_max_r_ro_mismatch_ratio:
+        raise ValueError(
+            "Automatic UFH RC fit rejected: active/passive R_ro mismatch is too large. "
+            f"Active R_ro={active_r_ro:.6g} K/kW, passive-derived R_ro={passive_r_ro:.6g} K/kW, "
+            f"mismatch ratio={mismatch_ratio:.3f}, allowed <= "
+            f"{automatic_settings.ufh_active_max_r_ro_mismatch_ratio:.3f}."
+        )
+
+
 def build_automatic_calibration_snapshot(
     repository: TelemetryRepository,
     *,
@@ -395,9 +508,18 @@ def build_automatic_calibration_snapshot(
                 eta=effective_request.eta,
                 A_glass=effective_request.A_glass,
             )
+            ufh_active_settings = build_ufh_active_calibration_settings(
+                reference_parameters=ufh_reference_parameters
+            )
             result = calibrate_ufh_active_from_repository(
                 repository,
-                build_ufh_active_calibration_settings(reference_parameters=ufh_reference_parameters),
+                ufh_active_settings,
+            )
+            _validate_automatic_ufh_active_fit(
+                repository,
+                result,
+                active_settings=ufh_active_settings,
+                automatic_settings=settings,
             )
             overrides = CalibrationParameterOverrides(
                 C_r=result.fitted_parameters.C_r,

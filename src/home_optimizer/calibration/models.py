@@ -117,6 +117,9 @@ DEFAULT_COP_ETA_LOSS_NAME: str = "soft_l1"
 DEFAULT_COP_HEATING_CURVE_LOSS_SCALE_C: float = 1.0
 DEFAULT_COP_ETA_LOSS_SCALE_KWH: float = 0.05
 DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
+DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS: int = 2
+DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO: float = 1e-6
+DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO: float = 4.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -812,13 +815,38 @@ class AutomaticCalibrationSettings:
     calibration cycle always attempts all supported stages (UFH, DHW standby,
     DHW active, and COP) and retains the previous successful snapshot whenever a
     particular stage fails.
+
+    Attributes:
+        min_history_hours: Minimum persisted telemetry history before any
+            automatic stage runs [h].
+        ufh_active_min_selected_segments: Minimum number of selected active-UFH
+            replay segments required before the fitted RC tuple is trusted [-].
+            One short segment is often not structurally informative enough to
+            separate solar/internal gains from the RC dynamics.
+        ufh_active_bound_tolerance_ratio: Relative tolerance used when deciding
+            whether a fitted UFH parameter effectively sits on one of its
+            optimizer bounds [-]. Values close to the bound are treated as bound
+            hits because such solutions are typically under-identified.
+        ufh_active_max_r_ro_mismatch_ratio: Maximum allowed multiplicative
+            mismatch between the active-UFH fitted ``R_ro`` and the passive
+            off-mode envelope-derived ``R_ro`` [-]. Larger disagreement means the
+            active replay fit is not physically self-consistent across stages.
     """
 
     min_history_hours: float = DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS
+    ufh_active_min_selected_segments: int = DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS
+    ufh_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO
+    ufh_active_max_r_ro_mismatch_ratio: float = DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO
 
     def __post_init__(self) -> None:
         if self.min_history_hours <= 0.0:
             raise ValueError("min_history_hours must be strictly positive.")
+        if self.ufh_active_min_selected_segments <= 0:
+            raise ValueError("ufh_active_min_selected_segments must be strictly positive.")
+        if self.ufh_active_bound_tolerance_ratio < 0.0:
+            raise ValueError("ufh_active_bound_tolerance_ratio must be non-negative.")
+        if self.ufh_active_max_r_ro_mismatch_ratio < 1.0:
+            raise ValueError("ufh_active_max_r_ro_mismatch_ratio must be >= 1.")
 
 
 @dataclass(frozen=True, slots=True)

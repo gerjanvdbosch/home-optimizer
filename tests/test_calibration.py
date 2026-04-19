@@ -1081,6 +1081,7 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
                 eta=0.55,
                 A_glass=7.5,
             ),
+            fit_c_r=False,
             sample_count=24,
             segment_count=3,
             dataset_start_utc=datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
@@ -1088,6 +1089,10 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
             optimizer_status="ok",
             rmse_room_temperature_c=0.18,
         ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=9.0),
     )
     monkeypatch.setattr(
         "home_optimizer.calibration.service.calibrate_cop_from_repository",
@@ -1159,6 +1164,7 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
                     eta=settings.reference_parameters.eta,
                     A_glass=settings.reference_parameters.A_glass,
                 ),
+                fit_c_r=False,
                 sample_count=12,
                 segment_count=2,
                 dataset_start_utc=start,
@@ -1167,6 +1173,10 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
                 rmse_room_temperature_c=0.1,
             ),
         )[1],
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=10.0),
     )
     monkeypatch.setattr(
         "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
@@ -1268,20 +1278,25 @@ def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(mo
             fitted_parameters=ThermalParameters(
                 dt_hours=5.0 / 60.0,
                 C_r=6.0,
-                C_b=0.15625,
-                R_br=20.8625,
-                R_ro=1.7483,
+                C_b=3.0,
+                R_br=1.0,
+                R_ro=3.0,
                 alpha=0.25,
                 eta=0.55,
                 A_glass=7.5,
             ),
+            fit_c_r=False,
             sample_count=25,
-            segment_count=1,
+            segment_count=2,
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=2),
             optimizer_status="ok",
             rmse_room_temperature_c=0.04,
         ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=3.2),
     )
     monkeypatch.setattr(
         "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
@@ -1317,6 +1332,207 @@ def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(mo
     assert snapshot.effective_parameters.R_br is None
     assert snapshot.effective_parameters.R_ro is None
     assert snapshot.effective_parameters.dhw_R_loss == 60.0
+
+
+def test_build_automatic_calibration_snapshot_rejects_ufh_fit_that_hits_bounds(monkeypatch) -> None:
+    """Automatic calibration must reject active UFH fits that converge onto box constraints."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=ThermalParameters(
+                dt_hours=5.0 / 60.0,
+                C_r=6.0,
+                C_b=2.5,
+                R_br=1.2,
+                R_ro=8.0,
+                alpha=0.25,
+                eta=0.55,
+                A_glass=7.5,
+            ),
+            fit_c_r=False,
+            sample_count=20,
+            segment_count=2,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=2),
+            optimizer_status="ok",
+            rmse_room_temperature_c=0.05,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=8.2),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw standby")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip cop")),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.ufh_active is not None
+    assert snapshot.ufh_active.succeeded is False
+    assert "parameter bounds" in snapshot.ufh_active.message
+
+
+def test_build_automatic_calibration_snapshot_rejects_ufh_fit_with_too_few_segments(monkeypatch) -> None:
+    """Automatic calibration must reject active UFH fits built from only one short selected segment."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=ThermalParameters(
+                dt_hours=5.0 / 60.0,
+                C_r=6.0,
+                C_b=11.0,
+                R_br=1.1,
+                R_ro=8.5,
+                alpha=0.25,
+                eta=0.55,
+                A_glass=7.5,
+            ),
+            fit_c_r=False,
+            sample_count=12,
+            segment_count=1,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=1),
+            optimizer_status="ok",
+            rmse_room_temperature_c=0.05,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=8.6),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw standby")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip cop")),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.ufh_active is not None
+    assert snapshot.ufh_active.succeeded is False
+    assert "insufficient active excitation" in snapshot.ufh_active.message
+
+
+def test_build_automatic_calibration_snapshot_rejects_ufh_fit_inconsistent_with_passive_r_ro(monkeypatch) -> None:
+    """Automatic calibration must reject active UFH fits that disagree strongly with the passive envelope stage."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=ThermalParameters(
+                dt_hours=5.0 / 60.0,
+                C_r=6.0,
+                C_b=11.0,
+                R_br=1.1,
+                R_ro=3.0,
+                alpha=0.25,
+                eta=0.55,
+                A_glass=7.5,
+            ),
+            fit_c_r=False,
+            sample_count=18,
+            segment_count=2,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=2),
+            optimizer_status="ok",
+            rmse_room_temperature_c=0.04,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=20.0),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw standby")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip cop")),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.ufh_active is not None
+    assert snapshot.ufh_active.succeeded is False
+    assert "active/passive R_ro mismatch" in snapshot.ufh_active.message
 
 
 def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:
