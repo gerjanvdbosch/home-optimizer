@@ -18,7 +18,7 @@ from home_optimizer.telemetry import (
     TelemetryRepository,
     aggregate_readings,
 )
-from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload
+from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult
 
 
 class SequenceBackend(SensorBackend):
@@ -489,6 +489,12 @@ def test_repository_round_trips_latest_calibration_snapshot(tmp_path: Path) -> N
             eta_carnot=0.41,
             T_supply_min=26.0,
         ),
+        ufh_active=CalibrationStageResult(
+            stage_name="ufh_active",
+            succeeded=False,
+            message="Rejected for visibility test.",
+            diagnostics={"selected_segment_count": 1, "required_min_selected_segments": 2},
+        ),
     )
 
     repository.add_calibration_snapshot(payload)
@@ -500,4 +506,6 @@ def test_repository_round_trips_latest_calibration_snapshot(tmp_path: Path) -> N
     assert round_tripped.effective_parameters.R_ro == pytest.approx(8.4)
     assert round_tripped.effective_parameters.eta_carnot == pytest.approx(0.41)
     assert round_tripped.effective_parameters.T_supply_min == pytest.approx(26.0)
+    assert round_tripped.ufh_active is not None
+    assert round_tripped.ufh_active.diagnostics["required_min_selected_segments"] == 2
 

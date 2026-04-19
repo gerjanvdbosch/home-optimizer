@@ -11,7 +11,7 @@ from home_optimizer.api import HomeOptimizerAPI, app
 from home_optimizer.optimizer import Optimizer, RunRequest
 from home_optimizer.sensors import LiveReadings, SensorBackend
 from home_optimizer.telemetry import TelemetryRepository
-from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload
+from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult
 
 client = TestClient(app)
 
@@ -348,6 +348,26 @@ def test_calibration_latest_returns_latest_snapshot(monkeypatch, tmp_path) -> No
                 eta_carnot=0.42,
                 dhw_R_loss=55.0,
             ),
+            ufh_active=CalibrationStageResult(
+                stage_name="ufh_active",
+                succeeded=False,
+                message="Automatic UFH RC fit rejected: optimiser converged to parameter bounds.",
+                diagnostics={
+                    "selected_segment_count": 1,
+                    "required_min_selected_segments": 2,
+                    "bound_violations": ["C_b at lower bound"],
+                },
+            ),
+            dhw_active=CalibrationStageResult(
+                stage_name="dhw_active",
+                succeeded=False,
+                message="Automatic DHW active fit rejected: insufficient active DHW excitation.",
+                diagnostics={
+                    "selected_segment_count": 1,
+                    "required_min_selected_segments": 2,
+                    "fitted_r_strat_k_per_kw": 12.0,
+                },
+            ),
         )
     )
     monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
@@ -359,6 +379,8 @@ def test_calibration_latest_returns_latest_snapshot(monkeypatch, tmp_path) -> No
     assert payload["effective_parameters"]["R_ro"] == 9.1
     assert payload["effective_parameters"]["eta_carnot"] == 0.42
     assert payload["effective_parameters"]["dhw_R_loss"] == 55.0
+    assert payload["ufh_active"]["diagnostics"]["bound_violations"] == ["C_b at lower bound"]
+    assert payload["dhw_active"]["diagnostics"]["required_min_selected_segments"] == 2
 
 
 def test_defaults_returns_static_runrequest_without_calibration_snapshot(monkeypatch, tmp_path) -> None:

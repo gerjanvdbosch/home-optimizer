@@ -13,6 +13,7 @@ Flow rate            : m³/h
 
 from __future__ import annotations
 
+from typing import Any
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -114,6 +115,7 @@ class CalibrationStageResult(BaseModel):
     dataset_start_utc: datetime | None = None
     dataset_end_utc: datetime | None = None
     optimizer_status: str | None = None
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     overrides: CalibrationParameterOverrides = Field(default_factory=CalibrationParameterOverrides)
 
 

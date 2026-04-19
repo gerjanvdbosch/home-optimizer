@@ -1082,12 +1082,15 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
                 A_glass=7.5,
             ),
             fit_c_r=False,
+            fit_initial_floor_temperature_offset=False,
+            fitted_initial_floor_temperature_offset_c=1.0,
             sample_count=24,
             segment_count=3,
             dataset_start_utc=datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
             dataset_end_utc=datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc),
             optimizer_status="ok",
             rmse_room_temperature_c=0.18,
+            max_abs_innovation_c=0.30,
         ),
     )
     monkeypatch.setattr(
@@ -1165,12 +1168,15 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
                     A_glass=settings.reference_parameters.A_glass,
                 ),
                 fit_c_r=False,
+                fit_initial_floor_temperature_offset=False,
+                fitted_initial_floor_temperature_offset_c=1.0,
                 sample_count=12,
                 segment_count=2,
                 dataset_start_utc=start,
                 dataset_end_utc=start + timedelta(hours=1),
                 optimizer_status="ok",
                 rmse_room_temperature_c=0.1,
+                max_abs_innovation_c=0.20,
             ),
         )[1],
     )
@@ -1183,12 +1189,14 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
         lambda _repository, settings: (
             captured_settings.setdefault("dhw_standby", settings),
             SimpleNamespace(
-                    tau_standby_hours=8.0,
+                tau_standby_hours=8.0,
                 suggested_r_loss_k_per_kw=60.0,
                 sample_count=12,
                 dataset_start_utc=start,
                 dataset_end_utc=start + timedelta(hours=1),
                 optimizer_status="ok",
+                rmse_mean_tank_temperature_c=0.10,
+                max_abs_residual_c=0.20,
             ),
         )[1],
     )
@@ -1210,6 +1218,8 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
                 dataset_end_utc=start + timedelta(hours=1),
                 optimizer_status="ok",
                 rmse_t_top_c=0.1,
+                rmse_t_bot_c=0.1,
+                max_abs_residual_c=0.2,
             ),
         )[1],
     )
@@ -1287,12 +1297,15 @@ def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(mo
                 A_glass=7.5,
             ),
             fit_c_r=False,
+            fit_initial_floor_temperature_offset=False,
+            fitted_initial_floor_temperature_offset_c=1.0,
             sample_count=25,
             segment_count=2,
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=2),
             optimizer_status="ok",
             rmse_room_temperature_c=0.04,
+            max_abs_innovation_c=0.12,
         ),
     )
     monkeypatch.setattr(
@@ -1308,6 +1321,8 @@ def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(mo
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=1),
             optimizer_status="ok",
+            rmse_mean_tank_temperature_c=0.10,
+            max_abs_residual_c=0.20,
         ),
     )
     monkeypatch.setattr(
@@ -1366,12 +1381,15 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_that_hits_bounds(m
                 A_glass=7.5,
             ),
             fit_c_r=False,
+            fit_initial_floor_temperature_offset=False,
+            fitted_initial_floor_temperature_offset_c=1.0,
             sample_count=20,
             segment_count=2,
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=2),
             optimizer_status="ok",
             rmse_room_temperature_c=0.05,
+            max_abs_innovation_c=0.15,
         ),
     )
     monkeypatch.setattr(
@@ -1401,6 +1419,8 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_that_hits_bounds(m
     assert snapshot.ufh_active is not None
     assert snapshot.ufh_active.succeeded is False
     assert "parameter bounds" in snapshot.ufh_active.message
+    assert snapshot.ufh_active.diagnostics["bound_violations"]
+    assert snapshot.ufh_active.diagnostics["selected_segment_count"] == 2
 
 
 def test_build_automatic_calibration_snapshot_rejects_ufh_fit_with_too_few_segments(monkeypatch) -> None:
@@ -1433,12 +1453,15 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_with_too_few_segme
                 A_glass=7.5,
             ),
             fit_c_r=False,
+            fit_initial_floor_temperature_offset=False,
+            fitted_initial_floor_temperature_offset_c=1.0,
             sample_count=12,
             segment_count=1,
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=1),
             optimizer_status="ok",
             rmse_room_temperature_c=0.05,
+            max_abs_innovation_c=0.15,
         ),
     )
     monkeypatch.setattr(
@@ -1500,12 +1523,15 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_inconsistent_with_
                 A_glass=7.5,
             ),
             fit_c_r=False,
+            fit_initial_floor_temperature_offset=False,
+            fitted_initial_floor_temperature_offset_c=1.0,
             sample_count=18,
             segment_count=2,
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=2),
             optimizer_status="ok",
             rmse_room_temperature_c=0.04,
+            max_abs_innovation_c=0.12,
         ),
     )
     monkeypatch.setattr(
@@ -1570,6 +1596,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_standby_fit_that_hits_
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=3),
             optimizer_status="ok",
+            rmse_mean_tank_temperature_c=0.20,
+            max_abs_residual_c=0.40,
         ),
     )
     monkeypatch.setattr(
@@ -1626,6 +1654,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_with_too_fe
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=3),
             optimizer_status="ok",
+            rmse_mean_tank_temperature_c=0.10,
+            max_abs_residual_c=0.20,
         ),
     )
     monkeypatch.setattr(
@@ -1644,6 +1674,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_with_too_fe
             dataset_end_utc=start + timedelta(hours=2),
             optimizer_status="ok",
             rmse_t_top_c=0.08,
+            rmse_t_bot_c=0.09,
+            max_abs_residual_c=0.20,
         ),
     )
     monkeypatch.setattr(
@@ -1661,6 +1693,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_with_too_fe
     assert snapshot.dhw_active is not None
     assert snapshot.dhw_active.succeeded is False
     assert "insufficient active DHW excitation" in snapshot.dhw_active.message
+    assert snapshot.dhw_active.diagnostics["selected_segment_count"] == 1
+    assert snapshot.dhw_active.diagnostics["required_min_selected_segments"] == 2
 
 
 def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_bounds(monkeypatch) -> None:
@@ -1696,6 +1730,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_b
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=3),
             optimizer_status="ok",
+            rmse_mean_tank_temperature_c=0.10,
+            max_abs_residual_c=0.20,
         ),
     )
     monkeypatch.setattr(
@@ -1714,6 +1750,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_b
             dataset_end_utc=start + timedelta(hours=2),
             optimizer_status="ok",
             rmse_t_top_c=0.08,
+            rmse_t_bot_c=0.09,
+            max_abs_residual_c=0.20,
         ),
     )
     monkeypatch.setattr(

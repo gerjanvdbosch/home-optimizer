@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from collections import Counter
 from datetime import datetime, timezone
 from math import isfinite
@@ -304,12 +305,18 @@ def _merge_runtime_safe_stage_overrides(
     return current_effective_parameters.merged_with(stage_overrides)
 
 
-def _stage_failure(stage_name: str, message: str) -> CalibrationStageResult:
+def _stage_failure(
+    stage_name: str,
+    message: str,
+    *,
+    diagnostics: dict[str, Any] | None = None,
+) -> CalibrationStageResult:
     """Create a compact failed-stage summary for persistence/API observability."""
     return CalibrationStageResult(
         stage_name=stage_name,
         succeeded=False,
         message=message,
+        diagnostics={} if diagnostics is None else diagnostics,
     )
 
 
@@ -323,6 +330,7 @@ def _stage_success(
     dataset_end_utc: datetime,
     segment_count: int | None = None,
     optimizer_status: str | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> CalibrationStageResult:
     """Create a compact successful-stage summary for persistence/API observability."""
     return CalibrationStageResult(
@@ -334,8 +342,97 @@ def _stage_success(
         dataset_start_utc=dataset_start_utc,
         dataset_end_utc=dataset_end_utc,
         optimizer_status=optimizer_status,
+        diagnostics={} if diagnostics is None else diagnostics,
         overrides=overrides,
     )
+
+
+class _CalibrationValidationError(ValueError):
+    """Internal validation error carrying structured stage diagnostics."""
+
+    def __init__(self, message: str, *, diagnostics: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+def _build_ufh_active_diagnostics(
+    result: UFHActiveCalibrationResult,
+    *,
+    active_settings: UFHActiveCalibrationSettings,
+    automatic_settings: AutomaticCalibrationSettings,
+    bound_violations: tuple[str, ...] = (),
+    passive_r_ro_k_per_kw: float | None = None,
+    r_ro_mismatch_ratio: float | None = None,
+) -> dict[str, Any]:
+    """Return structured UFH active-fit diagnostics for API/persistence visibility."""
+    fitted_parameter_names = ("C_r", "C_b", "R_br", "R_ro") if result.fit_c_r else ("C_b", "R_br", "R_ro")
+    bounds = {
+        parameter_name: {
+            "reference": getattr(active_settings.reference_parameters, parameter_name),
+            "fitted": getattr(result.fitted_parameters, parameter_name),
+            "lower_bound": getattr(active_settings.reference_parameters, parameter_name)
+            * active_settings.min_parameter_ratio,
+            "upper_bound": getattr(active_settings.reference_parameters, parameter_name)
+            * active_settings.max_parameter_ratio,
+        }
+        for parameter_name in fitted_parameter_names
+    }
+    return {
+        "selected_segment_count": result.segment_count,
+        "required_min_selected_segments": automatic_settings.ufh_active_min_selected_segments,
+        "fit_c_r": result.fit_c_r,
+        "fit_initial_floor_temperature_offset": result.fit_initial_floor_temperature_offset,
+        "fitted_initial_floor_temperature_offset_c": result.fitted_initial_floor_temperature_offset_c,
+        "rmse_room_temperature_c": result.rmse_room_temperature_c,
+        "max_abs_innovation_c": result.max_abs_innovation_c,
+        "bound_tolerance_ratio": automatic_settings.ufh_active_bound_tolerance_ratio,
+        "bound_violations": list(bound_violations),
+        "parameter_bounds": bounds,
+        "active_r_ro_k_per_kw": result.fitted_parameters.R_ro,
+        "passive_r_ro_k_per_kw": passive_r_ro_k_per_kw,
+        "r_ro_mismatch_ratio": r_ro_mismatch_ratio,
+        "max_r_ro_mismatch_ratio": automatic_settings.ufh_active_max_r_ro_mismatch_ratio,
+    }
+
+
+def _build_dhw_standby_diagnostics(
+    result: DHWStandbyCalibrationResult,
+    *,
+    standby_settings: DHWStandbyCalibrationSettings,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> dict[str, Any]:
+    """Return structured DHW standby-fit diagnostics for API/persistence visibility."""
+    return {
+        "tau_standby_hours": result.tau_standby_hours,
+        "tau_lower_bound_hours": standby_settings.min_tau_hours,
+        "tau_upper_bound_hours": standby_settings.max_tau_hours,
+        "bound_tolerance_ratio": automatic_settings.dhw_standby_bound_tolerance_ratio,
+        "suggested_r_loss_k_per_kw": result.suggested_r_loss_k_per_kw,
+        "rmse_mean_tank_temperature_c": result.rmse_mean_tank_temperature_c,
+        "max_abs_residual_c": result.max_abs_residual_c,
+    }
+
+
+def _build_dhw_active_diagnostics(
+    result: DHWActiveCalibrationResult,
+    *,
+    active_settings: DHWActiveCalibrationSettings,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> dict[str, Any]:
+    """Return structured DHW active-fit diagnostics for API/persistence visibility."""
+    reference_r_strat = active_settings.reference_parameters.R_strat
+    return {
+        "selected_segment_count": result.segment_count,
+        "required_min_selected_segments": automatic_settings.dhw_active_min_selected_segments,
+        "fitted_r_strat_k_per_kw": result.fitted_parameters.R_strat,
+        "r_strat_lower_bound_k_per_kw": reference_r_strat * active_settings.min_parameter_ratio,
+        "r_strat_upper_bound_k_per_kw": reference_r_strat * active_settings.max_parameter_ratio,
+        "bound_tolerance_ratio": automatic_settings.dhw_active_bound_tolerance_ratio,
+        "fixed_r_loss_k_per_kw": result.fitted_parameters.R_loss,
+        "rmse_t_top_c": result.rmse_t_top_c,
+        "rmse_t_bot_c": result.rmse_t_bot_c,
+        "max_abs_residual_c": result.max_abs_residual_c,
+    }
 
 
 def _ufh_effective_envelope_capacity_kwh_per_k(parameters: ThermalParameters) -> float:
@@ -393,7 +490,7 @@ def _validate_automatic_ufh_active_fit(
     *,
     active_settings: UFHActiveCalibrationSettings,
     automatic_settings: AutomaticCalibrationSettings,
-) -> None:
+) -> dict[str, Any]:
     """Fail fast when an automatic active-UFH RC fit is physically untrustworthy.
 
     The active replay stage can achieve a small one-step room-temperature RMSE even
@@ -410,10 +507,15 @@ def _validate_automatic_ufh_active_fit(
        off-mode envelope fit derived from the same telemetry history.
     """
     if result.segment_count < automatic_settings.ufh_active_min_selected_segments:
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic UFH RC fit rejected: insufficient active excitation. "
             f"Selected segments={result.segment_count}, required >= "
-            f"{automatic_settings.ufh_active_min_selected_segments}."
+            f"{automatic_settings.ufh_active_min_selected_segments}.",
+            diagnostics=_build_ufh_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+            ),
         )
 
     bound_violations = _ufh_active_bound_violations(
@@ -422,9 +524,15 @@ def _validate_automatic_ufh_active_fit(
         tolerance_ratio=automatic_settings.ufh_active_bound_tolerance_ratio,
     )
     if bound_violations:
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic UFH RC fit rejected: optimiser converged to parameter bounds. "
-            + " ".join(bound_violations)
+            + " ".join(bound_violations),
+            diagnostics=_build_ufh_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+                bound_violations=bound_violations,
+            ),
         )
 
     passive_result = calibrate_ufh_off_from_repository(
@@ -435,19 +543,39 @@ def _validate_automatic_ufh_active_fit(
     )
     passive_r_ro = passive_result.suggested_r_ro_k_per_kw
     if passive_r_ro is None or not isfinite(passive_r_ro) or passive_r_ro <= 0.0:
-        raise ValueError(
-            "Automatic UFH RC fit rejected: passive off-mode envelope stage did not produce a finite R_ro."
+        raise _CalibrationValidationError(
+            "Automatic UFH RC fit rejected: passive off-mode envelope stage did not produce a finite R_ro.",
+            diagnostics=_build_ufh_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+                passive_r_ro_k_per_kw=passive_r_ro,
+            ),
         )
 
     active_r_ro = result.fitted_parameters.R_ro
     mismatch_ratio = max(active_r_ro / passive_r_ro, passive_r_ro / active_r_ro)
     if mismatch_ratio > automatic_settings.ufh_active_max_r_ro_mismatch_ratio:
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic UFH RC fit rejected: active/passive R_ro mismatch is too large. "
             f"Active R_ro={active_r_ro:.6g} K/kW, passive-derived R_ro={passive_r_ro:.6g} K/kW, "
             f"mismatch ratio={mismatch_ratio:.3f}, allowed <= "
-            f"{automatic_settings.ufh_active_max_r_ro_mismatch_ratio:.3f}."
+            f"{automatic_settings.ufh_active_max_r_ro_mismatch_ratio:.3f}.",
+            diagnostics=_build_ufh_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+                passive_r_ro_k_per_kw=passive_r_ro,
+                r_ro_mismatch_ratio=mismatch_ratio,
+            ),
         )
+    return _build_ufh_active_diagnostics(
+        result,
+        active_settings=active_settings,
+        automatic_settings=automatic_settings,
+        passive_r_ro_k_per_kw=passive_r_ro,
+        r_ro_mismatch_ratio=mismatch_ratio,
+    )
 
 
 def _validate_automatic_dhw_standby_fit(
@@ -455,7 +583,7 @@ def _validate_automatic_dhw_standby_fit(
     *,
     standby_settings: DHWStandbyCalibrationSettings,
     automatic_settings: AutomaticCalibrationSettings,
-) -> None:
+) -> dict[str, Any]:
     """Fail fast when an automatic DHW standby-loss fit converges to its box bounds.
 
     The standby stage identifies a one-state envelope time constant ``tau_standby``.
@@ -467,15 +595,30 @@ def _validate_automatic_dhw_standby_fit(
     fitted_value = result.tau_standby_hours
     tolerance_ratio = automatic_settings.dhw_standby_bound_tolerance_ratio
     if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic DHW standby fit rejected: tau_standby converged to the lower bound. "
-            f"tau_standby={fitted_value:.6g} h, lower bound={lower_bound:.6g} h."
+            f"tau_standby={fitted_value:.6g} h, lower bound={lower_bound:.6g} h.",
+            diagnostics=_build_dhw_standby_diagnostics(
+                result,
+                standby_settings=standby_settings,
+                automatic_settings=automatic_settings,
+            ),
         )
     if fitted_value >= upper_bound * (1.0 - tolerance_ratio):
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic DHW standby fit rejected: tau_standby converged to the upper bound. "
-            f"tau_standby={fitted_value:.6g} h, upper bound={upper_bound:.6g} h."
+            f"tau_standby={fitted_value:.6g} h, upper bound={upper_bound:.6g} h.",
+            diagnostics=_build_dhw_standby_diagnostics(
+                result,
+                standby_settings=standby_settings,
+                automatic_settings=automatic_settings,
+            ),
         )
+    return _build_dhw_standby_diagnostics(
+        result,
+        standby_settings=standby_settings,
+        automatic_settings=automatic_settings,
+    )
 
 
 def _validate_automatic_dhw_active_fit(
@@ -483,7 +626,7 @@ def _validate_automatic_dhw_active_fit(
     *,
     active_settings: DHWActiveCalibrationSettings,
     automatic_settings: AutomaticCalibrationSettings,
-) -> None:
+) -> dict[str, Any]:
     """Fail fast when an automatic active-DHW ``R_strat`` fit is under-identified.
 
     The active DHW stage should only become a runtime override when enough selected
@@ -491,10 +634,15 @@ def _validate_automatic_dhw_active_fit(
     inside the physical optimiser box.
     """
     if result.segment_count < automatic_settings.dhw_active_min_selected_segments:
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic DHW active fit rejected: insufficient active DHW excitation. "
             f"Selected segments={result.segment_count}, required >= "
-            f"{automatic_settings.dhw_active_min_selected_segments}."
+            f"{automatic_settings.dhw_active_min_selected_segments}.",
+            diagnostics=_build_dhw_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+            ),
         )
 
     reference_r_strat = active_settings.reference_parameters.R_strat
@@ -503,15 +651,30 @@ def _validate_automatic_dhw_active_fit(
     fitted_value = result.fitted_parameters.R_strat
     tolerance_ratio = automatic_settings.dhw_active_bound_tolerance_ratio
     if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic DHW active fit rejected: R_strat converged to the lower bound. "
-            f"R_strat={fitted_value:.6g} K/kW, lower bound={lower_bound:.6g} K/kW."
+            f"R_strat={fitted_value:.6g} K/kW, lower bound={lower_bound:.6g} K/kW.",
+            diagnostics=_build_dhw_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+            ),
         )
     if fitted_value >= upper_bound * (1.0 - tolerance_ratio):
-        raise ValueError(
+        raise _CalibrationValidationError(
             "Automatic DHW active fit rejected: R_strat converged to the upper bound. "
-            f"R_strat={fitted_value:.6g} K/kW, upper bound={upper_bound:.6g} K/kW."
+            f"R_strat={fitted_value:.6g} K/kW, upper bound={upper_bound:.6g} K/kW.",
+            diagnostics=_build_dhw_active_diagnostics(
+                result,
+                active_settings=active_settings,
+                automatic_settings=automatic_settings,
+            ),
         )
+    return _build_dhw_active_diagnostics(
+        result,
+        active_settings=active_settings,
+        automatic_settings=automatic_settings,
+    )
 
 
 def build_automatic_calibration_snapshot(
@@ -579,7 +742,7 @@ def build_automatic_calibration_snapshot(
                 repository,
                 ufh_active_settings,
             )
-            _validate_automatic_ufh_active_fit(
+            ufh_active_diagnostics = _validate_automatic_ufh_active_fit(
                 repository,
                 result,
                 active_settings=ufh_active_settings,
@@ -605,6 +768,13 @@ def build_automatic_calibration_snapshot(
                 dataset_start_utc=result.dataset_start_utc,
                 dataset_end_utc=result.dataset_end_utc,
                 optimizer_status=result.optimizer_status,
+                diagnostics=ufh_active_diagnostics,
+            )
+        except _CalibrationValidationError as exc:
+            stage_results["ufh_active"] = _stage_failure(
+                "ufh_active",
+                str(exc),
+                diagnostics=exc.diagnostics,
             )
         except Exception as exc:  # noqa: BLE001
             stage_results["ufh_active"] = _stage_failure("ufh_active", str(exc))
@@ -626,7 +796,7 @@ def build_automatic_calibration_snapshot(
                 repository,
                 dhw_standby_settings,
             )
-            _validate_automatic_dhw_standby_fit(
+            dhw_standby_diagnostics = _validate_automatic_dhw_standby_fit(
                 result,
                 standby_settings=dhw_standby_settings,
                 automatic_settings=settings,
@@ -645,6 +815,13 @@ def build_automatic_calibration_snapshot(
                 dataset_start_utc=result.dataset_start_utc,
                 dataset_end_utc=result.dataset_end_utc,
                 optimizer_status=result.optimizer_status,
+                diagnostics=dhw_standby_diagnostics,
+            )
+        except _CalibrationValidationError as exc:
+            stage_results["dhw_standby"] = _stage_failure(
+                "dhw_standby",
+                str(exc),
+                diagnostics=exc.diagnostics,
             )
         except Exception as exc:  # noqa: BLE001
             stage_results["dhw_standby"] = _stage_failure("dhw_standby", str(exc))
@@ -671,7 +848,7 @@ def build_automatic_calibration_snapshot(
                 repository,
                 dhw_active_settings,
             )
-            _validate_automatic_dhw_active_fit(
+            dhw_active_diagnostics = _validate_automatic_dhw_active_fit(
                 result,
                 active_settings=dhw_active_settings,
                 automatic_settings=settings,
@@ -691,6 +868,13 @@ def build_automatic_calibration_snapshot(
                 dataset_start_utc=result.dataset_start_utc,
                 dataset_end_utc=result.dataset_end_utc,
                 optimizer_status=result.optimizer_status,
+                diagnostics=dhw_active_diagnostics,
+            )
+        except _CalibrationValidationError as exc:
+            stage_results["dhw_active"] = _stage_failure(
+                "dhw_active",
+                str(exc),
+                diagnostics=exc.diagnostics,
             )
         except Exception as exc:  # noqa: BLE001
             stage_results["dhw_active"] = _stage_failure("dhw_active", str(exc))
