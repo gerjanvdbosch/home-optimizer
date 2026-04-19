@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ..price_model import BasePriceModel
+from ..pricing import BasePriceModel
 from ..sensors.base import LiveReadings, SensorBackend
 from .models import TelemetryCollectorSettings
 from .repository import TelemetryRepository
@@ -211,7 +211,7 @@ class BufferedTelemetryCollector:
     def _persist_samples(self, samples: Sequence[LiveReadings]) -> dict[str, Any] | None:
         """Aggregate and persist a completed telemetry bucket.
 
-        If a :class:`~home_optimizer.price_model.BasePriceModel` was injected,
+        If a :class:`~home_optimizer.pricing.BasePriceModel` was injected,
         the electricity import price and feed-in rate are computed per sample
         (using each sample's UTC hour) and aggregated as mean + last, consistent
         with the pattern used for all other numeric fields.  The feed-in rate is

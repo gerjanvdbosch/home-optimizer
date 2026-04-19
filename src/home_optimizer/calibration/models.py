@@ -101,7 +101,7 @@ DEFAULT_INITIAL_DHW_BOTTOM_TEMPERATURE_BIAS_C: float = 0.0
 DEFAULT_MIN_DHW_TEMPERATURE_BIAS_C: float = -5.0
 DEFAULT_MAX_DHW_TEMPERATURE_BIAS_C: float = 5.0
 
-from ..cop_model import HeatPumpCOPParameters
+from ..domain.heat_pump.cop import HeatPumpCOPParameters
 from ..types import DHWParameters, ThermalParameters
 
 DEFAULT_INITIAL_ETA_CARNOT: float = 0.45
@@ -1485,7 +1485,7 @@ class UFHActiveCalibrationSettings:
     """Validated settings for active UFH RC identification.
 
     The active stage replays the full 2-state UFH dynamics with the existing
-    :class:`home_optimizer.kalman.UFHKalmanFilter` and learns the physical
+    :class:`home_optimizer.domain.estimation.kalman.UFHKalmanFilter` and learns the physical
     parameters from measured room-temperature innovations.
 
     Attributes:

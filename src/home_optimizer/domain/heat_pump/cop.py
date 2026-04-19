@@ -46,7 +46,7 @@ delta temperatures : K (equal in size to °C differences)
 
 Usage example
 -------------
->>> from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+>>> from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 >>> import numpy as np
 >>> cop_params = HeatPumpCOPParameters(
 ...     eta_carnot=0.45,

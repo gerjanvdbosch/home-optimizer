@@ -30,9 +30,9 @@ from enum import Enum
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
-from .sensors.nordpool import NordpoolClient
+from ..sensors.nordpool import NordpoolClient
 
-log = logging.getLogger("home_optimizer.price_model")
+log = logging.getLogger("home_optimizer.pricing.model")
 
 
 # ---------------------------------------------------------------------------

@@ -69,15 +69,10 @@ from typing import Union
 
 import numpy as np
 
-from .dhw_model import DHWModel
-from .thermal_model import ThermalModel
-from .types import (
-    CombinedMPCParameters,
-    DHWForecastHorizon,
-    DHWMPCParameters,
-    ForecastHorizon,
-    MPCParameters,
-)
+from ..domain.dhw.model import DHWModel
+from ..domain.ufh.model import ThermalModel
+from ..types.control import CombinedMPCParameters, DHWMPCParameters, MPCParameters
+from ..types.forecast import DHWForecastHorizon, ForecastHorizon
 
 try:
     import cvxpy as cp

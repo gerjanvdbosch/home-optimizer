@@ -6,7 +6,6 @@ from typing import Any
 from collections import Counter
 from datetime import datetime, timezone
 from math import isfinite
-from types import SimpleNamespace
 from typing import cast
 
 from sqlalchemy import text
@@ -52,10 +51,21 @@ from .settings_factory import (
 from .dhw_standby import calibrate_dhw_standby_loss
 from .ufh_active import calibrate_ufh_active_rc
 from .ufh_offline import calibrate_ufh_off_envelope
-from ..optimizer import RunRequest, merge_run_request_updates, sanitize_calibration_overrides
+from ..application.optimizer import RunRequest, merge_run_request_updates, sanitize_calibration_overrides
 from ..telemetry.models import ForecastSnapshot, TelemetryAggregate
 from ..telemetry.repository import TelemetryRepository
 from ..types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult, DHWParameters, ThermalParameters
+
+
+class SimpleNamespace:
+    """Minimal local namespace helper for SQL row projection helpers.
+
+    The calibration service uses lightweight attribute access for partially selected
+    SQL result rows. A local helper avoids relying on a top-level ``types`` import.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        self.__dict__.update(kwargs)
 
 
 def _parse_utc(value: object) -> datetime:

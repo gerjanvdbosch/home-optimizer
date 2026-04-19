@@ -16,8 +16,7 @@ from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel
 
-from .database import Database
-from .optimizer import (
+from .application.optimizer import (
     MPCStepResult,
     Optimizer,
     RunRequest,
@@ -26,7 +25,7 @@ from .optimizer import (
     sanitize_calibration_overrides,
 )
 from .telemetry import TelemetryRepository
-from .types import CalibrationSnapshotPayload
+from .types.calibration import CalibrationSnapshotPayload
 
 
 class OptimizeResponse(BaseModel):
@@ -256,7 +255,7 @@ class HomeOptimizerAPI:
     @staticmethod
     def _get_repository() -> TelemetryRepository:
         """Build telemetry repository from active ``DATABASE_URL``."""
-        return Database.from_env().repository()
+        return TelemetryRepository.from_env()
 
     @staticmethod
     def _time_labels(start_hour: int, n_points: int) -> list[str]:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from home_optimizer.kalman import UFHKalmanFilter
-from home_optimizer.thermal_model import ThermalModel
+from home_optimizer.domain.estimation.kalman import UFHKalmanFilter
+from home_optimizer.domain.ufh.model import ThermalModel
 from home_optimizer.types import KalmanNoiseParameters, ThermalParameters
 
 

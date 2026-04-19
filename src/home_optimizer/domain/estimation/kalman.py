@@ -26,9 +26,9 @@ from typing import Final
 
 import numpy as np
 
-from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
-from .thermal_model import MEASUREMENT_MATRIX, ThermalModel
-from .types import EKFNoiseParameters, KalmanNoiseParameters
+from ..dhw.model import DHWModel, MEASUREMENT_MATRIX_DHW
+from ..ufh.model import MEASUREMENT_MATRIX, ThermalModel
+from ...types.estimation import EKFNoiseParameters, KalmanNoiseParameters
 
 STATE_DIMENSION: Final[int] = 2
 SCALAR_MEASUREMENT_DIMENSION: Final[int] = 1

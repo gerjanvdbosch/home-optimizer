@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
-from .kalman import UFHKalmanFilter
-from .mpc import MPCController
-from .thermal_model import ThermalModel
+from .control.mpc import MPCController
+from .domain.estimation.kalman import UFHKalmanFilter
+from .domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
+from .domain.ufh.model import ThermalModel
 from .types import ForecastHorizon, KalmanNoiseParameters, MPCParameters, ThermalParameters
 
 

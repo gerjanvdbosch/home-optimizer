@@ -50,7 +50,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.linalg import expm
 
-from .types import ABSOLUTE_ZERO_C, DHWParameters
+from ...types.constants import ABSOLUTE_ZERO_C
+from ...types.physical import DHWParameters
 
 #: Observation matrix C_obs = [1, 0] — only T_top is measured.
 MEASUREMENT_MATRIX_DHW: np.ndarray = np.array([[1.0, 0.0]], dtype=float)

@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from home_optimizer.cop_model import (
+from home_optimizer.domain.heat_pump.cop import (
     T_CELSIUS_TO_KELVIN,
     HeatPumpCOPModel,
     HeatPumpCOPParameters,
@@ -302,8 +302,8 @@ def test_full_mpc_solve_with_physical_cop_model() -> None:
     The test uses mild outdoor conditions (8–12 °C) and a warm initial slab
     to ensure the MPC problem is comfortably feasible.
     """
-    from home_optimizer.mpc import MPCController
-    from home_optimizer.thermal_model import ThermalModel
+    from home_optimizer.control.mpc import MPCController
+    from home_optimizer.domain.ufh.model import ThermalModel
     from home_optimizer.types import ForecastHorizon, MPCParameters, ThermalParameters
 
     n = 8

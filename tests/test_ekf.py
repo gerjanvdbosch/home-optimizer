@@ -13,8 +13,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from home_optimizer.dhw_model import DHWModel
-from home_optimizer.kalman import DHWExtendedKalmanFilter
+from home_optimizer.domain.dhw.model import DHWModel
+from home_optimizer.domain.estimation.kalman import DHWExtendedKalmanFilter
 from home_optimizer.types import DHWParameters, EKFNoiseParameters
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .types import W_PER_KW, ThermalParameters
+from ...types.constants import W_PER_KW
+from ...types.physical import ThermalParameters
 
 # Measurement matrix C = [1, 0]  (T_r is observable, T_b is hidden)
 MEASUREMENT_MATRIX: np.ndarray = np.array([[1.0, 0.0]], dtype=float)

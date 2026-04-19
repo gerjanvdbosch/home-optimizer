@@ -14,7 +14,7 @@ from home_optimizer.calibration import (
     COPCalibrationSegmentQuality,
 )
 from home_optimizer.calibration import __main__ as calibration_main
-from home_optimizer.cop_model import HeatPumpCOPParameters
+from home_optimizer.domain.heat_pump.cop import HeatPumpCOPParameters
 
 
 def _build_cop_cli_dataset() -> COPCalibrationDataset:

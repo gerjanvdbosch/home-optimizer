@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from scipy.linalg import expm
 
-from home_optimizer.dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
-from home_optimizer.kalman import DHWKalmanFilter
+from home_optimizer.domain.dhw.model import DHWModel, MEASUREMENT_MATRIX_DHW
+from home_optimizer.domain.estimation.kalman import DHWKalmanFilter
 from home_optimizer.types import DHWParameters, KalmanNoiseParameters
 
 # ---------------------------------------------------------------------------

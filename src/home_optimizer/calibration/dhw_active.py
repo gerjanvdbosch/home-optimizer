@@ -44,7 +44,7 @@ from .models import (
     DHWActiveCalibrationResult,
     DHWActiveCalibrationSettings,
 )
-from ..dhw_model import DHWModel
+from ..domain.dhw.model import DHWModel
 from ..types import DHWParameters
 
 _INVALID_PARAMETER_RESIDUAL_C: float = 1_000.0

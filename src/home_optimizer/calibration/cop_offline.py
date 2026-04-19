@@ -51,7 +51,7 @@ from .models import (
     COPCalibrationResult,
     COPCalibrationSettings,
 )
-from ..cop_model import HeatPumpCOPModel, HeatPumpCOPParameters, T_CELSIUS_TO_KELVIN
+from ..domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters, T_CELSIUS_TO_KELVIN
 
 _MIN_DIAGNOSTIC_TEMPERATURE_LIFT_K: float = float(np.finfo(float).eps)
 

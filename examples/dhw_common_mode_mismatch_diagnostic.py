@@ -31,7 +31,6 @@ from enum import StrEnum
 from pathlib import Path
 import re
 from statistics import median
-from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
@@ -46,7 +45,7 @@ from home_optimizer.calibration.settings_factory import (
     build_dhw_active_calibration_settings,
     build_dhw_standby_calibration_settings,
 )
-from home_optimizer.optimizer import RunRequest
+from home_optimizer.application.optimizer import RunRequest
 from home_optimizer.telemetry.models import TelemetryAggregate
 from home_optimizer.telemetry.repository import TelemetryRepository
 from home_optimizer.types import DHWParameters, LITERS_PER_CUBIC_METER
@@ -63,6 +62,13 @@ DEFAULT_FLOW_SCALE_MULTIPLIERS: tuple[float, ...] = (
     1.0 + 0.25,
     16.667,
 )
+
+
+class SimpleNamespace:
+    """Minimal local namespace helper for diagnostic fixture assembly."""
+
+    def __init__(self, **kwargs: object) -> None:
+        self.__dict__.update(kwargs)
 
 
 class CapacityScenario(StrEnum):

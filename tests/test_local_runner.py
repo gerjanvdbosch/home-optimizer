@@ -97,7 +97,7 @@ def test_main_runs_initial_automatic_calibration_when_enabled(tmp_path, monkeypa
     monkeypatch.setattr(local_runner, "ForecastPersister", FakeForecastPersister)
     monkeypatch.setattr(local_runner, "OpenMeteoClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(local_runner.uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(local_runner.Database, "export_to_env", lambda self: None)
+    monkeypatch.setattr(local_runner.TelemetryRepository, "export_to_env", lambda self: None)
 
     def fake_run_and_persist_automatic_calibration(repository, *, base_request, settings):  # noqa: ANN001
         calibration_calls.append((repository.engine.url.render_as_string(hide_password=False), settings.min_history_hours))
@@ -157,7 +157,7 @@ def test_main_runs_initial_forecast_model_training_when_enabled(tmp_path, monkey
     monkeypatch.setattr(local_runner, "ForecastService", FakeForecastService)
     monkeypatch.setattr(local_runner, "OpenMeteoClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(local_runner.uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(local_runner.Database, "export_to_env", lambda self: None)
+    monkeypatch.setattr(local_runner.TelemetryRepository, "export_to_env", lambda self: None)
 
     local_runner.main(
         [

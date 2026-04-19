@@ -36,19 +36,19 @@ import uvicorn
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
-from .database import Database
 from .forecasting import ForecastService
-from .optimizer import Optimizer
-from .price_model import PriceConfig, PriceMode, build_price_model
+from .application.optimizer import Optimizer
+from .pricing import PriceConfig, PriceMode, build_price_model
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
 from .sensors.open_meteo import OpenMeteoClient, SeasonalMainsModel
 from .sensors.weather_backend import WeatherAugmentedBackend
 from .telemetry import (
     BufferedTelemetryCollector,
+    TelemetryRepository,
     ForecastPersister,
     TelemetryCollectorSettings,
 )
-from .types import LAMBDA_WATER_KWH_PER_M3_K, M3_PER_LITER
+from .types.constants import LAMBDA_WATER_KWH_PER_M3_K, M3_PER_LITER
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -520,10 +520,9 @@ def main() -> None:
     )
 
     # ── 2. Set up telemetry storage ────────────────────────────────────────
-    # Database.from_path() creates the parent directory, derives the SQLite
-    # URL, and validates the path — all in one call.
-    db = Database.from_path(opts.database_path)
-    repository = db.repository()
+    # TelemetryRepository.from_path() creates the parent directory, derives the
+    # SQLite URL, validates the path, and initialises the schema in one call.
+    repository = TelemetryRepository.from_path(opts.database_path)
     log.info("Telemetry database ready at %s", opts.database_path)
 
     # ── 3. Build HA sensor backend ─────────────────────────────────────────
@@ -589,7 +588,7 @@ def main() -> None:
     log.info("Price model ready (mode=%s)", opts.price_mode)
 
     collector_settings = TelemetryCollectorSettings(
-        database_url=db.url,
+        database_url=repository.url,
         sampling_interval_seconds=opts.sampling_interval_seconds,
         flush_interval_seconds=opts.flush_interval_seconds,
     )
@@ -613,7 +612,7 @@ def main() -> None:
     log.info("ForecastPersister started (hourly Open-Meteo updates)")
 
     # ── 4c. Build the shared baseline MPC/calibration input ───────────────
-    from .optimizer import RunRequest  # noqa: PLC0415
+    from .application.optimizer import RunRequest  # noqa: PLC0415
 
     _defaults = RunRequest.model_validate({})
     # price_cfg was already constructed above for the telemetry collector.
@@ -818,7 +817,7 @@ def main() -> None:
     # ── 6. Run FastAPI via Uvicorn (blocking) ──────────────────────────────
     # Export DATABASE_URL so the /api/forecast/latest endpoint finds the same
     # database that the addon uses for telemetry and forecast persistence.
-    db.export_to_env()
+    repository.export_to_env()
 
     # HA Ingress proxies requests via /api/hassio_ingress/<token>/.
     # Setting root_path tells FastAPI/Uvicorn the effective mount prefix so

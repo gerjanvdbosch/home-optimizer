@@ -10,7 +10,7 @@ historical telemetry:
 * optionally ``C_r`` [kWh/K] — room-air effective thermal capacity
 
 The optimisation objective is the batch vector of room-temperature innovations
-produced by :class:`home_optimizer.kalman.UFHKalmanFilter`.  This keeps the
+produced by :class:`home_optimizer.domain.estimation.kalman.UFHKalmanFilter`.  This keeps the
 hidden floor state ``T_b`` inside the Kalman architecture instead of treating it
 as a directly observed regression target.
 """
@@ -24,8 +24,8 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from .models import UFHActiveCalibrationDataset, UFHActiveCalibrationResult, UFHActiveCalibrationSettings
-from ..kalman import UFHKalmanFilter
-from ..thermal_model import ThermalModel, solar_gain_kw
+from ..domain.estimation.kalman import UFHKalmanFilter
+from ..domain.ufh.model import ThermalModel, solar_gain_kw
 from ..types import KalmanNoiseParameters, ThermalParameters
 
 _INVALID_PARAMETER_RESIDUAL_C: float = 1_000.0

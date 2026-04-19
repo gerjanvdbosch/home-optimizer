@@ -6,6 +6,7 @@ scheduler logic so that storage can be tested independently from APScheduler.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,9 @@ from sqlalchemy.orm import sessionmaker
 
 from ..types import CalibrationSnapshotPayload
 from .models import Base, CalibrationSnapshot, ForecastSnapshot, MPCLog, TelemetryAggregate
+
+DATABASE_URL_ENV: str = "DATABASE_URL"
+DATABASE_URL_DEFAULT: str = "sqlite:///database.sqlite3"
 
 
 class TelemetryRepository:
@@ -33,8 +37,49 @@ class TelemetryRepository:
     def __init__(self, database_url: str | None = None, engine: Engine | None = None) -> None:
         if engine is None and database_url is None:
             raise ValueError("Either database_url or engine must be supplied.")
-        self.engine = engine or create_engine(database_url, future=True)
+        if engine is not None:
+            self.engine = engine
+        else:
+            self.engine = create_engine(database_url, future=True)
         self._session_factory = sessionmaker(bind=self.engine, expire_on_commit=False, future=True)
+
+    @property
+    def url(self) -> str:
+        """SQLAlchemy connection URL [str] used by this repository instance."""
+        return self.engine.url.render_as_string(hide_password=False)
+
+    @classmethod
+    def url_from_env(cls) -> str:
+        """Return the active SQLAlchemy URL from ``DATABASE_URL`` or the default."""
+        return os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT)
+
+    @classmethod
+    def from_env(cls, *, init_schema: bool = True) -> "TelemetryRepository":
+        """Construct a repository from the active ``DATABASE_URL`` environment variable."""
+        repository = cls(database_url=cls.url_from_env())
+        if init_schema:
+            repository.create_schema()
+        return repository
+
+    @classmethod
+    def from_path(cls, path: str | Path, *, init_schema: bool = True) -> "TelemetryRepository":
+        """Construct a SQLite-backed repository from a filesystem path.
+
+        The parent directory is created eagerly so startup remains fail-fast and
+        runtime entry points do not need to duplicate this filesystem logic.
+        """
+        resolved = Path(path).resolve()
+        if resolved.is_dir():
+            raise ValueError(f"Database path {resolved!r} is a directory, not a file.")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        repository = cls(database_url=f"sqlite:///{resolved}")
+        if init_schema:
+            repository.create_schema()
+        return repository
+
+    def export_to_env(self) -> None:
+        """Write the repository URL to ``DATABASE_URL`` in the process environment."""
+        os.environ[DATABASE_URL_ENV] = self.url
 
     def create_schema(self) -> None:
         """Create the telemetry tables if they do not already exist."""

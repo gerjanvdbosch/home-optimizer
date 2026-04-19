@@ -13,7 +13,7 @@ Architecture
 ------------
 * :class:`NordpoolClient` is a **stateless** HTTP client.  Each call to
   :meth:`fetch_day_ahead` makes one HTTP request and returns the parsed result.
-* The caller (:class:`~home_optimizer.price_model.NordpoolPriceModel`) is
+* The caller (:class:`~home_optimizer.pricing.NordpoolPriceModel`) is
   responsible for caching and fallback logic.
 * All numeric constants (unit conversion factor, timeout) are named module-level
   constants — no magic numbers inline.
@@ -166,7 +166,7 @@ class NordpoolClient:
 
         Makes one synchronous HTTP GET request to the Nordpool Data Portal.
         Raises on network failure or non-200 HTTP status; the caller
-        (:class:`~home_optimizer.price_model.NordpoolPriceModel`) handles
+        (:class:`~home_optimizer.pricing.NordpoolPriceModel`) handles
         the fallback to the Dutch proxy pattern.
 
         Parameters

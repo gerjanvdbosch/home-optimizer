@@ -13,7 +13,7 @@ Physical model assumptions
 * Discretisation: forward-Euler with time step dt_hours.
 """
 
-from .cop_model import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
+from .application.optimizer import Optimizer, RunRequest
 from .calibration import (
     COPCalibrationDataset,
     COPCalibrationResult,
@@ -56,15 +56,17 @@ from .calibration import (
     calibrate_ufh_off_envelope,
     calibrate_ufh_off_from_repository,
 )
-from .dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
-from .kalman import (
+from .control.mpc import MPCController, MPCSolution
+from .domain.dhw.model import DHWModel, MEASUREMENT_MATRIX_DHW
+from .domain.estimation.kalman import (
     DHWKalmanFilter,
     ExtendedKalmanFilter,
     KalmanEstimate,
     LinearKalmanFilter,
     UFHKalmanFilter,
 )
-from .mpc import MPCController, MPCSolution
+from .domain.heat_pump.cop import T_CELSIUS_TO_KELVIN, HeatPumpCOPModel, HeatPumpCOPParameters
+from .domain.ufh.model import MEASUREMENT_MATRIX, ThermalModel, solar_gain_kw
 from .telemetry import (
     BufferedTelemetryCollector,
     TelemetryAggregate,
@@ -72,7 +74,6 @@ from .telemetry import (
     TelemetryRepository,
     aggregate_readings,
 )
-from .thermal_model import MEASUREMENT_MATRIX, ThermalModel, solar_gain_kw
 from .types import (
     W_PER_KW,
     CombinedMPCParameters,
@@ -117,6 +118,8 @@ __all__ = [
     "MPCParameters",
     "MPCController",
     "MPCSolution",
+    "Optimizer",
+    "RunRequest",
     "T_CELSIUS_TO_KELVIN",
     "TelemetryAggregate",
     "TelemetryCollectorSettings",

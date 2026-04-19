@@ -51,7 +51,7 @@ from home_optimizer.calibration.settings_factory import (
     build_dhw_active_calibration_settings,
     build_dhw_standby_calibration_settings,
 )
-from home_optimizer.optimizer import RunRequest
+from home_optimizer.application.optimizer import RunRequest
 from home_optimizer.telemetry.repository import TelemetryRepository
 from home_optimizer.types import DHWParameters
 
@@ -159,7 +159,7 @@ def _exact_step_with_charge_split(
     """Propagate one DHW step with an explicit top/bottom charge split.
 
     This keeps the same continuous losses and inter-layer transfer as
-    :class:`home_optimizer.dhw_model.DHWModel`, but replaces assumption A5's pure
+    :class:`home_optimizer.domain.dhw.model.DHWModel`, but replaces assumption A5's pure
     bottom injection by the richer diagnostic split
 
     ``Q_charge,top = beta_charge_top * P_dhw`` and

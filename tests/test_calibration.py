@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from math import cos, sin
-from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
@@ -41,12 +40,23 @@ from home_optimizer.calibration import (
     calibrate_ufh_off_envelope,
 )
 from home_optimizer.calibration.models import DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
-from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
-from home_optimizer.dhw_model import DHWModel
-from home_optimizer.optimizer import RunRequest
-from home_optimizer.thermal_model import ThermalModel, solar_gain_kw
+from home_optimizer.application.optimizer import RunRequest
+from home_optimizer.domain.dhw.model import DHWModel
+from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
+from home_optimizer.domain.ufh.model import ThermalModel, solar_gain_kw
 from home_optimizer.telemetry import TelemetryRepository
 from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload, DHWParameters, ThermalParameters
+
+
+class SimpleNamespace:
+    """Minimal local namespace helper for test fixtures.
+
+    This avoids depending on a top-level ``types`` import while still offering the
+    attribute-style test data used throughout this module.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        self.__dict__.update(kwargs)
 
 
 def test_build_ufh_off_calibration_dataset_filters_to_low_solar_off_windows() -> None:

@@ -113,7 +113,7 @@ def build_forecast(
     Returns
     -------
         ForecastHorizon
-        Ready to pass directly to :meth:`~home_optimizer.mpc.MPCController.solve`.
+        Ready to pass directly to :meth:`~home_optimizer.control.mpc.MPCController.solve`.
 
     Examples
     --------

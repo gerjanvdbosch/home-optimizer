@@ -58,13 +58,18 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import app
 from .calibration import AutomaticCalibrationSettings, run_and_persist_automatic_calibration
-from .database import DATABASE_URL_DEFAULT, Database
 from .forecasting import ForecastService
-from .optimizer import Optimizer
-from .price_model import PriceConfig, PriceMode, build_price_model
+from .application.optimizer import Optimizer
+from .pricing import PriceConfig, PriceMode, build_price_model
 from .sensors.local_backend import LocalBackend
 from .sensors.open_meteo import OpenMeteoClient
-from .telemetry import BufferedTelemetryCollector, ForecastPersister, TelemetryCollectorSettings
+from .telemetry import (
+    DATABASE_URL_DEFAULT,
+    BufferedTelemetryCollector,
+    ForecastPersister,
+    TelemetryCollectorSettings,
+    TelemetryRepository,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -390,20 +395,19 @@ def main(argv: list[str] | None = None) -> None:
     if not 0 <= args.forecast_training_minute_utc <= 59:
         raise ValueError("--forecast-training-minute-utc must be in [0, 59].")
 
-    # ── 1. Resolve database — Database class handles path, mkdir, and URL ──
+    # ── 1. Resolve repository — class handles path, mkdir, URL, and schema ──
     # Priority: --database CLI arg > DATABASE_URL env var > default.
     if args.database is not None:
-        db = Database.from_path(args.database)
+        repository = TelemetryRepository.from_path(args.database)
         log.info("Using database from --database: %s", args.database)
     else:
-        db = Database.from_env()
-        log.info("Using database from env/default: %s", db.url)
+        repository = TelemetryRepository.from_env()
+        log.info("Using database from env/default: %s", repository.url)
 
     # Export so the FastAPI /api/forecast/latest endpoint finds the same DB.
-    db.export_to_env()
+    repository.export_to_env()
 
-    # ── 2. Initialise database ─────────────────────────────────────────────
-    repository = db.repository()
+    # ── 2. Repository is already initialised by the constructor helpers ────
     log.info("Database schema ready.")
 
     # ── 3. Build Open-Meteo client ─────────────────────────────────────────
@@ -447,7 +451,7 @@ def main(argv: list[str] | None = None) -> None:
     sensors_file_exists = sensors_path is not None and sensors_path.exists()
     if sensors_file_exists and sensors_path is not None:
         mpc_sensor_backend = LocalBackend.from_json_file(sensors_path)
-        telemetry_settings = TelemetryCollectorSettings(database_url=db.url)
+        telemetry_settings = TelemetryCollectorSettings(database_url=repository.url)
         telemetry_collector = BufferedTelemetryCollector(
             backend=LocalBackend.from_json_file(sensors_path),
             repository=repository,
@@ -489,7 +493,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("Hourly forecast refresh scheduled.")
 
     # ── 5b. Build shared baseline RunRequest for calibration + MPC ─────────
-    from .optimizer import RunRequest  # noqa: PLC0415
+    from .application.optimizer import RunRequest  # noqa: PLC0415
 
     t_out_init = args.mpc_t_out
     if mpc_sensor_backend is not None:

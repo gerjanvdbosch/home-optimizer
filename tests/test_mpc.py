@@ -5,12 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import home_optimizer.mpc as mpc_module
-from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
-from home_optimizer.dhw_model import DHWModel
-from home_optimizer.mpc import MPCController
-from home_optimizer.optimizer import Optimizer, RunRequest, validate_run_request_physics
-from home_optimizer.thermal_model import ThermalModel
+import home_optimizer.control.mpc as mpc_module
+from home_optimizer.application.optimizer import Optimizer, RunRequest, validate_run_request_physics
+from home_optimizer.control.mpc import MPCController
+from home_optimizer.domain.dhw.model import DHWModel
+from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
+from home_optimizer.domain.ufh.model import ThermalModel
 from home_optimizer.types import (
     CombinedMPCParameters,
     DHWForecastHorizon,

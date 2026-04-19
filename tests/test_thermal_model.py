@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from home_optimizer.thermal_model import ThermalModel, solar_gain_kw
+from home_optimizer.domain.ufh.model import ThermalModel, solar_gain_kw
 from home_optimizer.types import ForecastHorizon, ThermalParameters
 
 

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from home_optimizer.forecasting import ForecastService, ShutterForecaster
-from home_optimizer.optimizer import Optimizer, RunRequest
+from home_optimizer.application.optimizer import Optimizer, RunRequest
 from home_optimizer.sensors import LiveReadings
 from home_optimizer.telemetry import TelemetryRepository, aggregate_readings
 
@@ -344,7 +344,7 @@ def test_forecast_service_injects_baseload_forecast_only(tmp_path) -> None:
 
 def test_optimizer_maps_baseload_forecast_with_derived_reference() -> None:
     """UFH forecast construction must derive the baseload floor from the thermal baseline."""
-    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+    from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
         {
@@ -379,7 +379,7 @@ def test_optimizer_maps_baseload_forecast_with_derived_reference() -> None:
 
 def test_optimizer_does_not_add_heat_when_baseload_heat_stays_below_baseline() -> None:
     """Baseload must not create extra Q_int when its useful heat stays below the baseline level."""
-    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+    from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
         {
@@ -414,7 +414,7 @@ def test_optimizer_does_not_add_heat_when_baseload_heat_stays_below_baseline() -
 
 def test_optimizer_keeps_baseline_internal_gains_when_heat_fraction_is_zero() -> None:
     """Zero baseload heat fraction must collapse to the scalar baseline without division tricks."""
-    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+    from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
         {
@@ -449,7 +449,7 @@ def test_optimizer_keeps_baseline_internal_gains_when_heat_fraction_is_zero() ->
 
 def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mapping() -> None:
     """An explicit internal-gains forecast must override the derived baseload heat mapping."""
-    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+    from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
         {
@@ -485,7 +485,7 @@ def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mappin
 
 def test_optimizer_rejects_negative_baseload_forecast_for_internal_gains_mapping() -> None:
     """Negative electrical baseload is physically impossible and must fail fast."""
-    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+    from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
         {

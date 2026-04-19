@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from home_optimizer.api import HomeOptimizerAPI, app
-from home_optimizer.optimizer import Optimizer, RunRequest
+from home_optimizer.application.optimizer import Optimizer, RunRequest
 from home_optimizer.sensors import LiveReadings, SensorBackend
 from home_optimizer.telemetry import TelemetryRepository
 from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult

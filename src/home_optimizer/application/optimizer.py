@@ -42,31 +42,25 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pydantic import BaseModel, Field
 
-from .cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
-from .dhw_model import DHWModel
-from .forecasting import ForecastService
-from .mpc import MPCController, MPCSolution
-from .price_model import BasePriceModel, PriceConfig, build_price_model  # noqa: F401 — PriceConfig re-exported via RunRequest
-from .thermal_model import ThermalModel
-from .types import (
-    CalibrationParameterOverrides,
-    CombinedMPCParameters,
-    DHWForecastHorizon,
-    DHWMPCParameters,
-    DHWParameters,
-    ForecastHorizon,
-    LAMBDA_WATER_KWH_PER_M3_K,
-    MPCParameters,
-    ThermalParameters,
-)
+from ..control.mpc import MPCController, MPCSolution
+from ..domain.dhw.model import DHWModel
+from ..domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
+from ..domain.ufh.model import ThermalModel
+from ..forecasting import ForecastService
+from ..pricing import BasePriceModel, PriceConfig, build_price_model  # noqa: F401 — PriceConfig re-exported via RunRequest
+from ..types.calibration import CalibrationParameterOverrides
+from ..types.constants import LAMBDA_WATER_KWH_PER_M3_K, W_PER_KW
+from ..types.control import CombinedMPCParameters, DHWMPCParameters, MPCParameters
+from ..types.forecast import DHWForecastHorizon, ForecastHorizon
+from ..types.physical import DHWParameters, ThermalParameters
 
 if TYPE_CHECKING:
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    from .sensors.base import SensorBackend
-    from .telemetry.repository import TelemetryRepository
+    from ..sensors.base import SensorBackend
+    from ..telemetry.repository import TelemetryRepository
 
-log = logging.getLogger("home_optimizer.optimizer")
+log = logging.getLogger("home_optimizer.application.optimizer")
 _FORECAST_SERVICE = ForecastService()
 
 
@@ -652,12 +646,12 @@ class Optimizer:
 
     Orchestrates the full solve pipeline:
 
-    1. Build the UFH :class:`~home_optimizer.thermal_model.ThermalModel`.
-    2. Build the Carnot :class:`~home_optimizer.cop_model.HeatPumpCOPModel` (§14.1).
+    1. Build the UFH :class:`~home_optimizer.domain.ufh.model.ThermalModel`.
+    2. Build the Carnot :class:`~home_optimizer.domain.heat_pump.cop.HeatPumpCOPModel` (§14.1).
     3. Compute time-varying COP arrays over the MPC horizon.
     4. Construct UFH and DHW :class:`~home_optimizer.types.ForecastHorizon` objects.
-    5. Optionally build the :class:`~home_optimizer.dhw_model.DHWModel`.
-    6. Solve the QP via :class:`~home_optimizer.mpc.MPCController` (CVXPY only).
+    5. Optionally build the :class:`~home_optimizer.domain.dhw.model.DHWModel`.
+    6. Solve the QP via :class:`~home_optimizer.control.mpc.MPCController` (CVXPY only).
     7. Compute energy and electricity-cost summaries.
 
     The class is *stateless* between calls: no mutable attributes are
@@ -1008,7 +1002,7 @@ class Optimizer:
             req: Validated Pydantic request containing all COP model parameters.
 
         Returns:
-            Constructed and validated :class:`~home_optimizer.cop_model.HeatPumpCOPModel`.
+            Constructed and validated :class:`~home_optimizer.domain.heat_pump.cop.HeatPumpCOPModel`.
 
         Raises:
             ValueError: If any parameter violates a physical constraint.
@@ -1036,7 +1030,7 @@ class Optimizer:
         Injects the time-varying UFH COP array (computed from the Carnot model
         and outdoor temperature) so the MPC can use physical electricity costs.
         The electricity price array is constructed by the configured
-        :class:`~home_optimizer.price_model.BasePriceModel` subclass
+        :class:`~home_optimizer.pricing.BasePriceModel` subclass
         (flat / dual-tariff / Nordpool), ensuring no magic numbers appear here.
 
         Args:
@@ -1086,7 +1080,6 @@ class Optimizer:
         # ── PV generation — real Open-Meteo GTI_pv when PV enabled ──
         # P_pv = (GTI_pv [W/m²] / W_PER_KW) * pv_peak_kw [kW/kWp].
         if req.pv_enabled:
-            from .types import W_PER_KW  # noqa: PLC0415
 
             gti_pv = Optimizer._materialize_horizon_array(
                 name="gti_pv_forecast",
