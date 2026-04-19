@@ -12,6 +12,7 @@ from .models import (
     COPCalibrationSettings,
     DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
+    DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
     DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C,
@@ -128,7 +129,7 @@ def build_dhw_standby_calibration_settings(
 def build_dhw_active_calibration_settings(
     reference_parameters: DHWParameters,
     *,
-    min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT,
+    min_sample_count: int = DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT,
     min_segment_samples: int = DEFAULT_MIN_DHW_SEGMENT_SAMPLES,
     min_dhw_power_kw: float = DEFAULT_MIN_DHW_POWER_KW,
     min_layer_temperature_spread_c: float = DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C,

@@ -2169,6 +2169,94 @@ def test_build_dhw_active_calibration_dataset_keeps_small_bucket_jitter() -> Non
     )
 
 
+def test_build_dhw_active_calibration_dataset_keeps_mixed_charging_runs() -> None:
+    """Default active-DHW spread thresholds must keep mixed but informative charging runs."""
+    reference_parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=12.0,
+        R_loss=50.0,
+    )
+    start = datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_end_utc=start,
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=47.0,
+            dhw_bottom_temperature_last_c=46.4,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=0.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=47.4,
+            dhw_bottom_temperature_last_c=46.8,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.0,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.0,
+            dhw_bottom_temperature_last_c=47.0,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.1,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=48.7,
+            dhw_bottom_temperature_last_c=47.2,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.2,
+        ),
+        SimpleNamespace(
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            dhw_top_temperature_last_c=49.5,
+            dhw_bottom_temperature_last_c=47.5,
+            boiler_ambient_temp_mean_c=20.0,
+            t_mains_estimated_mean_c=10.0,
+            hp_thermal_power_mean_kw=2.3,
+        ),
+    ]
+
+    dataset = build_dhw_active_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=DHWActiveCalibrationSettings(
+            reference_parameters=reference_parameters,
+            min_sample_count=4,
+            min_segment_samples=4,
+            max_implied_tap_m3_per_h=0.05,
+        ),
+    )
+
+    assert dataset.sample_count == 4
+    assert dataset.segment_count == 1
+    assert dataset.raw_segment_count == 1
+    assert dataset.dropped_segment_count == 0
+    quality = dataset.segment_qualities[0]
+    assert quality.mean_layer_spread_c >= 1.0
+    assert quality.bottom_temperature_rise_c > 0.5
+    assert quality.top_temperature_rise_c > 0.1
+
+
 def test_build_dhw_active_calibration_dataset_drops_weak_segments() -> None:
     """Weak but no-draw DHW runs must be dropped by the richer segment-quality filter."""
     reference_parameters = DHWParameters(

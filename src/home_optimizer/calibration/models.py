@@ -58,11 +58,12 @@ DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT: float = 0.0
 DEFAULT_INITIAL_FLOOR_OFFSET_SCALE_C: float = 2.0
 DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 2.0
 DEFAULT_MIN_DHW_POWER_KW: float = 0.25
-DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 3.0
-DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H: float = 0.01
-DEFAULT_MIN_DHW_SEGMENT_SAMPLES: int = 4
+DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C: float = 0.5
+DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H: float = 0.1
+DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT: int = 8
+DEFAULT_MIN_DHW_SEGMENT_SAMPLES: int = 3
 DEFAULT_MIN_DHW_SEGMENT_DELIVERED_ENERGY_KWH: float = 0.6
-DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C: float = 3.5
+DEFAULT_MIN_DHW_SEGMENT_MEAN_LAYER_SPREAD_C: float = 0.75
 DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C: float = 0.5
 DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C: float = 0.5
 DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C: float = 0.1
@@ -199,7 +200,7 @@ class UFHOffCalibrationSettings:
     max_gti_w_per_m2: float = DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
     max_defrost_active_fraction: float = DEFAULT_MAX_DEFROST_ACTIVE_FRACTION
     max_booster_active_fraction: float = DEFAULT_MAX_BOOSTER_ACTIVE_FRACTION
-    min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
+    min_sample_count: int = DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT
     forecast_alignment_tolerance_hours: float = DEFAULT_FORECAST_ALIGNMENT_TOLERANCE_HOURS
     initial_tau_hours: float = DEFAULT_INITIAL_TAU_HOURS
     min_tau_hours: float = DEFAULT_MIN_TAU_HOURS
@@ -1101,6 +1102,12 @@ class DHWActiveCalibrationSettings:
 
     The fitter replays the 2-state DHW model with ``V_tap = 0`` and minimises the
     one-step residuals on both ``T_top`` and ``T_bot``.
+
+    The active-DHW spread thresholds are intentionally treated as telemetry
+    excitation heuristics, not as first-principles thermodynamic constants. Real
+    boilers can partially remix while charging; therefore the defaults only reject
+    near-isothermal top/bottom traces that are too close to the sensor-noise floor
+    to identify ``R_strat`` robustly.
     """
 
     reference_parameters: DHWParameters

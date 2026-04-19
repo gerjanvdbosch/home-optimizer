@@ -9,7 +9,6 @@ from typing import Any
 
 from .models import (
     COP_LEAST_SQUARES_LOSS_CHOICES,
-    COPCalibrationSettings,
     DEFAULT_COP_MAX,
     DEFAULT_COP_MIN,
     DEFAULT_COP_ETA_LOSS_NAME,
@@ -21,6 +20,7 @@ from .models import (
     DEFAULT_COP_REAGGREGATE_MIN_ELECTRIC_ENERGY_KWH,
     DEFAULT_DELTA_T_COND_K,
     DEFAULT_DELTA_T_EVAP_K,
+    DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
     DEFAULT_MAX_COP_SEGMENT_SUPPLY_TRACKING_RMSE_C,
@@ -39,6 +39,7 @@ from .models import (
     DEFAULT_MIN_DHW_SEGMENT_SCORE,
     DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C,
     DEFAULT_MIN_THERMAL_ENERGY_KWH,
+    DEFAULT_MIN_SAMPLE_COUNT,
     DEFAULT_MIN_UFH_CURVE_SAMPLE_COUNT,
     DEFAULT_MIN_UFH_COP_SEGMENT_OUTDOOR_TEMPERATURE_SPAN_C,
     DEFAULT_MIN_UFH_COP_SEGMENT_SUPPLY_TARGET_SPAN_C,
@@ -432,8 +433,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-samples",
         type=int,
-        default=UFHOffCalibrationSettings().min_sample_count,
-        help="Minimum number of transition samples required before fitting [-].",
+        default=None,
+        help=(
+            "Optional minimum number of retained samples required before fitting [-]. "
+            "When omitted, each calibration stage uses its own validated default."
+        ),
     )
     parser.add_argument(
         "--reference-c-eff-kwh-per-k",
@@ -488,7 +492,7 @@ def _build_dhw_standby_settings(args: argparse.Namespace) -> DHWStandbyCalibrati
         dt_hours=float(args.dhw_dt_hours),
         reference_c_top_kwh_per_k=float(args.dhw_c_top),
         reference_c_bot_kwh_per_k=float(args.dhw_c_bot),
-        min_sample_count=args.min_samples,
+        min_sample_count=DEFAULT_MIN_SAMPLE_COUNT if args.min_samples is None else args.min_samples,
         max_layer_temperature_spread_c=float(args.dhw_max_layer_spread_c),
     )
 
@@ -521,6 +525,7 @@ def main() -> None:
     result: Any = None
 
     if args.stage == "off":
+        min_sample_count = DEFAULT_MIN_SAMPLE_COUNT if args.min_samples is None else args.min_samples
         max_gti_w_per_m2 = (
             UFHOffCalibrationSettings().max_gti_w_per_m2
             if args.max_gti_w_per_m2 is None
@@ -528,7 +533,7 @@ def main() -> None:
         )
         settings = UFHOffCalibrationSettings(
             max_gti_w_per_m2=max_gti_w_per_m2,
-            min_sample_count=args.min_samples,
+            min_sample_count=min_sample_count,
             reference_c_eff_kwh_per_k=args.reference_c_eff_kwh_per_k,
         )
         dataset = build_ufh_off_dataset_from_repository(repository, settings)
@@ -547,8 +552,9 @@ def main() -> None:
             },
         }
     elif args.stage == "cop":
+        min_sample_count = DEFAULT_MIN_SAMPLE_COUNT if args.min_samples is None else args.min_samples
         settings = build_cop_calibration_settings(
-            min_sample_count=args.min_samples,
+            min_sample_count=min_sample_count,
             min_ufh_curve_sample_count=args.cop_min_ufh_samples,
             min_thermal_energy_kwh=args.cop_min_thermal_energy_kwh,
             min_electric_energy_kwh=args.cop_min_electric_energy_kwh,
@@ -608,10 +614,11 @@ def main() -> None:
                 },
             }
     elif args.stage == "active-ufh":
+        min_sample_count = DEFAULT_MIN_SAMPLE_COUNT if args.min_samples is None else args.min_samples
         settings = build_ufh_active_calibration_settings(
             reference_parameters=_build_reference_parameters(args),
             max_gti_w_per_m2=args.max_gti_w_per_m2,
-            min_sample_count=args.min_samples,
+            min_sample_count=min_sample_count,
             min_segment_samples=args.min_segment_samples,
             min_segment_ufh_power_span_kw=args.min_segment_power_span_kw,
             min_segment_room_temperature_span_c=args.min_segment_room_span_c,
@@ -642,9 +649,10 @@ def main() -> None:
             },
         }
     elif args.stage == "active-dhw":
+        min_sample_count = DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT if args.min_samples is None else args.min_samples
         settings = build_dhw_active_calibration_settings(
             reference_parameters=_build_dhw_reference_parameters(args),
-            min_sample_count=args.min_samples,
+            min_sample_count=min_sample_count,
             min_segment_samples=args.dhw_min_segment_samples,
             min_dhw_power_kw=args.dhw_min_power_kw,
             min_layer_temperature_spread_c=args.dhw_min_layer_spread_c,

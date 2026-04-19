@@ -864,7 +864,12 @@ def build_dhw_active_calibration_dataset(
 
     To stay physically consistent without a tap-flow meter, this stage keeps only
     pairs whose total-energy-balance-implied draw remains below the configured
-    threshold.  Those windows are then replayed with ``V_tap = 0``.
+    threshold. Those windows are then replayed with ``V_tap = 0``.
+
+    The pair-level layer-spread gate is intentionally only a *minimum excitation
+    floor*: charging can remix a real tank, so low-but-nonzero spreads may still
+    contain usable ``R_strat`` information when the *segment as a whole* shows a
+    measurable rise and spread evolution.
     """
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
     raw_segments: list[list[DHWActiveCalibrationSample]] = []

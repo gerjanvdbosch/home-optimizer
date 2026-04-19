@@ -16,8 +16,10 @@ from home_optimizer.calibration.service import (
     _infer_calibration_replay_dt_hours,
     _load_calibration_aggregates,
     build_dhw_active_dataset_from_repository,
+    calibrate_dhw_standby_from_repository,
 )
 from home_optimizer.calibration.settings_factory import build_dhw_active_calibration_settings
+from home_optimizer.calibration.settings_factory import build_dhw_standby_calibration_settings
 from home_optimizer.telemetry.repository import TelemetryRepository
 from home_optimizer.types import DHWParameters
 
@@ -27,12 +29,20 @@ def main() -> None:
     rows = _load_calibration_aggregates(repository)
     dt_ref_hours = _infer_calibration_replay_dt_hours(repository)
     layer_capacity_kwh_per_k = 200 * 1.1628e-3 / 2.0
+    standby_result = calibrate_dhw_standby_from_repository(
+        repository,
+        build_dhw_standby_calibration_settings(
+            dt_hours=dt_ref_hours,
+            reference_c_top_kwh_per_k=layer_capacity_kwh_per_k,
+            reference_c_bot_kwh_per_k=layer_capacity_kwh_per_k,
+        ),
+    )
     reference = DHWParameters(
         dt_hours=dt_ref_hours,
         C_top=layer_capacity_kwh_per_k,
         C_bot=layer_capacity_kwh_per_k,
         R_strat=10.0,
-        R_loss=110.06132194509814,
+        R_loss=standby_result.suggested_r_loss_k_per_kw,
     )
     settings = build_dhw_active_calibration_settings(reference_parameters=reference)
 
@@ -70,6 +80,7 @@ def main() -> None:
             pair_rejection_counts["dt_out_of_range"] += 1
 
     print(f"dt_ref_hours={dt_ref_hours:.6f}")
+    print(f"standby_r_loss_k_per_kw={standby_result.suggested_r_loss_k_per_kw:.6f}")
     print(f"dhw_pair_count={dhw_pair_count}")
     print(f"default_settings={{'max_implied_tap_m3_per_h': {settings.max_implied_tap_m3_per_h}, 'min_layer_temperature_spread_c': {settings.min_layer_temperature_spread_c}}}")
     print("pair_rejection_counts=", dict(pair_rejection_counts))
