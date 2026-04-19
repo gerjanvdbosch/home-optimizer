@@ -1697,8 +1697,8 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_with_too_fe
     assert snapshot.dhw_active.diagnostics["required_min_selected_segments"] == 2
 
 
-def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_bounds(monkeypatch) -> None:
-    """Automatic calibration must reject active DHW fits that converge to R_strat bounds."""
+def test_build_automatic_calibration_snapshot_accepts_dhw_active_fit_at_near_zero_lower_bound(monkeypatch) -> None:
+    """Automatic calibration may accept a near-zero active-DHW lower-bound hit as strong mixing."""
     start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
     repository = SimpleNamespace(
         get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
@@ -1741,7 +1741,83 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_b
                 dt_hours=5.0 / 60.0,
                 C_top=0.5814,
                 C_bot=0.5814,
-                R_strat=2.5,
+                R_strat=1e-3,
+                R_loss=70.0,
+            ),
+            sample_count=18,
+            segment_count=2,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=2),
+            optimizer_status="ok",
+            rmse_t_top_c=0.08,
+            rmse_t_bot_c=0.09,
+            max_abs_residual_c=0.20,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip cop")),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.dhw_active is not None
+    assert snapshot.dhw_active.succeeded is True
+    assert snapshot.dhw_active.diagnostics["hits_lower_bound"] is True
+    assert snapshot.dhw_active.diagnostics["near_perfect_mixing_regime"] is True
+    np.testing.assert_allclose(snapshot.effective_parameters.dhw_R_strat, 1e-3)
+
+
+def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_upper_bound(monkeypatch) -> None:
+    """Automatic calibration must still reject active DHW fits that converge to the upper bound."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip ufh active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=10.0),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            tau_standby_hours=8.0,
+            suggested_r_loss_k_per_kw=70.0,
+            sample_count=20,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=3),
+            optimizer_status="ok",
+            rmse_mean_tank_temperature_c=0.10,
+            max_abs_residual_c=0.20,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=DHWParameters(
+                dt_hours=5.0 / 60.0,
+                C_top=0.5814,
+                C_bot=0.5814,
+                R_strat=50.0,
                 R_loss=70.0,
             ),
             sample_count=18,
@@ -1768,7 +1844,7 @@ def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_b
     assert snapshot is not None
     assert snapshot.dhw_active is not None
     assert snapshot.dhw_active.succeeded is False
-    assert "R_strat converged to the lower bound" in snapshot.dhw_active.message
+    assert "R_strat converged to the upper bound" in snapshot.dhw_active.message
 
 
 def test_build_dhw_standby_calibration_dataset_filters_to_quasi_mixed_non_dhw_windows() -> None:
@@ -2553,6 +2629,78 @@ def test_calibrate_dhw_active_stratification_recovers_synthetic_r_strat() -> Non
     np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, rtol=5e-2)
     np.testing.assert_allclose(result.fitted_parameters.R_loss, true_parameters.R_loss, rtol=1e-12)
     assert result.segment_count == 1
+    assert result.rmse_t_top_c < 1e-6
+    assert result.rmse_t_bot_c < 1e-6
+
+
+def test_calibrate_dhw_active_stratification_recovers_strong_charge_time_mixing() -> None:
+    """Active-DHW calibration must allow effective ``R_strat`` values far below 5 K/kW.
+
+    Real charging telemetry can behave nearly like a mixed tank because the fitted
+    ``R_strat`` is an *effective* remixing resistance, not a material constant.
+    This regression protects against reintroducing an overly aggressive lower box
+    bound that would force the optimiser onto an artificial constraint.
+    """
+    true_parameters = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=0.058,
+        C_bot=0.058,
+        R_strat=0.03,
+        R_loss=50.0,
+    )
+    reference_parameters = DHWParameters(
+        dt_hours=true_parameters.dt_hours,
+        C_top=true_parameters.C_top,
+        C_bot=true_parameters.C_bot,
+        R_strat=1.0,
+        R_loss=true_parameters.R_loss,
+    )
+    model = DHWModel(true_parameters)
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    state = np.array([47.0, 41.0], dtype=float)
+    samples: list[DHWActiveCalibrationSample] = []
+    for step_k in range(96):
+        interval_start = start + timedelta(hours=step_k * true_parameters.dt_hours)
+        interval_end = interval_start + timedelta(hours=true_parameters.dt_hours)
+        control_kw = 2.0 + 0.35 * np.sin(step_k / 7.0) + 0.1 * np.cos(step_k / 13.0)
+        t_mains_c = 10.0 + 0.25 * np.sin(step_k / 19.0)
+        t_amb_c = 20.0 + 0.15 * np.cos(step_k / 17.0)
+        next_state = model.step(
+            state=state,
+            control_kw=control_kw,
+            v_tap_m3_per_h=0.0,
+            t_mains_c=t_mains_c,
+            t_amb_c=t_amb_c,
+        )
+        samples.append(
+            DHWActiveCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=true_parameters.dt_hours,
+                t_top_start_c=float(state[0]),
+                t_top_end_c=float(next_state[0]),
+                t_bot_start_c=float(state[1]),
+                t_bot_end_c=float(next_state[1]),
+                p_dhw_mean_kw=control_kw,
+                t_mains_c=t_mains_c,
+                t_amb_c=t_amb_c,
+                implied_v_tap_m3_per_h=0.0,
+                segment_index=0,
+            )
+        )
+        state = next_state
+
+    dataset = DHWActiveCalibrationDataset(samples=tuple(samples))
+    settings = DHWActiveCalibrationSettings(
+        reference_parameters=reference_parameters,
+        min_sample_count=24,
+        min_segment_samples=4,
+    )
+
+    result = calibrate_dhw_active_stratification(dataset, settings)
+
+    np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, rtol=5e-2)
+    assert result.fitted_parameters.R_strat < 5.0
     assert result.rmse_t_top_c < 1e-6
     assert result.rmse_t_bot_c < 1e-6
 

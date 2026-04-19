@@ -68,7 +68,7 @@ DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C: float = 0.5
 DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C: float = 0.5
 DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C: float = 0.1
 DEFAULT_MIN_DHW_SEGMENT_SCORE: float = 0.0
-DEFAULT_MIN_DHW_R_STRAT_K_PER_KW: float = 5.0
+DEFAULT_MIN_DHW_R_STRAT_K_PER_KW: float = 1e-3
 DEFAULT_MAX_DHW_R_STRAT_K_PER_KW: float = 50.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT: float = 1.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_DELIVERED_ENERGY: float = 1.0
@@ -1113,9 +1113,11 @@ class DHWActiveCalibrationSettings:
 
     ``R_strat`` itself is a grey-box parameter, so the optimisation box is carried
     explicitly in physical units [K/kW] instead of reusing the UFH relative-box
-    heuristic. The default interval follows the documented empirical calibration
-    range for typical residential tanks and serves as a fail-fast identifiability
-    envelope rather than a first-principles derivation.
+    heuristic. The lower bound must remain strictly positive for numerical
+    well-posedness, but it cannot assume a strongly stratified residential tank:
+    during charging the *effective* remixing resistance can approach perfect
+    mixing. Therefore the default lower bound is near zero rather than the
+    previously too-restrictive residential-typical range.
     """
 
     reference_parameters: DHWParameters

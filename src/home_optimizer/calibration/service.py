@@ -40,6 +40,7 @@ from .models import (
     UFHCalibrationDataset,
     UFHOffCalibrationResult,
     UFHOffCalibrationSettings,
+    DEFAULT_MIN_DHW_R_STRAT_K_PER_KW,
     DEFAULT_MAX_PAIR_DT_HOURS,
 )
 from .settings_factory import (
@@ -422,13 +423,19 @@ def _build_dhw_active_diagnostics(
 ) -> dict[str, Any]:
     """Return structured DHW active-fit diagnostics for API/persistence visibility."""
     lower_bound, upper_bound = dhw_active_r_strat_bounds(active_settings)
+    tolerance_ratio = automatic_settings.dhw_active_bound_tolerance_ratio
+    hits_lower_bound = result.fitted_parameters.R_strat <= lower_bound * (1.0 + tolerance_ratio)
+    lower_bound_represents_nearly_perfect_mixing = lower_bound <= DEFAULT_MIN_DHW_R_STRAT_K_PER_KW * (1.0 + tolerance_ratio)
     return {
         "selected_segment_count": result.segment_count,
         "required_min_selected_segments": automatic_settings.dhw_active_min_selected_segments,
         "fitted_r_strat_k_per_kw": result.fitted_parameters.R_strat,
         "r_strat_lower_bound_k_per_kw": lower_bound,
         "r_strat_upper_bound_k_per_kw": upper_bound,
-        "bound_tolerance_ratio": automatic_settings.dhw_active_bound_tolerance_ratio,
+        "bound_tolerance_ratio": tolerance_ratio,
+        "hits_lower_bound": hits_lower_bound,
+        "lower_bound_represents_nearly_perfect_mixing": lower_bound_represents_nearly_perfect_mixing,
+        "near_perfect_mixing_regime": hits_lower_bound and lower_bound_represents_nearly_perfect_mixing,
         "fixed_r_loss_k_per_kw": result.fitted_parameters.R_loss,
         "rmse_t_top_c": result.rmse_t_top_c,
         "rmse_t_bot_c": result.rmse_t_bot_c,
@@ -649,7 +656,8 @@ def _validate_automatic_dhw_active_fit(
     lower_bound, upper_bound = dhw_active_r_strat_bounds(active_settings)
     fitted_value = result.fitted_parameters.R_strat
     tolerance_ratio = automatic_settings.dhw_active_bound_tolerance_ratio
-    if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
+    lower_bound_represents_nearly_perfect_mixing = lower_bound <= DEFAULT_MIN_DHW_R_STRAT_K_PER_KW * (1.0 + tolerance_ratio)
+    if fitted_value <= lower_bound * (1.0 + tolerance_ratio) and not lower_bound_represents_nearly_perfect_mixing:
         raise _CalibrationValidationError(
             "Automatic DHW active fit rejected: R_strat converged to the lower bound. "
             f"R_strat={fitted_value:.6g} K/kW, lower bound={lower_bound:.6g} K/kW.",

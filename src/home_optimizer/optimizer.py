@@ -324,7 +324,13 @@ class RunRequest(BaseModel):
         0.5814, ge=0.01, le=5.0, description="DHW bottom-layer thermal capacity C_bot [kWh/K]"
     )
     dhw_R_strat: float = Field(
-        10.0, ge=1.0, le=100.0, description="Stratification resistance R_strat [K/kW]"
+        10.0,
+        gt=0.0,
+        le=100.0,
+        description=(
+            "Effective DHW stratification resistance R_strat [K/kW]. Positive values very "
+            "close to zero are physically admissible and represent near-perfect mixing during charging."
+        ),
     )
     dhw_R_loss: float = Field(
         50.0,
