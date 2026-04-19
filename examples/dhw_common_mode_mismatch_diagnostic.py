@@ -200,6 +200,34 @@ class FlowScaleSensitivityPoint:
     mean_counter_cop: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class ElectricReferenceAudit:
+    """Audit whether the HP kWh counter or HP kW meter is the better short-bucket reference.
+
+    Attributes:
+        mode_name: Heat-pump mode covered by the audit.
+        bucket_count: Number of considered buckets [-].
+        zero_counter_bucket_count: Buckets where the electric energy delta is zero [-].
+        nonzero_counter_bucket_count: Buckets where the counter did move [-].
+        mean_hp_electric_power_kw: Mean instantaneous electric power meter value [kW].
+        mean_counter_implied_power_kw: Mean ``hp_electric_energy_delta_kwh / dt`` over
+            non-zero-counter buckets [kW].
+        mean_abs_meter_counter_gap_kw: Mean absolute difference between the electric
+            kW meter and counter-implied average kW over non-zero-counter buckets [kW].
+        counter_delta_levels_kwh: Sorted unique electric counter steps observed in the
+            filtered buckets [kWh].
+    """
+
+    mode_name: str
+    bucket_count: int
+    zero_counter_bucket_count: int
+    nonzero_counter_bucket_count: int
+    mean_hp_electric_power_kw: float
+    mean_counter_implied_power_kw: float | None
+    mean_abs_meter_counter_gap_kw: float | None
+    counter_delta_levels_kwh: tuple[float, ...]
+
+
 LITERS_PER_MINUTE_TO_M3_PER_HOUR: float = 60.0 / LITERS_PER_CUBIC_METER
 
 
@@ -310,7 +338,7 @@ def _rescaled_charge_rows(
     for row in rows:
         payload = dict(row.__dict__)
         payload["hp_thermal_power_mean_kw"] = scale_multiplier * float(row.hp_thermal_power_mean_kw)
-        scaled_rows.append(cast(TelemetryAggregate, SimpleNamespace(**payload)))
+        scaled_rows.append(cast(TelemetryAggregate, cast(object, SimpleNamespace(**payload))))
     return scaled_rows
 
 
@@ -397,6 +425,59 @@ def _flow_scale_sensitivity(
             )
         )
     return sensitivity_points
+
+
+def _audit_electric_reference(
+    *,
+    rows: list[TelemetryAggregate],
+    mode_name: str,
+) -> ElectricReferenceAudit:
+    """Compare the HP kW meter against the kWh counter on short telemetry buckets."""
+
+    mode_rows = [
+        row
+        for row in rows
+        if row.hp_mode_last == mode_name
+        and float(row.defrost_active_fraction) == 0.0
+        and float(row.booster_heater_active_fraction) == 0.0
+    ]
+    if not mode_rows:
+        raise ValueError(f"No clean telemetry buckets available for mode {mode_name!r}.")
+
+    zero_counter_bucket_count = 0
+    counter_implied_power_kw: list[float] = []
+    meter_counter_gaps_kw: list[float] = []
+    counter_delta_levels_kwh: set[float] = set()
+
+    for row in mode_rows:
+        counter_delta_kwh = float(row.hp_electric_energy_delta_kwh)
+        counter_delta_levels_kwh.add(counter_delta_kwh)
+        if counter_delta_kwh <= 0.0:
+            zero_counter_bucket_count += 1
+            continue
+        dt_hours = (row.bucket_end_utc - row.bucket_start_utc).total_seconds() / 3600.0
+        if dt_hours <= 0.0:
+            continue
+        implied_power_kw = counter_delta_kwh / dt_hours
+        counter_implied_power_kw.append(implied_power_kw)
+        meter_counter_gaps_kw.append(abs(float(row.hp_electric_power_mean_kw) - implied_power_kw))
+
+    return ElectricReferenceAudit(
+        mode_name=mode_name,
+        bucket_count=len(mode_rows),
+        zero_counter_bucket_count=zero_counter_bucket_count,
+        nonzero_counter_bucket_count=len(counter_implied_power_kw),
+        mean_hp_electric_power_kw=float(
+            np.mean(np.array([float(row.hp_electric_power_mean_kw) for row in mode_rows], dtype=float))
+        ),
+        mean_counter_implied_power_kw=(
+            float(np.mean(np.array(counter_implied_power_kw, dtype=float))) if counter_implied_power_kw else None
+        ),
+        mean_abs_meter_counter_gap_kw=(
+            float(np.mean(np.array(meter_counter_gaps_kw, dtype=float))) if meter_counter_gaps_kw else None
+        ),
+        counter_delta_levels_kwh=tuple(sorted(counter_delta_levels_kwh)),
+    )
 
 
 def _build_reference_parameters(
@@ -668,6 +749,14 @@ def _print_flow_scale_sensitivity(
     print()
 
 
+def _print_electric_reference_audit(audit: ElectricReferenceAudit) -> None:
+    """Render the HP kW meter versus kWh counter audit."""
+
+    print(f"electric_reference_audit mode={audit.mode_name}")
+    print(asdict(audit))
+    print()
+
+
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments for the common-mode mismatch diagnostic."""
 
@@ -714,6 +803,18 @@ def main() -> None:
             rows=full_aggregate_rows,
             mode_name="ufh",
             lambda_water=default_request.dhw_lambda_water_kwh_per_m3k,
+        )
+    )
+    _print_electric_reference_audit(
+        _audit_electric_reference(
+            rows=full_aggregate_rows,
+            mode_name="dhw",
+        )
+    )
+    _print_electric_reference_audit(
+        _audit_electric_reference(
+            rows=full_aggregate_rows,
+            mode_name="ufh",
         )
     )
 
