@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import pytest
 
 from home_optimizer.forecasting import ForecastService, ShutterForecaster
 from home_optimizer.optimizer import Optimizer, RunRequest
@@ -135,6 +136,13 @@ def _add_future_forecast_batch(
     )
 
 
+def _train_persisted_shutter_model(repository: TelemetryRepository) -> object:
+    """Train and persist one shutter artifact for runtime inference tests."""
+    metadata = ShutterForecaster().train_and_persist_from_repository(repository=repository)
+    assert metadata is not None
+    return metadata
+
+
 def test_shutter_forecaster_learns_daylight_closure_pattern(tmp_path) -> None:
     """Sunny hours should yield a lower predicted shutter opening than dark hours."""
     database_url = f"sqlite:///{tmp_path / 'shutter-forecast.sqlite3'}"
@@ -149,6 +157,7 @@ def test_shutter_forecaster_learns_daylight_closure_pattern(tmp_path) -> None:
         fetched_at_utc=future_fetched_at_utc,
         gti_profile_w_per_m2=[0.0, 180.0, 650.0, 650.0, 180.0, 0.0],
     )
+    _train_persisted_shutter_model(repository)
 
     rows = repository.get_latest_forecast_batch()
     prediction = ShutterForecaster().predict_from_repository(
@@ -211,6 +220,7 @@ def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None
         fetched_at_utc=future_fetched_at_utc,
         gti_profile_w_per_m2=[0.0, 180.0, 650.0, 650.0, 180.0, 0.0],
     )
+    _train_persisted_shutter_model(repository)
 
     base_input = RunRequest.model_validate({"horizon_hours": 6, "shutter_living_room_pct": 100.0})
     scheduled_input = Optimizer._build_scheduled_input(
@@ -223,3 +233,107 @@ def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None
     assert len(scheduled_input.shutter_forecast) == 6
     assert scheduled_input.shutter_forecast[2] < scheduled_input.shutter_forecast[0]
     assert scheduled_input.shutter_forecast[3] < scheduled_input.shutter_forecast[5]
+
+
+def test_shutter_forecaster_reuses_cached_model_for_unchanged_history(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Repeated predictions on an unchanged artifact must not hit disk deserialisation twice."""
+    database_url = f"sqlite:///{tmp_path / 'cached-shutter-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    _populate_shutter_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=72)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 180.0, 650.0, 650.0, 180.0, 0.0],
+    )
+    ShutterForecaster.clear_model_cache()
+    _train_persisted_shutter_model(repository)
+    ShutterForecaster.clear_model_cache()
+    rows = repository.get_latest_forecast_batch()
+
+    load_calls = 0
+    original_load = ShutterForecaster._load_artifact_from_disk
+
+    def counting_load(self: ShutterForecaster, artifact_path):  # noqa: ANN001
+        nonlocal load_calls
+        load_calls += 1
+        return original_load(self, artifact_path)
+
+    monkeypatch.setattr(ShutterForecaster, "_load_artifact_from_disk", counting_load)
+
+    first_forecaster = ShutterForecaster()
+    second_forecaster = ShutterForecaster()
+    first_prediction = first_forecaster.predict_from_repository(
+        repository=repository,
+        weather_rows=rows,
+        horizon_steps=6,
+        initial_shutter_pct=100.0,
+    )
+    second_prediction = second_forecaster.predict_from_repository(
+        repository=repository,
+        weather_rows=rows,
+        horizon_steps=6,
+        initial_shutter_pct=100.0,
+    )
+
+    assert load_calls == 1
+    assert first_prediction is not None and second_prediction is not None
+    np.testing.assert_allclose(first_prediction, second_prediction)
+
+
+def test_shutter_forecaster_refreshes_cached_model_after_retraining(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A same-process nightly retrain must refresh the cached runtime model without extra disk loads."""
+    database_url = f"sqlite:///{tmp_path / 'cache-invalidation-shutter.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    _populate_shutter_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=72)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 180.0, 650.0, 650.0, 180.0, 0.0],
+    )
+    ShutterForecaster.clear_model_cache()
+    _train_persisted_shutter_model(repository)
+    ShutterForecaster.clear_model_cache()
+    rows = repository.get_latest_forecast_batch()
+
+    load_calls = 0
+    original_load = ShutterForecaster._load_artifact_from_disk
+
+    def counting_load(self: ShutterForecaster, artifact_path):  # noqa: ANN001
+        nonlocal load_calls
+        load_calls += 1
+        return original_load(self, artifact_path)
+
+    monkeypatch.setattr(ShutterForecaster, "_load_artifact_from_disk", counting_load)
+
+    forecaster = ShutterForecaster()
+    first_prediction = forecaster.predict_from_repository(
+        repository=repository,
+        weather_rows=rows,
+        horizon_steps=6,
+        initial_shutter_pct=100.0,
+    )
+    first_cached_sample_count = forecaster._load_cached_artifact(repository).sample_count  # noqa: SLF001
+
+    _populate_shutter_history(repository, start_utc=history_start_utc + timedelta(hours=72), hours=1)
+    _train_persisted_shutter_model(repository)
+
+    second_prediction = forecaster.predict_from_repository(
+        repository=repository,
+        weather_rows=rows,
+        horizon_steps=6,
+        initial_shutter_pct=100.0,
+    )
+    refreshed_cached_sample_count = forecaster._load_cached_artifact(repository).sample_count  # noqa: SLF001
+
+    assert load_calls == 1
+    assert first_prediction is not None and second_prediction is not None
+    assert refreshed_cached_sample_count > first_cached_sample_count
+

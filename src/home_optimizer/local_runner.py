@@ -59,6 +59,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .api import app
 from .calibration import AutomaticCalibrationSettings, run_and_persist_automatic_calibration
 from .database import DATABASE_URL_DEFAULT, Database
+from .forecasting import ForecastService
 from .optimizer import Optimizer
 from .price_model import PriceConfig, PriceMode, build_price_model
 from .sensors.local_backend import LocalBackend
@@ -87,6 +88,9 @@ _DEFAULT_LATITUDE: float = 52.37
 _DEFAULT_LONGITUDE: float = 4.90
 _DEFAULT_CALIBRATION_INTERVAL_SECONDS: int = 6 * 3600
 _DEFAULT_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
+_DEFAULT_FORECAST_TRAINING_HOUR_UTC: int = 2
+_DEFAULT_FORECAST_TRAINING_MINUTE_UTC: int = 0
+_FORECAST_TRAINING_MISFIRE_GRACE_SECONDS: int = 3600
 
 log = logging.getLogger("home_optimizer.local_runner")
 
@@ -277,6 +281,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="HOURS",
         help="Minimum persisted telemetry history required before automatic calibration [h].",
     )
+    parser.add_argument(
+        "--forecast-training-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable persisted ML forecast-model training (currently shutter_forecast).",
+    )
+    parser.add_argument(
+        "--forecast-training-hour-utc",
+        type=int,
+        default=_DEFAULT_FORECAST_TRAINING_HOUR_UTC,
+        metavar="HOUR",
+        help="UTC hour (0–23) for the nightly ML forecast-model training job.",
+    )
+    parser.add_argument(
+        "--forecast-training-minute-utc",
+        type=int,
+        default=_DEFAULT_FORECAST_TRAINING_MINUTE_UTC,
+        metavar="MINUTE",
+        help="UTC minute (0–59) for the nightly ML forecast-model training job.",
+    )
 
     # ── Electricity price model ───────────────────────────────────────────
     parser.add_argument(
@@ -361,6 +385,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     args = _parse_args(argv)
+    if not 0 <= args.forecast_training_hour_utc <= 23:
+        raise ValueError("--forecast-training-hour-utc must be in [0, 23].")
+    if not 0 <= args.forecast_training_minute_utc <= 59:
+        raise ValueError("--forecast-training-minute-utc must be in [0, 59].")
 
     # ── 1. Resolve database — Database class handles path, mkdir, and URL ──
     # Priority: --database CLI arg > DATABASE_URL env var > default.
@@ -485,7 +513,47 @@ def main(argv: list[str] | None = None) -> None:
         }
     )
 
-    # ── 5c. Automatic calibration on persisted telemetry ───────────────────
+    # ── 5c. Nightly ML forecast-model training (currently shutter model) ───
+    if args.forecast_training_enabled:
+        forecast_service = ForecastService()
+
+        def _run_forecast_training_job() -> None:
+            results = forecast_service.train_and_persist_models(repository=repository)
+            shutter_result = results.get("shutter_forecast")
+            if shutter_result is None:
+                log.info("Forecast-model training skipped — insufficient history for shutter_forecast.")
+                return
+            trained_at_utc = getattr(shutter_result, "trained_at_utc", None)
+            sample_count = getattr(shutter_result, "sample_count", None)
+            log.info(
+                "Forecast model stored: shutter_forecast trained at %s with %d samples.",
+                trained_at_utc.isoformat() if trained_at_utc is not None else "unknown",
+                sample_count if sample_count is not None else -1,
+            )
+
+        try:
+            _run_forecast_training_job()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Initial forecast-model training failed: %s", exc)
+
+        scheduler.add_job(
+            _run_forecast_training_job,
+            trigger="cron",
+            hour=args.forecast_training_hour_utc,
+            minute=args.forecast_training_minute_utc,
+            id="forecast_model_training_periodic",
+            replace_existing=True,
+            misfire_grace_time=_FORECAST_TRAINING_MISFIRE_GRACE_SECONDS,
+        )
+        log.info(
+            "Forecast-model training job scheduled daily at %02d:%02d UTC.",
+            args.forecast_training_hour_utc,
+            args.forecast_training_minute_utc,
+        )
+    else:
+        log.info("Persisted ML forecast-model training disabled (--no-forecast-training-enabled).")
+
+    # ── 5d. Automatic calibration on persisted telemetry ───────────────────
     if args.calibration_interval > 0:
         calibration_settings = AutomaticCalibrationSettings(
             min_history_hours=args.calibration_min_history_hours,
@@ -530,7 +598,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         log.info("Automatic calibration disabled (--calibration-interval=0).")
 
-    # ── 5d. Optional: schedule periodic MPC ───────────────────────────────
+    # ── 5e. Optional: schedule periodic MPC ───────────────────────────────
     # When --sensors-json is provided, the MPC reads live initial conditions
     # from the JSON file at every solve interval (LocalBackend re-reads the
     # file on each call, so values updated on disk are picked up immediately).

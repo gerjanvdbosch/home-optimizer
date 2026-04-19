@@ -18,10 +18,14 @@ from __future__ import annotations
 from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+import logging
 from math import cos, pi, sin
+from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
+import joblib
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 
@@ -29,6 +33,13 @@ from .models import ShutterForecastSettings
 
 if TYPE_CHECKING:
     from ..telemetry.repository import TelemetryRepository
+
+
+_ARTIFACT_NAME: str = "shutter_model"
+_ARTIFACT_VERSION: int = 1
+_ARTIFACT_TMP_SUFFIX: str = ".tmp"
+
+log = logging.getLogger("home_optimizer.forecasting.shutter")
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +59,44 @@ class _ShutterSample:
     gti_w_per_m2: float
     previous_shutter_pct: float
     shutter_pct: float
+
+
+@dataclass(frozen=True, slots=True)
+class _CachedShutterModel:
+    """Cached fitted regressor or cached sparse-history miss.
+
+    Attributes:
+        regressor: Trained random forest, or ``None`` when history was too sparse.
+        sample_count: Number of training samples that were available when this
+            cache entry was created [-].
+    """
+
+    regressor: RandomForestRegressor | None
+    sample_count: int
+    artifact_mtime_ns: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ShutterModelArtifactMetadata:
+    """Metadata stored next to the persisted shutter ML artifact.
+
+    Attributes:
+        model_version: Artifact schema version [-].
+        trained_at_utc: UTC timestamp when the model was trained.
+        sample_count: Number of training samples used for fitting [-].
+        settings_signature: Tuple of hyperparameters that must match the current
+            ``ShutterForecastSettings`` before the artifact is accepted.
+        training_fingerprint: Compact summary of the repository history that was
+            available during training. This is informational for observability and
+            is not used as a runtime rejection criterion, because telemetry keeps
+            growing after each nightly training run.
+    """
+
+    model_version: int
+    trained_at_utc: datetime
+    sample_count: int
+    settings_signature: tuple[object, ...]
+    training_fingerprint: tuple[object, ...]
 
 
 def _cyclical_time_features(valid_at_utc: datetime) -> tuple[float, float, float, float, float]:
@@ -117,8 +166,66 @@ class ShutterForecaster:
     current measured/manual shutter state acts as the initial condition.
     """
 
+    _model_cache: dict[tuple[object, ...], _CachedShutterModel] = {}
+    _cache_lock: Lock = Lock()
+
     def __init__(self, settings: ShutterForecastSettings | None = None) -> None:
         self._settings = settings or ShutterForecastSettings()
+
+    @classmethod
+    def clear_model_cache(cls) -> None:
+        """Clear all cached trained shutter models in the current process."""
+        with cls._cache_lock:
+            cls._model_cache.clear()
+
+    def train_and_persist_from_repository(
+        self,
+        *,
+        repository: "TelemetryRepository",
+    ) -> ShutterModelArtifactMetadata | None:
+        """Fit a shutter model from repository history and persist it to disk.
+
+        Args:
+            repository: Telemetry repository that supplies historical telemetry and
+                the canonical artifact storage path next to its SQLite database.
+
+        Returns:
+            Persisted artifact metadata, or ``None`` when the repository still
+            contains too little history to fit a stable model.
+        """
+
+        training_samples = self._build_training_samples(repository)
+        if len(training_samples) < self._settings.min_training_samples:
+            log.info(
+                "Skipping shutter-model training: need at least %d samples, found %d.",
+                self._settings.min_training_samples,
+                len(training_samples),
+            )
+            return None
+
+        X = np.vstack(
+            [
+                _build_feature_row(
+                    valid_at_utc=sample.valid_at_utc,
+                    outdoor_temperature_c=sample.outdoor_temperature_c,
+                    gti_w_per_m2=sample.gti_w_per_m2,
+                    previous_shutter_pct=sample.previous_shutter_pct,
+                )
+                for sample in training_samples
+            ]
+        )
+        y = np.array([sample.shutter_pct for sample in training_samples], dtype=float)
+        regressor = self._fit_regressor(X, y)
+        metadata = ShutterModelArtifactMetadata(
+            model_version=_ARTIFACT_VERSION,
+            trained_at_utc=datetime.now(tz=timezone.utc),
+            sample_count=len(training_samples),
+            settings_signature=self._settings_signature(),
+            training_fingerprint=repository.forecast_training_fingerprint(),
+        )
+        artifact_path = repository.forecast_artifact_path(_ARTIFACT_NAME)
+        self._persist_artifact(artifact_path=artifact_path, regressor=regressor, metadata=metadata)
+        return metadata
 
     def predict_from_repository(
         self,
@@ -149,22 +256,82 @@ class ShutterForecaster:
         if len(weather_rows) < horizon_steps:
             return None
 
-        training_samples = self._build_training_samples(repository)
-        if len(training_samples) < self._settings.min_training_samples:
+        cached_model = self._load_cached_artifact(repository)
+        if cached_model.regressor is None:
             return None
 
-        X = np.vstack(
-            [
-                _build_feature_row(
-                    valid_at_utc=sample.valid_at_utc,
-                    outdoor_temperature_c=sample.outdoor_temperature_c,
-                    gti_w_per_m2=sample.gti_w_per_m2,
-                    previous_shutter_pct=sample.previous_shutter_pct,
-                )
-                for sample in training_samples
-            ]
+        predictions = np.zeros(horizon_steps, dtype=float)
+        previous_shutter_pct = initial_shutter_pct
+        for index, row in enumerate(weather_rows[:horizon_steps]):
+            features = _build_feature_row(
+                valid_at_utc=row.valid_at_utc,
+                outdoor_temperature_c=float(row.t_out_c),
+                gti_w_per_m2=float(row.gti_w_per_m2),
+                previous_shutter_pct=previous_shutter_pct,
+            )
+            predicted_pct = float(cached_model.regressor.predict(features.reshape(1, -1))[0])
+            clipped_pct = float(np.clip(predicted_pct, 0.0, 100.0))
+            predictions[index] = clipped_pct
+            previous_shutter_pct = clipped_pct
+        return predictions
+
+    def _load_cached_artifact(self, repository: "TelemetryRepository") -> _CachedShutterModel:
+        """Load the persisted shutter artifact, reusing an in-process cache.
+
+        The disk artifact is the source of truth. The in-process cache only avoids
+        repeated deserialisation while the artifact file remains unchanged.
+        """
+
+        artifact_path = repository.forecast_artifact_path(_ARTIFACT_NAME)
+        if not artifact_path.exists():
+            return _CachedShutterModel(regressor=None, sample_count=0, artifact_mtime_ns=None)
+
+        artifact_mtime_ns = artifact_path.stat().st_mtime_ns
+        cache_key = (str(artifact_path), self._settings_signature())
+        with type(self)._cache_lock:
+            cached = type(self)._model_cache.get(cache_key)
+        if cached is not None and cached.artifact_mtime_ns == artifact_mtime_ns:
+            return cached
+
+        loaded = self._load_artifact_from_disk(artifact_path)
+        if loaded is None:
+            return _CachedShutterModel(regressor=None, sample_count=0, artifact_mtime_ns=None)
+
+        metadata, regressor = loaded
+        if metadata.model_version != _ARTIFACT_VERSION:
+            log.warning(
+                "Ignoring shutter-model artifact %s with version %s (expected %s).",
+                artifact_path,
+                metadata.model_version,
+                _ARTIFACT_VERSION,
+            )
+            return _CachedShutterModel(regressor=None, sample_count=0, artifact_mtime_ns=None)
+        if metadata.settings_signature != self._settings_signature():
+            log.info(
+                "Ignoring shutter-model artifact %s because the hyperparameter signature changed.",
+                artifact_path,
+            )
+            return _CachedShutterModel(regressor=None, sample_count=0, artifact_mtime_ns=None)
+
+        cached = _CachedShutterModel(
+            regressor=regressor,
+            sample_count=metadata.sample_count,
+            artifact_mtime_ns=artifact_mtime_ns,
         )
-        y = np.array([sample.shutter_pct for sample in training_samples], dtype=float)
+        with type(self)._cache_lock:
+            type(self)._model_cache[cache_key] = cached
+        return cached
+
+    def _fit_regressor(self, X: np.ndarray, y: np.ndarray) -> RandomForestRegressor:
+        """Fit one shutter regressor from tabular training data.
+
+        Args:
+            X: Feature matrix with shape ``(n_samples, 8)``.
+            y: Target shutter positions [% open], shape ``(n_samples,)``.
+
+        Returns:
+            Trained scikit-learn random forest regressor.
+        """
 
         # A shallow random forest is robust to non-linear occupant behavior while
         # requiring little feature engineering. This keeps the runtime model small
@@ -176,21 +343,88 @@ class ShutterForecaster:
             random_state=self._settings.random_state,
         )
         regressor.fit(X, y)
+        return regressor
 
-        predictions = np.zeros(horizon_steps, dtype=float)
-        previous_shutter_pct = initial_shutter_pct
-        for index, row in enumerate(weather_rows[:horizon_steps]):
-            features = _build_feature_row(
-                valid_at_utc=row.valid_at_utc,
-                outdoor_temperature_c=float(row.t_out_c),
-                gti_w_per_m2=float(row.gti_w_per_m2),
-                previous_shutter_pct=previous_shutter_pct,
+    def _settings_signature(self) -> tuple[object, ...]:
+        """Return a stable hyperparameter signature for artifact compatibility checks."""
+
+        return (
+            self._settings.min_training_samples,
+            self._settings.max_history_gap_hours,
+            self._settings.alignment_tolerance_hours,
+            self._settings.random_state,
+            self._settings.tree_count,
+            self._settings.tree_max_depth,
+            self._settings.min_samples_leaf,
+        )
+
+    def _persist_artifact(
+        self,
+        *,
+        artifact_path: Path,
+        regressor: RandomForestRegressor,
+        metadata: ShutterModelArtifactMetadata,
+    ) -> None:
+        """Persist one trained shutter model atomically to disk.
+
+        Atomic replacement ensures runtime inference never observes a partially
+        written model file while the nightly training job is updating it.
+        """
+
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = artifact_path.with_suffix(f"{artifact_path.suffix}{_ARTIFACT_TMP_SUFFIX}")
+        payload = {
+            "metadata": {
+                "model_version": metadata.model_version,
+                "trained_at_utc": metadata.trained_at_utc.isoformat(),
+                "sample_count": metadata.sample_count,
+                "settings_signature": metadata.settings_signature,
+                "training_fingerprint": metadata.training_fingerprint,
+            },
+            "model": regressor,
+        }
+        joblib.dump(payload, temporary_path)
+        temporary_path.replace(artifact_path)
+
+        cached = _CachedShutterModel(
+            regressor=regressor,
+            sample_count=metadata.sample_count,
+            artifact_mtime_ns=artifact_path.stat().st_mtime_ns,
+        )
+        cache_key = (str(artifact_path), self._settings_signature())
+        with type(self)._cache_lock:
+            type(self)._model_cache[cache_key] = cached
+
+    def _load_artifact_from_disk(
+        self,
+        artifact_path: Path,
+    ) -> tuple[ShutterModelArtifactMetadata, RandomForestRegressor] | None:
+        """Deserialize one persisted shutter model artifact from disk."""
+
+        try:
+            payload = joblib.load(artifact_path)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not load shutter-model artifact %s: %s", artifact_path, exc)
+            return None
+
+        metadata_payload = payload.get("metadata") if isinstance(payload, dict) else None
+        regressor = payload.get("model") if isinstance(payload, dict) else None
+        if not isinstance(metadata_payload, dict) or not isinstance(regressor, RandomForestRegressor):
+            log.warning("Ignoring malformed shutter-model artifact at %s.", artifact_path)
+            return None
+
+        try:
+            metadata = ShutterModelArtifactMetadata(
+                model_version=int(metadata_payload["model_version"]),
+                trained_at_utc=datetime.fromisoformat(str(metadata_payload["trained_at_utc"])),
+                sample_count=int(metadata_payload["sample_count"]),
+                settings_signature=tuple(metadata_payload["settings_signature"]),
+                training_fingerprint=tuple(metadata_payload["training_fingerprint"]),
             )
-            predicted_pct = float(regressor.predict(features.reshape(1, -1))[0])
-            clipped_pct = float(np.clip(predicted_pct, 0.0, 100.0))
-            predictions[index] = clipped_pct
-            previous_shutter_pct = clipped_pct
-        return predictions
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Ignoring shutter-model artifact with invalid metadata at %s: %s", artifact_path, exc)
+            return None
+        return metadata, regressor
 
     def _build_training_samples(self, repository: "TelemetryRepository") -> list[_ShutterSample]:
         """Construct sequential training samples from telemetry and forecast history.

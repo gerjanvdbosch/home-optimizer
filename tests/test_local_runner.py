@@ -59,6 +59,23 @@ def test_parse_args_exposes_calibration_flags() -> None:
     assert args.calibration_min_history_hours == 12.0
 
 
+def test_parse_args_exposes_forecast_training_flags() -> None:
+    """Local runner CLI must expose nightly persisted forecast-model training controls."""
+    args = local_runner._parse_args(
+        [
+            "--forecast-training-hour-utc",
+            "3",
+            "--forecast-training-minute-utc",
+            "45",
+            "--no-forecast-training-enabled",
+        ]
+    )
+
+    assert args.forecast_training_enabled is False
+    assert args.forecast_training_hour_utc == 3
+    assert args.forecast_training_minute_utc == 45
+
+
 def test_main_runs_initial_automatic_calibration_when_enabled(tmp_path, monkeypatch) -> None:
     """Local runner must trigger automatic calibration during startup."""
     sensors_path = tmp_path / "sensors.json"
@@ -111,4 +128,55 @@ def test_main_runs_initial_automatic_calibration_when_enabled(tmp_path, monkeypa
     database_url, min_history_hours = calibration_calls[0]
     assert str(database_path.resolve()) in database_url
     assert min_history_hours == 12.0
+
+
+def test_main_runs_initial_forecast_model_training_when_enabled(tmp_path, monkeypatch) -> None:
+    """Local runner must train persisted forecast models once during startup when enabled."""
+    sensors_path = tmp_path / "sensors.json"
+    _write_sensors_json(sensors_path)
+    database_path = tmp_path / "local-runner-forecast.sqlite3"
+
+    forecast_training_calls: list[str] = []
+
+    class FakeForecastPersister:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: D401, ANN002, ANN003
+            pass
+
+        def persist_once(self) -> int:
+            return 0
+
+        def start(self, scheduler, *, run_immediately: bool = True) -> None:  # noqa: ANN001
+            return None
+
+    class FakeForecastService:
+        def train_and_persist_models(self, *, repository):  # noqa: ANN001
+            forecast_training_calls.append(repository.engine.url.render_as_string(hide_password=False))
+            return {"shutter_forecast": None}
+
+    monkeypatch.setattr(local_runner, "ForecastPersister", FakeForecastPersister)
+    monkeypatch.setattr(local_runner, "ForecastService", FakeForecastService)
+    monkeypatch.setattr(local_runner, "OpenMeteoClient", lambda *args, **kwargs: object())
+    monkeypatch.setattr(local_runner.uvicorn, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(local_runner.Database, "export_to_env", lambda self: None)
+
+    local_runner.main(
+        [
+            "--database",
+            str(database_path),
+            "--sensors-json",
+            str(sensors_path),
+            "--mpc-interval",
+            "0",
+            "--calibration-interval",
+            "0",
+            "--forecast-training-hour-utc",
+            "1",
+            "--forecast-training-minute-utc",
+            "30",
+        ]
+    )
+
+    assert len(forecast_training_calls) == 1
+    assert str(database_path.resolve()) in forecast_training_calls[0]
+
 

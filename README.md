@@ -10,6 +10,7 @@ Python-implementatie van een gecombineerd thermisch model voor **vloerverwarming
 - **FastAPI webinterface** met operationeel dashboard (Open-Meteo forecast) en MPC-simulator;
 - **telemetrylaag** (SQLite + SQLAlchemy + APScheduler) voor sensor- en forecastopslag.
 - **ML-forecastlaag** (scikit-learn) voor gedragsafhankelijke horizon-signalen zoals `shutter_forecast`, uitbreidbaar naar een latere baseload-voorspelling.
+- Persistente ML-modelartifacts worden naast de SQLite database opgeslagen; runtime inference laadt deze artifacts zonder live retraining in het MPC-pad.
 
 ---
 
@@ -28,6 +29,7 @@ De lokale runner combineert in één proces:
 - de **ForecastPersister** (haalt Open-Meteo op, slaat op in SQLite),
 - optioneel de **telemetrycollector** uit `sensors.json`,
 - de **automatische calibratie** op basis van opgeslagen telemetrie,
+- de **nachtelijke ML forecast-modeltraining** (momenteel voor `shutter_forecast`),
 - en de **FastAPI/Uvicorn** server.
 
 ```bash
@@ -80,6 +82,9 @@ home-optimizer-local --database ./dev.db --pv-tilt 35
 | `--mpc-interval` | `30` | Periodieke MPC-interval [s]; `0` schakelt MPC scheduling uit |
 | `--calibration-interval` | `21600` | Periodieke automatic calibration [s]; `0` schakelt calibratie uit |
 | `--calibration-min-history-hours` | `24` | Minimale telemetry-historie vóór automatic calibration [h] |
+| `--forecast-training-enabled` / `--no-forecast-training-enabled` | aan | Nightly persisted ML forecast-modeltraining in-/uitschakelen |
+| `--forecast-training-hour-utc` | `2` | UTC uur voor de nightly ML forecast-modeltraining |
+| `--forecast-training-minute-utc` | `0` | UTC minuut voor de nightly ML forecast-modeltraining |
 
 ### Database-locatie configureren
 
@@ -116,6 +121,7 @@ Open na het starten van de runner:
 - Carnot COP-model met stooklijn
 - Zoninstraling op de zuidramen kan optioneel met een **`shutter_forecast` over de hele horizon** worden gemoduleerd; zonder die array blijft de actuele `shutter_living_room_pct` de fallback voor alle MPC-stappen
 - Als geen expliciete `shutter_forecast` wordt meegegeven, kan de runtime automatisch een eenvoudige **scikit-learn shutter-voorspelling** afleiden uit historische telemetry + de laatste weerforecast; bij te weinig historie blijft de scalar fallback actief
+- Die shutter-voorspelling wordt niet meer live getraind tijdens een solve: de runner/addon traint het model bij startup en daarna dagelijks op een vast UTC-tijdstip, schrijft het artifact weg naast de database, en runtime inference laadt vervolgens het laatst getrainde model
 - Laadt bij openen eerst `GET /api/defaults`, dus de formuliervelden tonen automatisch de laatste calibrated defaults als die beschikbaar zijn
 - Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
 
@@ -175,6 +181,12 @@ De telemetrylaag samplet live sensoren vaker dan ze naar disk schrijft:
 - snapshots worden persistent opgeslagen in SQLite
 - `GET /api/defaults` gebruikt de laatste snapshot als calibrated defaults voor de simulator
 - de scheduled MPC gebruikt dezelfde snapshot automatisch bij periodieke solves
+
+**Persistente forecast-modellen** (disk artifacts naast SQLite):
+
+- de ML-forecastlaag traint het `shutter_forecast` model bij startup en daarna dagelijks opnieuw
+- artifacts worden atomisch weggeschreven naast het SQLite-bestand, zodat runtime inference nooit een half geschreven model leest
+- de runtime laadt het laatste artifact in-memory en hergebruikt het totdat er een nieuwer artifact is
 
 Lokale demo (leest uit `sensors.json`):
 

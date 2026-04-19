@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import app
 from .database import Database
+from .forecasting import ForecastService
 from .optimizer import Optimizer
 from .price_model import PriceConfig, PriceMode, build_price_model
 from .sensors.ha_backend import HAEntityConfig, HomeAssistantBackend
@@ -63,6 +64,10 @@ DEFAULT_CALIBRATION_INTERVAL_SECONDS: int = 6 * 3600
 
 #: Minimum telemetry history before the addon attempts offline calibration [h].
 DEFAULT_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
+
+DEFAULT_FORECAST_TRAINING_HOUR_UTC: int = 2
+DEFAULT_FORECAST_TRAINING_MINUTE_UTC: int = 0
+FORECAST_TRAINING_MISFIRE_GRACE_SECONDS: int = 3600
 
 log = logging.getLogger("home_optimizer.addon")
 
@@ -132,6 +137,22 @@ class AddonOptions(BaseModel):
         DEFAULT_CALIBRATION_MIN_HISTORY_HOURS,
         gt=0.0,
         description="Minimum persisted telemetry history required before auto-calibration [h].",
+    )
+    forecast_training_enabled: bool = Field(
+        True,
+        description="Enable nightly persisted ML forecast-model training (currently shutter_forecast).",
+    )
+    forecast_training_hour_utc: int = Field(
+        DEFAULT_FORECAST_TRAINING_HOUR_UTC,
+        ge=0,
+        le=23,
+        description="UTC hour for the nightly persisted ML forecast-model training job.",
+    )
+    forecast_training_minute_utc: int = Field(
+        DEFAULT_FORECAST_TRAINING_MINUTE_UTC,
+        ge=0,
+        le=59,
+        description="UTC minute for the nightly persisted ML forecast-model training job.",
     )
 
     # --- MPC physical parameters (§15 of the theory document) ---
@@ -655,7 +676,47 @@ def main() -> None:
         }
     )
 
-    # ── 4d. Start periodic automatic calibration (optional) ───────────────
+    # ── 4d. Start nightly persisted ML forecast-model training (optional) ──
+    if opts.forecast_training_enabled:
+        forecast_service = ForecastService()
+
+        def _run_forecast_training_job() -> None:
+            results = forecast_service.train_and_persist_models(repository=repository)
+            shutter_result = results.get("shutter_forecast")
+            if shutter_result is None:
+                log.info("Forecast-model training skipped — insufficient history for shutter_forecast.")
+                return
+            trained_at_utc = getattr(shutter_result, "trained_at_utc", None)
+            sample_count = getattr(shutter_result, "sample_count", None)
+            log.info(
+                "Forecast model stored: shutter_forecast trained at %s with %d samples.",
+                trained_at_utc.isoformat() if trained_at_utc is not None else "unknown",
+                sample_count if sample_count is not None else -1,
+            )
+
+        try:
+            _run_forecast_training_job()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Initial forecast-model training failed: %s", exc)
+
+        collector.scheduler.add_job(
+            _run_forecast_training_job,
+            trigger="cron",
+            hour=opts.forecast_training_hour_utc,
+            minute=opts.forecast_training_minute_utc,
+            id="forecast_model_training_periodic",
+            replace_existing=True,
+            misfire_grace_time=FORECAST_TRAINING_MISFIRE_GRACE_SECONDS,
+        )
+        log.info(
+            "Forecast-model training job scheduled daily at %02d:%02d UTC.",
+            opts.forecast_training_hour_utc,
+            opts.forecast_training_minute_utc,
+        )
+    else:
+        log.info("Persisted ML forecast-model training disabled (forecast_training_enabled=false).")
+
+    # ── 4e. Start periodic automatic calibration (optional) ───────────────
     if opts.calibration_enabled:
         from .calibration.service import run_and_persist_automatic_calibration  # noqa: PLC0415
 
@@ -700,7 +761,7 @@ def main() -> None:
     else:
         log.info("Automatic calibration scheduling disabled (calibration_enabled=false).")
 
-    # ── 4e. Start periodic MPC (optional) ─────────────────────────────────
+    # ── 4f. Start periodic MPC (optional) ─────────────────────────────────
     if opts.mpc_enabled:
         optimizer = Optimizer()
         optimizer.schedule_periodic(

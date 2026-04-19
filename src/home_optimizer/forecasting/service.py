@@ -32,6 +32,10 @@ class ForecastProvider(ABC):
     ) -> dict[str, object]:
         """Return zero or more additional request overrides."""
 
+    @abstractmethod
+    def train_and_persist(self, *, repository: "TelemetryRepository") -> object | None:
+        """Train the provider model on repository history and persist it to disk."""
+
 
 class ShutterForecastProvider(ForecastProvider):
     """Predict ``shutter_forecast`` with a scikit-learn autoregressive regressor."""
@@ -70,6 +74,11 @@ class ShutterForecastProvider(ForecastProvider):
             return {}
         return {"shutter_forecast": predicted.tolist()}
 
+    def train_and_persist(self, *, repository: "TelemetryRepository") -> object | None:
+        """Train and persist the disk-backed shutter model artifact."""
+
+        return self._forecaster.train_and_persist_from_repository(repository=repository)
+
 
 class ForecastService:
     """Compose multiple ML forecast providers into one runtime enrichment step.
@@ -80,8 +89,8 @@ class ForecastService:
 
     def __init__(self, settings: ForecastServiceSettings | None = None) -> None:
         effective_settings = settings or ForecastServiceSettings()
-        self._providers: tuple[ForecastProvider, ...] = (
-            ShutterForecastProvider(ShutterForecaster(effective_settings.shutter)),
+        self._providers: tuple[tuple[str, ForecastProvider], ...] = (
+            ("shutter_forecast", ShutterForecastProvider(ShutterForecaster(effective_settings.shutter))),
         )
 
     def build_missing_overrides(
@@ -108,7 +117,7 @@ class ForecastService:
         incoming_overrides = dict(current_overrides or {})
         produced_overrides: dict[str, object] = {}
         effective_overrides = dict(incoming_overrides)
-        for provider in self._providers:
+        for _field_name, provider in self._providers:
             produced = provider.build_overrides(
                 request_data=request_data,
                 repository=repository,
@@ -118,3 +127,17 @@ class ForecastService:
             effective_overrides.update(produced)
             produced_overrides.update(produced)
         return produced_overrides
+
+    def train_and_persist_models(self, *, repository: "TelemetryRepository") -> dict[str, object | None]:
+        """Train every configured forecast provider and persist its model artifact.
+
+        Returns:
+            Mapping from provider field name to training metadata, or ``None`` when
+            a provider skipped training because insufficient history was available.
+        """
+
+        return {
+            field_name: provider.train_and_persist(repository=repository)
+            for field_name, provider in self._providers
+        }
+

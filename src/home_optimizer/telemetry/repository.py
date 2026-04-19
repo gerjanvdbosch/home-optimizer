@@ -7,9 +7,11 @@ scheduler logic so that storage can be tested independently from APScheduler.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -225,6 +227,89 @@ class TelemetryRepository:
             min_start_utc, max_end_utc = session.execute(stmt).one()
             return min_start_utc, max_end_utc
 
+    def get_forecast_time_bounds(self) -> tuple[datetime | None, datetime | None]:
+        """Return the oldest and newest forecast validity timestamps in history."""
+        with self._session_factory() as session:
+            stmt = select(
+                func.min(ForecastSnapshot.valid_at_utc),
+                func.max(ForecastSnapshot.valid_at_utc),
+            )
+            min_valid_utc, max_valid_utc = session.execute(stmt).one()
+            return min_valid_utc, max_valid_utc
+
     def count(self) -> int:
         """Return the number of persisted telemetry buckets."""
         return len(self.list_aggregates())
+
+    def count_forecast_snapshots(self) -> int:
+        """Return the number of persisted forecast rows."""
+        with self._session_factory() as session:
+            stmt = select(func.count(ForecastSnapshot.id))
+            result = session.execute(stmt).scalar_one()
+            return int(result)
+
+    def forecast_training_fingerprint(
+        self,
+    ) -> tuple[str, int, datetime | None, datetime | None, int, datetime | None, datetime | None]:
+        """Return a compact fingerprint of persisted ML training history.
+
+        The forecasting cache uses this fingerprint to detect when new telemetry
+        buckets or forecast rows have been appended and the model must be retrained.
+
+        Returns:
+            Tuple containing:
+                database_url [-],
+                aggregate_count [-],
+                aggregate_min_start_utc [UTC],
+                aggregate_max_end_utc [UTC],
+                forecast_row_count [-],
+                forecast_min_valid_utc [UTC],
+                forecast_latest_fetch_utc [UTC].
+        """
+
+        aggregate_min_start_utc, aggregate_max_end_utc = self.get_aggregate_time_bounds()
+        forecast_min_valid_utc, _forecast_max_valid_utc = self.get_forecast_time_bounds()
+        return (
+            self.engine.url.render_as_string(hide_password=True),
+            self.count(),
+            aggregate_min_start_utc,
+            aggregate_max_end_utc,
+            self.count_forecast_snapshots(),
+            forecast_min_valid_utc,
+            self.get_latest_forecast_fetched_at(),
+        )
+
+    def database_file_path(self) -> Path:
+        """Return the resolved SQLite database file path used by this repository.
+
+        Raises:
+            ValueError: If the repository is not backed by a SQLite file URL.
+        """
+
+        parsed_url = make_url(self.engine.url.render_as_string(hide_password=False))
+        if parsed_url.drivername != "sqlite":
+            raise ValueError(
+                "Disk-backed forecast artifacts currently require a SQLite repository; "
+                f"got driver {parsed_url.drivername!r}."
+            )
+        if parsed_url.database in (None, "", ":memory:"):
+            raise ValueError("Forecast artifacts require a SQLite file path, not an in-memory database.")
+        return Path(parsed_url.database).resolve()
+
+    def forecast_artifact_path(self, artifact_name: str, *, suffix: str = ".joblib") -> Path:
+        """Return the canonical on-disk path for one persisted forecast model artifact.
+
+        Args:
+            artifact_name: Stable artifact base name, for example ``"shutter_model"``.
+            suffix: Artifact file suffix, default ``.joblib``.
+
+        Returns:
+            Absolute artifact file path stored next to the SQLite database.
+        """
+
+        if not artifact_name or not artifact_name.strip():
+            raise ValueError("artifact_name must not be blank.")
+        database_path = self.database_file_path()
+        safe_artifact_name = artifact_name.strip().replace(" ", "_")
+        return database_path.with_name(f"{database_path.stem}.{safe_artifact_name}{suffix}")
+
