@@ -58,6 +58,32 @@ class CalibrationParameterOverrides(BaseModel):
     C_b: float | None = Field(default=None, gt=0.0, description="UFH slab capacity C_b [kWh/K]")
     R_br: float | None = Field(default=None, gt=0.0, description="UFH floor-room resistance R_br [K/kW]")
     R_ro: float | None = Field(default=None, gt=0.0, description="UFH room-outdoor resistance R_ro [K/kW]")
+    eta: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="UFH glazing solar transmittance eta [-]",
+    )
+    internal_gains_heat_fraction: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Useful indoor heat fraction of household baseload [-]",
+    )
+    room_temperature_bias_c: float | None = Field(
+        default=None,
+        description="Additive room-temperature sensor bias correction [°C]",
+    )
+    dhw_C_top: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="DHW top-layer thermal capacity C_top [kWh/K]",
+    )
+    dhw_C_bot: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="DHW bottom-layer thermal capacity C_bot [kWh/K]",
+    )
     dhw_R_strat: float | None = Field(
         default=None,
         gt=0.0,
@@ -67,6 +93,18 @@ class CalibrationParameterOverrides(BaseModel):
         default=None,
         gt=0.0,
         description="DHW standby-loss resistance R_loss [K/kW]",
+    )
+    dhw_top_temperature_bias_c: float | None = Field(
+        default=None,
+        description="Additive DHW top-temperature sensor bias correction [°C]",
+    )
+    dhw_bottom_temperature_bias_c: float | None = Field(
+        default=None,
+        description="Additive DHW bottom-temperature sensor bias correction [°C]",
+    )
+    dhw_boiler_ambient_bias_c: float | None = Field(
+        default=None,
+        description="Additive DHW boiler-ambient sensor bias correction [°C]",
     )
     eta_carnot: float | None = Field(
         default=None,

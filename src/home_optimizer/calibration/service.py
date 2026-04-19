@@ -367,24 +367,48 @@ def _build_ufh_active_diagnostics(
     r_ro_mismatch_ratio: float | None = None,
 ) -> dict[str, Any]:
     """Return structured UFH active-fit diagnostics for API/persistence visibility."""
-    fitted_parameter_names = ("C_r", "C_b", "R_br", "R_ro") if result.fit_c_r else ("C_b", "R_br", "R_ro")
+    fit_c_r = bool(getattr(result, "fit_c_r", False))
+    fit_eta = bool(getattr(result, "fit_eta", False))
+    fit_internal_gains_heat_fraction = bool(getattr(result, "fit_internal_gains_heat_fraction", False))
+    fit_room_temperature_bias = bool(getattr(result, "fit_room_temperature_bias", False))
+    fitted_parameter_names = ["C_b", "R_br", "R_ro"]
+    if fit_c_r:
+        fitted_parameter_names.insert(0, "C_r")
+    if fit_eta:
+        fitted_parameter_names.append("eta")
     bounds = {
         parameter_name: {
             "reference": getattr(active_settings.reference_parameters, parameter_name),
             "fitted": getattr(result.fitted_parameters, parameter_name),
-            "lower_bound": getattr(active_settings.reference_parameters, parameter_name)
-            * active_settings.min_parameter_ratio,
-            "upper_bound": getattr(active_settings.reference_parameters, parameter_name)
-            * active_settings.max_parameter_ratio,
+            "lower_bound": (
+                active_settings.min_eta
+                if parameter_name == "eta"
+                else getattr(active_settings.reference_parameters, parameter_name) * active_settings.min_parameter_ratio
+            ),
+            "upper_bound": (
+                active_settings.max_eta
+                if parameter_name == "eta"
+                else getattr(active_settings.reference_parameters, parameter_name) * active_settings.max_parameter_ratio
+            ),
         }
         for parameter_name in fitted_parameter_names
     }
     return {
         "selected_segment_count": result.segment_count,
         "required_min_selected_segments": automatic_settings.ufh_active_min_selected_segments,
-        "fit_c_r": result.fit_c_r,
-        "fit_initial_floor_temperature_offset": result.fit_initial_floor_temperature_offset,
-        "fitted_initial_floor_temperature_offset_c": result.fitted_initial_floor_temperature_offset_c,
+        "fit_c_r": fit_c_r,
+        "fit_eta": fit_eta,
+        "fit_internal_gains_heat_fraction": fit_internal_gains_heat_fraction,
+        "fit_room_temperature_bias": fit_room_temperature_bias,
+        "fitted_eta": getattr(result.fitted_parameters, "eta", active_settings.reference_parameters.eta),
+        "fitted_internal_gains_heat_fraction": getattr(
+            result,
+            "fitted_internal_gains_heat_fraction",
+            active_settings.reference_internal_gains_heat_fraction,
+        ),
+        "fitted_room_temperature_bias_c": getattr(result, "fitted_room_temperature_bias_c", 0.0),
+        "fit_initial_floor_temperature_offset": getattr(result, "fit_initial_floor_temperature_offset", False),
+        "fitted_initial_floor_temperature_offset_c": getattr(result, "fitted_initial_floor_temperature_offset_c", 0.0),
         "rmse_room_temperature_c": result.rmse_room_temperature_c,
         "max_abs_innovation_c": result.max_abs_innovation_c,
         "bound_tolerance_ratio": automatic_settings.ufh_active_bound_tolerance_ratio,
@@ -410,6 +434,8 @@ def _build_dhw_standby_diagnostics(
         "tau_upper_bound_hours": standby_settings.max_tau_hours,
         "bound_tolerance_ratio": automatic_settings.dhw_standby_bound_tolerance_ratio,
         "suggested_r_loss_k_per_kw": result.suggested_r_loss_k_per_kw,
+        "fit_ambient_temperature_bias": getattr(result, "fit_ambient_temperature_bias", False),
+        "fitted_ambient_temperature_bias_c": getattr(result, "fitted_ambient_temperature_bias_c", 0.0),
         "rmse_mean_tank_temperature_c": result.rmse_mean_tank_temperature_c,
         "max_abs_residual_c": result.max_abs_residual_c,
     }
@@ -430,6 +456,17 @@ def _build_dhw_active_diagnostics(
         "selected_segment_count": result.segment_count,
         "required_min_selected_segments": automatic_settings.dhw_active_min_selected_segments,
         "fitted_r_strat_k_per_kw": result.fitted_parameters.R_strat,
+        "fitted_c_top_kwh_per_k": result.fitted_parameters.C_top,
+        "fitted_c_bot_kwh_per_k": result.fitted_parameters.C_bot,
+        "fit_capacity_split": getattr(result, "fit_capacity_split", False),
+        "fitted_c_top_fraction": getattr(
+            result,
+            "fitted_c_top_fraction",
+            result.fitted_parameters.C_top / (result.fitted_parameters.C_top + result.fitted_parameters.C_bot),
+        ),
+        "fit_temperature_biases": getattr(result, "fit_temperature_biases", False),
+        "fitted_t_top_bias_c": getattr(result, "fitted_t_top_bias_c", 0.0),
+        "fitted_t_bot_bias_c": getattr(result, "fitted_t_bot_bias_c", 0.0),
         "r_strat_lower_bound_k_per_kw": lower_bound,
         "r_strat_upper_bound_k_per_kw": upper_bound,
         "bound_tolerance_ratio": tolerance_ratio,
@@ -474,13 +511,21 @@ def _ufh_active_bound_violations(
         Tuple with human-readable violation messages. Empty tuple means the fit is
         safely interior to the allowed parameter box.
     """
-    fitted_parameter_names = ("C_r", "C_b", "R_br", "R_ro") if result.fit_c_r else ("C_b", "R_br", "R_ro")
+    fitted_parameter_names = ["C_b", "R_br", "R_ro"]
+    if bool(getattr(result, "fit_c_r", False)):
+        fitted_parameter_names.insert(0, "C_r")
+    if bool(getattr(result, "fit_eta", False)):
+        fitted_parameter_names.append("eta")
     violations: list[str] = []
     for parameter_name in fitted_parameter_names:
-        reference_value = getattr(settings.reference_parameters, parameter_name)
         fitted_value = getattr(result.fitted_parameters, parameter_name)
-        lower_bound = reference_value * settings.min_parameter_ratio
-        upper_bound = reference_value * settings.max_parameter_ratio
+        if parameter_name == "eta":
+            lower_bound = settings.min_eta
+            upper_bound = settings.max_eta
+        else:
+            reference_value = getattr(settings.reference_parameters, parameter_name)
+            lower_bound = reference_value * settings.min_parameter_ratio
+            upper_bound = reference_value * settings.max_parameter_ratio
         if fitted_value <= lower_bound * (1.0 + tolerance_ratio):
             violations.append(
                 f"{parameter_name}={fitted_value:.6g} is at/near the lower bound {lower_bound:.6g}."
@@ -488,6 +533,18 @@ def _ufh_active_bound_violations(
         elif fitted_value >= upper_bound * (1.0 - tolerance_ratio):
             violations.append(
                 f"{parameter_name}={fitted_value:.6g} is at/near the upper bound {upper_bound:.6g}."
+            )
+    if bool(getattr(result, "fit_internal_gains_heat_fraction", False)):
+        lower_bound = settings.min_internal_gains_heat_fraction
+        upper_bound = settings.max_internal_gains_heat_fraction
+        fitted_value = float(getattr(result, "fitted_internal_gains_heat_fraction"))
+        if fitted_value <= lower_bound + tolerance_ratio:
+            violations.append(
+                f"internal_gains_heat_fraction={fitted_value:.6g} is at/near the lower bound {lower_bound:.6g}."
+            )
+        elif fitted_value >= upper_bound - tolerance_ratio:
+            violations.append(
+                f"internal_gains_heat_fraction={fitted_value:.6g} is at/near the upper bound {upper_bound:.6g}."
             )
     return tuple(violations)
 
@@ -743,7 +800,11 @@ def build_automatic_calibration_snapshot(
                 A_glass=effective_request.A_glass,
             )
             ufh_active_settings = build_ufh_active_calibration_settings(
-                reference_parameters=ufh_reference_parameters
+                reference_parameters=ufh_reference_parameters,
+                reference_internal_gains_kw=effective_request.internal_gains_kw,
+                reference_internal_gains_heat_fraction=effective_request.internal_gains_heat_fraction,
+                fit_eta=True,
+                fit_internal_gains_heat_fraction=True,
             )
             result = calibrate_ufh_active_from_repository(
                 repository,
@@ -760,6 +821,21 @@ def build_automatic_calibration_snapshot(
                 C_b=result.fitted_parameters.C_b,
                 R_br=result.fitted_parameters.R_br,
                 R_ro=result.fitted_parameters.R_ro,
+                eta=(
+                    result.fitted_parameters.eta
+                    if bool(getattr(result, "fit_eta", False))
+                    else None
+                ),
+                internal_gains_heat_fraction=(
+                    getattr(result, "fitted_internal_gains_heat_fraction")
+                    if bool(getattr(result, "fit_internal_gains_heat_fraction", False))
+                    else None
+                ),
+                room_temperature_bias_c=(
+                    getattr(result, "fitted_room_temperature_bias_c")
+                    if bool(getattr(result, "fit_room_temperature_bias", False))
+                    else None
+                ),
             )
             effective_parameters = _merge_runtime_safe_stage_overrides(
                 base_request,
@@ -798,6 +874,7 @@ def build_automatic_calibration_snapshot(
                 dt_hours=calibration_replay_dt_hours,
                 reference_c_top_kwh_per_k=effective_request.dhw_C_top,
                 reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
+                fit_ambient_temperature_bias=True,
             )
             result = calibrate_dhw_standby_from_repository(
                 repository,
@@ -808,7 +885,14 @@ def build_automatic_calibration_snapshot(
                 standby_settings=dhw_standby_settings,
                 automatic_settings=settings,
             )
-            overrides = CalibrationParameterOverrides(dhw_R_loss=result.suggested_r_loss_k_per_kw)
+            overrides = CalibrationParameterOverrides(
+                dhw_R_loss=result.suggested_r_loss_k_per_kw,
+                dhw_boiler_ambient_bias_c=(
+                    getattr(result, "fitted_ambient_temperature_bias_c")
+                    if bool(getattr(result, "fit_ambient_temperature_bias", False))
+                    else None
+                ),
+            )
             effective_parameters = _merge_runtime_safe_stage_overrides(
                 base_request,
                 effective_parameters,
@@ -849,7 +933,9 @@ def build_automatic_calibration_snapshot(
                 R_loss=effective_request.dhw_R_loss,
             )
             dhw_active_settings = build_dhw_active_calibration_settings(
-                reference_parameters=dhw_reference_parameters
+                reference_parameters=dhw_reference_parameters,
+                fit_capacity_split=True,
+                fit_temperature_biases=True,
             )
             result = calibrate_dhw_active_from_repository(
                 repository,
@@ -860,7 +946,29 @@ def build_automatic_calibration_snapshot(
                 active_settings=dhw_active_settings,
                 automatic_settings=settings,
             )
-            overrides = CalibrationParameterOverrides(dhw_R_strat=result.fitted_parameters.R_strat)
+            overrides = CalibrationParameterOverrides(
+                dhw_C_top=(
+                    result.fitted_parameters.C_top
+                    if bool(getattr(result, "fit_capacity_split", False))
+                    else None
+                ),
+                dhw_C_bot=(
+                    result.fitted_parameters.C_bot
+                    if bool(getattr(result, "fit_capacity_split", False))
+                    else None
+                ),
+                dhw_R_strat=result.fitted_parameters.R_strat,
+                dhw_top_temperature_bias_c=(
+                    getattr(result, "fitted_t_top_bias_c")
+                    if bool(getattr(result, "fit_temperature_biases", False))
+                    else None
+                ),
+                dhw_bottom_temperature_bias_c=(
+                    getattr(result, "fitted_t_bot_bias_c")
+                    if bool(getattr(result, "fit_temperature_biases", False))
+                    else None
+                ),
+            )
             effective_parameters = _merge_runtime_safe_stage_overrides(
                 base_request,
                 effective_parameters,

@@ -83,6 +83,7 @@ def _predict_mean_tank_temperature_end(
     settings: DHWStandbyCalibrationSettings,
     *,
     tau_standby_hours: float,
+    ambient_temperature_bias_c: float,
 ) -> np.ndarray:
     """Evaluate the forward-Euler one-step standby envelope on a batch of samples.
 
@@ -97,7 +98,7 @@ def _predict_mean_tank_temperature_end(
         settings,
     )
     return mean_start_c + arrays.dt_hours / tau_standby_hours * (
-        -(mean_start_c - arrays.boiler_ambient_mean_c)
+        -(mean_start_c - (arrays.boiler_ambient_mean_c + ambient_temperature_bias_c))
     )
 
 
@@ -129,16 +130,27 @@ def calibrate_dhw_standby_loss(
 
     def residuals(theta: np.ndarray) -> np.ndarray:
         tau_standby_hours = float(theta[0])
+        ambient_temperature_bias_c = (
+            float(theta[1]) if settings.fit_ambient_temperature_bias else settings.initial_ambient_temperature_bias_c
+        )
         predictions = _predict_mean_tank_temperature_end(
             arrays,
             settings,
             tau_standby_hours=tau_standby_hours,
+            ambient_temperature_bias_c=ambient_temperature_bias_c,
         )
         return predictions - mean_end_c
 
-    initial_theta = np.array([settings.initial_tau_hours], dtype=float)
-    lower_bounds = np.array([settings.min_tau_hours], dtype=float)
-    upper_bounds = np.array([settings.max_tau_hours], dtype=float)
+    initial_theta_values = [settings.initial_tau_hours]
+    lower_bound_values = [settings.min_tau_hours]
+    upper_bound_values = [settings.max_tau_hours]
+    if settings.fit_ambient_temperature_bias:
+        initial_theta_values.append(settings.initial_ambient_temperature_bias_c)
+        lower_bound_values.append(settings.min_ambient_temperature_bias_c)
+        upper_bound_values.append(settings.max_ambient_temperature_bias_c)
+    initial_theta = np.array(initial_theta_values, dtype=float)
+    lower_bounds = np.array(lower_bound_values, dtype=float)
+    upper_bounds = np.array(upper_bound_values, dtype=float)
 
     result = least_squares(
         residuals,
@@ -153,12 +165,17 @@ def calibrate_dhw_standby_loss(
     rmse_mean_tank_temperature_c = sqrt(float(np.mean(np.square(fitted_residuals))))
     max_abs_residual_c = float(np.max(np.abs(fitted_residuals)))
     tau_standby_hours = float(result.x[0])
+    fitted_ambient_temperature_bias_c = (
+        float(result.x[1]) if settings.fit_ambient_temperature_bias else settings.initial_ambient_temperature_bias_c
+    )
     suggested_r_loss_k_per_kw = 2.0 * tau_standby_hours / settings.reference_c_total_kwh_per_k
 
     return DHWStandbyCalibrationResult(
         tau_standby_hours=tau_standby_hours,
         suggested_r_loss_k_per_kw=suggested_r_loss_k_per_kw,
         reference_c_total_kwh_per_k=settings.reference_c_total_kwh_per_k,
+        fit_ambient_temperature_bias=settings.fit_ambient_temperature_bias,
+        fitted_ambient_temperature_bias_c=fitted_ambient_temperature_bias_c,
         rmse_mean_tank_temperature_c=rmse_mean_tank_temperature_c,
         max_abs_residual_c=max_abs_residual_c,
         sample_count=dataset.sample_count,

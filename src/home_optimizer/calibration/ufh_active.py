@@ -71,6 +71,7 @@ class _ThetaSpec:
     upper_bounds: np.ndarray
     theta_prior: np.ndarray
     fit_initial_floor_temperature_offset: bool
+    fit_room_temperature_bias: bool
 
 
 def _as_arrays(dataset: UFHActiveCalibrationDataset) -> _ActiveCalibrationArrays:
@@ -94,6 +95,10 @@ def _parameter_names(settings: UFHActiveCalibrationSettings) -> tuple[str, ...]:
     names = ["C_b", "R_br", "R_ro"]
     if settings.fit_c_r:
         names.insert(0, "C_r")
+    if settings.fit_eta:
+        names.append("eta")
+    if settings.fit_internal_gains_heat_fraction:
+        names.append("internal_gains_heat_fraction")
     return tuple(names)
 
 
@@ -105,23 +110,45 @@ def _build_theta_spec(settings: UFHActiveCalibrationSettings) -> _ThetaSpec:
         "C_b": reference.C_b,
         "R_br": reference.R_br,
         "R_ro": reference.R_ro,
+        "eta": reference.eta,
+        "internal_gains_heat_fraction": settings.reference_internal_gains_heat_fraction,
     }
     parameter_names = list(_parameter_names(settings))
     theta_prior = [reference_values[name] for name in parameter_names]
-    lower_bounds = [reference_values[name] * settings.min_parameter_ratio for name in parameter_names]
-    upper_bounds = [reference_values[name] * settings.max_parameter_ratio for name in parameter_names]
+    lower_bounds: list[float] = []
+    upper_bounds: list[float] = []
+    for name in parameter_names:
+        if name == "eta":
+            lower_bounds.append(settings.min_eta)
+            upper_bounds.append(settings.max_eta)
+        elif name == "internal_gains_heat_fraction":
+            lower_bounds.append(settings.min_internal_gains_heat_fraction)
+            upper_bounds.append(settings.max_internal_gains_heat_fraction)
+        else:
+            lower_bounds.append(reference_values[name] * settings.min_parameter_ratio)
+            upper_bounds.append(reference_values[name] * settings.max_parameter_ratio)
 
     if settings.fit_initial_floor_temperature_offset:
         parameter_names.append("initial_floor_temperature_offset_c")
         theta_prior.append(settings.initial_floor_temperature_offset_c)
         lower_bounds.append(settings.min_initial_floor_temperature_offset_c)
         upper_bounds.append(settings.max_initial_floor_temperature_offset_c)
+    if settings.fit_room_temperature_bias:
+        parameter_names.append("room_temperature_bias_c")
+        theta_prior.append(settings.initial_room_temperature_bias_c)
+        lower_bounds.append(settings.min_room_temperature_bias_c)
+        upper_bounds.append(settings.max_room_temperature_bias_c)
 
     lower_bounds_arr = np.array(lower_bounds, dtype=float)
     upper_bounds_arr = np.array(upper_bounds, dtype=float)
-    if np.any(lower_bounds_arr <= 0.0) and not settings.fit_initial_floor_temperature_offset:
-        raise ValueError("All physical calibration parameter lower bounds must remain strictly positive.")
-    if np.any(lower_bounds_arr[:-1] <= 0.0) and settings.fit_initial_floor_temperature_offset:
+    physical_parameter_count = len(_parameter_names(settings))
+    if np.any(lower_bounds_arr[:physical_parameter_count] < 0.0):
+        raise ValueError("Calibration parameter lower bounds must remain non-negative.")
+    if np.any(lower_bounds_arr[:physical_parameter_count] <= 0.0) and any(
+        name not in {"eta", "internal_gains_heat_fraction"}
+        for name, lower_bound in zip(parameter_names[:physical_parameter_count], lower_bounds_arr[:physical_parameter_count], strict=True)
+        if lower_bound <= 0.0
+    ):
         raise ValueError("All physical calibration parameter lower bounds must remain strictly positive.")
     if np.any(lower_bounds_arr >= upper_bounds_arr):
         raise ValueError("Each calibration parameter lower bound must be < its upper bound.")
@@ -131,6 +158,7 @@ def _build_theta_spec(settings: UFHActiveCalibrationSettings) -> _ThetaSpec:
         upper_bounds=upper_bounds_arr,
         theta_prior=np.array(theta_prior, dtype=float),
         fit_initial_floor_temperature_offset=settings.fit_initial_floor_temperature_offset,
+        fit_room_temperature_bias=settings.fit_room_temperature_bias,
     )
 
 
@@ -159,6 +187,7 @@ def _parameters_from_theta(theta: np.ndarray, settings: UFHActiveCalibrationSett
         "C_b": reference.C_b,
         "R_br": reference.R_br,
         "R_ro": reference.R_ro,
+        "eta": reference.eta,
     }
     physical_parameter_count = len(_parameter_names(settings))
     for name, value in zip(_parameter_names(settings), theta_arr[:physical_parameter_count], strict=True):
@@ -171,9 +200,21 @@ def _parameters_from_theta(theta: np.ndarray, settings: UFHActiveCalibrationSett
         R_br=values["R_br"],
         R_ro=values["R_ro"],
         alpha=reference.alpha,
-        eta=reference.eta,
+        eta=values["eta"],
         A_glass=reference.A_glass,
     )
+
+
+def _internal_gains_heat_fraction_from_theta(
+    theta: np.ndarray,
+    settings: UFHActiveCalibrationSettings,
+) -> float:
+    """Return the fitted or fixed baseload→heat mapping fraction ``[-]``."""
+    if not settings.fit_internal_gains_heat_fraction:
+        return settings.reference_internal_gains_heat_fraction
+    theta_arr = np.asarray(theta, dtype=float)
+    theta_spec = _build_theta_spec(settings)
+    return float(theta_arr[theta_spec.parameter_names.index("internal_gains_heat_fraction")])
 
 
 def _initial_floor_offset_from_theta(theta: np.ndarray, settings: UFHActiveCalibrationSettings) -> float:
@@ -181,7 +222,40 @@ def _initial_floor_offset_from_theta(theta: np.ndarray, settings: UFHActiveCalib
     if not settings.fit_initial_floor_temperature_offset:
         return settings.initial_floor_temperature_offset_c
     theta_arr = np.asarray(theta, dtype=float)
-    return float(theta_arr[-1])
+    theta_spec = _build_theta_spec(settings)
+    return float(theta_arr[theta_spec.parameter_names.index("initial_floor_temperature_offset_c")])
+
+
+def _room_temperature_bias_from_theta(theta: np.ndarray, settings: UFHActiveCalibrationSettings) -> float:
+    """Return the fitted or fixed room-temperature sensor bias correction [°C]."""
+    if not settings.fit_room_temperature_bias:
+        return settings.initial_room_temperature_bias_c
+    theta_arr = np.asarray(theta, dtype=float)
+    theta_spec = _build_theta_spec(settings)
+    return float(theta_arr[theta_spec.parameter_names.index("room_temperature_bias_c")])
+
+
+def _effective_internal_gain_kw(
+    *,
+    proxy_electric_power_kw: float,
+    settings: UFHActiveCalibrationSettings,
+    internal_gains_heat_fraction: float,
+) -> float:
+    """Map the electrical household proxy to sensible indoor heat [kW].
+
+    Mirrors the runtime grey-box relation
+
+        Q_int = max(Q_int,baseline, heat_fraction × P_baseload)
+
+    so the offline fit remains structurally aligned with the MPC disturbance model.
+    """
+    if not settings.fit_internal_gains_heat_fraction:
+        # Preserve the original offline active-UFH semantics: the dataset already
+        # carries the direct internal-gain proxy that historical tests and tuning
+        # expect. The baseload→heat mapping is only activated when the caller
+        # explicitly asks to identify that extra parameter.
+        return proxy_electric_power_kw
+    return max(settings.reference_internal_gains_kw, internal_gains_heat_fraction * proxy_electric_power_kw)
 
 
 def _regularization_residual(theta: np.ndarray, settings: UFHActiveCalibrationSettings) -> np.ndarray:
@@ -220,6 +294,8 @@ def _replay_with_parameters(
     parameters: ThermalParameters,
     *,
     initial_floor_temperature_offset_c: float,
+    internal_gains_heat_fraction: float,
+    room_temperature_bias_c: float,
 ) -> _ReplayDiagnostics:
     """Replay the active UFH trajectory and collect room-temperature innovations.
 
@@ -231,6 +307,18 @@ def _replay_with_parameters(
         raise ValueError("initial_floor_temperature_offset_c violates its lower physical bound.")
     if initial_floor_temperature_offset_c > settings.max_initial_floor_temperature_offset_c:
         raise ValueError("initial_floor_temperature_offset_c violates its upper physical bound.")
+    if not (
+        settings.min_internal_gains_heat_fraction
+        <= internal_gains_heat_fraction
+        <= settings.max_internal_gains_heat_fraction
+    ):
+        raise ValueError("internal_gains_heat_fraction violates its configured bounds.")
+    if not (
+        settings.min_room_temperature_bias_c
+        <= room_temperature_bias_c
+        <= settings.max_room_temperature_bias_c
+    ):
+        raise ValueError("room_temperature_bias_c violates its configured bounds.")
 
     model = ThermalModel(parameters)
     noise = KalmanNoiseParameters(
@@ -252,8 +340,10 @@ def _replay_with_parameters(
             # Implements phase-2.5 replay reset at each contiguous UFH run boundary.
             initial_state_c = np.array(
                 [
-                    arrays.room_temperature_start_c[index],
-                    arrays.room_temperature_start_c[index] + initial_floor_temperature_offset_c,
+                    arrays.room_temperature_start_c[index] + room_temperature_bias_c,
+                    arrays.room_temperature_start_c[index]
+                    + room_temperature_bias_c
+                    + initial_floor_temperature_offset_c,
                 ],
                 dtype=float,
             )
@@ -276,7 +366,11 @@ def _replay_with_parameters(
             [
                 arrays.outdoor_temperature_mean_c[index],
                 q_solar_kw,
-                arrays.internal_gain_proxy_kw[index],
+                _effective_internal_gain_kw(
+                    proxy_electric_power_kw=float(arrays.internal_gain_proxy_kw[index]),
+                    settings=settings,
+                    internal_gains_heat_fraction=internal_gains_heat_fraction,
+                ),
             ],
             dtype=float,
         )
@@ -285,7 +379,7 @@ def _replay_with_parameters(
         _, innovation_c, _ = filter_.step(
             control_kw=float(arrays.ufh_power_mean_kw[index]),
             disturbance=disturbance,
-            room_temp_measurement_c=float(arrays.room_temperature_end_c[index]),
+            room_temp_measurement_c=float(arrays.room_temperature_end_c[index] + room_temperature_bias_c),
         )
         innovations.append(float(innovation_c))
     return _ReplayDiagnostics(innovations_c=np.array(innovations, dtype=float))
@@ -326,6 +420,8 @@ def calibrate_ufh_active_rc(
                 settings,
                 parameters,
                 initial_floor_temperature_offset_c=_initial_floor_offset_from_theta(theta, settings),
+                internal_gains_heat_fraction=_internal_gains_heat_fraction_from_theta(theta, settings),
+                room_temperature_bias_c=_room_temperature_bias_from_theta(theta, settings),
             )
             return np.concatenate(
                 [diagnostics.innovations_c, _regularization_residual(theta, settings)]
@@ -345,15 +441,24 @@ def calibrate_ufh_active_rc(
 
     fitted_parameters = _parameters_from_theta(result.x, settings)
     fitted_initial_floor_temperature_offset_c = _initial_floor_offset_from_theta(result.x, settings)
+    fitted_internal_gains_heat_fraction = _internal_gains_heat_fraction_from_theta(result.x, settings)
+    fitted_room_temperature_bias_c = _room_temperature_bias_from_theta(result.x, settings)
     diagnostics = _replay_with_parameters(
         arrays,
         settings,
         fitted_parameters,
         initial_floor_temperature_offset_c=fitted_initial_floor_temperature_offset_c,
+        internal_gains_heat_fraction=fitted_internal_gains_heat_fraction,
+        room_temperature_bias_c=fitted_room_temperature_bias_c,
     )
     return UFHActiveCalibrationResult(
         fitted_parameters=fitted_parameters,
         fit_c_r=settings.fit_c_r,
+        fit_eta=settings.fit_eta,
+        fitted_internal_gains_heat_fraction=fitted_internal_gains_heat_fraction,
+        fit_internal_gains_heat_fraction=settings.fit_internal_gains_heat_fraction,
+        fit_room_temperature_bias=settings.fit_room_temperature_bias,
+        fitted_room_temperature_bias_c=fitted_room_temperature_bias_c,
         fit_initial_floor_temperature_offset=settings.fit_initial_floor_temperature_offset,
         fitted_initial_floor_temperature_offset_c=fitted_initial_floor_temperature_offset_c,
         rmse_room_temperature_c=diagnostics.rmse_room_temperature_c,

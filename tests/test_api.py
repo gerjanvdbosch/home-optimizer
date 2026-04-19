@@ -266,6 +266,48 @@ def test_optimizer_scheduled_input_applies_live_shutter_position() -> None:
     assert scheduled_input.shutter_living_room_pct == 35.0
 
 
+def test_optimizer_scheduled_input_applies_persisted_sensor_biases_to_live_readings(tmp_path) -> None:
+    """Scheduled MPC input must correct live sensor readings with persisted bias overrides."""
+
+    class StaticBackend(SensorBackend):
+        def __init__(self, readings: LiveReadings) -> None:
+            self._readings = readings
+
+        def read_all(self) -> LiveReadings:
+            return self._readings
+
+        def close(self) -> None:
+            return None
+
+    database_url = f"sqlite:///{tmp_path / 'optimizer-sensor-bias.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                room_temperature_bias_c=0.7,
+                dhw_top_temperature_bias_c=1.2,
+                dhw_bottom_temperature_bias_c=-0.8,
+                dhw_boiler_ambient_bias_c=0.5,
+            ),
+        )
+    )
+
+    raw_readings = _live_readings(shutter_living_room_pct=35.0)
+    base_input = RunRequest.model_validate({"horizon_hours": 8})
+    scheduled_input = Optimizer._build_scheduled_input(
+        base_input=base_input,
+        backend=StaticBackend(raw_readings),
+        repository=repository,
+    )
+
+    assert scheduled_input.T_r_init == raw_readings.room_temperature_c + 0.7
+    assert scheduled_input.dhw_T_top_init == raw_readings.dhw_top_temperature_c + 1.2
+    assert scheduled_input.dhw_T_bot_init == raw_readings.dhw_bottom_temperature_c - 0.8
+    assert scheduled_input.dhw_t_amb_c == raw_readings.boiler_ambient_temp_c + 0.5
+
+
 def test_optimizer_scheduled_input_keeps_explicit_shutter_forecast(tmp_path) -> None:
     """A caller-supplied shutter forecast must survive scheduled live-sensor overrides."""
 

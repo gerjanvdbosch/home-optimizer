@@ -111,7 +111,14 @@ def _as_arrays(dataset: DHWActiveCalibrationDataset) -> _ActiveCalibrationArrays
 
 def _initial_theta(settings: DHWActiveCalibrationSettings) -> np.ndarray:
     """Return the initial optimisation vector from the reference parameter set."""
-    return np.array([settings.reference_parameters.R_strat], dtype=float)
+    theta_values = [settings.reference_parameters.R_strat]
+    if settings.fit_capacity_split:
+        if settings.initial_c_top_fraction is None:
+            raise ValueError("initial_c_top_fraction must be populated when fit_capacity_split is enabled.")
+        theta_values.append(settings.initial_c_top_fraction)
+    if settings.fit_temperature_biases:
+        theta_values.extend([settings.initial_t_top_bias_c, settings.initial_t_bot_bias_c])
+    return np.array(theta_values, dtype=float)
 
 
 def dhw_active_r_strat_bounds(settings: DHWActiveCalibrationSettings) -> tuple[float, float]:
@@ -135,23 +142,60 @@ def dhw_active_r_strat_bounds(settings: DHWActiveCalibrationSettings) -> tuple[f
 def _theta_bounds(settings: DHWActiveCalibrationSettings) -> tuple[np.ndarray, np.ndarray]:
     """Construct the optimiser bounds for the scalar ``R_strat`` parameter."""
     lower_bound, upper_bound = dhw_active_r_strat_bounds(settings)
-    return np.array([lower_bound], dtype=float), np.array([upper_bound], dtype=float)
+    lower_bounds = [lower_bound]
+    upper_bounds = [upper_bound]
+    if settings.fit_capacity_split:
+        lower_bounds.append(settings.min_c_top_fraction)
+        upper_bounds.append(settings.max_c_top_fraction)
+    if settings.fit_temperature_biases:
+        lower_bounds.extend([settings.min_temperature_bias_c, settings.min_temperature_bias_c])
+        upper_bounds.extend([settings.max_temperature_bias_c, settings.max_temperature_bias_c])
+    return np.array(lower_bounds, dtype=float), np.array(upper_bounds, dtype=float)
 
 
 def _parameters_from_theta(theta: np.ndarray, settings: DHWActiveCalibrationSettings) -> DHWParameters:
     """Map the optimisation vector back to a full DHW parameter object."""
     theta_arr = np.asarray(theta, dtype=float)
-    if theta_arr.shape != (1,):
-        raise ValueError("theta must have shape (1,) for active DHW calibration.")
+    expected_size = 1 + int(settings.fit_capacity_split) + (2 if settings.fit_temperature_biases else 0)
+    if theta_arr.shape != (expected_size,):
+        raise ValueError(f"theta must have shape ({expected_size},) for active DHW calibration.")
     reference = settings.reference_parameters
+    theta_index = 1
+    if settings.fit_capacity_split:
+        c_top_fraction = float(theta_arr[theta_index])
+        theta_index += 1
+    else:
+        c_top_fraction = reference.C_top / (reference.C_top + reference.C_bot)
+    c_total = settings.reference_c_total_kwh_per_k
     return DHWParameters(
         dt_hours=reference.dt_hours,
-        C_top=reference.C_top,
-        C_bot=reference.C_bot,
+        C_top=c_total * c_top_fraction,
+        C_bot=c_total * (1.0 - c_top_fraction),
         R_strat=float(theta_arr[0]),
         R_loss=reference.R_loss,
         lambda_water=reference.lambda_water,
     )
+
+
+def _c_top_fraction_from_theta(theta: np.ndarray, settings: DHWActiveCalibrationSettings) -> float:
+    """Return the fitted or fixed top-layer capacity fraction ``C_top / (C_top + C_bot)``."""
+    if not settings.fit_capacity_split:
+        reference = settings.reference_parameters
+        return reference.C_top / (reference.C_top + reference.C_bot)
+    theta_arr = np.asarray(theta, dtype=float)
+    return float(theta_arr[1])
+
+
+def _temperature_biases_from_theta(
+    theta: np.ndarray,
+    settings: DHWActiveCalibrationSettings,
+) -> tuple[float, float]:
+    """Return the fitted or fixed additive top/bottom DHW sensor biases [°C]."""
+    if not settings.fit_temperature_biases:
+        return settings.initial_t_top_bias_c, settings.initial_t_bot_bias_c
+    theta_arr = np.asarray(theta, dtype=float)
+    start_index = 1 + int(settings.fit_capacity_split)
+    return float(theta_arr[start_index]), float(theta_arr[start_index + 1])
 
 
 def _regularization_residual(theta: np.ndarray, settings: DHWActiveCalibrationSettings) -> np.ndarray:
@@ -167,6 +211,9 @@ def _regularization_residual(theta: np.ndarray, settings: DHWActiveCalibrationSe
 def _replay_with_parameters(
     arrays: _ActiveCalibrationArrays,
     parameters: DHWParameters,
+    *,
+    t_top_bias_c: float,
+    t_bot_bias_c: float,
 ) -> _ReplayDiagnostics:
     """Replay one-step DHW transitions with ``V_tap = 0`` and collect residuals.
 
@@ -187,14 +234,17 @@ def _replay_with_parameters(
         )
         model = DHWModel(sample_parameters)
         predicted_state = model.step(
-            state=np.array([arrays.t_top_start_c[index], arrays.t_bot_start_c[index]], dtype=float),
+            state=np.array(
+                [arrays.t_top_start_c[index] + t_top_bias_c, arrays.t_bot_start_c[index] + t_bot_bias_c],
+                dtype=float,
+            ),
             control_kw=float(arrays.p_dhw_mean_kw[index]),
             v_tap_m3_per_h=0.0,
             t_mains_c=float(arrays.t_mains_c[index]),
             t_amb_c=float(arrays.t_amb_c[index]),
         )
-        t_top_residuals.append(float(predicted_state[0] - arrays.t_top_end_c[index]))
-        t_bot_residuals.append(float(predicted_state[1] - arrays.t_bot_end_c[index]))
+        t_top_residuals.append(float(predicted_state[0] - (arrays.t_top_end_c[index] + t_top_bias_c)))
+        t_bot_residuals.append(float(predicted_state[1] - (arrays.t_bot_end_c[index] + t_bot_bias_c)))
     return _ReplayDiagnostics(
         t_top_residuals_c=np.array(t_top_residuals, dtype=float),
         t_bot_residuals_c=np.array(t_bot_residuals, dtype=float),
@@ -227,7 +277,13 @@ def calibrate_dhw_active_stratification(
     def residuals(theta: np.ndarray) -> np.ndarray:
         try:
             parameters = _parameters_from_theta(theta, settings)
-            diagnostics = _replay_with_parameters(arrays, parameters)
+            t_top_bias_c, t_bot_bias_c = _temperature_biases_from_theta(theta, settings)
+            diagnostics = _replay_with_parameters(
+                arrays,
+                parameters,
+                t_top_bias_c=t_top_bias_c,
+                t_bot_bias_c=t_bot_bias_c,
+            )
             return np.concatenate(
                 [
                     diagnostics.t_top_residuals_c,
@@ -249,9 +305,21 @@ def calibrate_dhw_active_stratification(
         raise RuntimeError(f"DHW active stratification calibration failed: {result.message}")
 
     fitted_parameters = _parameters_from_theta(result.x, settings)
-    diagnostics = _replay_with_parameters(arrays, fitted_parameters)
+    fitted_c_top_fraction = _c_top_fraction_from_theta(result.x, settings)
+    fitted_t_top_bias_c, fitted_t_bot_bias_c = _temperature_biases_from_theta(result.x, settings)
+    diagnostics = _replay_with_parameters(
+        arrays,
+        fitted_parameters,
+        t_top_bias_c=fitted_t_top_bias_c,
+        t_bot_bias_c=fitted_t_bot_bias_c,
+    )
     return DHWActiveCalibrationResult(
         fitted_parameters=fitted_parameters,
+        fit_capacity_split=settings.fit_capacity_split,
+        fitted_c_top_fraction=fitted_c_top_fraction,
+        fit_temperature_biases=settings.fit_temperature_biases,
+        fitted_t_top_bias_c=fitted_t_top_bias_c,
+        fitted_t_bot_bias_c=fitted_t_bot_bias_c,
         rmse_t_top_c=diagnostics.rmse_t_top_c,
         rmse_t_bot_c=diagnostics.rmse_t_bot_c,
         max_abs_residual_c=diagnostics.max_abs_residual_c,

@@ -198,6 +198,15 @@ class RunRequest(BaseModel):
     T_b_init: float = Field(
         22.5, ge=5.0, le=45.0, description="Initial floor/slab temperature T_b [degC]"
     )
+    room_temperature_bias_c: float = Field(
+        0.0,
+        ge=-10.0,
+        le=10.0,
+        description=(
+            "Additive room-temperature sensor bias correction [°C]. "
+            "The corrected room reading equals raw_sensor + room_temperature_bias_c."
+        ),
+    )
     previous_power_kw: float = Field(
         0.8, ge=0.0, le=20.0, description="UFH power applied in previous step [kW]"
     )
@@ -351,6 +360,33 @@ class RunRequest(BaseModel):
     dhw_T_bot_init: float = Field(
         45.0, ge=15.0, le=80.0, description="Initial bottom-layer temperature T_bot [degC]"
     )
+    dhw_top_temperature_bias_c: float = Field(
+        0.0,
+        ge=-10.0,
+        le=10.0,
+        description=(
+            "Additive DHW top-temperature sensor bias correction [°C]. "
+            "The corrected top-layer reading equals raw_sensor + dhw_top_temperature_bias_c."
+        ),
+    )
+    dhw_bottom_temperature_bias_c: float = Field(
+        0.0,
+        ge=-10.0,
+        le=10.0,
+        description=(
+            "Additive DHW bottom-temperature sensor bias correction [°C]. "
+            "The corrected bottom-layer reading equals raw_sensor + dhw_bottom_temperature_bias_c."
+        ),
+    )
+    dhw_boiler_ambient_bias_c: float = Field(
+        0.0,
+        ge=-10.0,
+        le=10.0,
+        description=(
+            "Additive DHW boiler-ambient sensor bias correction [°C]. "
+            "The corrected ambient reading equals raw_sensor + dhw_boiler_ambient_bias_c."
+        ),
+    )
     dhw_P_max: float = Field(
         3.0, ge=0.5, le=15.0, description="Max DHW thermal power P_dhw,max [kW]"
     )
@@ -416,8 +452,24 @@ class RunRequest(BaseModel):
     )
 
 
-_UFH_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = ("C_r", "C_b", "R_br", "R_ro")
-_DHW_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = ("dhw_R_strat", "dhw_R_loss")
+_UFH_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
+    "C_r",
+    "C_b",
+    "R_br",
+    "R_ro",
+    "eta",
+    "internal_gains_heat_fraction",
+    "room_temperature_bias_c",
+)
+_DHW_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
+    "dhw_C_top",
+    "dhw_C_bot",
+    "dhw_R_strat",
+    "dhw_R_loss",
+    "dhw_top_temperature_bias_c",
+    "dhw_bottom_temperature_bias_c",
+    "dhw_boiler_ambient_bias_c",
+)
 _COP_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
     "eta_carnot",
     "T_supply_min",
@@ -1253,18 +1305,22 @@ class Optimizer:
 
         # ── 2. Live sensor overrides ─────────────────────────────────────
         if backend is not None:
+            effective_request = merge_run_request_updates(base_input, overrides)
             readings = backend.read_all()
+            corrected_room_temperature_c = (
+                readings.room_temperature_c + effective_request.room_temperature_bias_c
+            )
 
             # Estimate slab temperature from supply/return average when possible.
             t_b_estimate = (
                 (readings.hp_supply_temperature_c + readings.hp_return_temperature_c) / 2.0
-                if readings.hp_supply_temperature_c > readings.room_temperature_c
-                else readings.room_temperature_c + 2.0
+                if readings.hp_supply_temperature_c > corrected_room_temperature_c
+                else corrected_room_temperature_c + 2.0
             )
 
             overrides.update(
                 {
-                    "T_r_init": readings.room_temperature_c,
+                    "T_r_init": corrected_room_temperature_c,
                     "T_b_init": t_b_estimate,
                     "outdoor_temperature_c": readings.outdoor_temperature_c,
                     "shutter_living_room_pct": readings.shutter_living_room_pct,
@@ -1272,10 +1328,16 @@ class Optimizer:
             )
 
             if base_input.dhw_enabled:
-                overrides["dhw_T_top_init"] = readings.dhw_top_temperature_c
-                overrides["dhw_T_bot_init"] = readings.dhw_bottom_temperature_c
+                overrides["dhw_T_top_init"] = (
+                    readings.dhw_top_temperature_c + effective_request.dhw_top_temperature_bias_c
+                )
+                overrides["dhw_T_bot_init"] = (
+                    readings.dhw_bottom_temperature_c + effective_request.dhw_bottom_temperature_bias_c
+                )
                 overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
-                overrides["dhw_t_amb_c"] = readings.boiler_ambient_temp_c
+                overrides["dhw_t_amb_c"] = (
+                    readings.boiler_ambient_temp_c + effective_request.dhw_boiler_ambient_bias_c
+                )
 
         # ── 3. Open-Meteo forecast arrays from database ──────────────────
         if repository is not None:

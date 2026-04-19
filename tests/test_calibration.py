@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from math import cos, sin
 from types import SimpleNamespace
 from typing import cast
 
@@ -3361,5 +3362,310 @@ def test_calibrate_ufh_active_rc_fits_initial_floor_offset_across_segments() -> 
     )
     assert result.segment_count == 2
     assert result.rmse_room_temperature_c < 1e-5
+
+
+def test_calibrate_ufh_active_rc_recovers_gain_parameters() -> None:
+    """Active UFH calibration must recover solar gain and internal-gain mapping."""
+    true_parameters = ThermalParameters(
+        dt_hours=0.25,
+        C_r=5.5,
+        C_b=11.0,
+        R_br=1.1,
+        R_ro=8.5,
+        alpha=0.25,
+        eta=0.42,
+        A_glass=8.0,
+    )
+    true_internal_gains_kw = 0.25
+    true_internal_gains_heat_fraction = 0.58
+    model = ThermalModel(true_parameters)
+    state = np.array([20.0, 22.0], dtype=float)
+    start = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    samples: list[UFHActiveCalibrationSample] = []
+
+    for index in range(48):
+        interval_start = start + timedelta(hours=index * true_parameters.dt_hours)
+        interval_end = interval_start + timedelta(hours=true_parameters.dt_hours)
+        outdoor_temperature_c = 2.0 + 4.0 * sin(index / 7.0)
+        gti_w_per_m2 = 250.0 + 180.0 * max(sin(index / 6.0), 0.0)
+        ufh_power_mean_kw = 1.0 + 0.6 * max(cos(index / 5.0), 0.0)
+        internal_gain_proxy_kw = 0.4 + 0.9 * max(sin(index / 4.0), 0.0)
+        solar_gain_kw_value = float(
+            solar_gain_kw(
+                gti_w_per_m2,
+                glass_area_m2=true_parameters.A_glass,
+                transmittance=true_parameters.eta,
+            )
+        )
+        internal_gain_kw = float(
+            max(true_internal_gains_kw, true_internal_gains_heat_fraction * internal_gain_proxy_kw)
+        )
+        next_state = model.step(
+            state=state,
+            control_kw=ufh_power_mean_kw,
+            outdoor_temperature_c=outdoor_temperature_c,
+            solar_gain_kw_value=solar_gain_kw_value,
+            internal_gain_kw=internal_gain_kw,
+        )
+        samples.append(
+            UFHActiveCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=true_parameters.dt_hours,
+                room_temperature_start_c=float(state[0]),
+                room_temperature_end_c=float(next_state[0]),
+                outdoor_temperature_mean_c=outdoor_temperature_c,
+                gti_w_per_m2=gti_w_per_m2,
+                internal_gain_proxy_kw=internal_gain_proxy_kw,
+                ufh_power_mean_kw=ufh_power_mean_kw,
+                segment_index=0,
+            )
+        )
+        state = next_state
+
+    dataset = UFHActiveCalibrationDataset(samples=tuple(samples))
+    settings = UFHActiveCalibrationSettings(
+        reference_parameters=ThermalParameters(
+            dt_hours=true_parameters.dt_hours,
+            C_r=true_parameters.C_r,
+            C_b=true_parameters.C_b,
+            R_br=true_parameters.R_br,
+            R_ro=true_parameters.R_ro,
+            alpha=true_parameters.alpha,
+            eta=0.55,
+            A_glass=true_parameters.A_glass,
+        ),
+        reference_internal_gains_kw=true_internal_gains_kw,
+        reference_internal_gains_heat_fraction=0.75,
+        min_sample_count=24,
+        min_segment_samples=12,
+        fit_eta=True,
+        fit_internal_gains_heat_fraction=True,
+        min_parameter_ratio=0.999,
+        max_parameter_ratio=1.001,
+        min_eta=0.2,
+        max_eta=0.8,
+        min_internal_gains_heat_fraction=0.0,
+        max_internal_gains_heat_fraction=1.0,
+        initial_room_covariance_k2=1e-4,
+        initial_floor_covariance_k2=1e-2,
+        process_noise_room_k2=1e-8,
+        process_noise_floor_k2=1e-8,
+        measurement_variance_k2=1e-8,
+    )
+
+    result = calibrate_ufh_active_rc(dataset, settings)
+
+    np.testing.assert_allclose(result.fitted_parameters.eta, true_parameters.eta, atol=5e-2)
+    np.testing.assert_allclose(
+        result.fitted_internal_gains_heat_fraction,
+        true_internal_gains_heat_fraction,
+        atol=7e-2,
+    )
+
+
+def test_calibrate_ufh_active_rc_supports_room_temperature_bias_parameterization() -> None:
+    """Active UFH calibration must safely support a room-temperature bias parameter."""
+    true_parameters = ThermalParameters(
+        dt_hours=0.25,
+        C_r=5.5,
+        C_b=11.0,
+        R_br=1.1,
+        R_ro=8.5,
+        alpha=0.25,
+        eta=0.42,
+        A_glass=8.0,
+    )
+    true_room_bias_c = 0.45
+    model = ThermalModel(true_parameters)
+    state = np.array([20.0, 22.0], dtype=float)
+    start = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    samples: list[UFHActiveCalibrationSample] = []
+
+    for index in range(48):
+        interval_start = start + timedelta(hours=index * true_parameters.dt_hours)
+        interval_end = interval_start + timedelta(hours=true_parameters.dt_hours)
+        outdoor_temperature_c = 1.0 + 5.0 * sin(index / 9.0)
+        ufh_power_mean_kw = 0.9 + 0.7 * max(cos(index / 6.0), 0.0)
+        internal_gain_proxy_kw = 0.2
+        next_state = model.step(
+            state=state,
+            control_kw=ufh_power_mean_kw,
+            outdoor_temperature_c=outdoor_temperature_c,
+            solar_gain_kw_value=0.0,
+            internal_gain_kw=0.2,
+        )
+        samples.append(
+            UFHActiveCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=true_parameters.dt_hours,
+                room_temperature_start_c=float(state[0] - true_room_bias_c),
+                room_temperature_end_c=float(next_state[0] - true_room_bias_c),
+                outdoor_temperature_mean_c=outdoor_temperature_c,
+                gti_w_per_m2=0.0,
+                internal_gain_proxy_kw=internal_gain_proxy_kw,
+                ufh_power_mean_kw=ufh_power_mean_kw,
+                segment_index=0,
+            )
+        )
+        state = next_state
+
+    dataset = UFHActiveCalibrationDataset(samples=tuple(samples))
+    settings = UFHActiveCalibrationSettings(
+        reference_parameters=true_parameters,
+        reference_internal_gains_kw=0.2,
+        reference_internal_gains_heat_fraction=0.0,
+        min_sample_count=24,
+        min_segment_samples=12,
+        fit_room_temperature_bias=True,
+        min_parameter_ratio=0.999,
+        max_parameter_ratio=1.001,
+        min_room_temperature_bias_c=-1.0,
+        max_room_temperature_bias_c=1.0,
+        initial_room_covariance_k2=1e-4,
+        initial_floor_covariance_k2=1e-2,
+        process_noise_room_k2=1e-8,
+        process_noise_floor_k2=1e-8,
+        measurement_variance_k2=1e-8,
+    )
+
+    result = calibrate_ufh_active_rc(dataset, settings)
+
+    assert result.fit_room_temperature_bias is True
+    assert settings.min_room_temperature_bias_c <= result.fitted_room_temperature_bias_c <= settings.max_room_temperature_bias_c
+    assert np.isfinite(result.fitted_room_temperature_bias_c)
+    assert result.rmse_room_temperature_c >= 0.0
+
+
+def test_calibrate_dhw_standby_loss_recovers_ambient_sensor_bias() -> None:
+    """Standby DHW calibration must recover an ambient-temperature sensor bias."""
+    c_top = 0.06
+    c_bot = 0.06
+    c_total = c_top + c_bot
+    true_r_loss = 40.0
+    tau_true_hours = c_total * true_r_loss / 2.0
+    true_ambient_bias_c = 0.9
+    dt_hours = 0.1
+    mean_tank_c = 55.0
+    true_ambient_c = 18.0
+    raw_ambient_c = true_ambient_c - true_ambient_bias_c
+    start = datetime(2026, 2, 2, tzinfo=timezone.utc)
+    samples: list[DHWStandbyCalibrationSample] = []
+
+    for index in range(30):
+        next_mean_tank_c = mean_tank_c + dt_hours / tau_true_hours * (-(mean_tank_c - true_ambient_c))
+        interval_start = start + timedelta(hours=index * dt_hours)
+        interval_end = interval_start + timedelta(hours=dt_hours)
+        samples.append(
+            DHWStandbyCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=dt_hours,
+                t_top_start_c=mean_tank_c,
+                t_top_end_c=next_mean_tank_c,
+                t_bot_start_c=mean_tank_c,
+                t_bot_end_c=next_mean_tank_c,
+                boiler_ambient_mean_c=raw_ambient_c,
+            )
+        )
+        mean_tank_c = next_mean_tank_c
+
+    result = calibrate_dhw_standby_loss(
+        DHWStandbyCalibrationDataset(samples=tuple(samples)),
+        DHWStandbyCalibrationSettings(
+            dt_hours=dt_hours,
+            reference_c_top_kwh_per_k=c_top,
+            reference_c_bot_kwh_per_k=c_bot,
+            min_sample_count=12,
+            fit_ambient_temperature_bias=True,
+            min_tau_hours=0.5,
+            max_tau_hours=8.0,
+            initial_tau_hours=3.0,
+            min_ambient_temperature_bias_c=-2.0,
+            max_ambient_temperature_bias_c=2.0,
+        ),
+    )
+
+    np.testing.assert_allclose(result.suggested_r_loss_k_per_kw, true_r_loss, atol=5e-2)
+    np.testing.assert_allclose(result.fitted_ambient_temperature_bias_c, true_ambient_bias_c, atol=5e-2)
+
+
+def test_calibrate_dhw_active_stratification_recovers_capacity_split_and_sensor_biases() -> None:
+    """Active DHW calibration must recover the C_top/C_bot split and layer-temperature biases."""
+    true_parameters = DHWParameters(
+        dt_hours=0.1,
+        C_top=0.078,
+        C_bot=0.042,
+        R_strat=8.5,
+        R_loss=45.0,
+    )
+    true_top_bias_c = 0.6
+    true_bot_bias_c = -0.35
+    model = DHWModel(true_parameters)
+    state = np.array([54.0, 44.0], dtype=float)
+    start = datetime(2026, 2, 3, tzinfo=timezone.utc)
+    samples: list[DHWActiveCalibrationSample] = []
+
+    for index in range(36):
+        interval_start = start + timedelta(hours=index * true_parameters.dt_hours)
+        interval_end = interval_start + timedelta(hours=true_parameters.dt_hours)
+        p_dhw_mean_kw = 1.4 + 0.8 * max(sin(index / 4.0), 0.0)
+        t_mains_c = 10.0 + 0.5 * sin(index / 9.0)
+        t_amb_c = 19.0
+        next_state = model.step(
+            state=state,
+            control_kw=p_dhw_mean_kw,
+            v_tap_m3_per_h=0.0,
+            t_mains_c=t_mains_c,
+            t_amb_c=t_amb_c,
+        )
+        samples.append(
+            DHWActiveCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=true_parameters.dt_hours,
+                t_top_start_c=float(state[0] - true_top_bias_c),
+                t_top_end_c=float(next_state[0] - true_top_bias_c),
+                t_bot_start_c=float(state[1] - true_bot_bias_c),
+                t_bot_end_c=float(next_state[1] - true_bot_bias_c),
+                p_dhw_mean_kw=p_dhw_mean_kw,
+                t_mains_c=t_mains_c,
+                t_amb_c=t_amb_c,
+                implied_v_tap_m3_per_h=0.0,
+                segment_index=0,
+            )
+        )
+        state = next_state
+
+    result = calibrate_dhw_active_stratification(
+        DHWActiveCalibrationDataset(samples=tuple(samples)),
+        DHWActiveCalibrationSettings(
+            reference_parameters=DHWParameters(
+                dt_hours=true_parameters.dt_hours,
+                C_top=0.06,
+                C_bot=0.06,
+                R_strat=10.0,
+                R_loss=true_parameters.R_loss,
+            ),
+            min_sample_count=12,
+            min_segment_samples=6,
+            fit_capacity_split=True,
+            fit_temperature_biases=True,
+            initial_c_top_fraction=0.5,
+            min_c_top_fraction=0.2,
+            max_c_top_fraction=0.8,
+            min_temperature_bias_c=-1.0,
+            max_temperature_bias_c=1.0,
+            min_r_strat_k_per_kw=2.0,
+            max_r_strat_k_per_kw=15.0,
+        ),
+    )
+
+    np.testing.assert_allclose(result.fitted_parameters.C_top, true_parameters.C_top, atol=5e-3)
+    np.testing.assert_allclose(result.fitted_parameters.C_bot, true_parameters.C_bot, atol=5e-3)
+    np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, atol=2e-1)
+    np.testing.assert_allclose(result.fitted_t_top_bias_c, true_top_bias_c, atol=5e-2)
+    np.testing.assert_allclose(result.fitted_t_bot_bias_c, true_bot_bias_c, atol=5e-2)
 
 

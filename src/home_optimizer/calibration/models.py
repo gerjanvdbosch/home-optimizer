@@ -52,6 +52,17 @@ DEFAULT_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT: float = 1.0
 DEFAULT_SEGMENT_SCORE_WEIGHT_UFH_POWER_SPAN: float = 1.0
 DEFAULT_SEGMENT_SCORE_WEIGHT_ROOM_TEMPERATURE_SPAN: float = 1.0
 DEFAULT_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN: float = 1.0
+DEFAULT_FIT_ETA: bool = False
+DEFAULT_MIN_ETA: float = 0.0
+DEFAULT_MAX_ETA: float = 1.0
+DEFAULT_INITIAL_INTERNAL_GAINS_HEAT_FRACTION: float = 0.7
+DEFAULT_MIN_INTERNAL_GAINS_HEAT_FRACTION: float = 0.0
+DEFAULT_MAX_INTERNAL_GAINS_HEAT_FRACTION: float = 1.0
+DEFAULT_FIT_INTERNAL_GAINS_HEAT_FRACTION: bool = False
+DEFAULT_FIT_ROOM_TEMPERATURE_BIAS: bool = False
+DEFAULT_INITIAL_ROOM_TEMPERATURE_BIAS_C: float = 0.0
+DEFAULT_MIN_ROOM_TEMPERATURE_BIAS_C: float = -5.0
+DEFAULT_MAX_ROOM_TEMPERATURE_BIAS_C: float = 5.0
 DEFAULT_MIN_INITIAL_FLOOR_OFFSET_C: float = -15.0
 DEFAULT_MAX_INITIAL_FLOOR_OFFSET_C: float = 15.0
 DEFAULT_INITIAL_FLOOR_OFFSET_REGULARIZATION_WEIGHT: float = 0.0
@@ -77,6 +88,18 @@ DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_LAYER_SPREAD_SPAN: float = 1.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_BOTTOM_TEMPERATURE_RISE: float = 1.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TOP_TEMPERATURE_RISE: float = 0.5
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN: float = 0.5
+DEFAULT_FIT_DHW_AMBIENT_TEMPERATURE_BIAS: bool = False
+DEFAULT_INITIAL_DHW_AMBIENT_TEMPERATURE_BIAS_C: float = 0.0
+DEFAULT_MIN_DHW_AMBIENT_TEMPERATURE_BIAS_C: float = -5.0
+DEFAULT_MAX_DHW_AMBIENT_TEMPERATURE_BIAS_C: float = 5.0
+DEFAULT_FIT_DHW_CAPACITY_SPLIT: bool = False
+DEFAULT_MIN_DHW_C_TOP_FRACTION: float = 0.1
+DEFAULT_MAX_DHW_C_TOP_FRACTION: float = 0.9
+DEFAULT_FIT_DHW_TEMPERATURE_BIASES: bool = False
+DEFAULT_INITIAL_DHW_TOP_TEMPERATURE_BIAS_C: float = 0.0
+DEFAULT_INITIAL_DHW_BOTTOM_TEMPERATURE_BIAS_C: float = 0.0
+DEFAULT_MIN_DHW_TEMPERATURE_BIAS_C: float = -5.0
+DEFAULT_MAX_DHW_TEMPERATURE_BIAS_C: float = 5.0
 
 from ..cop_model import HeatPumpCOPParameters
 from ..types import DHWParameters, ThermalParameters
@@ -364,6 +387,10 @@ class DHWStandbyCalibrationSettings:
     initial_tau_hours: float = DEFAULT_INITIAL_TAU_HOURS
     min_tau_hours: float = DEFAULT_MIN_TAU_HOURS
     max_tau_hours: float = DEFAULT_MAX_TAU_HOURS
+    fit_ambient_temperature_bias: bool = DEFAULT_FIT_DHW_AMBIENT_TEMPERATURE_BIAS
+    initial_ambient_temperature_bias_c: float = DEFAULT_INITIAL_DHW_AMBIENT_TEMPERATURE_BIAS_C
+    min_ambient_temperature_bias_c: float = DEFAULT_MIN_DHW_AMBIENT_TEMPERATURE_BIAS_C
+    max_ambient_temperature_bias_c: float = DEFAULT_MAX_DHW_AMBIENT_TEMPERATURE_BIAS_C
 
     def __post_init__(self) -> None:
         if not self.dhw_mode_name.strip():
@@ -392,6 +419,14 @@ class DHWStandbyCalibrationSettings:
             raise ValueError("min_tau_hours must be < max_tau_hours.")
         if not (self.min_tau_hours <= self.initial_tau_hours <= self.max_tau_hours):
             raise ValueError("initial_tau_hours must lie within its bounds.")
+        if self.min_ambient_temperature_bias_c >= self.max_ambient_temperature_bias_c:
+            raise ValueError("min_ambient_temperature_bias_c must be < max_ambient_temperature_bias_c.")
+        if not (
+            self.min_ambient_temperature_bias_c
+            <= self.initial_ambient_temperature_bias_c
+            <= self.max_ambient_temperature_bias_c
+        ):
+            raise ValueError("initial_ambient_temperature_bias_c must lie within its bounds.")
 
     @property
     def reference_c_total_kwh_per_k(self) -> float:
@@ -406,6 +441,8 @@ class DHWStandbyCalibrationResult:
     tau_standby_hours: float
     suggested_r_loss_k_per_kw: float
     reference_c_total_kwh_per_k: float
+    fit_ambient_temperature_bias: bool
+    fitted_ambient_temperature_bias_c: float
     rmse_mean_tank_temperature_c: float
     max_abs_residual_c: float
     sample_count: int
@@ -1166,6 +1203,15 @@ class DHWActiveCalibrationSettings:
     segment_score_weight_tap_margin: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN
     min_r_strat_k_per_kw: float = DEFAULT_MIN_DHW_R_STRAT_K_PER_KW
     max_r_strat_k_per_kw: float = DEFAULT_MAX_DHW_R_STRAT_K_PER_KW
+    fit_capacity_split: bool = DEFAULT_FIT_DHW_CAPACITY_SPLIT
+    initial_c_top_fraction: float | None = None
+    min_c_top_fraction: float = DEFAULT_MIN_DHW_C_TOP_FRACTION
+    max_c_top_fraction: float = DEFAULT_MAX_DHW_C_TOP_FRACTION
+    fit_temperature_biases: bool = DEFAULT_FIT_DHW_TEMPERATURE_BIASES
+    initial_t_top_bias_c: float = DEFAULT_INITIAL_DHW_TOP_TEMPERATURE_BIAS_C
+    initial_t_bot_bias_c: float = DEFAULT_INITIAL_DHW_BOTTOM_TEMPERATURE_BIAS_C
+    min_temperature_bias_c: float = DEFAULT_MIN_DHW_TEMPERATURE_BIAS_C
+    max_temperature_bias_c: float = DEFAULT_MAX_DHW_TEMPERATURE_BIAS_C
     regularization_weight: float = DEFAULT_REGULARIZATION_WEIGHT
     regularization_scale_ratio: float = DEFAULT_REGULARIZATION_SCALE_RATIO
 
@@ -1219,6 +1265,31 @@ class DHWActiveCalibrationSettings:
             )
         if self.regularization_weight < 0.0:
             raise ValueError("regularization_weight must be non-negative.")
+        if self.min_c_top_fraction <= 0.0 or self.max_c_top_fraction >= 1.0:
+            raise ValueError("Capacity split bounds must satisfy 0 < min_c_top_fraction < max_c_top_fraction < 1.")
+        if self.min_c_top_fraction >= self.max_c_top_fraction:
+            raise ValueError("min_c_top_fraction must be < max_c_top_fraction.")
+        reference_c_top_fraction = self.reference_parameters.C_top / (
+            self.reference_parameters.C_top + self.reference_parameters.C_bot
+        )
+        if not (self.min_c_top_fraction <= reference_c_top_fraction <= self.max_c_top_fraction):
+            raise ValueError("reference C_top/C_total fraction must lie within the configured split bounds.")
+        if self.initial_c_top_fraction is None:
+            object.__setattr__(self, "initial_c_top_fraction", reference_c_top_fraction)
+        if self.initial_c_top_fraction is None or not (
+            self.min_c_top_fraction <= self.initial_c_top_fraction <= self.max_c_top_fraction
+        ):
+            raise ValueError("initial_c_top_fraction must lie within its bounds.")
+        if self.min_temperature_bias_c >= self.max_temperature_bias_c:
+            raise ValueError("min_temperature_bias_c must be < max_temperature_bias_c.")
+        for name in ("initial_t_top_bias_c", "initial_t_bot_bias_c"):
+            if not (self.min_temperature_bias_c <= getattr(self, name) <= self.max_temperature_bias_c):
+                raise ValueError(f"{name} must lie within [min_temperature_bias_c, max_temperature_bias_c].")
+
+    @property
+    def reference_c_total_kwh_per_k(self) -> float:
+        """Injected total DHW heat capacity ``C_top + C_bot`` [kWh/K]."""
+        return self.reference_parameters.C_top + self.reference_parameters.C_bot
 
 
 @dataclass(frozen=True, slots=True)
@@ -1226,6 +1297,11 @@ class DHWActiveCalibrationResult:
     """Result of fitting active DHW stratification parameters from no-draw charging runs."""
 
     fitted_parameters: DHWParameters
+    fit_capacity_split: bool
+    fitted_c_top_fraction: float
+    fit_temperature_biases: bool
+    fitted_t_top_bias_c: float
+    fitted_t_bot_bias_c: float
     rmse_t_top_c: float
     rmse_t_bot_c: float
     max_abs_residual_c: float
@@ -1486,7 +1562,19 @@ class UFHActiveCalibrationSettings:
     segment_score_weight_room_temperature_span: float = DEFAULT_SEGMENT_SCORE_WEIGHT_ROOM_TEMPERATURE_SPAN
     segment_score_weight_outdoor_temperature_span: float = DEFAULT_SEGMENT_SCORE_WEIGHT_OUTDOOR_TEMPERATURE_SPAN
     min_ufh_power_kw: float = DEFAULT_MIN_UFH_POWER_KW
+    reference_internal_gains_kw: float = 0.3
+    reference_internal_gains_heat_fraction: float = DEFAULT_INITIAL_INTERNAL_GAINS_HEAT_FRACTION
     fit_c_r: bool = False
+    fit_eta: bool = DEFAULT_FIT_ETA
+    min_eta: float = DEFAULT_MIN_ETA
+    max_eta: float = DEFAULT_MAX_ETA
+    fit_internal_gains_heat_fraction: bool = DEFAULT_FIT_INTERNAL_GAINS_HEAT_FRACTION
+    min_internal_gains_heat_fraction: float = DEFAULT_MIN_INTERNAL_GAINS_HEAT_FRACTION
+    max_internal_gains_heat_fraction: float = DEFAULT_MAX_INTERNAL_GAINS_HEAT_FRACTION
+    fit_room_temperature_bias: bool = DEFAULT_FIT_ROOM_TEMPERATURE_BIAS
+    initial_room_temperature_bias_c: float = DEFAULT_INITIAL_ROOM_TEMPERATURE_BIAS_C
+    min_room_temperature_bias_c: float = DEFAULT_MIN_ROOM_TEMPERATURE_BIAS_C
+    max_room_temperature_bias_c: float = DEFAULT_MAX_ROOM_TEMPERATURE_BIAS_C
     fit_initial_floor_temperature_offset: bool = False
     initial_floor_temperature_offset_c: float = DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C
     min_initial_floor_temperature_offset_c: float = DEFAULT_MIN_INITIAL_FLOOR_OFFSET_C
@@ -1528,6 +1616,7 @@ class UFHActiveCalibrationSettings:
             "segment_score_weight_ufh_power_span",
             "segment_score_weight_room_temperature_span",
             "segment_score_weight_outdoor_temperature_span",
+            "reference_internal_gains_kw",
         ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be strictly positive.")
@@ -1549,8 +1638,34 @@ class UFHActiveCalibrationSettings:
             raise ValueError("max_selected_segments must be strictly positive when provided.")
         if self.min_parameter_ratio >= self.max_parameter_ratio:
             raise ValueError("min_parameter_ratio must be < max_parameter_ratio.")
+        if not 0.0 <= self.reference_internal_gains_heat_fraction <= 1.0:
+            raise ValueError("reference_internal_gains_heat_fraction must be in [0, 1].")
+        if not 0.0 <= self.min_eta <= self.max_eta <= 1.0:
+            raise ValueError("Eta bounds must satisfy 0 <= min_eta <= max_eta <= 1.")
+        if not (self.min_eta <= self.reference_parameters.eta <= self.max_eta):
+            raise ValueError("reference_parameters.eta must lie within [min_eta, max_eta].")
+        if not 0.0 <= self.min_internal_gains_heat_fraction <= self.max_internal_gains_heat_fraction <= 1.0:
+            raise ValueError(
+                "Internal-gains heat-fraction bounds must satisfy 0 <= min <= max <= 1."
+            )
+        if not (
+            self.min_internal_gains_heat_fraction
+            <= self.reference_internal_gains_heat_fraction
+            <= self.max_internal_gains_heat_fraction
+        ):
+            raise ValueError(
+                "reference_internal_gains_heat_fraction must lie within its configured bounds."
+            )
         if self.regularization_weight < 0.0:
             raise ValueError("regularization_weight must be non-negative.")
+        if self.min_room_temperature_bias_c >= self.max_room_temperature_bias_c:
+            raise ValueError("min_room_temperature_bias_c must be < max_room_temperature_bias_c.")
+        if not (
+            self.min_room_temperature_bias_c
+            <= self.initial_room_temperature_bias_c
+            <= self.max_room_temperature_bias_c
+        ):
+            raise ValueError("initial_room_temperature_bias_c must lie within its bounds.")
         if self.initial_floor_temperature_offset_c < self.min_initial_floor_temperature_offset_c:
             raise ValueError(
                 "initial_floor_temperature_offset_c must be >= min_initial_floor_temperature_offset_c."
@@ -1573,6 +1688,11 @@ class UFHActiveCalibrationResult:
 
     fitted_parameters: ThermalParameters
     fit_c_r: bool
+    fit_eta: bool
+    fitted_internal_gains_heat_fraction: float
+    fit_internal_gains_heat_fraction: bool
+    fit_room_temperature_bias: bool
+    fitted_room_temperature_bias_c: float
     fit_initial_floor_temperature_offset: bool
     fitted_initial_floor_temperature_offset_c: float
     rmse_room_temperature_c: float
