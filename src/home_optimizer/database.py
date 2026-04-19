@@ -60,7 +60,7 @@ class Database:
 
     Example — explicit path (local runner)::
 
-        db = Database.from_path(Path("./dev_data/local.db"))
+        db = Database.from_path(Path("./database.sqlite3"))
         repo = db.repository()
 
     Example — inject into FastAPI env so /api/forecast/latest finds it::

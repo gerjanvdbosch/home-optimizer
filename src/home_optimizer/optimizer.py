@@ -55,6 +55,7 @@ from .types import (
     DHWMPCParameters,
     DHWParameters,
     ForecastHorizon,
+    LAMBDA_WATER_KWH_PER_M3_K,
     MPCParameters,
     ThermalParameters,
 )
@@ -307,6 +308,15 @@ class RunRequest(BaseModel):
             "internal_gains_forecast is absent."
         ),
     )
+    baseload_internal_gains_reference_kw: float = Field(
+        0.30,
+        ge=0.0,
+        description=(
+            "Always-on electrical baseload reference [kW] that is treated as already covered by "
+            "the baseline internal_gains_kw.  Only the excess baseload above this reference is "
+            "mapped to additional sensible indoor heat gains when baseload_forecast is used."
+        ),
+    )
 
     # ── PV self-consumption ───────────────────────────────────────────────
     pv_enabled: bool = Field(
@@ -327,6 +337,11 @@ class RunRequest(BaseModel):
     )
     dhw_R_loss: float = Field(
         50.0, ge=5.0, le=200.0, description="Standby-loss resistance R_loss [K/kW]"
+    )
+    dhw_lambda_water_kwh_per_m3k: float = Field(
+        LAMBDA_WATER_KWH_PER_M3_K,
+        gt=0.0,
+        description="Water volumetric heat capacity lambda [kWh/(m^3·K)] (§8.4)",
     )
     dhw_T_top_init: float = Field(
         55.0, ge=20.0, le=85.0, description="Initial top-layer temperature T_top [degC]"
@@ -441,8 +456,9 @@ def validate_run_request_physics(req: RunRequest) -> None:
                 C_bot=req.dhw_C_bot,
                 R_strat=req.dhw_R_strat,
                 R_loss=req.dhw_R_loss,
+                lambda_water=req.dhw_lambda_water_kwh_per_m3k,
             )
-        )
+        ).parameters.assert_euler_stable_for_tap_flow(req.dhw_v_tap_m3_per_h)
 
 
 def merge_run_request_updates(base_request: RunRequest, updates: dict[str, object]) -> RunRequest:
@@ -681,6 +697,7 @@ class Optimizer:
                 C_bot=req.dhw_C_bot,
                 R_strat=req.dhw_R_strat,
                 R_loss=req.dhw_R_loss,
+                lambda_water=req.dhw_lambda_water_kwh_per_m3k,
             )
             dhw_mpc_params = DHWMPCParameters(
                 P_dhw_max=req.dhw_P_max,
@@ -699,6 +716,7 @@ class Optimizer:
             )
             dhw_model = DHWModel(dhw_params)
             dhw_forecast = self._build_dhw_forecast(req, N, cop_model)
+            dhw_forecast.assert_compatible_with_parameters(dhw_params)
             initial_dhw_state = np.array([req.dhw_T_top_init, req.dhw_T_bot_init])
 
         # ── Step 6: Solve MPC through the canonical CVXPY formulation ───
@@ -1041,20 +1059,26 @@ class Optimizer:
 
         Precedence:
         1. explicit ``internal_gains_forecast``
-        2. baseline ``internal_gains_kw`` + ``baseload_internal_gains_heat_fraction`` × ``baseload_forecast``
+        2. baseline ``internal_gains_kw`` + ``baseload_internal_gains_heat_fraction`` ×
+           ``max(baseload_forecast - baseload_internal_gains_reference_kw, 0)``
         3. scalar ``internal_gains_kw`` broadcast across the horizon
 
         The baseload mapping expresses that only a fraction of electrical household
         demand becomes useful sensible heat in the conditioned zone, while the
         scalar baseline captures occupant/metabolic and other non-forecast gains.
+        The reference term avoids double-counting always-on plug loads that are
+        already absorbed into the baseline internal-gains assumption.
         """
 
         if req.internal_gains_forecast is not None:
-            return Optimizer._materialize_horizon_array(
+            explicit_internal_gains = Optimizer._materialize_horizon_array(
                 name="internal_gains_forecast",
                 horizon_steps=horizon_steps,
                 values=req.internal_gains_forecast,
             )
+            if np.any(explicit_internal_gains < 0.0):
+                raise ValueError("internal_gains_forecast must remain non-negative [kW].")
+            return explicit_internal_gains
 
         baseline_internal_gains = np.full(horizon_steps, req.internal_gains_kw, dtype=float)
         if req.baseload_forecast is None:
@@ -1065,10 +1089,52 @@ class Optimizer:
             horizon_steps=horizon_steps,
             values=req.baseload_forecast,
         )
-        return np.maximum(
-            baseline_internal_gains + req.baseload_internal_gains_heat_fraction * baseload_profile,
-            0.0,
+        return baseline_internal_gains + Optimizer._map_baseload_to_internal_gains_increment(
+            baseload_profile_kw=baseload_profile,
+            reference_kw=req.baseload_internal_gains_reference_kw,
+            heat_fraction=req.baseload_internal_gains_heat_fraction,
         )
+
+    @staticmethod
+    def _map_baseload_to_internal_gains_increment(
+        *,
+        baseload_profile_kw: np.ndarray,
+        reference_kw: float,
+        heat_fraction: float,
+    ) -> np.ndarray:
+        """Return the incremental sensible heat gain implied by the electrical baseload.
+
+        Implements the optimizer-side mapping
+
+        ``Q_int,extra[k] = heat_fraction * max(P_baseload[k] - P_reference, 0)``
+
+        from the project-specific grey-box interpretation of internal gains.  The
+        reference removes the approximately constant standby / always-on part of the
+        electrical load so the time-varying increment represents occupant-driven
+        activity more accurately than a direct 1:1 mapping.
+
+        Args:
+            baseload_profile_kw: Forecast non-heat-pump household electrical demand
+                over the horizon [kW], shape ``(N,)``.
+            reference_kw: Electrical baseload floor already represented by the
+                scalar background internal gains [kW].
+            heat_fraction: Fraction of the excess electrical demand that appears
+                indoors as useful sensible heat [-].
+
+        Returns:
+            Incremental internal-gains profile [kW], shape ``(N,)``.
+
+        Raises:
+            ValueError: If the baseload profile contains negative values.
+        """
+
+        if np.any(baseload_profile_kw < 0.0):
+            raise ValueError("baseload_forecast must remain non-negative [kW].")
+
+        # Implements the refined UFH disturbance mapping: only excess baseload
+        # above the configurable always-on reference adds time-varying heat.
+        excess_baseload_kw = np.maximum(baseload_profile_kw - reference_kw, 0.0)
+        return heat_fraction * excess_baseload_kw
 
     @staticmethod
     def _build_dhw_forecast(

@@ -144,7 +144,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="PATH",
         help=(
-            "Path to the SQLite database file, e.g. './dev_data/local.db'. "
+            "Path to the SQLite database file, e.g. './database.sqlite3'. "
             "Overrides the DATABASE_URL environment variable. "
             f"Default: uses DATABASE_URL env var or '{DATABASE_URL_DEFAULT}'."
         ),

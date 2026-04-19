@@ -48,6 +48,7 @@ from .telemetry import (
     ForecastPersister,
     TelemetryCollectorSettings,
 )
+from .types import LAMBDA_WATER_KWH_PER_M3_K, M3_PER_LITER
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -170,6 +171,14 @@ class AddonOptions(BaseModel):
         ge=0.0,
         le=1.0,
         description="Fraction of household baseload that becomes useful indoor heat gains [-]",
+    )
+    mpc_baseload_internal_gains_reference_kw: float = Field(
+        0.30,
+        ge=0.0,
+        description=(
+            "Always-on household electrical baseload reference [kW] that is treated as already "
+            "represented by the scalar background internal gains."
+        ),
     )
     mpc_P_max: float = Field(4.5, gt=0.0, description="Max UFH thermal power P_UFH,max [kW]")
     mpc_delta_P_max: float = Field(1.0, gt=0.0, description="Max UFH ramp-rate [kW/step]")
@@ -649,15 +658,17 @@ def main() -> None:
             "price_config": price_cfg,
             "internal_gains_kw": _defaults.internal_gains_kw,
             "baseload_internal_gains_heat_fraction": opts.mpc_baseload_internal_gains_heat_fraction,
+            "baseload_internal_gains_reference_kw": opts.mpc_baseload_internal_gains_reference_kw,
             # ── PV ───────────────────────────────────────────────────────────
             "pv_enabled": _defaults.pv_enabled,
             "pv_peak_kw": _defaults.pv_peak_kw,
             # ── DHW ──────────────────────────────────────────────────────────
             "dhw_enabled": opts.mpc_dhw_enabled,
-            "dhw_C_top": opts.boiler_tank_liters * 1.1628e-3 / 2.0,
-            "dhw_C_bot": opts.boiler_tank_liters * 1.1628e-3 / 2.0,
+            "dhw_C_top": opts.boiler_tank_liters * M3_PER_LITER * LAMBDA_WATER_KWH_PER_M3_K / 2.0,
+            "dhw_C_bot": opts.boiler_tank_liters * M3_PER_LITER * LAMBDA_WATER_KWH_PER_M3_K / 2.0,
             "dhw_R_strat": opts.mpc_dhw_R_strat,
             "dhw_R_loss": opts.mpc_dhw_R_loss,
+            "dhw_lambda_water_kwh_per_m3k": LAMBDA_WATER_KWH_PER_M3_K,
             "dhw_T_top_init": _defaults.dhw_T_top_init,
             "dhw_T_bot_init": _defaults.dhw_T_bot_init,
             "dhw_P_max": opts.mpc_dhw_P_max,

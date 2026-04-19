@@ -342,8 +342,8 @@ def test_forecast_service_injects_baseload_forecast_only(tmp_path) -> None:
     assert np.all(baseload_forecast >= 0.0)
 
 
-def test_optimizer_maps_baseload_forecast_to_internal_gains_with_heat_fraction() -> None:
-    """UFH forecast construction must map baseload to heat gains via baseline + heat fraction."""
+def test_optimizer_maps_only_excess_baseload_to_internal_gains() -> None:
+    """UFH forecast construction must map only excess baseload above the reference floor to heat gains."""
     from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
@@ -356,6 +356,7 @@ def test_optimizer_maps_baseload_forecast_to_internal_gains_with_heat_fraction()
             "baseload_forecast": [0.35, 0.45, 0.95, 1.10],
             "internal_gains_kw": 0.20,
             "baseload_internal_gains_heat_fraction": 0.50,
+            "baseload_internal_gains_reference_kw": 0.30,
             "pv_enabled": False,
         }
     )
@@ -374,7 +375,43 @@ def test_optimizer_maps_baseload_forecast_to_internal_gains_with_heat_fraction()
 
     forecast = Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
 
-    np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.375, 0.425, 0.675, 0.75]))
+    np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.225, 0.275, 0.525, 0.60]))
+
+
+def test_optimizer_does_not_add_heat_for_baseload_below_reference_floor() -> None:
+    """Always-on baseload below the configurable reference must not create extra time-varying Q_int."""
+    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+            "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+            "baseload_forecast": [0.05, 0.10, 0.20, 0.25],
+            "internal_gains_kw": 0.20,
+            "baseload_internal_gains_heat_fraction": 0.50,
+            "baseload_internal_gains_reference_kw": 0.30,
+            "pv_enabled": False,
+        }
+    )
+    cop_model = HeatPumpCOPModel(
+        HeatPumpCOPParameters(
+            eta_carnot=run_request.eta_carnot,
+            delta_T_cond=run_request.delta_T_cond,
+            delta_T_evap=run_request.delta_T_evap,
+            T_supply_min=run_request.T_supply_min,
+            T_ref_outdoor=run_request.T_ref_outdoor_curve,
+            heating_curve_slope=run_request.heating_curve_slope,
+            cop_min=run_request.cop_min,
+            cop_max=run_request.cop_max,
+        )
+    )
+
+    forecast = Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
+
+    np.testing.assert_allclose(forecast.internal_gains_kw, np.full(4, 0.20))
 
 
 def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mapping() -> None:
@@ -392,6 +429,7 @@ def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mappin
             "internal_gains_forecast": [0.10, 0.20, 0.30, 0.40],
             "internal_gains_kw": 0.20,
             "baseload_internal_gains_heat_fraction": 0.50,
+            "baseload_internal_gains_reference_kw": 0.30,
             "pv_enabled": False,
         }
     )
@@ -411,6 +449,41 @@ def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mappin
     forecast = Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
 
     np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.10, 0.20, 0.30, 0.40]))
+
+
+def test_optimizer_rejects_negative_baseload_forecast_for_internal_gains_mapping() -> None:
+    """Negative electrical baseload is physically impossible and must fail fast."""
+    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+            "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+            "baseload_forecast": [0.35, -0.10, 0.95, 1.10],
+            "internal_gains_kw": 0.20,
+            "baseload_internal_gains_heat_fraction": 0.50,
+            "baseload_internal_gains_reference_kw": 0.30,
+            "pv_enabled": False,
+        }
+    )
+    cop_model = HeatPumpCOPModel(
+        HeatPumpCOPParameters(
+            eta_carnot=run_request.eta_carnot,
+            delta_T_cond=run_request.delta_T_cond,
+            delta_T_evap=run_request.delta_T_evap,
+            T_supply_min=run_request.T_supply_min,
+            T_ref_outdoor=run_request.T_ref_outdoor_curve,
+            heating_curve_slope=run_request.heating_curve_slope,
+            cop_min=run_request.cop_min,
+            cop_max=run_request.cop_max,
+        )
+    )
+
+    with pytest.raises(ValueError, match="baseload_forecast must remain non-negative"):
+        Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
 
 
 def test_shutter_forecaster_reuses_cached_model_for_unchanged_history(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

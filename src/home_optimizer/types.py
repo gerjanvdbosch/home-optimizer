@@ -29,6 +29,18 @@ Array1DInput = Iterable[float] | np.ndarray
 #: 1 kW = 1000 W  — used to convert W/m² irradiance to kW.
 W_PER_KW: float = 1000.0
 
+#: Absolute zero expressed in degrees Celsius. Temperatures below this are non-physical.
+ABSOLUTE_ZERO_C: float = -273.15
+
+#: Water volumetric heat capacity λ = ρ·c_p [kWh/(m³·K)] (§8.4, §15).
+LAMBDA_WATER_KWH_PER_M3_K: float = 1.1628
+
+#: Number of litres in one cubic metre [L/m³].
+LITERS_PER_CUBIC_METER: float = 1000.0
+
+#: Cubic metres in one litre [m³/L].
+M3_PER_LITER: float = 1.0 / LITERS_PER_CUBIC_METER
+
 
 class CalibrationParameterOverrides(BaseModel):
     """Validated calibrated parameter overrides that can be applied to ``RunRequest``.
@@ -209,7 +221,7 @@ class DHWParameters:
     C_bot:          Thermal capacity of the bottom layer [kWh/K].
     R_strat:        Stratification thermal resistance top↔bottom [K/kW].
     R_loss:         Standby-loss resistance to ambient (both layers share R_loss) [K/kW].
-    lambda_water:   ρ·c_p of water [kWh/(m³·K)]; physical constant, default 1.1628.
+    lambda_water:   ρ·c_p of water [kWh/(m³·K)] (§8.4).
     """
 
     dt_hours: float
@@ -217,7 +229,7 @@ class DHWParameters:
     C_bot: float
     R_strat: float
     R_loss: float
-    lambda_water: float = 1.1628  # kWh/(m³·K) — ρ·c_p water
+    lambda_water: float = LAMBDA_WATER_KWH_PER_M3_K
 
     def __post_init__(self) -> None:
         for f in ("dt_hours", "C_top", "C_bot", "R_strat", "R_loss", "lambda_water"):
@@ -231,6 +243,8 @@ class DHWParameters:
 
     def max_stable_euler_dt(self, safety_factor: float = 0.2) -> float:
         """Upper bound on dt for a stable forward-Euler step [h]."""
+        if safety_factor <= 0.0:
+            raise ValueError("safety_factor must be strictly positive.")
         return safety_factor * min(self.euler_time_constants_hours)
 
     def assert_euler_stable(self, safety_factor: float = 0.2) -> None:
@@ -240,6 +254,54 @@ class DHWParameters:
             raise ValueError(
                 f"Forward-Euler time step dt={self.dt_hours:.3f} h exceeds the stability "
                 f"bound {limit:.3f} h.  Reduce dt or switch to ZOH discretisation."
+            )
+
+    def tap_flow_time_constant_hours(self, v_tap_m3_per_h: float) -> float:
+        """Return the DHW top-layer tap time constant ``C_top / (λ·V_tap)`` [h].
+
+        This is the additional DHW-specific stability limit from §10.2: large tap
+        flow can create dynamics much faster than the standby/stratification time
+        constants, so the discretisation must also remain small relative to this
+        tap-driven time constant.
+        """
+        if v_tap_m3_per_h < 0.0:
+            raise ValueError("v_tap_m3_per_h must be non-negative.")
+        if v_tap_m3_per_h == 0.0:
+            return float("inf")
+        return self.C_top / (self.lambda_water * v_tap_m3_per_h)
+
+    def max_stable_euler_dt_for_tap_flow(
+        self,
+        v_tap_m3_per_h: float,
+        safety_factor: float = 0.2,
+    ) -> float:
+        """Return the most restrictive Euler bound [h] for the supplied tap flow.
+
+        The bound is the minimum of the linear thermal time constants and the
+        tap-flow-driven time constant from §10.2.
+        """
+        base_limit = self.max_stable_euler_dt(safety_factor)
+        tap_tau_hours = self.tap_flow_time_constant_hours(v_tap_m3_per_h)
+        if np.isinf(tap_tau_hours):
+            return base_limit
+        return min(base_limit, safety_factor * tap_tau_hours)
+
+    def assert_euler_stable_for_tap_flow(
+        self,
+        v_tap_m3_per_h: float,
+        safety_factor: float = 0.2,
+    ) -> None:
+        """Raise when ``dt_hours`` violates the DHW Euler bound at a given tap flow.
+
+        This check strengthens :meth:`assert_euler_stable` by including the
+        tap-flow-dependent limit ``Δt << C_top / (λ·V_tap,max)`` from §10.2.
+        """
+        limit = self.max_stable_euler_dt_for_tap_flow(v_tap_m3_per_h, safety_factor)
+        if self.dt_hours > limit:
+            raise ValueError(
+                f"Forward-Euler time step dt={self.dt_hours:.3f} h exceeds the DHW stability "
+                f"bound {limit:.3f} h at V_tap={v_tap_m3_per_h:.6f} m³/h. "
+                "Reduce dt, reduce the admissible tap flow, or switch to ZOH discretisation."
             )
 
 
@@ -736,6 +798,28 @@ class DHWForecastHorizon:
     @property
     def horizon_steps(self) -> int:
         return int(self.v_tap_m3_per_h.size)
+
+    @property
+    def max_tap_flow_m3_per_h(self) -> float:
+        """Return the maximum tap-flow disturbance over the horizon [m³/h]."""
+        return float(np.max(self.v_tap_m3_per_h))
+
+    def assert_compatible_with_parameters(
+        self,
+        parameters: DHWParameters,
+        safety_factor: float = 0.2,
+    ) -> None:
+        """Fail fast when the forecast violates the DHW Euler stability bound.
+
+        The MPC uses the DHW forecast as a known LTV disturbance sequence, so the
+        physically relevant discretisation check must be based on the **largest**
+        tap flow that appears anywhere in the horizon, not only the nominal scalar
+        operating point.
+        """
+        parameters.assert_euler_stable_for_tap_flow(
+            v_tap_m3_per_h=self.max_tap_flow_m3_per_h,
+            safety_factor=safety_factor,
+        )
 
     def disturbance_matrix(self) -> np.ndarray:
         """Return N×2 matrix with columns [T_amb, T_mains]."""

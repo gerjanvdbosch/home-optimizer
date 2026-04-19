@@ -52,18 +52,26 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .types import DHWParameters
+from .types import ABSOLUTE_ZERO_C, DHWParameters
 
 #: Observation matrix C_obs = [1, 0] — only T_top is measured.
 MEASUREMENT_MATRIX_DHW: np.ndarray = np.array([[1.0, 0.0]], dtype=float)
+
+
+def _assert_temperature_above_absolute_zero(*, name: str, temperature_c: float) -> None:
+    """Raise when a temperature falls below absolute zero [°C]."""
+    if temperature_c < ABSOLUTE_ZERO_C:
+        raise ValueError(
+            f"{name}={temperature_c:.3f} °C is below absolute zero ({ABSOLUTE_ZERO_C:.2f} °C)."
+        )
 
 
 @dataclass(slots=True)
 class DHWModel:
     """Discrete grey-box 2-node stratification model for a DHW tank.
 
-    Validates Euler stability on construction (based on constant time constants;
-    the stability margin may tighten further at high V_tap — verify separately).
+    Validates the base Euler stability on construction and re-checks the stricter
+    tap-flow-dependent stability bound whenever time-varying DHW matrices are built.
     """
 
     parameters: DHWParameters
@@ -99,6 +107,10 @@ class DHWModel:
         B_dhw is constant (P_dhw enters the bottom layer only — assumption A5).
         """
         p = self.parameters
+        if v_tap_m3_per_h < 0.0:
+            raise ValueError("v_tap_m3_per_h must be non-negative.")
+        # Implements the DHW-specific Euler stability guard from §10.2.
+        p.assert_euler_stable_for_tap_flow(v_tap_m3_per_h)
         dt = p.dt_hours
         a_strat, b_strat, a_loss, b_loss = self._constant_scalars()
 
@@ -139,7 +151,13 @@ class DHWModel:
         x = np.asarray(state, dtype=float)
         if x.shape != (2,):
             raise ValueError("state must be [T_top, T_bot].")
+        if v_tap_m3_per_h < 0.0:
+            raise ValueError("v_tap_m3_per_h must be non-negative.")
         T_top, T_bot = x
+        _assert_temperature_above_absolute_zero(name="T_top", temperature_c=float(T_top))
+        _assert_temperature_above_absolute_zero(name="T_bot", temperature_c=float(T_bot))
+        _assert_temperature_above_absolute_zero(name="t_mains_c", temperature_c=float(t_mains_c))
+        _assert_temperature_above_absolute_zero(name="t_amb_c", temperature_c=float(t_amb_c))
         p = self.parameters
 
         q_strat = (T_top - T_bot) / p.R_strat
@@ -165,6 +183,10 @@ class DHWModel:
         x = np.asarray(state, dtype=float)
         if x.shape != (2,):
             raise ValueError("state must be [T_top, T_bot].")
+        _assert_temperature_above_absolute_zero(name="T_top", temperature_c=float(x[0]))
+        _assert_temperature_above_absolute_zero(name="T_bot", temperature_c=float(x[1]))
+        _assert_temperature_above_absolute_zero(name="t_mains_c", temperature_c=float(t_mains_c))
+        _assert_temperature_above_absolute_zero(name="t_amb_c", temperature_c=float(t_amb_c))
         d = np.array([t_amb_c, t_mains_c], dtype=float)
         A, B, E = self.state_matrices(v_tap_m3_per_h)
         return A @ x + B[:, 0] * control_kw + E @ d

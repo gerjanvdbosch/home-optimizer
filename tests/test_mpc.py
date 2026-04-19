@@ -9,7 +9,7 @@ import home_optimizer.mpc as mpc_module
 from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 from home_optimizer.dhw_model import DHWModel
 from home_optimizer.mpc import MPCController
-from home_optimizer.optimizer import Optimizer, RunRequest
+from home_optimizer.optimizer import Optimizer, RunRequest, validate_run_request_physics
 from home_optimizer.thermal_model import ThermalModel
 from home_optimizer.types import (
     CombinedMPCParameters,
@@ -259,6 +259,24 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
     assert np.all(
         elec_combined <= 3.0 + 1e-5
     ), f"Electrical budget violated: max={elec_combined.max():.4f} kW > 3.0 kW"
+
+
+def test_optimizer_request_validation_rejects_dhw_tap_flow_instability() -> None:
+    """Runtime request validation must include the DHW tap-flow Euler bound from §10.2."""
+    req = RunRequest.model_validate(
+        {
+            "dt_hours": 1.0,
+            "dhw_enabled": True,
+            "dhw_C_top": 0.05,
+            "dhw_C_bot": 0.05,
+            "dhw_R_strat": 100.0,
+            "dhw_R_loss": 200.0,
+            "dhw_v_tap_m3_per_h": 0.2,
+        }
+    )
+
+    with pytest.raises(ValueError, match="V_tap"):
+        validate_run_request_physics(req)
 
 
 # ---------------------------------------------------------------------------

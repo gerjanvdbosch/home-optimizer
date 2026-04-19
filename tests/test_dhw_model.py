@@ -220,6 +220,27 @@ def test_euler_stability_check_rejects_too_large_dt() -> None:
         )
 
 
+def test_flow_dependent_euler_stability_rejects_excessive_tap_flow() -> None:
+    """DHW discretisation must also respect the tap-flow time constant from §10.2."""
+    params = DHWParameters(
+        dt_hours=1.0,
+        C_top=0.5814,
+        C_bot=0.5814,
+        R_strat=10.0,
+        R_loss=50.0,
+    )
+    model = DHWModel(params)
+
+    with pytest.raises(ValueError, match="V_tap"):
+        model.state_matrices(v_tap_m3_per_h=0.3)
+
+
+def test_negative_tap_flow_is_rejected_fail_fast(model: DHWModel) -> None:
+    """Negative tap flow is physically impossible and must never reach the solver."""
+    with pytest.raises(ValueError, match="non-negative"):
+        model.state_matrices(v_tap_m3_per_h=-0.01)
+
+
 # ---------------------------------------------------------------------------
 # DHW Kalman filter (§12)
 # ---------------------------------------------------------------------------
