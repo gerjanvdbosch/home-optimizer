@@ -114,15 +114,27 @@ def _initial_theta(settings: DHWActiveCalibrationSettings) -> np.ndarray:
     return np.array([settings.reference_parameters.R_strat], dtype=float)
 
 
-def _theta_bounds(settings: DHWActiveCalibrationSettings) -> tuple[np.ndarray, np.ndarray]:
-    """Construct physical parameter bounds relative to the reference ``R_strat``."""
-    reference_r_strat = settings.reference_parameters.R_strat
-    lower_bound = reference_r_strat * settings.min_parameter_ratio
-    upper_bound = reference_r_strat * settings.max_parameter_ratio
+def dhw_active_r_strat_bounds(settings: DHWActiveCalibrationSettings) -> tuple[float, float]:
+    """Return the explicit active-DHW optimiser box for ``R_strat`` [K/kW].
+
+    The active-DHW fit identifies a grey-box stratification parameter, not a
+    first-principles material property. Therefore the admissible interval is
+    carried explicitly in physical units via ``DHWActiveCalibrationSettings`` and
+    shared between the least-squares solver and the automatic-calibration
+    diagnostics.
+    """
+    lower_bound = settings.min_r_strat_k_per_kw
+    upper_bound = settings.max_r_strat_k_per_kw
     if lower_bound <= 0.0:
         raise ValueError("R_strat lower bound must remain strictly positive.")
     if lower_bound >= upper_bound:
         raise ValueError("R_strat lower bound must be < upper bound.")
+    return lower_bound, upper_bound
+
+
+def _theta_bounds(settings: DHWActiveCalibrationSettings) -> tuple[np.ndarray, np.ndarray]:
+    """Construct the optimiser bounds for the scalar ``R_strat`` parameter."""
+    lower_bound, upper_bound = dhw_active_r_strat_bounds(settings)
     return np.array([lower_bound], dtype=float), np.array([upper_bound], dtype=float)
 
 

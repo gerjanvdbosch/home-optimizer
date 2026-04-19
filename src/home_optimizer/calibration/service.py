@@ -20,6 +20,7 @@ from .dataset import (
     build_ufh_off_calibration_dataset,
 )
 from .cop_offline import calibrate_cop_model
+from .dhw_active import dhw_active_r_strat_bounds
 from .dhw_active import calibrate_dhw_active_stratification
 from .models import (
     AutomaticCalibrationSettings,
@@ -420,13 +421,13 @@ def _build_dhw_active_diagnostics(
     automatic_settings: AutomaticCalibrationSettings,
 ) -> dict[str, Any]:
     """Return structured DHW active-fit diagnostics for API/persistence visibility."""
-    reference_r_strat = active_settings.reference_parameters.R_strat
+    lower_bound, upper_bound = dhw_active_r_strat_bounds(active_settings)
     return {
         "selected_segment_count": result.segment_count,
         "required_min_selected_segments": automatic_settings.dhw_active_min_selected_segments,
         "fitted_r_strat_k_per_kw": result.fitted_parameters.R_strat,
-        "r_strat_lower_bound_k_per_kw": reference_r_strat * active_settings.min_parameter_ratio,
-        "r_strat_upper_bound_k_per_kw": reference_r_strat * active_settings.max_parameter_ratio,
+        "r_strat_lower_bound_k_per_kw": lower_bound,
+        "r_strat_upper_bound_k_per_kw": upper_bound,
         "bound_tolerance_ratio": automatic_settings.dhw_active_bound_tolerance_ratio,
         "fixed_r_loss_k_per_kw": result.fitted_parameters.R_loss,
         "rmse_t_top_c": result.rmse_t_top_c,
@@ -645,9 +646,7 @@ def _validate_automatic_dhw_active_fit(
             ),
         )
 
-    reference_r_strat = active_settings.reference_parameters.R_strat
-    lower_bound = reference_r_strat * active_settings.min_parameter_ratio
-    upper_bound = reference_r_strat * active_settings.max_parameter_ratio
+    lower_bound, upper_bound = dhw_active_r_strat_bounds(active_settings)
     fitted_value = result.fitted_parameters.R_strat
     tolerance_ratio = automatic_settings.dhw_active_bound_tolerance_ratio
     if fitted_value <= lower_bound * (1.0 + tolerance_ratio):

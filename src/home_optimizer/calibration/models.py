@@ -68,6 +68,8 @@ DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C: float = 0.5
 DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C: float = 0.5
 DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C: float = 0.1
 DEFAULT_MIN_DHW_SEGMENT_SCORE: float = 0.0
+DEFAULT_MIN_DHW_R_STRAT_K_PER_KW: float = 5.0
+DEFAULT_MAX_DHW_R_STRAT_K_PER_KW: float = 50.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_SAMPLE_COUNT: float = 1.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_DELIVERED_ENERGY: float = 1.0
 DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_MEAN_LAYER_SPREAD: float = 1.0
@@ -1108,6 +1110,12 @@ class DHWActiveCalibrationSettings:
     boilers can partially remix while charging; therefore the defaults only reject
     near-isothermal top/bottom traces that are too close to the sensor-noise floor
     to identify ``R_strat`` robustly.
+
+    ``R_strat`` itself is a grey-box parameter, so the optimisation box is carried
+    explicitly in physical units [K/kW] instead of reusing the UFH relative-box
+    heuristic. The default interval follows the documented empirical calibration
+    range for typical residential tanks and serves as a fail-fast identifiability
+    envelope rather than a first-principles derivation.
     """
 
     reference_parameters: DHWParameters
@@ -1135,8 +1143,8 @@ class DHWActiveCalibrationSettings:
     segment_score_weight_bottom_temperature_rise: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_BOTTOM_TEMPERATURE_RISE
     segment_score_weight_top_temperature_rise: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TOP_TEMPERATURE_RISE
     segment_score_weight_tap_margin: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN
-    min_parameter_ratio: float = DEFAULT_MIN_PARAMETER_RATIO
-    max_parameter_ratio: float = DEFAULT_MAX_PARAMETER_RATIO
+    min_r_strat_k_per_kw: float = DEFAULT_MIN_DHW_R_STRAT_K_PER_KW
+    max_r_strat_k_per_kw: float = DEFAULT_MAX_DHW_R_STRAT_K_PER_KW
     regularization_weight: float = DEFAULT_REGULARIZATION_WEIGHT
     regularization_scale_ratio: float = DEFAULT_REGULARIZATION_SCALE_RATIO
 
@@ -1154,8 +1162,8 @@ class DHWActiveCalibrationSettings:
             "min_segment_layer_spread_span_c",
             "min_segment_bottom_temperature_rise_c",
             "min_segment_top_temperature_rise_c",
-            "min_parameter_ratio",
-            "max_parameter_ratio",
+            "min_r_strat_k_per_kw",
+            "max_r_strat_k_per_kw",
             "regularization_scale_ratio",
             "segment_score_weight_sample_count",
             "segment_score_weight_delivered_energy",
@@ -1181,8 +1189,13 @@ class DHWActiveCalibrationSettings:
             raise ValueError("min_segment_samples must be <= min_sample_count.")
         if self.max_selected_segments is not None and self.max_selected_segments <= 0:
             raise ValueError("max_selected_segments must be strictly positive when provided.")
-        if self.min_parameter_ratio >= self.max_parameter_ratio:
-            raise ValueError("min_parameter_ratio must be < max_parameter_ratio.")
+        if self.min_r_strat_k_per_kw >= self.max_r_strat_k_per_kw:
+            raise ValueError("min_r_strat_k_per_kw must be < max_r_strat_k_per_kw.")
+        if not (self.min_r_strat_k_per_kw <= self.reference_parameters.R_strat <= self.max_r_strat_k_per_kw):
+            raise ValueError(
+                "reference_parameters.R_strat must lie within "
+                "[min_r_strat_k_per_kw, max_r_strat_k_per_kw]."
+            )
         if self.regularization_weight < 0.0:
             raise ValueError("regularization_weight must be non-negative.")
 

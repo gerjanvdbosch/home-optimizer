@@ -13,10 +13,12 @@ from .models import (
     DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
     DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
     DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT,
+    DEFAULT_MAX_DHW_R_STRAT_K_PER_KW,
     DEFAULT_MAX_DHW_IMPLIED_TAP_M3_PER_H,
     DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_DHW_LAYER_TEMPERATURE_SPREAD_C,
     DEFAULT_MIN_DHW_POWER_KW,
+    DEFAULT_MIN_DHW_R_STRAT_K_PER_KW,
     DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C,
     DEFAULT_MIN_DHW_SEGMENT_DELIVERED_ENERGY_KWH,
     DEFAULT_MIN_DHW_SEGMENT_LAYER_SPREAD_SPAN_C,
@@ -140,6 +142,8 @@ def build_dhw_active_calibration_settings(
     min_segment_bottom_temperature_rise_c: float = DEFAULT_MIN_DHW_SEGMENT_BOTTOM_TEMPERATURE_RISE_C,
     min_segment_top_temperature_rise_c: float = DEFAULT_MIN_DHW_SEGMENT_TOP_TEMPERATURE_RISE_C,
     min_segment_score: float = DEFAULT_MIN_DHW_SEGMENT_SCORE,
+    min_r_strat_k_per_kw: float = DEFAULT_MIN_DHW_R_STRAT_K_PER_KW,
+    max_r_strat_k_per_kw: float = DEFAULT_MAX_DHW_R_STRAT_K_PER_KW,
     max_selected_segments: int | None = None,
 ) -> DHWActiveCalibrationSettings:
     """Build active-DHW calibration settings with CLI-equivalent defaults.
@@ -158,6 +162,8 @@ def build_dhw_active_calibration_settings(
         min_segment_bottom_temperature_rise_c: Minimum bottom rise [°C].
         min_segment_top_temperature_rise_c: Minimum top rise [°C].
         min_segment_score: Minimum dimensionless segment-quality score [-].
+        min_r_strat_k_per_kw: Explicit lower optimiser bound for ``R_strat`` [K/kW].
+        max_r_strat_k_per_kw: Explicit upper optimiser bound for ``R_strat`` [K/kW].
         max_selected_segments: Optional cap on retained segments [-].
 
     Returns:
@@ -176,6 +182,8 @@ def build_dhw_active_calibration_settings(
         min_segment_bottom_temperature_rise_c=min_segment_bottom_temperature_rise_c,
         min_segment_top_temperature_rise_c=min_segment_top_temperature_rise_c,
         min_segment_score=min_segment_score,
+        min_r_strat_k_per_kw=min_r_strat_k_per_kw,
+        max_r_strat_k_per_kw=max_r_strat_k_per_kw,
         max_selected_segments=max_selected_segments,
     )
 

@@ -327,7 +327,12 @@ class RunRequest(BaseModel):
         10.0, ge=1.0, le=100.0, description="Stratification resistance R_strat [K/kW]"
     )
     dhw_R_loss: float = Field(
-        50.0, ge=5.0, le=200.0, description="Standby-loss resistance R_loss [K/kW]"
+        50.0,
+        ge=5.0,
+        description=(
+            "Standby-loss resistance R_loss [K/kW]. High-efficiency tanks can exceed "
+            "older heuristic ceilings, so only a physical lower bound is enforced."
+        ),
     )
     dhw_lambda_water_kwh_per_m3k: float = Field(
         LAMBDA_WATER_KWH_PER_M3_K,
