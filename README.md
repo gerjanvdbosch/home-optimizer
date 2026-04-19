@@ -121,7 +121,7 @@ Open na het starten van de runner:
 - Carnot COP-model met stooklijn
 - Zoninstraling op de zuidramen kan optioneel met een **`shutter_forecast` over de hele horizon** worden gemoduleerd; zonder die array blijft de actuele `shutter_living_room_pct` de fallback voor alle MPC-stappen
 - Als geen expliciete `shutter_forecast` wordt meegegeven, kan de runtime automatisch een eenvoudige **scikit-learn shutter-voorspelling** afleiden uit historische telemetry + de laatste weerforecast; bij te weinig historie blijft de scalar fallback actief
-- Als geen expliciete `internal_gains_forecast` wordt meegegeven, kan de runtime automatisch een persistente **`baseload_forecast`** afleiden uit historische telemetry + de laatste weerforecast; die forecast dient dan als standaard proxy voor tijdsvariabele `Q_int`
+- Als geen expliciete `internal_gains_forecast` wordt meegegeven, kan de runtime automatisch een persistente **`baseload_forecast`** afleiden uit historische telemetry + de laatste weerforecast; de optimizer vertaalt die vervolgens fysisch naar `Q_int` via `internal_gains_kw + baseload_internal_gains_heat_fraction × baseload_forecast`
 - Die shutter-voorspelling wordt niet meer live getraind tijdens een solve: de runner/addon traint het model bij startup en daarna dagelijks op een vast UTC-tijdstip, schrijft het artifact weg naast de database, en runtime inference laadt vervolgens het laatst getrainde model
 - Laadt bij openen eerst `GET /api/defaults`, dus de formuliervelden tonen automatisch de laatste calibrated defaults als die beschikbaar zijn
 - Resultaten: kamertemperatuur-traject, warmtepompvermogen, COP-profiel, DHW-tanktemperaturen
@@ -142,7 +142,7 @@ De standaardwaarden zijn afgestemd op een **redelijk goed geïsoleerde Nederland
 | `GET` | `/api/forecast/latest` | Meest recente forecast uit de database |
 | `POST` | `/api/simulate` | Voer één MPC-stap uit, retourneert grafieken + samenvattingen |
 
-`RunRequest` ondersteunt naast de scalar `shutter_living_room_pct` ook een optionele `shutter_forecast: list[float]` met lengte `N`; deze array overschrijft de scalar fallback stap-voor-stap voor de UFH-zoninstraling. Daarnaast bestaan nu `baseload_forecast: list[float]` en `internal_gains_forecast: list[float]`; als alleen `baseload_forecast` beschikbaar is, gebruikt de UFH-forecast deze standaard als tijdsvariabele proxy voor `Q_int`.
+`RunRequest` ondersteunt naast de scalar `shutter_living_room_pct` ook een optionele `shutter_forecast: list[float]` met lengte `N`; deze array overschrijft de scalar fallback stap-voor-stap voor de UFH-zoninstraling. Daarnaast bestaan nu `baseload_forecast: list[float]`, `internal_gains_forecast: list[float]` en `baseload_internal_gains_heat_fraction`; als alleen `baseload_forecast` beschikbaar is, gebruikt de UFH-forecast deze samen met de baseline `internal_gains_kw` om een fysisch plausibeler tijdsvariabele `Q_int` op te bouwen.
 
 De forecastservice is provider-gebaseerd opgezet: vandaag vult hij `shutter_forecast`, `baseload_forecast` en waar nodig `internal_gains_forecast`, en dezelfde laag kan later verder worden uitgebreid zonder de optimizer-API te breken.
 

@@ -276,18 +276,35 @@ class RunRequest(BaseModel):
         None,
         description=(
             "Forecast household baseload / non-heat-pump electrical demand [kW], length N.  "
-            "This signal is learned from telemetry and can serve as a proxy for "
-            "time-varying internal gains when internal_gains_forecast is absent."
+            "This signal is learned from telemetry and can be mapped to time-varying "
+            "internal gains when internal_gains_forecast is absent."
         ),
     )
     internal_gains_kw: float = Field(
-        0.30, ge=0.0, le=3.0, description="Internal heat gains Q_int [kW]"
+        0.30,
+        ge=0.0,
+        le=3.0,
+        description=(
+            "Baseline internal heat gains Q_int [kW].  Used directly when no horizon-wide "
+            "internal-gains or baseload forecast is available, and otherwise acts as the "
+            "background non-electrical gain offset (occupants, standby heat, etc.)."
+        ),
     )
     internal_gains_forecast: list[float] | None = Field(
         None,
         description=(
             "Forecast internal gains Q_int [kW], length N.  "
             "When provided, this array overrides the scalar internal_gains_kw."
+        ),
+    )
+    baseload_internal_gains_heat_fraction: float = Field(
+        0.70,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of the electrical household baseload forecast that becomes useful indoor "
+            "heat gain [-].  Used only when baseload_forecast is available and explicit "
+            "internal_gains_forecast is absent."
         ),
     )
 
@@ -979,20 +996,7 @@ class Optimizer:
             values=req.gti_window_forecast,
             fallback_scalar=0.0,
         )
-        if req.internal_gains_forecast is not None:
-            internal_gains = Optimizer._materialize_horizon_array(
-                name="internal_gains_forecast",
-                horizon_steps=N,
-                values=req.internal_gains_forecast,
-            )
-        elif req.baseload_forecast is not None:
-            internal_gains = Optimizer._materialize_horizon_array(
-                name="baseload_forecast",
-                horizon_steps=N,
-                values=req.baseload_forecast,
-            )
-        else:
-            internal_gains = np.full(N, req.internal_gains_kw, dtype=float)
+        internal_gains = Optimizer._build_internal_gains_profile(req, horizon_steps=N)
         # Real shutter forecasts are optional. When absent, the latest measured
         # or manually configured scalar shutter position is broadcast across the
         # horizon, preserving the previous scheduled-MPC behavior.
@@ -1029,6 +1033,41 @@ class Optimizer:
             pv_kw=pv,
             cop_ufh_k=cop_ufh_k,
             shutter_pct=shutter_pct,
+        )
+
+    @staticmethod
+    def _build_internal_gains_profile(req: RunRequest, *, horizon_steps: int) -> np.ndarray:
+        """Return the internal-gains horizon using explicit forecast or physical baseload mapping.
+
+        Precedence:
+        1. explicit ``internal_gains_forecast``
+        2. baseline ``internal_gains_kw`` + ``baseload_internal_gains_heat_fraction`` × ``baseload_forecast``
+        3. scalar ``internal_gains_kw`` broadcast across the horizon
+
+        The baseload mapping expresses that only a fraction of electrical household
+        demand becomes useful sensible heat in the conditioned zone, while the
+        scalar baseline captures occupant/metabolic and other non-forecast gains.
+        """
+
+        if req.internal_gains_forecast is not None:
+            return Optimizer._materialize_horizon_array(
+                name="internal_gains_forecast",
+                horizon_steps=horizon_steps,
+                values=req.internal_gains_forecast,
+            )
+
+        baseline_internal_gains = np.full(horizon_steps, req.internal_gains_kw, dtype=float)
+        if req.baseload_forecast is None:
+            return baseline_internal_gains
+
+        baseload_profile = Optimizer._materialize_horizon_array(
+            name="baseload_forecast",
+            horizon_steps=horizon_steps,
+            values=req.baseload_forecast,
+        )
+        return np.maximum(
+            baseline_internal_gains + req.baseload_internal_gains_heat_fraction * baseload_profile,
+            0.0,
         )
 
     @staticmethod

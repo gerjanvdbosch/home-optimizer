@@ -86,7 +86,7 @@ class ShutterForecastProvider(ForecastProvider):
 
 
 class BaseloadForecastProvider(ForecastProvider):
-    """Predict a persisted household baseload forecast and optional internal-gains proxy."""
+    """Predict a persisted household baseload forecast."""
 
     def __init__(self, forecaster: BaseloadForecaster | None = None) -> None:
         self._forecaster = forecaster or BaseloadForecaster()
@@ -118,14 +118,7 @@ class BaseloadForecastProvider(ForecastProvider):
                 return {}
             baseload_forecast = baseload_prediction.tolist()
 
-        overrides: dict[str, object] = {"baseload_forecast": baseload_forecast}
-        explicit_internal_gains = request_data.get("internal_gains_forecast")
-        if explicit_internal_gains is None and "internal_gains_forecast" not in current_overrides:
-            # household_elec_power_mean_kw is already persisted as a Q_int proxy in telemetry,
-            # so the learned baseload forecast is a physically consistent default proxy for
-            # time-varying internal gains when no explicit thermal-gains forecast exists.
-            overrides["internal_gains_forecast"] = baseload_forecast
-        return overrides
+        return {"baseload_forecast": baseload_forecast}
 
     def train_and_persist(self, *, repository: "TelemetryRepository") -> object | None:
         """Train and persist the disk-backed baseload model artifact."""

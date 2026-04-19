@@ -307,8 +307,8 @@ def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None
     assert scheduled_input.shutter_forecast[3] < scheduled_input.shutter_forecast[5]
 
 
-def test_forecast_service_injects_baseload_and_internal_gains_proxy(tmp_path) -> None:
-    """The ML service must provide a baseload forecast and reuse it as internal-gains proxy."""
+def test_forecast_service_injects_baseload_forecast_only(tmp_path) -> None:
+    """The ML service must provide a baseload forecast without precomputing thermal gains."""
     database_url = f"sqlite:///{tmp_path / 'baseload-forecast.sqlite3'}"
     repository = TelemetryRepository(database_url=database_url)
     repository.create_schema()
@@ -330,7 +330,6 @@ def test_forecast_service_injects_baseload_and_internal_gains_proxy(tmp_path) ->
             "shutter_living_room_pct": 100.0,
             "shutter_forecast": None,
             "baseload_forecast": None,
-            "internal_gains_forecast": None,
         },
         repository=repository,
         weather_rows=rows,
@@ -338,16 +337,13 @@ def test_forecast_service_injects_baseload_and_internal_gains_proxy(tmp_path) ->
     )
 
     assert "baseload_forecast" in overrides
-    assert "internal_gains_forecast" in overrides
     baseload_forecast = np.asarray(overrides["baseload_forecast"], dtype=float)
-    internal_gains_forecast = np.asarray(overrides["internal_gains_forecast"], dtype=float)
     assert baseload_forecast.shape == (6,)
-    np.testing.assert_allclose(baseload_forecast, internal_gains_forecast)
     assert np.all(baseload_forecast >= 0.0)
 
 
-def test_optimizer_uses_baseload_forecast_as_internal_gains_proxy() -> None:
-    """UFH forecast construction must use baseload_forecast when no explicit internal-gains forecast exists."""
+def test_optimizer_maps_baseload_forecast_to_internal_gains_with_heat_fraction() -> None:
+    """UFH forecast construction must map baseload to heat gains via baseline + heat fraction."""
     from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
 
     run_request = RunRequest.model_validate(
@@ -358,6 +354,8 @@ def test_optimizer_uses_baseload_forecast_as_internal_gains_proxy() -> None:
             "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
             "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
             "baseload_forecast": [0.35, 0.45, 0.95, 1.10],
+            "internal_gains_kw": 0.20,
+            "baseload_internal_gains_heat_fraction": 0.50,
             "pv_enabled": False,
         }
     )
@@ -376,7 +374,43 @@ def test_optimizer_uses_baseload_forecast_as_internal_gains_proxy() -> None:
 
     forecast = Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
 
-    np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.35, 0.45, 0.95, 1.10]))
+    np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.375, 0.425, 0.675, 0.75]))
+
+
+def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mapping() -> None:
+    """An explicit internal-gains forecast must override the derived baseload heat mapping."""
+    from home_optimizer.cop_model import HeatPumpCOPModel, HeatPumpCOPParameters
+
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+            "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+            "baseload_forecast": [0.35, 0.45, 0.95, 1.10],
+            "internal_gains_forecast": [0.10, 0.20, 0.30, 0.40],
+            "internal_gains_kw": 0.20,
+            "baseload_internal_gains_heat_fraction": 0.50,
+            "pv_enabled": False,
+        }
+    )
+    cop_model = HeatPumpCOPModel(
+        HeatPumpCOPParameters(
+            eta_carnot=run_request.eta_carnot,
+            delta_T_cond=run_request.delta_T_cond,
+            delta_T_evap=run_request.delta_T_evap,
+            T_supply_min=run_request.T_supply_min,
+            T_ref_outdoor=run_request.T_ref_outdoor_curve,
+            heating_curve_slope=run_request.heating_curve_slope,
+            cop_min=run_request.cop_min,
+            cop_max=run_request.cop_max,
+        )
+    )
+
+    forecast = Optimizer._build_ufh_forecast(run_request, start_hour=0, cop_model=cop_model)
+
+    np.testing.assert_allclose(forecast.internal_gains_kw, np.array([0.10, 0.20, 0.30, 0.40]))
 
 
 def test_shutter_forecaster_reuses_cached_model_for_unchanged_history(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
