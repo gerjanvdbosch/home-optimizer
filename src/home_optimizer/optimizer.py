@@ -427,8 +427,8 @@ def validate_run_request_physics(req: RunRequest) -> None:
             Pydantic field bounds.
 
     Raises:
-        ValueError: If the UFH or DHW parameter tuple violates the Forward-Euler
-            stability constraints enforced by the runtime models.
+        ValueError: If the UFH tuple violates its Forward-Euler validity limits or
+            if the DHW tuple/disturbances are non-physical for runtime discretisation.
     """
     # Implements the UFH state-space validity checks from §4/§5.
     ThermalModel(
@@ -444,8 +444,9 @@ def validate_run_request_physics(req: RunRequest) -> None:
         )
     )
     if req.dhw_enabled:
-        # Implements the DHW Euler validity checks from §10/§11.
-        DHWModel(
+        # DHW runtime uses exact ZOH discretisation; validate only the physical
+        # parameter tuple and the supplied tap-flow disturbance.
+        dhw_model = DHWModel(
             DHWParameters(
                 dt_hours=req.dt_hours,
                 C_top=req.dhw_C_top,
@@ -454,7 +455,8 @@ def validate_run_request_physics(req: RunRequest) -> None:
                 R_loss=req.dhw_R_loss,
                 lambda_water=req.dhw_lambda_water_kwh_per_m3k,
             )
-        ).parameters.assert_euler_stable_for_tap_flow(req.dhw_v_tap_m3_per_h)
+        )
+        dhw_model.state_matrices(req.dhw_v_tap_m3_per_h)
 
 
 def merge_run_request_updates(base_request: RunRequest, updates: dict[str, object]) -> RunRequest:
@@ -745,6 +747,7 @@ class Optimizer:
 
         p_ufh_elec = p_ufh / cop_ufh_arr
         p_dhw_elec = p_dhw / cop_dhw_arr
+        assert pv_kw is not None
         p_import = np.maximum(p_ufh_elec + p_dhw_elec - pv_kw, 0.0)
         total_cost = float(np.sum(p_import * prices * dt))
         ufh_energy = float(np.sum(p_ufh) * dt)

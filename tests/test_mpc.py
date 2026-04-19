@@ -261,8 +261,8 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
     ), f"Electrical budget violated: max={elec_combined.max():.4f} kW > 3.0 kW"
 
 
-def test_optimizer_request_validation_rejects_dhw_tap_flow_instability() -> None:
-    """Runtime request validation must include the DHW tap-flow Euler bound from §10.2."""
+def test_optimizer_request_validation_accepts_dhw_high_tap_flow_with_exact_zoh() -> None:
+    """Runtime request validation must accept DHW tap flows when exact ZOH discretisation is used."""
     req = RunRequest.model_validate(
         {
             "dt_hours": 1.0,
@@ -275,8 +275,7 @@ def test_optimizer_request_validation_rejects_dhw_tap_flow_instability() -> None
         }
     )
 
-    with pytest.raises(ValueError, match="V_tap"):
-        validate_run_request_physics(req)
+    validate_run_request_physics(req)
 
 
 # ---------------------------------------------------------------------------

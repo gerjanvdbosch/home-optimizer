@@ -811,17 +811,19 @@ class DHWForecastHorizon:
         parameters: DHWParameters,
         safety_factor: float = 0.2,
     ) -> None:
-        """Fail fast when the forecast violates the DHW Euler stability bound.
+        """Fail fast on non-finite DHW disturbance inputs for runtime discretisation.
 
-        The MPC uses the DHW forecast as a known LTV disturbance sequence, so the
-        physically relevant discretisation check must be based on the **largest**
-        tap flow that appears anywhere in the horizon, not only the nominal scalar
-        operating point.
+        The runtime DHW model now uses exact ZOH discretisation, so large tap-flow
+        disturbances no longer need an Euler stability rejection. The remaining
+        runtime requirement is simply that the supplied horizon and parameter tuple
+        stay finite and physically sign-consistent.
         """
-        parameters.assert_euler_stable_for_tap_flow(
-            v_tap_m3_per_h=self.max_tap_flow_m3_per_h,
-            safety_factor=safety_factor,
-        )
+        if safety_factor <= 0.0:
+            raise ValueError("safety_factor must be strictly positive.")
+        if not np.isfinite(parameters.dt_hours):
+            raise ValueError("parameters.dt_hours must be finite.")
+        if not np.isfinite(self.max_tap_flow_m3_per_h):
+            raise ValueError("v_tap_m3_per_h must be finite across the DHW horizon.")
 
     def disturbance_matrix(self) -> np.ndarray:
         """Return N×2 matrix with columns [T_amb, T_mains]."""

@@ -11,8 +11,8 @@ Physical equations (§9):
   C_top · dT_top/dt = −(T_top−T_bot)/R_strat − λ·V_tap·T_top − (T_top−T_amb)/R_loss
   C_bot · dT_bot/dt = +(T_top−T_bot)/R_strat + P_dhw + λ·V_tap·T_mains − (T_bot−T_amb)/R_loss
 
-Discrete state-space (forward-Euler, step Δt [h], §10–§11):
-──────────────────────────────────────────────────────────────
+Discrete state-space (exact ZOH, step Δt [h], §10–§11):
+──────────────────────────────────────────────────────────
 
   Auxiliary scalars (constant):
     a_strat = Δt / (C_top · R_strat)
@@ -24,14 +24,11 @@ Discrete state-space (forward-Euler, step Δt [h], §10–§11):
     a_tap[k] = Δt / C_top · λ · V_tap[k]
     b_tap[k] = Δt / C_bot · λ · V_tap[k]
 
-  A_dhw[k] = [[1 − a_strat − a_loss − a_tap[k],  a_strat],
-               [b_strat,                          1 − b_strat − b_loss]]
-
-  B_dhw    = [[0       ],     (P_dhw goes to bottom layer — assumption A5)
-               [Δt/C_bot]]
-
-  E_dhw[k] = [[a_loss,  0      ],
-               [b_loss,  b_tap[k]]]
+  The continuous-time affine system is first assembled from the physics and then
+  discretised exactly under a zero-order-hold assumption with constant
+  ``P_dhw``, ``T_amb`` and ``T_mains`` over the interval. This follows the
+  project requirement from §10.2 to prefer ZOH whenever DHW dynamics are too fast
+  for forward Euler at the runtime MPC step.
 
   d_dhw = [T_amb, T_mains]ᵀ
 
@@ -51,6 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.linalg import expm
 
 from .types import ABSOLUTE_ZERO_C, DHWParameters
 
@@ -70,28 +68,55 @@ def _assert_temperature_above_absolute_zero(*, name: str, temperature_c: float) 
 class DHWModel:
     """Discrete grey-box 2-node stratification model for a DHW tank.
 
-    Validates the base Euler stability on construction and re-checks the stricter
-    tap-flow-dependent stability bound whenever time-varying DHW matrices are built.
+    The runtime MPC and Kalman paths use exact zero-order-hold discretisation of
+    the linearised DHW subsystem. This avoids the conditional-stability problems of
+    forward Euler for large MPC steps while preserving the same public state-space
+    interface ``(A, B, E)``.
     """
 
     parameters: DHWParameters
-
-    def __post_init__(self) -> None:
-        self.parameters.assert_euler_stable()
 
     # ------------------------------------------------------------------
     # Constant auxiliary scalars
     # ------------------------------------------------------------------
 
-    def _constant_scalars(self) -> tuple[float, float, float, float]:
-        """Return (a_strat, b_strat, a_loss, b_loss) — all Δt-dependent, V_tap-independent."""
+    def _continuous_matrices(
+        self,
+        v_tap_m3_per_h: float,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return continuous-time ``(F, G_u, G_d)`` matrices for the DHW physics.
+
+        Args:
+            v_tap_m3_per_h: Piecewise-constant tap-flow rate over the interval [m³/h].
+
+        Returns:
+            Tuple with continuous-time state matrix ``F`` [1/h], input matrix
+            ``G_u`` [K/(kWh)], and disturbance matrix ``G_d`` [1/h].
+        """
         p = self.parameters
-        dt = p.dt_hours
-        a_strat = dt / (p.C_top * p.R_strat)
-        b_strat = dt / (p.C_bot * p.R_strat)
-        a_loss = dt / (p.C_top * p.R_loss)
-        b_loss = dt / (p.C_bot * p.R_loss)
-        return a_strat, b_strat, a_loss, b_loss
+        strat_top_per_h = 1.0 / (p.C_top * p.R_strat)
+        strat_bot_per_h = 1.0 / (p.C_bot * p.R_strat)
+        loss_top_per_h = 1.0 / (p.C_top * p.R_loss)
+        loss_bot_per_h = 1.0 / (p.C_bot * p.R_loss)
+        tap_top_per_h = p.lambda_water * v_tap_m3_per_h / p.C_top
+        tap_bot_per_h = p.lambda_water * v_tap_m3_per_h / p.C_bot
+
+        F = np.array(
+            [
+                [-(strat_top_per_h + loss_top_per_h + tap_top_per_h), strat_top_per_h],
+                [strat_bot_per_h, -(strat_bot_per_h + loss_bot_per_h)],
+            ],
+            dtype=float,
+        )
+        G_u = np.array([[0.0], [1.0 / p.C_bot]], dtype=float)
+        G_d = np.array(
+            [
+                [loss_top_per_h, 0.0],
+                [loss_bot_per_h, tap_bot_per_h],
+            ],
+            dtype=float,
+        )
+        return F, G_u, G_d
 
     # ------------------------------------------------------------------
     # Time-varying state-space matrices
@@ -101,38 +126,25 @@ class DHWModel:
         self,
         v_tap_m3_per_h: float,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return (A_dhw, B_dhw, E_dhw) for a given tap flow rate V_tap [m³/h].
+        """Return exact discrete ``(A_dhw, B_dhw, E_dhw)`` for a given tap flow.
 
-        A_dhw and E_dhw are time-varying (depend on V_tap[k]).
-        B_dhw is constant (P_dhw enters the bottom layer only — assumption A5).
+        A_dhw and E_dhw are time-varying (depend on ``V_tap[k]``). ``B_dhw`` is
+        still the bottom-layer actuation channel from assumption A5, but all three
+        matrices are obtained from one exact zero-order-hold discretisation of the
+        continuous affine DHW model over ``dt_hours``.
         """
-        p = self.parameters
         if v_tap_m3_per_h < 0.0:
             raise ValueError("v_tap_m3_per_h must be non-negative.")
-        # Implements the DHW-specific Euler stability guard from §10.2.
-        p.assert_euler_stable_for_tap_flow(v_tap_m3_per_h)
-        dt = p.dt_hours
-        a_strat, b_strat, a_loss, b_loss = self._constant_scalars()
-
-        # Tap-flow-dependent scalars (bilinear term, linearised via known V_tap[k])
-        a_tap = dt / p.C_top * p.lambda_water * v_tap_m3_per_h
-        b_tap = dt / p.C_bot * p.lambda_water * v_tap_m3_per_h
-
-        A = np.array(
-            [
-                [1.0 - a_strat - a_loss - a_tap, a_strat],
-                [b_strat, 1.0 - b_strat - b_loss],
-            ],
-            dtype=float,
-        )
-        B = np.array([[0.0], [dt / p.C_bot]], dtype=float)
-        E = np.array(
-            [
-                [a_loss, 0.0],
-                [b_loss, b_tap],
-            ],
-            dtype=float,
-        )
+        p = self.parameters
+        F, G_u, G_d = self._continuous_matrices(v_tap_m3_per_h)
+        augmented = np.zeros((5, 5), dtype=float)
+        augmented[:2, :2] = F
+        augmented[:2, 2:3] = G_u
+        augmented[:2, 3:] = G_d
+        discretised = expm(augmented * p.dt_hours)
+        A = discretised[:2, :2]
+        B = discretised[:2, 2:3]
+        E = discretised[:2, 3:]
         return A, B, E
 
     # ------------------------------------------------------------------
@@ -179,7 +191,7 @@ class DHWModel:
         t_mains_c: float,
         t_amb_c: float,
     ) -> np.ndarray:
-        """Forward-Euler step using the matrix form: x[k+1] = A[k] x[k] + B u[k] + E[k] d[k]."""
+        """Exact ZOH step using ``x[k+1] = A[k] x[k] + B u[k] + E[k] d[k]``."""
         x = np.asarray(state, dtype=float)
         if x.shape != (2,):
             raise ValueError("state must be [T_top, T_bot].")

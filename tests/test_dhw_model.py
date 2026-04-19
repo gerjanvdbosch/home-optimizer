@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.linalg import expm
 
 from home_optimizer.dhw_model import MEASUREMENT_MATRIX_DHW, DHWModel
 from home_optimizer.kalman import DHWKalmanFilter
@@ -42,48 +43,57 @@ def model(params: DHWParameters) -> DHWModel:
 
 
 def test_A_matrix_matches_specification(model: DHWModel, params: DHWParameters) -> None:
-    """A_dhw must match the spec exactly (§11)."""
+    """A_dhw must equal the exact ZOH discretisation of the continuous DHW physics."""
     v_tap = 0.0
     A, _, _ = model.state_matrices(v_tap)
-    dt = params.dt_hours
-    a_strat = dt / (params.C_top * params.R_strat)
-    b_strat = dt / (params.C_bot * params.R_strat)
-    a_loss = dt / (params.C_top * params.R_loss)
-    b_loss = dt / (params.C_bot * params.R_loss)
-    a_tap = dt / params.C_top * params.lambda_water * v_tap
-
-    expected = np.array(
+    f_cont = np.array(
         [
-            [1.0 - a_strat - a_loss - a_tap, a_strat],
-            [b_strat, 1.0 - b_strat - b_loss],
+            [-(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss)), 1.0 / (params.C_top * params.R_strat)],
+            [1.0 / (params.C_bot * params.R_strat), -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss))],
         ]
     )
+    expected = expm(f_cont * params.dt_hours)
     np.testing.assert_allclose(A, expected)
 
 
 def test_B_matrix_is_constant_and_correct(model: DHWModel, params: DHWParameters) -> None:
-    """B_dhw = [0, Δt/C_bot]ᵀ — P_dhw enters bottom layer only (assumption A5)."""
+    """B_dhw must be the exact ZOH actuation map with bottom-layer-only heating."""
     for v_tap in (0.0, 0.01, 0.05):
         _, B, _ = model.state_matrices(v_tap)
-        expected = np.array([[0.0], [params.dt_hours / params.C_bot]])
+        f_cont = np.array(
+            [
+                [-(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss) + params.lambda_water * v_tap / params.C_top), 1.0 / (params.C_top * params.R_strat)],
+                [1.0 / (params.C_bot * params.R_strat), -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss))],
+            ]
+        )
+        g_u = np.array([[0.0], [1.0 / params.C_bot]])
+        augmented = np.zeros((3, 3), dtype=float)
+        augmented[:2, :2] = f_cont
+        augmented[:2, 2:3] = g_u
+        expected = expm(augmented * params.dt_hours)[:2, 2:3]
         np.testing.assert_allclose(B, expected)
 
 
 def test_E_matrix_matches_specification(model: DHWModel, params: DHWParameters) -> None:
-    """E_dhw[k] must match spec: col-0 = [a_loss, b_loss], col-1 = [0, b_tap]."""
+    """E_dhw[k] must equal the exact ZOH disturbance map for [T_amb, T_mains]."""
     v_tap = 0.02
     _, _, E = model.state_matrices(v_tap)
-    dt = params.dt_hours
-    a_loss = dt / (params.C_top * params.R_loss)
-    b_loss = dt / (params.C_bot * params.R_loss)
-    b_tap = dt / params.C_bot * params.lambda_water * v_tap
-
-    expected = np.array(
+    f_cont = np.array(
         [
-            [a_loss, 0.0],
-            [b_loss, b_tap],
+            [-(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss) + params.lambda_water * v_tap / params.C_top), 1.0 / (params.C_top * params.R_strat)],
+            [1.0 / (params.C_bot * params.R_strat), -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss))],
         ]
     )
+    g_d = np.array(
+        [
+            [1.0 / (params.C_top * params.R_loss), 0.0],
+            [1.0 / (params.C_bot * params.R_loss), params.lambda_water * v_tap / params.C_bot],
+        ]
+    )
+    augmented = np.zeros((4, 4), dtype=float)
+    augmented[:2, :2] = f_cont
+    augmented[:2, 2:] = g_d
+    expected = expm(augmented * params.dt_hours)[:2, 2:]
     np.testing.assert_allclose(E, expected)
 
 
@@ -152,17 +162,26 @@ def test_tap_stream_split_correct(model: DHWModel, params: DHWParameters) -> Non
 
 
 def test_step_and_continuous_derivative_agree(model: DHWModel, params: DHWParameters) -> None:
-    """Forward-Euler step via matrix form must equal step via continuous derivative."""
+    """For a small dt, the exact ZOH step must match Euler to first order."""
+    small_dt_params = DHWParameters(
+        dt_hours=5.0 / 60.0,
+        C_top=params.C_top,
+        C_bot=params.C_bot,
+        R_strat=params.R_strat,
+        R_loss=params.R_loss,
+        lambda_water=params.lambda_water,
+    )
+    small_dt_model = DHWModel(small_dt_params)
     state = np.array([55.0, 42.0])
     P_dhw, v_tap, t_mains, t_amb = 1.5, 0.02, 10.0, 18.0
 
     # Matrix form
-    x_mat = model.step(state, P_dhw, v_tap, t_mains, t_amb)
+    x_mat = small_dt_model.step(state, P_dhw, v_tap, t_mains, t_amb)
     # Euler via continuous derivative
-    dxdt = model.continuous_derivative(state, P_dhw, v_tap, t_mains, t_amb)
-    x_euler = state + params.dt_hours * dxdt
+    dxdt = small_dt_model.continuous_derivative(state, P_dhw, v_tap, t_mains, t_amb)
+    x_euler = state + small_dt_params.dt_hours * dxdt
 
-    np.testing.assert_allclose(x_mat, x_euler, rtol=1e-12)
+    np.testing.assert_allclose(x_mat, x_euler, atol=5e-2)
 
 
 def test_t_dhw_mean_is_weighted_average(model: DHWModel, params: DHWParameters) -> None:
@@ -206,22 +225,25 @@ def test_measurement_matrix_is_correct() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_euler_stability_check_rejects_too_large_dt() -> None:
-    """DHWModel must raise if Δt violates the stability bound."""
-    with pytest.raises(ValueError, match="stability"):
-        DHWModel(
-            DHWParameters(
-                dt_hours=5.0,  # far too large: bound = 0.2·(0.5814·10) = 1.16 h
-                C_top=0.5814,
-                C_bot=0.5814,
-                R_strat=10.0,
-                R_loss=50.0,
-            )
+def test_exact_zoh_runtime_supports_large_dt_that_would_break_euler() -> None:
+    """DHWModel must remain usable at large dt because runtime discretisation is exact ZOH."""
+    model = DHWModel(
+        DHWParameters(
+            dt_hours=5.0,
+            C_top=0.5814,
+            C_bot=0.5814,
+            R_strat=10.0,
+            R_loss=50.0,
         )
+    )
+    a_mat, b_mat, e_mat = model.state_matrices(v_tap_m3_per_h=0.0)
+    assert np.all(np.isfinite(a_mat))
+    assert np.all(np.isfinite(b_mat))
+    assert np.all(np.isfinite(e_mat))
 
 
-def test_flow_dependent_euler_stability_rejects_excessive_tap_flow() -> None:
-    """DHW discretisation must also respect the tap-flow time constant from §10.2."""
+def test_exact_zoh_runtime_supports_high_tap_flow_without_euler_rejection() -> None:
+    """Exact ZOH runtime discretisation must not reject high tap flow purely on Euler grounds."""
     params = DHWParameters(
         dt_hours=1.0,
         C_top=0.5814,
@@ -230,9 +252,10 @@ def test_flow_dependent_euler_stability_rejects_excessive_tap_flow() -> None:
         R_loss=50.0,
     )
     model = DHWModel(params)
-
-    with pytest.raises(ValueError, match="V_tap"):
-        model.state_matrices(v_tap_m3_per_h=0.3)
+    a_mat, b_mat, e_mat = model.state_matrices(v_tap_m3_per_h=0.3)
+    assert np.all(np.isfinite(a_mat))
+    assert np.all(np.isfinite(b_mat))
+    assert np.all(np.isfinite(e_mat))
 
 
 def test_negative_tap_flow_is_rejected_fail_fast(model: DHWModel) -> None:
@@ -265,7 +288,7 @@ def test_dhw_kalman_tracks_t_top_exactly(model: DHWModel) -> None:
 
     for _ in range(24):
         true_state = model.step(true_state, 1.0, 0.0, 10.0, 20.0)
-        estimate, _, _ = kf.step(
+        kf.step(
             control_kw=1.0,
             v_tap_m3_per_h=0.0,
             t_mains_c=10.0,
@@ -273,7 +296,7 @@ def test_dhw_kalman_tracks_t_top_exactly(model: DHWModel) -> None:
             t_top_measurement_c=float(true_state[0]),
         )
 
-    assert abs(estimate.mean_c[0] - true_state[0]) < 1e-3
+    assert abs(kf.estimate.mean_c[0] - true_state[0]) < 1e-3
 
 
 def test_dhw_kalman_converges_on_hidden_t_bot(model: DHWModel) -> None:
@@ -283,9 +306,9 @@ def test_dhw_kalman_converges_on_hidden_t_bot(model: DHWModel) -> None:
 
     for _ in range(48):
         true_state = model.step(true_state, 1.0, 0.0, 10.0, 20.0)
-        estimate, _, _ = kf.step(1.0, 0.0, 10.0, 20.0, float(true_state[0]))
+        kf.step(1.0, 0.0, 10.0, 20.0, float(true_state[0]))
 
-    assert abs(estimate.mean_c[1] - true_state[1]) < 0.5
+    assert abs(kf.estimate.mean_c[1] - true_state[1]) < 0.5
 
 
 def test_dhw_kalman_covariance_remains_positive_definite(model: DHWModel) -> None:
