@@ -101,6 +101,14 @@ class AddonOptions(BaseModel):
     database_path: str = Field(
         ..., min_length=1, description="SQLite path, e.g. /config/database.sqlite3"
     )
+    # Directory where persisted ML forecast-model artifacts are stored. When
+    # running under the supervisor this is typically a writable folder under
+    # /config such as /config/models. The path must be a non-empty string.
+    models_path: str = Field(
+        "/config/models",
+        min_length=1,
+        description="Directory path where ML forecast artifacts are persisted, e.g. /config/models",
+    )
     sampling_interval_seconds: int = Field(10, gt=0, description="Sensor polling interval [s]")
     flush_interval_seconds: int = Field(
         300, gt=0, description="Aggregation window written to DB [s]"
@@ -522,7 +530,7 @@ def main() -> None:
     # ── 2. Set up telemetry storage ────────────────────────────────────────
     # TelemetryRepository.from_path() creates the parent directory, derives the
     # SQLite URL, validates the path, and initialises the schema in one call.
-    repository = TelemetryRepository.from_path(opts.database_path)
+    repository = TelemetryRepository.from_path(opts.database_path, model_dir=opts.models_path)
     log.info("Telemetry database ready at %s", opts.database_path)
 
     # ── 3. Build HA sensor backend ─────────────────────────────────────────

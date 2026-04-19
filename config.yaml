@@ -39,6 +39,7 @@ map:
 options:
   # --- Telemetry storage ---
   database_path: "/config/database.sqlite3"
+  models_path: "/config/models"
   sampling_interval_seconds: 10
   flush_interval_seconds: 300
   api_port: 8099
@@ -200,6 +201,8 @@ schema:
   sensor_hp_electric_total_kwh: str
   sensor_p1_import_total_kwh: str
   sensor_p1_export_total_kwh: str
+
+  models_path: str
 
   price_mode: list(flat|dual|nordpool)
   price_flat_rate: float

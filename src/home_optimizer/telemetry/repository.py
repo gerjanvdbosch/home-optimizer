@@ -34,7 +34,22 @@ class TelemetryRepository:
         Optional pre-created engine, useful for tests.
     """
 
-    def __init__(self, database_url: str | None = None, engine: Engine | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str | None = None,
+        engine: Engine | None = None,
+        *,
+        model_dir: str | Path | None = None,
+    ) -> None:
+        """Initialise repository.
+
+        Added parameter ``model_dir`` configures where persisted ML forecast
+        artifacts are stored on disk. When ``model_dir`` is ``None`` (default)
+        the historical behaviour is preserved: artifacts are stored next to the
+        SQLite database file. When provided, the path is interpreted as a
+        filesystem directory and must be writable by the process.
+        """
+
         if engine is None and database_url is None:
             raise ValueError("Either database_url or engine must be supplied.")
         if engine is not None:
@@ -42,6 +57,11 @@ class TelemetryRepository:
         else:
             self.engine = create_engine(database_url, future=True)
         self._session_factory = sessionmaker(bind=self.engine, expire_on_commit=False, future=True)
+
+        # Optional explicit models directory where ML artifacts are persisted.
+        # Normalised to an absolute Path when supplied; None indicates the
+        # default (store artifacts next to the SQLite DB file).
+        self._model_dir: Path | None = Path(model_dir).resolve() if model_dir is not None else None
 
     @property
     def url(self) -> str:
@@ -54,15 +74,22 @@ class TelemetryRepository:
         return os.environ.get(DATABASE_URL_ENV, DATABASE_URL_DEFAULT)
 
     @classmethod
-    def from_env(cls, *, init_schema: bool = True) -> "TelemetryRepository":
-        """Construct a repository from the active ``DATABASE_URL`` environment variable."""
-        repository = cls(database_url=cls.url_from_env())
+    def from_env(cls, *, init_schema: bool = True, model_dir: str | Path | None = None) -> "TelemetryRepository":
+        """Construct a repository from the active ``DATABASE_URL`` environment variable.
+
+        The optional ``model_dir`` argument overrides the MODELS_DIR environment
+        variable when provided. When both are omitted the repository defaults to
+        storing artifacts next to the SQLite database file.
+        """
+        # Respect explicit model_dir argument or fall back to MODELS_DIR env var.
+        effective_model_dir = model_dir if model_dir is not None else os.environ.get("MODELS_DIR")
+        repository = cls(database_url=cls.url_from_env(), model_dir=effective_model_dir)
         if init_schema:
             repository.create_schema()
         return repository
 
     @classmethod
-    def from_path(cls, path: str | Path, *, init_schema: bool = True) -> "TelemetryRepository":
+    def from_path(cls, path: str | Path, *, init_schema: bool = True, model_dir: str | Path | None = None) -> "TelemetryRepository":
         """Construct a SQLite-backed repository from a filesystem path.
 
         The parent directory is created eagerly so startup remains fail-fast and
@@ -72,7 +99,7 @@ class TelemetryRepository:
         if resolved.is_dir():
             raise ValueError(f"Database path {resolved!r} is a directory, not a file.")
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        repository = cls(database_url=f"sqlite:///{resolved}")
+        repository = cls(database_url=f"sqlite:///{resolved}", model_dir=model_dir)
         if init_schema:
             repository.create_schema()
         return repository
@@ -354,7 +381,14 @@ class TelemetryRepository:
 
         if not artifact_name or not artifact_name.strip():
             raise ValueError("artifact_name must not be blank.")
-        database_path = self.database_file_path()
         safe_artifact_name = artifact_name.strip().replace(" ", "_")
+
+        # If a dedicated models directory was provided, store artifacts there.
+        if self._model_dir is not None:
+            self._model_dir.mkdir(parents=True, exist_ok=True)
+            return (self._model_dir / f"{safe_artifact_name}{suffix}").resolve()
+
+        # Default behaviour: store artifacts next to the SQLite database file.
+        database_path = self.database_file_path()
         return database_path.with_name(f"{database_path.stem}.{safe_artifact_name}{suffix}")
 

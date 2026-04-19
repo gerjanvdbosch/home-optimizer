@@ -154,6 +154,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             f"Default: uses DATABASE_URL env var or '{DATABASE_URL_DEFAULT}'."
         ),
     )
+    parser.add_argument(
+        "--models-dir",
+        type=str,
+        default='./models',
+        metavar="PATH",
+        help=(
+            "Directory where persisted ML forecast-model artifacts are stored. "
+            "When omitted artifacts are stored next to the SQLite database file."
+        ),
+    )
 
     # ── Server ────────────────────────────────────────────────────────────
     parser.add_argument(
@@ -398,11 +408,11 @@ def main(argv: list[str] | None = None) -> None:
     # ── 1. Resolve repository — class handles path, mkdir, URL, and schema ──
     # Priority: --database CLI arg > DATABASE_URL env var > default.
     if args.database is not None:
-        repository = TelemetryRepository.from_path(args.database)
-        log.info("Using database from --database: %s", args.database)
+        repository = TelemetryRepository.from_path(args.database, model_dir=args.models_dir)
+        log.info("Using database from --database: %s  models_dir=%s", args.database, args.models_dir)
     else:
-        repository = TelemetryRepository.from_env()
-        log.info("Using database from env/default: %s", repository.url)
+        repository = TelemetryRepository.from_env(model_dir=args.models_dir)
+        log.info("Using database from env/default: %s  models_dir=%s", repository.url, args.models_dir)
 
     # Export so the FastAPI /api/forecast/latest endpoint finds the same DB.
     repository.export_to_env()
