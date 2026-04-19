@@ -1,6 +1,0 @@
-"""Minimal demo script – equivalent to `python -m home_optimizer`."""
-
-from home_optimizer.__main__ import main
-
-if __name__ == "__main__":
-    main()
