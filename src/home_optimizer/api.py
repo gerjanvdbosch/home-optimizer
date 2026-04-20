@@ -398,12 +398,15 @@ class HomeOptimizerAPI:
 
         # Show human-readable time labels while keeping x numeric for plotting
         fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
+        # Reduce visual noise: use a transparent plot background so the card
+        # background carries the visual weight, hide x-gridlines and make y-grid
+        # lines very subtle. This focuses attention on the traces themselves.
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="Temperatuur [degC]", gridcolor="#f5f5f5", zeroline=False),
-            xaxis=dict(gridcolor="#f5f5f5"),
+            yaxis=dict(title="Temperatuur [degC]", gridcolor="rgba(0,0,0,0.04)", zeroline=False),
+            xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             hovermode="x unified",
         )
@@ -453,12 +456,13 @@ class HomeOptimizerAPI:
 
         # Keep human-readable time labels
         fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
+        # Subtle grid and transparent plotting area to reduce background
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="Temperatuur [degC]", gridcolor="#f5f5f5", zeroline=False),
-            xaxis=dict(gridcolor="#f5f5f5"),
+            yaxis=dict(title="Temperatuur [degC]", gridcolor="rgba(0,0,0,0.04)", zeroline=False),
+            xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             hovermode="x unified",
         )
@@ -528,7 +532,7 @@ class HomeOptimizerAPI:
             title_text="Thermisch vermogen [kW]",
             secondary_y=False,
             range=[0, p_max * 1.1],
-            gridcolor="#f5f5f5",
+            gridcolor="rgba(0,0,0,0.04)",
             zeroline=False,
         )
         fig.update_yaxes(
@@ -539,6 +543,10 @@ class HomeOptimizerAPI:
             zeroline=False,
             showgrid=False,
         )
+        # Make x-grid less prominent / hidden so price and power bars stand out
+        fig.update_xaxes(showgrid=False)
+        # Use transparent plotting area so card background is visually dominant
+        fig.update_layout(plot_bgcolor="rgba(255,255,255,0)")
         return fig.to_json()
 
     @staticmethod
