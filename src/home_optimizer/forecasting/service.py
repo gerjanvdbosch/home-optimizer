@@ -10,15 +10,20 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from .baseload import BaseloadForecaster
 from .dhw_tap import DHWTapForecaster
 from .models import ForecastServiceSettings
 from .shutter import ShutterForecaster
+from ..types.constants import LAMBDA_WATER_KWH_PER_M3_K
 
 if TYPE_CHECKING:
     from ..telemetry.repository import TelemetryRepository
+
+
+log = logging.getLogger("home_optimizer.forecasting.service")
 
 
 class ForecastProvider(ABC):
@@ -129,7 +134,7 @@ class BaseloadForecastProvider(ForecastProvider):
 
 
 class DHWTapForecastProvider(ForecastProvider):
-    """Build a recurring hour-of-day DHW tap-flow forecast from persisted telemetry."""
+    """Build and train recurring hour-of-day DHW tap-flow forecasts from telemetry."""
 
     def __init__(self, forecaster: DHWTapForecaster | None = None) -> None:
         self._forecaster = forecaster or DHWTapForecaster()
@@ -186,16 +191,44 @@ class DHWTapForecastProvider(ForecastProvider):
         return {"dhw_v_tap_forecast": predicted.tolist()}
 
     def train_and_persist(self, *, repository: "TelemetryRepository") -> object | None:
-        """No-op: the DHW tap forecast is derived directly from telemetry at runtime."""
-        _ = repository
-        return None
+        """Train and persist the DHW tap profile using the latest calibrated DHW tuple.
+
+        The inferred tap-flow profile depends on the physical DHW tank parameters
+        ``(C_top, C_bot, R_loss, λ)``. To avoid silently training against stale or
+        hard-coded physics, the nightly training job only proceeds when the latest
+        calibration snapshot contains the required DHW parameters.
+        """
+
+        calibration_snapshot = repository.get_latest_calibration_snapshot()
+        if calibration_snapshot is None:
+            log.info("Skipping DHW tap-profile training: no calibration snapshot is available yet.")
+            return None
+
+        effective_parameters = calibration_snapshot.effective_parameters
+        c_top = effective_parameters.dhw_C_top
+        c_bot = effective_parameters.dhw_C_bot
+        r_loss = effective_parameters.dhw_R_loss
+        if c_top is None or c_bot is None or r_loss is None:
+            log.info(
+                "Skipping DHW tap-profile training: latest calibration snapshot lacks one of dhw_C_top, dhw_C_bot, dhw_R_loss."
+            )
+            return None
+
+        return self._forecaster.train_and_persist_from_repository(
+            repository=repository,
+            c_top_kwh_per_k=float(c_top),
+            c_bot_kwh_per_k=float(c_bot),
+            r_loss_k_per_kw=float(r_loss),
+            lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        )
 
 
 class ForecastService:
     """Compose multiple ML forecast providers into one runtime enrichment step.
 
-    The current service only predicts ``shutter_forecast``. The provider-based
-    design keeps the API stable when a later baseload forecaster is added.
+    Providers currently cover DHW tap-flow, household baseload, and living-room
+    shutters. The provider-based design keeps the API stable when more forecast
+    enrichments are added.
     """
 
     def __init__(self, settings: ForecastServiceSettings | None = None) -> None:

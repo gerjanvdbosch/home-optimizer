@@ -7,10 +7,12 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 
-from home_optimizer.forecasting import ForecastService, ShutterForecaster
+from home_optimizer.forecasting import DHWTapForecaster, ForecastService, ShutterForecaster
 from home_optimizer.application.optimizer import Optimizer, RunRequest
 from home_optimizer.sensors import LiveReadings
 from home_optimizer.telemetry import TelemetryRepository, aggregate_readings
+from home_optimizer.types.calibration import CalibrationParameterOverrides, CalibrationSnapshotPayload
+from home_optimizer.types.constants import LAMBDA_WATER_KWH_PER_M3_K
 
 
 def _reading(
@@ -294,6 +296,47 @@ def _train_persisted_baseload_model(repository: TelemetryRepository) -> object:
     return metadata
 
 
+def _add_dhw_calibration_snapshot(
+    repository: TelemetryRepository,
+    *,
+    generated_at_utc: datetime,
+    c_top_kwh_per_k: float,
+    c_bot_kwh_per_k: float,
+    r_loss_k_per_kw: float,
+) -> object:
+    """Persist one minimal calibration snapshot with the DHW parameters needed for tap-profile training."""
+
+    payload = CalibrationSnapshotPayload(
+        generated_at_utc=generated_at_utc,
+        effective_parameters=CalibrationParameterOverrides(
+            dhw_C_top=c_top_kwh_per_k,
+            dhw_C_bot=c_bot_kwh_per_k,
+            dhw_R_loss=r_loss_k_per_kw,
+        ),
+    )
+    return repository.add_calibration_snapshot(payload)
+
+
+def _train_persisted_dhw_tap_profile(
+    repository: TelemetryRepository,
+    *,
+    c_top_kwh_per_k: float,
+    c_bot_kwh_per_k: float,
+    r_loss_k_per_kw: float,
+) -> object:
+    """Train and persist one recurring DHW tap-profile artifact for inference tests."""
+
+    metadata = DHWTapForecaster().train_and_persist_from_repository(
+        repository=repository,
+        c_top_kwh_per_k=c_top_kwh_per_k,
+        c_bot_kwh_per_k=c_bot_kwh_per_k,
+        r_loss_k_per_kw=r_loss_k_per_kw,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+    )
+    assert metadata is not None
+    return metadata
+
+
 def test_shutter_forecaster_learns_daylight_closure_pattern(tmp_path) -> None:
     """Sunny hours should yield a lower predicted shutter opening than dark hours."""
     database_url = f"sqlite:///{tmp_path / 'shutter-forecast.sqlite3'}"
@@ -396,6 +439,85 @@ def test_forecast_service_builds_dhw_tap_forecast_from_history(tmp_path) -> None
     assert np.all(tap_forecast >= 0.0)
     assert [row.valid_at_utc.hour for row in rows[:4]] == [20, 21, 22, 23]
     assert float(np.max(tap_forecast[2:4])) > float(np.max(tap_forecast[:2]))
+
+
+def test_dhw_tap_forecaster_reuses_persisted_profile_without_recomputing_history(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trained DHW tap artifact must be reused at runtime without re-inferring history."""
+
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-persisted.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 10, 0, 0, tzinfo=timezone.utc)
+    c_top_kwh_per_k = 0.11628
+    c_bot_kwh_per_k = 0.11628
+    r_loss_k_per_kw = 462.0
+    _populate_dhw_tap_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=92)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 0.0, 0.0, 0.0],
+    )
+    DHWTapForecaster.clear_model_cache()
+    _train_persisted_dhw_tap_profile(
+        repository,
+        c_top_kwh_per_k=c_top_kwh_per_k,
+        c_bot_kwh_per_k=c_bot_kwh_per_k,
+        r_loss_k_per_kw=r_loss_k_per_kw,
+    )
+
+    forecaster = DHWTapForecaster()
+
+    def fail_if_history_is_used(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("predict_from_repository should have reused the persisted DHW profile artifact.")
+
+    monkeypatch.setattr(forecaster, "_predict_from_history", fail_if_history_is_used)
+    rows = repository.get_latest_forecast_batch()
+    prediction = forecaster.predict_from_repository(
+        repository=repository,
+        horizon_valid_at_utc=[row.valid_at_utc for row in rows[:4]],
+        c_top_kwh_per_k=c_top_kwh_per_k,
+        c_bot_kwh_per_k=c_bot_kwh_per_k,
+        r_loss_k_per_kw=r_loss_k_per_kw,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+    )
+
+    assert prediction is not None
+    assert prediction.shape == (4,)
+    assert [row.valid_at_utc.hour for row in rows[:4]] == [20, 21, 22, 23]
+    assert float(np.max(prediction[2:4])) > float(np.max(prediction[:2]))
+
+
+def test_forecast_service_trains_persisted_dhw_tap_profile_from_calibration_snapshot(tmp_path) -> None:
+    """Nightly forecast training must persist a DHW tap artifact when calibrated DHW physics are available."""
+
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-training.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 10, 0, 0, tzinfo=timezone.utc)
+    c_top_kwh_per_k = 0.11628
+    c_bot_kwh_per_k = 0.11628
+    r_loss_k_per_kw = 462.0
+    _populate_dhw_tap_history(repository, start_utc=history_start_utc, hours=72)
+    _add_dhw_calibration_snapshot(
+        repository,
+        generated_at_utc=history_start_utc + timedelta(hours=72),
+        c_top_kwh_per_k=c_top_kwh_per_k,
+        c_bot_kwh_per_k=c_bot_kwh_per_k,
+        r_loss_k_per_kw=r_loss_k_per_kw,
+    )
+
+    training_results = ForecastService().train_and_persist_models(repository=repository)
+
+    dhw_training_result = training_results["dhw_v_tap_forecast"]
+    assert dhw_training_result is not None
+    assert int(getattr(dhw_training_result, "sample_count", -1)) >= 24
+    assert repository.forecast_artifact_path("dhw_tap_profile").exists()
 
 
 def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None:
