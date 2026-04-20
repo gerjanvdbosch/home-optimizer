@@ -199,7 +199,7 @@ class AddonOptions(BaseModel):
     mpc_dhw_enabled: bool = Field(True, description="Include DHW in periodic MPC")
     mpc_dhw_P_max: float = Field(3.0, gt=0.0, description="Max DHW thermal power [kW]")
     mpc_dhw_delta_P_max: float = Field(1.0, gt=0.0, description="Max DHW ramp-rate [kW/step]")
-    mpc_dhw_T_min: float = Field(50.0, description="Min DHW tap temperature [°C]")
+    mpc_dhw_T_min: float = Field(30.0, description="Min DHW tap temperature [°C]")
     mpc_dhw_T_legionella: float = Field(60.0, description="Legionella target temperature [°C]")
     mpc_dhw_R_strat: float = Field(10.0, gt=0.0, description="DHW stratification resistance [K/kW]")
     mpc_dhw_R_loss: float = Field(50.0, gt=0.0, description="DHW standby-loss resistance [K/kW]")
