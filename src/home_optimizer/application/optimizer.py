@@ -388,7 +388,7 @@ class RunRequest(BaseModel):
         1.0, ge=0.1, le=10.0, description="Max DHW ramp-rate delta_P_dhw,max [kW/step]"
     )
     dhw_T_min: float = Field(
-        50.0, ge=35.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [degC]"
+        50.0, ge=10.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [degC]"
     )
     dhw_T_legionella: float = Field(
         60.0, ge=55.0, le=85.0, description="Legionella prevention temperature T_leg [degC]"
