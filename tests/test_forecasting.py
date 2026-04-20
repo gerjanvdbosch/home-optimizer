@@ -332,6 +332,9 @@ def _train_persisted_dhw_tap_profile(
         c_bot_kwh_per_k=c_bot_kwh_per_k,
         r_loss_k_per_kw=r_loss_k_per_kw,
         lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
     )
     assert metadata is not None
     return metadata
@@ -484,6 +487,9 @@ def test_dhw_tap_forecaster_reuses_persisted_profile_without_recomputing_history
         c_bot_kwh_per_k=c_bot_kwh_per_k,
         r_loss_k_per_kw=r_loss_k_per_kw,
         lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
     )
 
     assert prediction is not None
@@ -492,8 +498,8 @@ def test_dhw_tap_forecaster_reuses_persisted_profile_without_recomputing_history
     assert float(np.max(prediction[2:4])) > float(np.max(prediction[:2]))
 
 
-def test_forecast_service_trains_persisted_dhw_tap_profile_from_calibration_snapshot(tmp_path) -> None:
-    """Nightly forecast training must persist a DHW tap artifact when calibrated DHW physics are available."""
+def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_request(tmp_path) -> None:
+    """Nightly DHW training must work from the effective runtime tuple, not only from snapshot deltas."""
 
     database_url = f"sqlite:///{tmp_path / 'dhw-tap-training.sqlite3'}"
     repository = TelemetryRepository(database_url=database_url)
@@ -504,15 +510,29 @@ def test_forecast_service_trains_persisted_dhw_tap_profile_from_calibration_snap
     c_bot_kwh_per_k = 0.11628
     r_loss_k_per_kw = 462.0
     _populate_dhw_tap_history(repository, start_utc=history_start_utc, hours=72)
-    _add_dhw_calibration_snapshot(
-        repository,
-        generated_at_utc=history_start_utc + timedelta(hours=72),
-        c_top_kwh_per_k=c_top_kwh_per_k,
-        c_bot_kwh_per_k=c_bot_kwh_per_k,
-        r_loss_k_per_kw=r_loss_k_per_kw,
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=history_start_utc + timedelta(hours=72),
+            effective_parameters=CalibrationParameterOverrides(dhw_R_loss=r_loss_k_per_kw),
+        )
     )
 
-    training_results = ForecastService().train_and_persist_models(repository=repository)
+    base_request_data = RunRequest.model_validate(
+        {
+            "dhw_enabled": True,
+            "dhw_C_top": c_top_kwh_per_k,
+            "dhw_C_bot": c_bot_kwh_per_k,
+            "dhw_R_loss": 50.0,
+            "dhw_lambda_water_kwh_per_m3k": LAMBDA_WATER_KWH_PER_M3_K,
+            "dhw_top_temperature_bias_c": 0.0,
+            "dhw_bottom_temperature_bias_c": 0.0,
+            "dhw_boiler_ambient_bias_c": 0.0,
+        }
+    ).model_dump(mode="python")
+    training_results = ForecastService().train_and_persist_models(
+        repository=repository,
+        base_request_data=base_request_data,
+    )
 
     dhw_training_result = training_results["dhw_v_tap_forecast"]
     assert dhw_training_result is not None

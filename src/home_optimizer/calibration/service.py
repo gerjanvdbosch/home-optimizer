@@ -1097,6 +1097,7 @@ def build_automatic_calibration_snapshot(
                 reference_c_top_kwh_per_k=effective_request.dhw_C_top,
                 reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
                 fit_ambient_temperature_bias=True,
+                initial_ambient_temperature_bias_c=effective_request.dhw_boiler_ambient_bias_c,
             )
             result = calibrate_dhw_standby_from_repository(
                 repository,
@@ -1158,6 +1159,9 @@ def build_automatic_calibration_snapshot(
                 reference_parameters=dhw_reference_parameters,
                 fit_capacity_split=settings.dhw_active_fit_capacity_split,
                 fit_temperature_biases=settings.dhw_active_fit_temperature_biases,
+                ambient_temperature_bias_c=effective_request.dhw_boiler_ambient_bias_c,
+                initial_t_top_bias_c=effective_request.dhw_top_temperature_bias_c,
+                initial_t_bot_bias_c=effective_request.dhw_bottom_temperature_bias_c,
             )
             result = calibrate_dhw_active_from_repository(
                 repository,

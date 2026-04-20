@@ -122,6 +122,7 @@ def build_dhw_standby_calibration_settings(
     min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT,
     max_layer_temperature_spread_c: float = DEFAULT_MAX_DHW_LAYER_TEMPERATURE_SPREAD_C,
     fit_ambient_temperature_bias: bool = False,
+    initial_ambient_temperature_bias_c: float = 0.0,
 ) -> DHWStandbyCalibrationSettings:
     """Build standby-DHW calibration settings with CLI-equivalent defaults.
 
@@ -143,6 +144,7 @@ def build_dhw_standby_calibration_settings(
         min_sample_count=min_sample_count,
         max_layer_temperature_spread_c=max_layer_temperature_spread_c,
         fit_ambient_temperature_bias=fit_ambient_temperature_bias,
+        initial_ambient_temperature_bias_c=initial_ambient_temperature_bias_c,
     )
 
 
@@ -165,6 +167,9 @@ def build_dhw_active_calibration_settings(
     max_selected_segments: int | None = None,
     fit_capacity_split: bool = False,
     fit_temperature_biases: bool = False,
+    ambient_temperature_bias_c: float = 0.0,
+    initial_t_top_bias_c: float = 0.0,
+    initial_t_bot_bias_c: float = 0.0,
 ) -> DHWActiveCalibrationSettings:
     """Build active-DHW calibration settings with CLI-equivalent defaults.
 
@@ -208,7 +213,10 @@ def build_dhw_active_calibration_settings(
         max_r_strat_k_per_kw=max_r_strat_k_per_kw,
         max_selected_segments=max_selected_segments,
         fit_capacity_split=fit_capacity_split,
+        ambient_temperature_bias_c=ambient_temperature_bias_c,
         fit_temperature_biases=fit_temperature_biases,
+        initial_t_top_bias_c=initial_t_top_bias_c,
+        initial_t_bot_bias_c=initial_t_bot_bias_c,
         initial_c_top_fraction=reference_parameters.C_top / (reference_parameters.C_top + reference_parameters.C_bot),
     )
 

@@ -149,8 +149,9 @@ def test_main_runs_initial_forecast_model_training_when_enabled(tmp_path, monkey
             return None
 
     class FakeForecastService:
-        def train_and_persist_models(self, *, repository):  # noqa: ANN001
+        def train_and_persist_models(self, *, repository, base_request_data=None):  # noqa: ANN001
             forecast_training_calls.append(repository.engine.url.render_as_string(hide_password=False))
+            assert base_request_data is not None
             return {"shutter_forecast": None}
 
     monkeypatch.setattr(local_runner, "ForecastPersister", FakeForecastPersister)

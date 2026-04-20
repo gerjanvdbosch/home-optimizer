@@ -113,6 +113,9 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        top_temperature_bias_c: float,
+        bottom_temperature_bias_c: float,
+        boiler_ambient_bias_c: float,
     ) -> float | None:
         """Infer one tap-flow sample from the DHW total-energy balance.
 
@@ -128,25 +131,31 @@ class DHWTapForecaster:
             return None
 
         start_energy_kwh = self._total_energy_kwh(
-            t_top_c=float(previous_row.dhw_top_temperature_last_c),
-            t_bot_c=float(previous_row.dhw_bottom_temperature_last_c),
+            t_top_c=float(previous_row.dhw_top_temperature_last_c) + top_temperature_bias_c,
+            t_bot_c=float(previous_row.dhw_bottom_temperature_last_c) + bottom_temperature_bias_c,
             c_top_kwh_per_k=c_top_kwh_per_k,
             c_bot_kwh_per_k=c_bot_kwh_per_k,
         )
         end_energy_kwh = self._total_energy_kwh(
-            t_top_c=float(next_row.dhw_top_temperature_last_c),
-            t_bot_c=float(next_row.dhw_bottom_temperature_last_c),
+            t_top_c=float(next_row.dhw_top_temperature_last_c) + top_temperature_bias_c,
+            t_bot_c=float(next_row.dhw_bottom_temperature_last_c) + bottom_temperature_bias_c,
             c_top_kwh_per_k=c_top_kwh_per_k,
             c_bot_kwh_per_k=c_bot_kwh_per_k,
         )
         delta_energy_rate_kw = (end_energy_kwh - start_energy_kwh) / dt_hours
         mean_t_top_c = 0.5 * (
-            float(previous_row.dhw_top_temperature_last_c) + float(next_row.dhw_top_temperature_last_c)
+            float(previous_row.dhw_top_temperature_last_c)
+            + top_temperature_bias_c
+            + float(next_row.dhw_top_temperature_last_c)
+            + top_temperature_bias_c
         )
         mean_t_bot_c = 0.5 * (
-            float(previous_row.dhw_bottom_temperature_last_c) + float(next_row.dhw_bottom_temperature_last_c)
+            float(previous_row.dhw_bottom_temperature_last_c)
+            + bottom_temperature_bias_c
+            + float(next_row.dhw_bottom_temperature_last_c)
+            + bottom_temperature_bias_c
         )
-        t_amb_c = float(next_row.boiler_ambient_temp_mean_c)
+        t_amb_c = float(next_row.boiler_ambient_temp_mean_c) + boiler_ambient_bias_c
         t_mains_c = float(next_row.t_mains_estimated_mean_c)
         q_loss_kw = (mean_t_top_c - t_amb_c) / r_loss_k_per_kw + (mean_t_bot_c - t_amb_c) / r_loss_k_per_kw
         p_dhw_kw = (
@@ -171,6 +180,9 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        top_temperature_bias_c: float,
+        bottom_temperature_bias_c: float,
+        boiler_ambient_bias_c: float,
     ) -> PersistedRegressorArtifactMetadata | None:
         """Train and persist one recurring hourly DHW tap profile.
 
@@ -193,6 +205,9 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            top_temperature_bias_c=top_temperature_bias_c,
+            bottom_temperature_bias_c=bottom_temperature_bias_c,
+            boiler_ambient_bias_c=boiler_ambient_bias_c,
         )
         if profile is None:
             log.info(
@@ -212,6 +227,9 @@ class DHWTapForecaster:
                     c_bot_kwh_per_k=c_bot_kwh_per_k,
                     r_loss_k_per_kw=r_loss_k_per_kw,
                     lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+                    top_temperature_bias_c=top_temperature_bias_c,
+                    bottom_temperature_bias_c=bottom_temperature_bias_c,
+                    boiler_ambient_bias_c=boiler_ambient_bias_c,
                 )
             ),
             training_fingerprint=repository.forecast_training_fingerprint(),
@@ -228,6 +246,9 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        top_temperature_bias_c: float,
+        bottom_temperature_bias_c: float,
+        boiler_ambient_bias_c: float,
     ) -> tuple[_PersistedDHWTapProfile | None, int]:
         """Infer a recurring hourly tap profile from historical telemetry.
 
@@ -257,6 +278,9 @@ class DHWTapForecaster:
                 c_bot_kwh_per_k=c_bot_kwh_per_k,
                 r_loss_k_per_kw=r_loss_k_per_kw,
                 lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+                top_temperature_bias_c=top_temperature_bias_c,
+                bottom_temperature_bias_c=bottom_temperature_bias_c,
+                boiler_ambient_bias_c=boiler_ambient_bias_c,
             )
             if inferred_v_tap is None:
                 continue
@@ -291,6 +315,9 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        top_temperature_bias_c: float,
+        bottom_temperature_bias_c: float,
+        boiler_ambient_bias_c: float,
     ) -> np.ndarray | None:
         """Infer one horizon-wide recurring DHW tap forecast directly from history."""
 
@@ -300,6 +327,9 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            top_temperature_bias_c=top_temperature_bias_c,
+            bottom_temperature_bias_c=bottom_temperature_bias_c,
+            boiler_ambient_bias_c=boiler_ambient_bias_c,
         )
         if profile is None:
             return None
@@ -329,7 +359,10 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
-    ) -> tuple[float, float, float, float]:
+        top_temperature_bias_c: float,
+        bottom_temperature_bias_c: float,
+        boiler_ambient_bias_c: float,
+    ) -> tuple[float, float, float, float, float, float, float]:
         """Return the physical parameter tuple that the persisted profile depends on."""
 
         return (
@@ -337,6 +370,9 @@ class DHWTapForecaster:
             float(c_bot_kwh_per_k),
             float(r_loss_k_per_kw),
             float(lambda_water_kwh_per_m3_k),
+            float(top_temperature_bias_c),
+            float(bottom_temperature_bias_c),
+            float(boiler_ambient_bias_c),
         )
 
     def _settings_signature(
@@ -486,6 +522,9 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        top_temperature_bias_c: float,
+        bottom_temperature_bias_c: float,
+        boiler_ambient_bias_c: float,
     ) -> np.ndarray | None:
         """Return an hour-of-day DHW tap-flow forecast for the requested horizon.
 
@@ -509,6 +548,9 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            top_temperature_bias_c=top_temperature_bias_c,
+            bottom_temperature_bias_c=bottom_temperature_bias_c,
+            boiler_ambient_bias_c=boiler_ambient_bias_c,
         )
         cached_profile = self._load_cached_artifact(repository, physical_signature=physical_signature)
         if cached_profile.profile is not None:
@@ -524,5 +566,8 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            top_temperature_bias_c=top_temperature_bias_c,
+            bottom_temperature_bias_c=bottom_temperature_bias_c,
+            boiler_ambient_bias_c=boiler_ambient_bias_c,
         )
 

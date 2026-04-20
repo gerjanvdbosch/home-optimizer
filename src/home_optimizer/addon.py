@@ -697,7 +697,10 @@ def main() -> None:
         forecast_service = ForecastService()
 
         def _run_forecast_training_job() -> None:
-            results = forecast_service.train_and_persist_models(repository=repository)
+            results = forecast_service.train_and_persist_models(
+                repository=repository,
+                base_request_data=mpc_base_input.model_dump(mode="python"),
+            )
             successful_models = 0
             for field_name, model_result in results.items():
                 if model_result is None:

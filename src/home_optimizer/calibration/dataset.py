@@ -870,6 +870,11 @@ def build_dhw_active_calibration_dataset(
     floor*: charging can remix a real tank, so low-but-nonzero spreads may still
     contain usable ``R_strat`` information when the *segment as a whole* shows a
     measurable rise and spread evolution.
+
+    Existing calibrated DHW sensor-bias corrections are applied during the
+    no-draw selection logic only. The dataset itself continues to store the raw
+    measured temperatures so the active fitter can either keep those injected
+    biases fixed or refine them further when ``fit_temperature_biases=True``.
     """
     rows = sorted(aggregates, key=lambda row: row.bucket_end_utc)
     raw_segments: list[list[DHWActiveCalibrationSample]] = []
@@ -985,21 +990,23 @@ def build_dhw_active_calibration_dataset(
             pair_is_valid = False
 
         layer_spread_start_c = abs(
-            float(previous_row.dhw_top_temperature_last_c) - float(previous_row.dhw_bottom_temperature_last_c)
+            (float(previous_row.dhw_top_temperature_last_c) + settings.initial_t_top_bias_c)
+            - (float(previous_row.dhw_bottom_temperature_last_c) + settings.initial_t_bot_bias_c)
         )
         layer_spread_end_c = abs(
-            float(next_row.dhw_top_temperature_last_c) - float(next_row.dhw_bottom_temperature_last_c)
+            (float(next_row.dhw_top_temperature_last_c) + settings.initial_t_top_bias_c)
+            - (float(next_row.dhw_bottom_temperature_last_c) + settings.initial_t_bot_bias_c)
         )
         if max(layer_spread_start_c, layer_spread_end_c) < settings.min_layer_temperature_spread_c:
             pair_is_valid = False
 
         t_mains_c = float(next_row.t_mains_estimated_mean_c)
-        t_amb_c = float(next_row.boiler_ambient_temp_mean_c)
+        t_amb_c = float(next_row.boiler_ambient_temp_mean_c) + settings.ambient_temperature_bias_c
         implied_v_tap_m3_per_h = _implied_v_tap_m3_per_h(
-            t_top_start_c=float(previous_row.dhw_top_temperature_last_c),
-            t_bot_start_c=float(previous_row.dhw_bottom_temperature_last_c),
-            t_top_end_c=float(next_row.dhw_top_temperature_last_c),
-            t_bot_end_c=float(next_row.dhw_bottom_temperature_last_c),
+            t_top_start_c=float(previous_row.dhw_top_temperature_last_c) + settings.initial_t_top_bias_c,
+            t_bot_start_c=float(previous_row.dhw_bottom_temperature_last_c) + settings.initial_t_bot_bias_c,
+            t_top_end_c=float(next_row.dhw_top_temperature_last_c) + settings.initial_t_top_bias_c,
+            t_bot_end_c=float(next_row.dhw_bottom_temperature_last_c) + settings.initial_t_bot_bias_c,
             dt_hours=dt_hours,
             p_dhw_mean_kw=p_dhw_mean_kw,
             t_mains_c=t_mains_c,

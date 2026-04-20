@@ -1373,9 +1373,13 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     assert ufh_settings.fit_eta is False
     assert ufh_settings.fit_internal_gains_heat_fraction is False
     assert standby_settings.dt_hours == 5.0 / 60.0
+    assert standby_settings.initial_ambient_temperature_bias_c == RunRequest.model_validate({}).dhw_boiler_ambient_bias_c
     assert dhw_active_settings.reference_parameters.dt_hours == 5.0 / 60.0
     assert dhw_active_settings.fit_capacity_split is False
     assert dhw_active_settings.fit_temperature_biases is False
+    assert dhw_active_settings.ambient_temperature_bias_c == RunRequest.model_validate({}).dhw_boiler_ambient_bias_c
+    assert dhw_active_settings.initial_t_top_bias_c == RunRequest.model_validate({}).dhw_top_temperature_bias_c
+    assert dhw_active_settings.initial_t_bot_bias_c == RunRequest.model_validate({}).dhw_bottom_temperature_bias_c
     assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
     assert snapshot.dhw_standby is not None and snapshot.dhw_standby.succeeded is True
     assert snapshot.dhw_active is not None and snapshot.dhw_active.succeeded is True

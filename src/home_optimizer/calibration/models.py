@@ -1227,6 +1227,7 @@ class DHWActiveCalibrationSettings:
     initial_c_top_fraction: float | None = None
     min_c_top_fraction: float = DEFAULT_MIN_DHW_C_TOP_FRACTION
     max_c_top_fraction: float = DEFAULT_MAX_DHW_C_TOP_FRACTION
+    ambient_temperature_bias_c: float = DEFAULT_INITIAL_DHW_AMBIENT_TEMPERATURE_BIAS_C
     fit_temperature_biases: bool = DEFAULT_FIT_DHW_TEMPERATURE_BIASES
     initial_t_top_bias_c: float = DEFAULT_INITIAL_DHW_TOP_TEMPERATURE_BIAS_C
     initial_t_bot_bias_c: float = DEFAULT_INITIAL_DHW_BOTTOM_TEMPERATURE_BIAS_C
@@ -1302,6 +1303,14 @@ class DHWActiveCalibrationSettings:
             raise ValueError("initial_c_top_fraction must lie within its bounds.")
         if self.min_temperature_bias_c >= self.max_temperature_bias_c:
             raise ValueError("min_temperature_bias_c must be < max_temperature_bias_c.")
+        if not (
+            DEFAULT_MIN_DHW_AMBIENT_TEMPERATURE_BIAS_C
+            <= self.ambient_temperature_bias_c
+            <= DEFAULT_MAX_DHW_AMBIENT_TEMPERATURE_BIAS_C
+        ):
+            raise ValueError(
+                "ambient_temperature_bias_c must lie within the configured DHW ambient-bias bounds."
+            )
         for name in ("initial_t_top_bias_c", "initial_t_bot_bias_c"):
             if not (self.min_temperature_bias_c <= getattr(self, name) <= self.max_temperature_bias_c):
                 raise ValueError(f"{name} must lie within [min_temperature_bias_c, max_temperature_bias_c].")
