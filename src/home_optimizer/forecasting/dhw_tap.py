@@ -180,14 +180,49 @@ class DHWTapForecaster:
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
     ) -> float | None:
-        """Infer one tap-flow sample from the DHW total-energy balance.
+        """Infer one tap-flow sample [m³/h] from the DHW total-energy balance (§9.5).
 
-        Implements the rearranged tank balance from §9.5:
+        Rearranges the global tank energy balance from §9.5:
 
-            V_tap = (P_dhw - Q_loss - ΔE/Δt) / (λ·(T_top - T_mains))
+            d/dt (C_top·T_top + C_bot·T_bot) = P_dhw − λ·V̇_tap·(T_top−T_mains) − Q_loss
 
-        using the mean outlet/ambient temperatures over the interval and clamping the
-        result to the physically feasible interval ``[0, max_implied_tap_m3_per_h]``.
+        Solving for V̇_tap:
+
+            V̇_tap = (P_dhw − Q_loss − ΔE/Δt) / (λ·(T_top − T_mains))
+
+        Unit verification:
+            numerator  : [kW] − [kW] − [kWh/h] = [kWh/h]
+            denominator: [kWh/(m³·K)] × [K]     = [kWh/m³]
+            result     : [kWh/h] / [kWh/m³]      = [m³/h]  ✓
+
+        Approximations (explicitly named):
+        - ``P_dhw``: ``hp_thermal_power_mean_kw`` from ``next_row`` (mean over the bucket).
+          Mode is determined by ``hp_mode_last`` (end-of-bucket), not a weighted mean.
+          If the HP switched modes mid-bucket this introduces an error, but for 1-h
+          buckets mode switches are infrequent and the clamping to [0, max_tap] limits
+          the damage.
+        - ``T_top``, ``T_bot``: midpoint estimate (mean of start and end temperatures).
+        - ``T_amb``, ``T_mains``: mean over the bucket from ``next_row``.
+
+        Observability condition (§12.5): when ``T_top − T_mains < min_tap_temp_diff_k``
+        the denominator is very small; a 0.1 kW numerator error then produces an
+        unrealistically large V̇_tap.  In that regime the tank is nearly cold and no
+        useful tap information can be extracted from the temperatures → return 0.0.
+
+        Args:
+            previous_row: Telemetry bucket immediately before the interval.
+            next_row: Telemetry bucket covering the interval being analysed.
+            c_top_kwh_per_k: ``C_top`` [kWh/K].
+            c_bot_kwh_per_k: ``C_bot`` [kWh/K].
+            r_loss_k_per_kw: ``R_loss`` [K/kW].
+            lambda_water_kwh_per_m3_k: ``λ`` [kWh/(m³·K)].
+            top_temperature_bias_c: Sensor correction for ``T_top`` [°C / K].
+            bottom_temperature_bias_c: Sensor correction for ``T_bot`` [°C / K].
+            boiler_ambient_bias_c: Sensor correction for ``T_amb`` [°C / K].
+
+        Returns:
+            Inferred tap flow clamped to ``[0, max_implied_tap_m3_per_h]`` [m³/h],
+            or ``None`` when the interval is invalid (gap too large / negative dt).
         """
         dt_hours = (next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds() / _SECONDS_PER_HOUR
         if dt_hours <= 0.0 or dt_hours > self._settings.max_history_gap_hours:
@@ -205,7 +240,10 @@ class DHWTapForecaster:
             c_top_kwh_per_k=c_top_kwh_per_k,
             c_bot_kwh_per_k=c_bot_kwh_per_k,
         )
+        # ΔE/Δt [kW]: rate of change of total tank energy over the interval.
         delta_energy_rate_kw = (end_energy_kwh - start_energy_kwh) / dt_hours
+
+        # Midpoint temperature estimates over the interval [kW each].
         mean_t_top_c = 0.5 * (
             float(previous_row.dhw_top_temperature_last_c)
             + top_temperature_bias_c
@@ -218,20 +256,35 @@ class DHWTapForecaster:
             + float(next_row.dhw_bottom_temperature_last_c)
             + bottom_temperature_bias_c
         )
+        # Ambient and mains temperatures: bucket-mean values from next_row, which
+        # covers exactly the interval [previous_row.bucket_end_utc, next_row.bucket_end_utc].
         t_amb_c = float(next_row.boiler_ambient_temp_mean_c) + boiler_ambient_bias_c
         t_mains_c = float(next_row.t_mains_estimated_mean_c)
+
+        # Q_loss = (T_top − T_amb)/R_loss + (T_bot − T_amb)/R_loss  [kW]  (§9.2)
         q_loss_kw = (mean_t_top_c - t_amb_c) / r_loss_k_per_kw + (mean_t_bot_c - t_amb_c) / r_loss_k_per_kw
+
+        # P_dhw: thermal power delivered by the heat pump to the DHW tank [kW].
+        # Use mean thermal power only when mode_last confirms DHW operation.
         p_dhw_kw = (
             max(float(next_row.hp_thermal_power_mean_kw), 0.0)
             if str(next_row.hp_mode_last).strip().lower() == _DHW_MODE_NAME
             else 0.0
         )
 
-        tap_denominator = lambda_water_kwh_per_m3_k * (mean_t_top_c - t_mains_c)
-        if tap_denominator <= 0.0:
+        # Observability guard (§12.5): below min_tap_temp_diff_k the denominator
+        # λ·(T_top − T_mains) is too small to reliably separate tap flow from
+        # numerical noise in the energy balance. Skip this sample.
+        temp_diff_k = mean_t_top_c - t_mains_c
+        if temp_diff_k < self._settings.min_tap_temp_diff_k:
             return 0.0
 
+        # V̇_tap [m³/h] = numerator [kW] / denominator [kWh/m³]
+        #               = [kWh/h] / [kWh/m³] = [m³/h]  ✓
+        tap_denominator = lambda_water_kwh_per_m3_k * temp_diff_k
         implied_v_tap = (p_dhw_kw - q_loss_kw - delta_energy_rate_kw) / tap_denominator
+        # Clamp to [0, max]: negative values are physically impossible (§ fail-fast);
+        # extreme positives indicate measurement noise, not actual demand.
         clamped_v_tap = float(np.clip(implied_v_tap, 0.0, self._settings.max_implied_tap_m3_per_h))
         return clamped_v_tap
 
@@ -451,6 +504,7 @@ class DHWTapForecaster:
             self._settings.max_history_gap_hours,
             self._settings.max_implied_tap_m3_per_h,
             self._settings.min_peak_to_background_ratio,
+            self._settings.min_tap_temp_diff_k,
             *physical_signature,
         )
 

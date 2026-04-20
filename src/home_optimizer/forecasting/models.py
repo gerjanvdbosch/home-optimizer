@@ -36,6 +36,7 @@ DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR: int = 2
 DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS: float = 2.0
 DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H: float = 0.2
 DEFAULT_DHW_TAP_MIN_PEAK_TO_BACKGROUND_RATIO: float = 2.0
+DEFAULT_DHW_TAP_MIN_TAP_TEMP_DIFF_K: float = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,15 @@ class DHWTapForecastSettings:
             ratio of 1.0 and is always rejected; a sparse evening shower
             (e.g. 22:00 with 0.10 m³/h against a 0.02 m³/h background) yields
             a ratio of ~5.0 and is always accepted.
+        min_tap_temp_diff_k: Minimum required temperature difference
+            ``T_top - T_mains`` [K] for the energy-balance inference to be
+            considered reliable. When ``T_top`` is nearly at mains temperature
+            the denominator ``λ·(T_top - T_mains)`` is very small, making a tiny
+            numerator error (e.g. 0.1 kW) produce an unrealistically large inferred
+            ``V_tap``. Below this threshold the inference sample is skipped (0.0) —
+            physically the tank is nearly cold and no hot-tap demand is detectable.
+            Corresponds to the EKF observability condition from §12.5:
+            observability of ``V_tap`` degrades when ``T_top ≈ T_mains``.
     """
 
     min_training_samples: int = DEFAULT_DHW_TAP_MIN_TRAINING_SAMPLES
@@ -123,6 +133,7 @@ class DHWTapForecastSettings:
     max_history_gap_hours: float = DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS
     max_implied_tap_m3_per_h: float = DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H
     min_peak_to_background_ratio: float = DEFAULT_DHW_TAP_MIN_PEAK_TO_BACKGROUND_RATIO
+    min_tap_temp_diff_k: float = DEFAULT_DHW_TAP_MIN_TAP_TEMP_DIFF_K
 
     def __post_init__(self) -> None:
         if self.min_training_samples <= 0:
@@ -135,6 +146,8 @@ class DHWTapForecastSettings:
             raise ValueError("max_implied_tap_m3_per_h must be strictly positive.")
         if self.min_peak_to_background_ratio < 1.0:
             raise ValueError("min_peak_to_background_ratio must be >= 1.0.")
+        if self.min_tap_temp_diff_k <= 0.0:
+            raise ValueError("min_tap_temp_diff_k must be strictly positive [K].")
 
 
 @dataclass(frozen=True, slots=True)

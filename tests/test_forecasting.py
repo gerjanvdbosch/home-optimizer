@@ -650,6 +650,85 @@ def test_dhw_tap_forecaster_accepts_sparse_evening_shower_profile(
         assert float(tap_forecast[shower_hour_indices[0]]) == pytest.approx(0.10, abs=1e-6)
 
 
+def test_dhw_tap_inferrer_skips_cold_tank_intervals(tmp_path) -> None:
+    """Inference must return 0.0 when T_top − T_mains < min_tap_temp_diff_k (§12.5).
+
+    When the tank is nearly at mains temperature the denominator λ·(T_top−T_mains)
+    approaches zero.  A small numerator error (e.g. 0.1 kW standby-loss residual)
+    would then produce a spuriously large inferred V_tap.  The observability guard
+    must clamp such intervals to 0.0, exactly as the EKF does when T_top ≈ T_mains.
+    """
+    from home_optimizer.forecasting.models import DHWTapForecastSettings
+
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-cold-tank.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    c_top_kwh_per_k = 0.11628
+    c_bot_kwh_per_k = 0.11628
+    r_loss_k_per_kw = 462.0
+    lambda_water = LAMBDA_WATER_KWH_PER_M3_K
+
+    # min_tap_temp_diff_k = 5.0 K (default).  T_top − T_mains = 12 − 10 = 2 K < 5 K
+    # → every inference should return 0.0.
+    history_start_utc = datetime(2026, 4, 10, 0, 0, tzinfo=timezone.utc)
+    for step in range(30):
+        valid_at_utc = history_start_utc + timedelta(hours=step)
+        aggregate = aggregate_readings(
+            [
+                _reading(
+                    valid_at_utc - timedelta(minutes=5),
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=8.0,
+                    hp_mode="off",
+                    hp_supply_temperature_c=20.0,
+                    hp_supply_target_temperature_c=20.0,
+                    hp_return_temperature_c=20.0,
+                    hp_flow_lpm=0.0,
+                    hp_electric_power_kw=0.0,
+                    dhw_top_temperature_c=12.0,   # nearly at mains temperature
+                    dhw_bottom_temperature_c=11.0,
+                ),
+                _reading(
+                    valid_at_utc,
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=8.0,
+                    hp_mode="off",
+                    hp_supply_temperature_c=20.0,
+                    hp_supply_target_temperature_c=20.0,
+                    hp_return_temperature_c=20.0,
+                    hp_flow_lpm=0.0,
+                    hp_electric_power_kw=0.0,
+                    dhw_top_temperature_c=12.0,
+                    dhw_bottom_temperature_c=11.0,
+                ),
+            ]
+        )
+        aggregate.update({"electricity_price_mean_eur_per_kwh": 0.25, "electricity_price_last_eur_per_kwh": 0.25, "feed_in_price_eur_per_kwh": 0.0})
+        repository.add_aggregate(aggregate)
+
+    forecaster = DHWTapForecaster()
+    # Calling train directly exercises _infer_v_tap_m3_per_h on cold-tank data.
+    # With all intervals at T_top−T_mains = 2 K < min_tap_temp_diff_k = 5 K, every
+    # sample must be 0.0, resulting in a zero-profile → not trustworthy → None.
+    profile, sample_count = forecaster._build_hourly_profile_from_history(
+        repository=repository,
+        c_top_kwh_per_k=c_top_kwh_per_k,
+        c_bot_kwh_per_k=c_bot_kwh_per_k,
+        r_loss_k_per_kw=r_loss_k_per_kw,
+        lambda_water_kwh_per_m3_k=lambda_water,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
+    )
+    # The profile itself may have been built (enough samples) but all means = 0,
+    # so the peak-to-background quality check rejects it.
+    assert profile is None, (
+        "Cold-tank profile with T_top ≈ T_mains must be rejected: "
+        "all inferred V_tap samples must be 0.0, making peak/background = 0/0 → untrusworthy."
+    )
+
+
 def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_request(tmp_path) -> None:
     """Nightly DHW training must work from the effective runtime tuple, not only from snapshot deltas."""
 
