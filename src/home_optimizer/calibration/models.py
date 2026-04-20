@@ -880,6 +880,14 @@ class AutomaticCalibrationSettings:
     Attributes:
         min_history_hours: Minimum persisted telemetry history before any
             automatic stage runs [h].
+        ufh_active_fit_eta: Whether the automatic active-UFH stage is allowed to
+            fit glazing transmittance ``eta`` [-]. Disabled by default because the
+            real replay database currently offers too little excitation to separate
+            envelope dynamics from solar-gain scaling robustly.
+        ufh_active_fit_internal_gains_heat_fraction: Whether the automatic
+            active-UFH stage is allowed to fit the baseload→heat mapping fraction
+            ``internal_gains_heat_fraction`` [-]. Disabled by default because this
+            nuisance parameter is weakly identifiable on short histories.
         ufh_active_min_selected_segments: Minimum number of selected active-UFH
             replay segments required before the fitted RC tuple is trusted [-].
             One short segment is often not structurally informative enough to
@@ -900,17 +908,29 @@ class AutomaticCalibrationSettings:
         dhw_standby_bound_tolerance_ratio: Relative tolerance used when deciding
             whether the fitted DHW standby ``tau_standby`` / derived ``R_loss`` is
             effectively sitting on its optimizer bounds [-].
+        dhw_active_fit_capacity_split: Whether the automatic active-DHW stage is
+            allowed to fit the top/bottom heat-capacity split [-]. Disabled by
+            default because the current production database drives this parameter
+            to its box constraints, indicating under-identification.
+        dhw_active_fit_temperature_biases: Whether the automatic active-DHW stage
+            is allowed to fit DHW top/bottom sensor biases [°C]. Disabled by
+            default because the current production database does not support stable
+            identification of both sensor biases together with ``R_strat``.
         dhw_active_bound_tolerance_ratio: Relative tolerance used when deciding
             whether the fitted active-DHW ``R_strat`` is effectively sitting on its
             optimizer bounds [-].
     """
 
     min_history_hours: float = DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS
+    ufh_active_fit_eta: bool = False
+    ufh_active_fit_internal_gains_heat_fraction: bool = False
     ufh_active_min_selected_segments: int = DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS
     ufh_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO
     ufh_active_max_r_ro_mismatch_ratio: float = DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO
     dhw_active_min_selected_segments: int = DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS
     dhw_standby_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO
+    dhw_active_fit_capacity_split: bool = False
+    dhw_active_fit_temperature_biases: bool = False
     dhw_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO
 
     def __post_init__(self) -> None:

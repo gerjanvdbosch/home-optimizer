@@ -1000,8 +1000,8 @@ def build_automatic_calibration_snapshot(
                 reference_parameters=ufh_reference_parameters,
                 reference_internal_gains_kw=effective_request.internal_gains_kw,
                 reference_internal_gains_heat_fraction=effective_request.internal_gains_heat_fraction,
-                fit_eta=True,
-                fit_internal_gains_heat_fraction=True,
+                fit_eta=settings.ufh_active_fit_eta,
+                fit_internal_gains_heat_fraction=settings.ufh_active_fit_internal_gains_heat_fraction,
             )
             result = calibrate_ufh_active_from_repository(
                 repository,
@@ -1131,8 +1131,8 @@ def build_automatic_calibration_snapshot(
             )
             dhw_active_settings = build_dhw_active_calibration_settings(
                 reference_parameters=dhw_reference_parameters,
-                fit_capacity_split=True,
-                fit_temperature_biases=True,
+                fit_capacity_split=settings.dhw_active_fit_capacity_split,
+                fit_temperature_biases=settings.dhw_active_fit_temperature_biases,
             )
             result = calibrate_dhw_active_from_repository(
                 repository,

@@ -1249,7 +1249,7 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
 
 
 def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeypatch) -> None:
-    """Automatic calibration must reuse the CLI stage defaults and telemetry replay Δt."""
+    """Automatic calibration must reuse replay/filter defaults while applying automatic-only fit overrides."""
     start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
     repository = SimpleNamespace(
         get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
@@ -1338,7 +1338,7 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     )
     monkeypatch.setattr(
         "home_optimizer.calibration.service.calibrate_cop_from_repository",
-        lambda _repository, settings: SimpleNamespace(
+        lambda _repository, _settings: SimpleNamespace(
             fitted_parameters=HeatPumpCOPParameters(
                 eta_carnot=0.41,
                 delta_T_cond=5.0,
@@ -1370,8 +1370,12 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     assert ufh_settings.reference_parameters.dt_hours == 5.0 / 60.0
     assert ufh_settings.max_gti_w_per_m2 == DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
     assert ufh_settings.reference_parameters.dt_hours != RunRequest.model_validate({}).dt_hours
+    assert ufh_settings.fit_eta is False
+    assert ufh_settings.fit_internal_gains_heat_fraction is False
     assert standby_settings.dt_hours == 5.0 / 60.0
     assert dhw_active_settings.reference_parameters.dt_hours == 5.0 / 60.0
+    assert dhw_active_settings.fit_capacity_split is False
+    assert dhw_active_settings.fit_temperature_biases is False
     assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
     assert snapshot.dhw_standby is not None and snapshot.dhw_standby.succeeded is True
     assert snapshot.dhw_active is not None and snapshot.dhw_active.succeeded is True
@@ -1525,7 +1529,11 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_that_hits_bounds(m
     snapshot = build_automatic_calibration_snapshot(
         repository=cast(TelemetryRepository, cast(object, repository)),
         base_request=RunRequest.model_validate({}),
-        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+        settings=AutomaticCalibrationSettings(
+            min_history_hours=12.0,
+            ufh_active_fit_eta=True,
+            ufh_active_fit_internal_gains_heat_fraction=True,
+        ),
     )
 
     assert snapshot is not None
@@ -1598,7 +1606,10 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_with_eta_near_zero
     snapshot = build_automatic_calibration_snapshot(
         repository=cast(TelemetryRepository, cast(object, repository)),
         base_request=RunRequest.model_validate({}),
-        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+        settings=AutomaticCalibrationSettings(
+            min_history_hours=12.0,
+            dhw_active_fit_capacity_split=True,
+        ),
     )
 
     assert snapshot is not None
@@ -1670,7 +1681,11 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_with_too_few_segme
     snapshot = build_automatic_calibration_snapshot(
         repository=cast(TelemetryRepository, cast(object, repository)),
         base_request=RunRequest.model_validate({}),
-        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+        settings=AutomaticCalibrationSettings(
+            min_history_hours=12.0,
+            dhw_active_fit_capacity_split=True,
+            dhw_active_fit_temperature_biases=True,
+        ),
     )
 
     assert snapshot is not None
