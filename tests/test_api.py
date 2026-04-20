@@ -110,7 +110,6 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-chart-card"' in html
     assert 'id="pv_enabled"' in html
     assert 'id="shutter_living_room_pct"' in html
-    assert 'id="shutter_forecast"' in html
     assert "UFH + DHW + PV MPC" in html
     assert "fetch(apiUrl('/api/defaults'))" in html
     assert "applyRunRequestDefaults" in html

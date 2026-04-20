@@ -123,11 +123,10 @@ Praktische tips
 Testing
 -------
 
-Run de CLI-gerelateerde tests:
+Run de tests:
 
 ```bash
-pytest tests/test_local_runner.py -q
-pytest tests/test_calibration_cli.py -q
+pytest -q
 ```
 
 Debug en logs
