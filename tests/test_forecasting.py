@@ -510,6 +510,11 @@ def test_dhw_tap_forecaster_rejects_flat_positive_background_profile(
     ``R_loss`` or a sensor correction) instead of representing real sparse tap
     events. Passing such a profile to the MPC would make it keep the tank at
     ``T_dhw_min`` almost continuously.
+
+    The guard uses a peak-to-background (median) ratio.  A perfectly flat profile
+    (all 24 hours identical) yields ratio = 1.0, which is below the minimum
+    threshold of 2.0, so the profile is rejected and ``predict_from_repository``
+    returns ``None``.
     """
 
     database_url = f"sqlite:///{tmp_path / 'dhw-tap-flat-profile.sqlite3'}"
@@ -565,6 +570,84 @@ def test_dhw_tap_forecaster_rejects_flat_positive_background_profile(
     )
 
     assert prediction is None
+
+
+def test_dhw_tap_forecaster_accepts_sparse_evening_shower_profile(
+    tmp_path,
+) -> None:
+    """A sparse evening-shower profile must pass the peak-to-background quality check.
+
+    This is the regression test for the previous ``mean/peak`` guard which was too
+    aggressive: a profile with peak=0.10 m³/h at 22:00 and background=0.02 m³/h
+    across the remaining 23 hours has mean/peak ≈ 0.33, which exceeded the old
+    threshold of 0.30 and caused silent rejection.  The new ``peak/median`` ratio
+    for this profile is 0.10 / 0.02 = 5.0 >> 2.0, so it is correctly accepted.
+    """
+
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-sparse-profile.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    future_fetched_at_utc = datetime(2026, 4, 15, 22, 0, tzinfo=timezone.utc)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 0.0, 0.0, 0.0],
+    )
+    rows = repository.get_latest_forecast_batch()
+
+    # Build a realistic sparse profile: peak at 22:00, low background elsewhere.
+    hourly_means = np.full(24, 0.02, dtype=float)
+    hourly_means[22] = 0.10  # evening shower peak
+    sparse_profile = _PersistedDHWTapProfile(
+        hourly_mean_m3_per_h=hourly_means,
+        hourly_sample_count=np.full(24, 4, dtype=int),
+    )
+
+    forecaster = DHWTapForecaster()
+    physical_signature = forecaster._physical_signature(
+        c_top_kwh_per_k=0.11628,
+        c_bot_kwh_per_k=0.11628,
+        r_loss_k_per_kw=462.0,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
+    )
+    metadata = PersistedRegressorArtifactMetadata(
+        model_version=1,
+        trained_at_utc=future_fetched_at_utc,
+        sample_count=int(np.sum(sparse_profile.hourly_sample_count)),
+        settings_signature=forecaster._settings_signature(physical_signature=physical_signature),
+        training_fingerprint=repository.forecast_training_fingerprint(),
+    )
+    forecaster._persist_artifact(
+        artifact_path=repository.forecast_artifact_path("dhw_tap_profile"),
+        profile=sparse_profile,
+        metadata=metadata,
+    )
+    DHWTapForecaster.clear_model_cache()
+    prediction = forecaster.predict_from_repository(
+        repository=repository,
+        horizon_valid_at_utc=[row.valid_at_utc for row in rows[:4]],
+        c_top_kwh_per_k=0.11628,
+        c_bot_kwh_per_k=0.11628,
+        r_loss_k_per_kw=462.0,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
+    )
+
+    # Profile must be accepted — the MPC sees time-varying tap demand.
+    assert prediction is not None
+    tap_forecast = np.asarray(prediction, dtype=float)
+    assert tap_forecast.shape == (4,)
+    assert np.all(tap_forecast >= 0.0)
+    # Row at 22:00 must carry the shower peak; background hours carry 0.02 m³/h.
+    shower_hour_indices = [i for i, row in enumerate(rows[:4]) if row.valid_at_utc.hour == 22]
+    if shower_hour_indices:
+        assert float(tap_forecast[shower_hour_indices[0]]) == pytest.approx(0.10, abs=1e-6)
 
 
 def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_request(tmp_path) -> None:

@@ -35,7 +35,7 @@ DEFAULT_DHW_TAP_MIN_TRAINING_SAMPLES: int = 24
 DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR: int = 2
 DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS: float = 2.0
 DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H: float = 0.2
-DEFAULT_DHW_TAP_MAX_HOURLY_MEAN_TO_PEAK_RATIO: float = 0.30
+DEFAULT_DHW_TAP_MIN_PEAK_TO_BACKGROUND_RATIO: float = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,13 +96,33 @@ class ForecastServiceSettings:
 
 @dataclass(frozen=True, slots=True)
 class DHWTapForecastSettings:
-    """Hyperparameters and fail-fast limits for the history-based DHW tap forecaster."""
+    """Hyperparameters and fail-fast limits for the history-based DHW tap forecaster.
+
+    Attributes:
+        min_training_samples: Minimum total inferred ``V_tap`` samples [-] required
+            before a recurring profile is accepted for training.
+        min_samples_per_hour: Minimum samples per UTC hour [-] required before that
+            hour's mean is used in the forecast; under-sampled hours return 0.0.
+        max_history_gap_hours: Maximum allowed time gap [h] between consecutive
+            telemetry buckets that still counts as one continuous sequence.
+        max_implied_tap_m3_per_h: Physical upper clamp [m³/h] applied to each
+            individually inferred ``V_tap`` sample before hourly aggregation.
+        min_peak_to_background_ratio: Minimum ratio of the hourly-profile peak to the
+            median of all sampled hours [-]. Profiles whose peak is not at least this
+            factor above the median background are treated as flat calibration
+            artifacts (caused by ``R_loss`` or sensor bias errors) and rejected.
+            A value of 2.0 means the peak hour must have at least twice the flow
+            of the typical background hour.  A truly flat uniform bias yields a
+            ratio of 1.0 and is always rejected; a sparse evening shower
+            (e.g. 22:00 with 0.10 m³/h against a 0.02 m³/h background) yields
+            a ratio of ~5.0 and is always accepted.
+    """
 
     min_training_samples: int = DEFAULT_DHW_TAP_MIN_TRAINING_SAMPLES
     min_samples_per_hour: int = DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR
     max_history_gap_hours: float = DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS
     max_implied_tap_m3_per_h: float = DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H
-    max_hourly_mean_to_peak_ratio: float = DEFAULT_DHW_TAP_MAX_HOURLY_MEAN_TO_PEAK_RATIO
+    min_peak_to_background_ratio: float = DEFAULT_DHW_TAP_MIN_PEAK_TO_BACKGROUND_RATIO
 
     def __post_init__(self) -> None:
         if self.min_training_samples <= 0:
@@ -113,8 +133,8 @@ class DHWTapForecastSettings:
             raise ValueError("max_history_gap_hours must be strictly positive.")
         if self.max_implied_tap_m3_per_h <= 0.0:
             raise ValueError("max_implied_tap_m3_per_h must be strictly positive.")
-        if not 0.0 < self.max_hourly_mean_to_peak_ratio <= 1.0:
-            raise ValueError("max_hourly_mean_to_peak_ratio must lie in (0, 1].")
+        if self.min_peak_to_background_ratio < 1.0:
+            raise ValueError("min_peak_to_background_ratio must be >= 1.0.")
 
 
 @dataclass(frozen=True, slots=True)

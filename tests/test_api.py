@@ -84,7 +84,7 @@ def test_simulate_supports_combined_mode_through_unified_mpc() -> None:
             "pv_enabled": True,
             "pv_peak_kw": 3.0,
             "horizon_hours": 8,
-            "dhw_v_tap_m3_per_h": 0.015,
+            "dhw_v_tap_forecast": [0.015] * 8,
         },
     )
 

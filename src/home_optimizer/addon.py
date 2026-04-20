@@ -675,7 +675,6 @@ def main() -> None:
             "dhw_T_legionella": opts.mpc_dhw_T_legionella,
             "dhw_legionella_period_steps": _defaults.dhw_legionella_period_steps,
             "dhw_legionella_duration_steps": _defaults.dhw_legionella_duration_steps,
-            "dhw_v_tap_m3_per_h": _defaults.dhw_v_tap_m3_per_h,
             "dhw_t_mains_c": _defaults.dhw_t_mains_c,
             "dhw_t_amb_c": _defaults.dhw_t_amb_c,
             # ── Shared WP electrical budget ──────────────────────────────────

@@ -263,7 +263,7 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
 
 @pytest.mark.filterwarnings("ignore:Solution may be inaccurate:UserWarning")
 def test_optimizer_does_not_preheat_dhw_above_minimum_just_because_pv_is_available() -> None:
-    """Sunny surplus hours must not trigger DHW heating while T_top is still above ``dhw_T_min``.
+    """Sunny surplus hours must not trigger DHW heating while T_top is still above the ``dhw_T_min``.
 
     This regression covers the user-facing failure mode where the convex MPC used
     free PV hours to opportunistically charge the tank even though the top layer
@@ -286,7 +286,6 @@ def test_optimizer_does_not_preheat_dhw_above_minimum_just_because_pv_is_availab
             "dhw_T_top_init": 55.0,
             "dhw_T_bot_init": 50.0,
             "dhw_T_min": 50.0,
-            "dhw_v_tap_m3_per_h": 0.0,
             "dhw_v_tap_forecast": [0.0, 0.0, 0.0, 0.0],
         }
     )
@@ -307,7 +306,6 @@ def test_optimizer_request_validation_accepts_dhw_high_tap_flow_with_exact_zoh()
             "dhw_C_bot": 0.05,
             "dhw_R_strat": 100.0,
             "dhw_R_loss": 200.0,
-            "dhw_v_tap_m3_per_h": 0.2,
         }
     )
 
@@ -586,7 +584,6 @@ def test_optimizer_build_dhw_forecast_prefers_explicit_tap_flow_forecast() -> No
             "horizon_hours": horizon_steps,
             "outdoor_temperature_c": 8.0,
             "t_out_forecast": [8.0] * horizon_steps,
-            "dhw_v_tap_m3_per_h": 0.0,
             "dhw_v_tap_forecast": [0.0, 0.0, 0.03, 0.04],
         }
     )

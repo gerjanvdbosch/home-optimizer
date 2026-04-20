@@ -399,20 +399,13 @@ class RunRequest(BaseModel):
     dhw_legionella_duration_steps: int = Field(
         1, ge=1, le=4, description="Min consecutive steps at T_legionella for legionella kill"
     )
-    dhw_v_tap_m3_per_h: float = Field(
-        0.0,
-        ge=0.0,
-        le=0.2,
-        description=(
-            "Scalar fallback tap-water flow Vdot_tap [m^3/h]. Used only when no "
-            "horizon-wide dhw_v_tap_forecast is available."
-        ),
-    )
     dhw_v_tap_forecast: list[float] | None = Field(
         None,
         description=(
-            "Hourly DHW tap-flow forecast [m³/h], length N. When provided, this array "
-            "overrides the scalar dhw_v_tap_m3_per_h for every MPC step."
+            "Hourly DHW tap-flow forecast Vdot_tap [m³/h], length N. "
+            "Provided by the DHW tap forecaster once enough history is available. "
+            "When absent the MPC assumes zero tap demand (conservative cold-start). "
+            "Can also be set explicitly for simulation or testing."
         ),
     )
     dhw_t_mains_c: float = Field(
@@ -522,7 +515,7 @@ def validate_run_request_physics(req: RunRequest) -> None:
                 lambda_water=req.dhw_lambda_water_kwh_per_m3k,
             )
         )
-        dhw_model.state_matrices(req.dhw_v_tap_m3_per_h)
+        dhw_model.state_matrices(0.0)
 
 
 def merge_run_request_updates(base_request: RunRequest, updates: dict[str, object]) -> RunRequest:
@@ -1289,11 +1282,14 @@ class Optimizer:
         # During a legionella cycle the effective supply temp would be T_legionella;
         # the legionella scheduler adjusts the constraint, not the COP model here.
         cop_dhw_k = cop_model.cop_dhw(t_out_arr, t_dhw_supply=req.dhw_T_min)
+        # When no forecast is available from the DHW tap forecaster (cold start or
+        # insufficient history), assume zero tap demand: conservative but physically
+        # correct — the MPC will not pre-heat unnecessarily.
         v_tap_arr = Optimizer._materialize_horizon_array(
             name="dhw_v_tap_forecast",
             horizon_steps=N,
             values=req.dhw_v_tap_forecast,
-            fallback_scalar=req.dhw_v_tap_m3_per_h,
+            fallback_scalar=0.0,
         )
         return DHWForecastHorizon(
             v_tap_m3_per_h=v_tap_arr,

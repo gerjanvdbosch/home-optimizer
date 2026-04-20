@@ -446,8 +446,8 @@
         <input type="number" id="dhw_T_top_init" value="55.0" min="20" max="85" step="0.5" oninput="upd('vDhwTtop', this.value)" />
       </div>
       <div class="field">
-        <label>T_bot init [&deg;C] <span id="vDhwTbot">45.0</span></label>
-        <input type="number" id="dhw_T_bot_init" value="45.0" min="15" max="80" step="0.5" oninput="upd('vDhwTbot', this.value)" />
+        <label>T_bot init [&deg;C] <span id="vDhwTbot">55.0</span></label>
+        <input type="number" id="dhw_T_bot_init" value="55.0" min="15" max="80" step="0.5" oninput="upd('vDhwTbot', this.value)" />
       </div>
       <div class="field">
         <label>P_DHW,max [kW therm] <span id="vDhwPmax">3.0</span></label>
@@ -458,8 +458,8 @@
         <input type="number" id="dhw_delta_P_max" value="1.0" min="0.1" max="10" step="0.1" oninput="upd('vDhwDPmax', this.value)" />
       </div>
       <div class="field">
-        <label>T_DHW,min [&deg;C] <span id="vDhwTmin">50.0</span></label>
-        <input type="number" id="dhw_T_min" value="50.0" min="10" max="70" step="0.5" oninput="upd('vDhwTmin', this.value)" />
+        <label>T_DHW,min [&deg;C] <span id="vDhwTmin">30.0</span></label>
+        <input type="number" id="dhw_T_min" value="30.0" min="10" max="70" step="0.5" oninput="upd('vDhwTmin', this.value)" />
       </div>
       <div class="field">
         <label>T_legionella [&deg;C] <span id="vDhwTleg">60.0</span></label>
@@ -474,8 +474,8 @@
         <input type="number" id="dhw_legionella_duration_steps" value="1" min="1" max="4" step="1" oninput="upd('vDhwLegD', this.value)" />
       </div>
       <div class="field">
-        <label>V&#775;_tap [m&sup3;/h] <span id="vDhwVtap">0.01</span></label>
-        <input type="number" id="dhw_v_tap_m3_per_h" value="0.01" min="0" max="0.2" step="0.005" oninput="upd('vDhwVtap', this.value)" />
+        <label>V&#775;_tap (flat, sim) [m&sup3;/h] <span id="vDhwVtap">0.01</span></label>
+        <input type="number" id="dhw_v_tap_sim" value="0.01" min="0" max="0.2" step="0.005" oninput="upd('vDhwVtap', this.value)" />
       </div>
       <div class="field">
         <label>T_mains [&deg;C] <span id="vDhwTmains">10.0</span></label>
@@ -603,7 +603,7 @@
     dhw_T_legionella: 'vDhwTleg',
     dhw_legionella_period_steps: 'vDhwLegP',
     dhw_legionella_duration_steps: 'vDhwLegD',
-    dhw_v_tap_m3_per_h: 'vDhwVtap',
+    dhw_v_tap_sim: 'vDhwVtap',
     dhw_t_mains_c: 'vDhwTmains',
     dhw_t_amb_c: 'vDhwTamb',
     P_hp_max_elec: 'vPhpMaxElec',
@@ -707,7 +707,9 @@
       dhw_T_min: n('dhw_T_min'), dhw_T_legionella: n('dhw_T_legionella'),
       dhw_legionella_period_steps: i('dhw_legionella_period_steps'),
       dhw_legionella_duration_steps: i('dhw_legionella_duration_steps'),
-      dhw_v_tap_m3_per_h: n('dhw_v_tap_m3_per_h'),
+      // Expand the scalar V_tap slider into a flat horizon-length forecast array so
+      // the backend sees dhw_v_tap_forecast (the only accepted field) without a scalar.
+      dhw_v_tap_forecast: Array(i('horizon_hours')).fill(n('dhw_v_tap_sim')),
       dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),
       P_hp_max_elec: n('P_hp_max_elec'),
       eta_carnot: n('eta_carnot'),

@@ -108,16 +108,25 @@ class DHWTapForecaster:
         """Return whether a recurring DHW profile is informative enough for runtime MPC use.
 
         The hour-of-day forecaster estimates ``V_tap`` indirectly from the DHW
-        total-energy balance. Small bias errors in ``R_loss`` / sensor corrections can
-        therefore create a *flat positive floor* across most hours even when the real
-        demand is sparse. Feeding such a profile into the MPC makes it maintain
-        ``T_top`` almost continuously, which is the wrong operational response to a
-        forecasting artifact.
+        total-energy balance. Small bias errors in ``R_loss`` or sensor corrections can
+        create a *flat positive floor* across all hours, even when the real demand is
+        sparse (e.g. a single evening shower at 22:00).  Feeding such an artifact to
+        the MPC makes it maintain ``T_top`` almost continuously, which wastes energy.
 
-        This guard accepts only profiles whose retained hourly means exhibit enough
-        contrast between the daily peak and the daily mean. A profile whose mean is
-        too close to its peak is treated as a model-mismatch artifact and rejected so
-        runtime control safely falls back to the scalar DHW draw setting.
+        The guard uses a **peak-to-background ratio**:
+
+            ratio = peak(sampled hourly means) / median(sampled hourly means)
+
+        A truly flat uniform bias yields ratio ≈ 1.0 → rejected.
+        A sparse tap event (e.g. 22:00 peak = 0.10 m³/h, background median = 0.02)
+        yields ratio ≈ 5.0 → accepted.
+
+        The ``mean/peak`` approach used previously was fragile: with realistic noise
+        (background ≈ 0.03, peak ≈ 0.10, 24 hours) the mean/peak ratio ≈ 0.33,
+        which exceeded the old threshold of 0.30 and silently rejected valid profiles.
+        The median-based ratio is immune to this: the median of a sparse-tap profile
+        is dominated by the many low-background hours, so the ratio clearly separates
+        real demand from calibration artifacts.
 
         Args:
             profile: Persisted recurring hourly tap profile [m³/h].
@@ -131,18 +140,29 @@ class DHWTapForecaster:
             return False
 
         sampled_hourly_means = profile.hourly_mean_m3_per_h[sampled_hour_mask]
-        peak_hourly_mean_m3_per_h = float(np.max(sampled_hourly_means))
-        if peak_hourly_mean_m3_per_h <= 0.0:
+        peak_m3_per_h = float(np.max(sampled_hourly_means))
+        if peak_m3_per_h <= 0.0:
+            # All sampled hours are zero → no detectable tap demand at all.
             return False
 
-        mean_hourly_mean_m3_per_h = float(np.mean(sampled_hourly_means))
-        hourly_mean_to_peak_ratio = mean_hourly_mean_m3_per_h / peak_hourly_mean_m3_per_h
-        if hourly_mean_to_peak_ratio > self._settings.max_hourly_mean_to_peak_ratio:
+        # Use the median as the background level; it is robust against a single
+        # large peak hour and represents "what a typical non-shower hour looks like".
+        background_m3_per_h = float(np.median(sampled_hourly_means))
+
+        if background_m3_per_h <= 0.0:
+            # Median is zero: at least half the hours have no inferred tap flow,
+            # which means the profile is sparse and the peak is clearly real.
+            return True
+
+        peak_to_background_ratio = peak_m3_per_h / background_m3_per_h
+        if peak_to_background_ratio < self._settings.min_peak_to_background_ratio:
             log.info(
                 "Rejecting DHW tap profile because it is too flat for runtime use: "
-                "mean/peak=%.4f > %.4f.",
-                hourly_mean_to_peak_ratio,
-                self._settings.max_hourly_mean_to_peak_ratio,
+                "peak/background=%.3f < %.3f (peak=%.4f m³/h, background_median=%.4f m³/h).",
+                peak_to_background_ratio,
+                self._settings.min_peak_to_background_ratio,
+                peak_m3_per_h,
+                background_m3_per_h,
             )
             return False
         return True
@@ -430,6 +450,7 @@ class DHWTapForecaster:
             self._settings.min_samples_per_hour,
             self._settings.max_history_gap_hours,
             self._settings.max_implied_tap_m3_per_h,
+            self._settings.min_peak_to_background_ratio,
             *physical_signature,
         )
 
