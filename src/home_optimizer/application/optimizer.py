@@ -400,7 +400,20 @@ class RunRequest(BaseModel):
         1, ge=1, le=4, description="Min consecutive steps at T_legionella for legionella kill"
     )
     dhw_v_tap_m3_per_h: float = Field(
-        0.01, ge=0.0, le=0.2, description="Average tap-water flow Vdot_tap [m^3/h]"
+        0.0,
+        ge=0.0,
+        le=0.2,
+        description=(
+            "Scalar fallback tap-water flow Vdot_tap [m^3/h]. Used only when no "
+            "horizon-wide dhw_v_tap_forecast is available."
+        ),
+    )
+    dhw_v_tap_forecast: list[float] | None = Field(
+        None,
+        description=(
+            "Hourly DHW tap-flow forecast [m³/h], length N. When provided, this array "
+            "overrides the scalar dhw_v_tap_m3_per_h for every MPC step."
+        ),
     )
     dhw_t_mains_c: float = Field(
         10.0, ge=0.0, le=25.0, description="Cold mains-water temperature T_mains [degC]"
@@ -734,6 +747,7 @@ class Optimizer:
         dt = thermal_params.dt_hours
         pv_kw = ufh_forecast.pv_kw
         prices = ufh_forecast.price_eur_per_kwh
+        feed_in_prices = ufh_forecast.feed_in_price_eur_per_kwh
 
         # ── Step 5: Optional DHW setup ───────────────────────────────────
         dhw_model: DHWModel | None = None
@@ -801,8 +815,10 @@ class Optimizer:
         p_ufh_elec = p_ufh / cop_ufh_arr
         p_dhw_elec = p_dhw / cop_dhw_arr
         assert pv_kw is not None
-        p_import = np.maximum(p_ufh_elec + p_dhw_elec - pv_kw, 0.0)
-        total_cost = float(np.sum(p_import * prices * dt))
+        net_grid_power_kw = p_ufh_elec + p_dhw_elec - pv_kw
+        p_import = np.maximum(net_grid_power_kw, 0.0)
+        p_export = np.maximum(-net_grid_power_kw, 0.0)
+        total_cost = float(np.sum((p_import * prices - p_export * feed_in_prices) * dt))
         ufh_energy = float(np.sum(p_ufh) * dt)
         dhw_energy = float(np.sum(p_dhw) * dt)
 
@@ -1047,6 +1063,7 @@ class Optimizer:
         # Build the configured price model (flat / dual / nordpool).
         price_model: BasePriceModel = build_price_model(req.price_config)
         prices = price_model.prices(start_hour, N)
+        feed_in_prices = price_model.feed_in_prices(start_hour, N)
 
         # ── Outdoor temperature ──────────────────────────────────────────
         # Use the explicit forecast when available; otherwise broadcast the scalar
@@ -1098,6 +1115,7 @@ class Optimizer:
             gti_w_per_m2=gti,
             internal_gains_kw=internal_gains,
             price_eur_per_kwh=prices,
+            feed_in_price_eur_per_kwh=feed_in_prices,
             room_temperature_ref_c=np.full(N + 1, req.T_ref),
             pv_kw=pv,
             cop_ufh_k=cop_ufh_k,
@@ -1233,8 +1251,14 @@ class Optimizer:
         # During a legionella cycle the effective supply temp would be T_legionella;
         # the legionella scheduler adjusts the constraint, not the COP model here.
         cop_dhw_k = cop_model.cop_dhw(t_out_arr, t_dhw_supply=req.dhw_T_min)
+        v_tap_arr = Optimizer._materialize_horizon_array(
+            name="dhw_v_tap_forecast",
+            horizon_steps=N,
+            values=req.dhw_v_tap_forecast,
+            fallback_scalar=req.dhw_v_tap_m3_per_h,
+        )
         return DHWForecastHorizon(
-            v_tap_m3_per_h=np.full(N, req.dhw_v_tap_m3_per_h),
+            v_tap_m3_per_h=v_tap_arr,
             t_mains_c=np.full(N, req.dhw_t_mains_c),
             t_amb_c=np.full(N, req.dhw_t_amb_c),
             legionella_required=np.zeros(N, dtype=bool),

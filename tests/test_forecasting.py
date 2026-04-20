@@ -19,24 +19,31 @@ def _reading(
     shutter_living_room_pct: float,
     outdoor_temperature_c: float,
     household_elec_power_kw: float = 0.0,
+    hp_mode: str = "ufh",
+    hp_supply_temperature_c: float = 31.0,
+    hp_supply_target_temperature_c: float = 33.0,
+    hp_return_temperature_c: float = 27.0,
+    hp_flow_lpm: float = 9.0,
+    hp_electric_power_kw: float = 2.0,
+    dhw_top_temperature_c: float = 52.0,
+    dhw_bottom_temperature_c: float = 45.0,
 ) -> LiveReadings:
     """Create one fully populated telemetry sample for forecasting tests."""
-    hp_electric_power_kw = 2.0
     pv_output_kw = 0.6
     return LiveReadings(
         room_temperature_c=20.5,
         outdoor_temperature_c=outdoor_temperature_c,
-        hp_supply_temperature_c=31.0,
-        hp_supply_target_temperature_c=33.0,
-        hp_return_temperature_c=27.0,
-        hp_flow_lpm=9.0,
+        hp_supply_temperature_c=hp_supply_temperature_c,
+        hp_supply_target_temperature_c=hp_supply_target_temperature_c,
+        hp_return_temperature_c=hp_return_temperature_c,
+        hp_flow_lpm=hp_flow_lpm,
         hp_electric_power_kw=hp_electric_power_kw,
-        hp_mode="ufh",
+        hp_mode=hp_mode,
         p1_net_power_kw=household_elec_power_kw + hp_electric_power_kw - pv_output_kw,
         pv_output_kw=pv_output_kw,
         thermostat_setpoint_c=20.5,
-        dhw_top_temperature_c=52.0,
-        dhw_bottom_temperature_c=45.0,
+        dhw_top_temperature_c=dhw_top_temperature_c,
+        dhw_bottom_temperature_c=dhw_bottom_temperature_c,
         shutter_living_room_pct=shutter_living_room_pct,
         defrost_active=False,
         booster_heater_active=False,
@@ -199,6 +206,78 @@ def _populate_baseload_history(repository: TelemetryRepository, *, start_utc: da
         )
 
 
+def _synthetic_dhw_tap_temperatures(valid_at_utc: datetime) -> tuple[float, float]:
+    """Return a recurring DHW temperature profile with evening draw around 22:00–23:00 UTC."""
+    hour = valid_at_utc.hour
+    if hour == 22:
+        return 48.0, 41.0
+    if hour == 23:
+        return 44.0, 38.0
+    if hour == 0:
+        return 43.5, 38.0
+    return 54.0, 46.0
+
+
+def _populate_dhw_tap_history(repository: TelemetryRepository, *, start_utc: datetime, hours: int) -> None:
+    """Populate telemetry history with a recurring evening DHW draw signature."""
+    for step in range(hours):
+        valid_at_utc = start_utc + timedelta(hours=step)
+        dhw_top_temperature_c, dhw_bottom_temperature_c = _synthetic_dhw_tap_temperatures(valid_at_utc)
+        aggregate = aggregate_readings(
+            [
+                _reading(
+                    valid_at_utc - timedelta(minutes=5),
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=8.0,
+                    household_elec_power_kw=0.4,
+                    hp_mode="off",
+                    hp_supply_temperature_c=20.0,
+                    hp_supply_target_temperature_c=20.0,
+                    hp_return_temperature_c=20.0,
+                    hp_flow_lpm=0.0,
+                    hp_electric_power_kw=0.0,
+                    dhw_top_temperature_c=dhw_top_temperature_c,
+                    dhw_bottom_temperature_c=dhw_bottom_temperature_c,
+                ),
+                _reading(
+                    valid_at_utc,
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=8.0,
+                    household_elec_power_kw=0.4,
+                    hp_mode="off",
+                    hp_supply_temperature_c=20.0,
+                    hp_supply_target_temperature_c=20.0,
+                    hp_return_temperature_c=20.0,
+                    hp_flow_lpm=0.0,
+                    hp_electric_power_kw=0.0,
+                    dhw_top_temperature_c=dhw_top_temperature_c,
+                    dhw_bottom_temperature_c=dhw_bottom_temperature_c,
+                ),
+            ]
+        )
+        aggregate.update(
+            {
+                "electricity_price_mean_eur_per_kwh": 0.25,
+                "electricity_price_last_eur_per_kwh": 0.25,
+                "feed_in_price_eur_per_kwh": 0.0,
+            }
+        )
+        repository.add_aggregate(aggregate)
+        repository.bulk_add_forecast_snapshots(
+            [
+                {
+                    "fetched_at_utc": valid_at_utc,
+                    "valid_at_utc": valid_at_utc,
+                    "step_k": 0,
+                    "dt_hours": 1.0,
+                    "t_out_c": 8.0,
+                    "gti_w_per_m2": 0.0,
+                    "gti_pv_w_per_m2": 0.0,
+                }
+            ]
+        )
+
+
 def _train_persisted_shutter_model(repository: TelemetryRepository) -> object:
     """Train and persist one shutter artifact for runtime inference tests."""
     metadata = ShutterForecaster().train_and_persist_from_repository(repository=repository)
@@ -276,6 +355,47 @@ def test_forecast_service_returns_no_shutter_override_without_enough_history(tmp
     )
 
     assert overrides == {}
+
+
+def test_forecast_service_builds_dhw_tap_forecast_from_history(tmp_path) -> None:
+    """The runtime forecast service must learn recurring DHW draw hours from telemetry history."""
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 10, 0, 0, tzinfo=timezone.utc)
+    _populate_dhw_tap_history(repository, start_utc=history_start_utc, hours=72)
+    future_fetched_at_utc = history_start_utc + timedelta(hours=92)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 0.0, 0.0, 0.0],
+    )
+
+    rows = repository.get_latest_forecast_batch()
+    overrides = ForecastService().build_missing_overrides(
+        request_data=RunRequest.model_validate(
+            {
+                "horizon_hours": 4,
+                "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+                "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+                "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+                "dhw_enabled": True,
+                "dhw_C_top": 0.11628,
+                "dhw_C_bot": 0.11628,
+                "dhw_R_loss": 462.0,
+            }
+        ).model_dump(mode="python"),
+        repository=repository,
+        weather_rows=rows[:4],
+    )
+
+    assert "dhw_v_tap_forecast" in overrides
+    tap_forecast = np.asarray(overrides["dhw_v_tap_forecast"], dtype=float)
+    assert tap_forecast.shape == (4,)
+    assert np.all(tap_forecast >= 0.0)
+    assert [row.valid_at_utc.hour for row in rows[:4]] == [20, 21, 22, 23]
+    assert float(np.max(tap_forecast[2:4])) > float(np.max(tap_forecast[:2]))
 
 
 def test_optimizer_scheduled_input_injects_ml_shutter_forecast(tmp_path) -> None:

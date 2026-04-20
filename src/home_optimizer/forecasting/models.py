@@ -31,6 +31,10 @@ DEFAULT_BASELOAD_RANDOM_STATE: int = 11
 DEFAULT_BASELOAD_TREE_COUNT: int = 64
 DEFAULT_BASELOAD_TREE_MAX_DEPTH: int = 6
 DEFAULT_BASELOAD_MIN_SAMPLES_LEAF: int = 2
+DEFAULT_DHW_TAP_MIN_TRAINING_SAMPLES: int = 24
+DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR: int = 2
+DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS: float = 2.0
+DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H: float = 0.2
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +83,34 @@ class ForecastServiceSettings:
     """Top-level settings for the runtime ML forecasting service.
 
     Attributes:
+        dhw_tap: Settings for the recurring DHW tap-forecast provider.
         shutter: Settings for the current shutter-forecast provider.
         baseload: Settings for the baseload forecast provider.
     """
 
+    dhw_tap: "DHWTapForecastSettings" = field(default_factory=lambda: DHWTapForecastSettings())
     shutter: ShutterForecastSettings = field(default_factory=ShutterForecastSettings)
     baseload: "BaseloadForecastSettings" = field(default_factory=lambda: BaseloadForecastSettings())
+
+
+@dataclass(frozen=True, slots=True)
+class DHWTapForecastSettings:
+    """Hyperparameters and fail-fast limits for the history-based DHW tap forecaster."""
+
+    min_training_samples: int = DEFAULT_DHW_TAP_MIN_TRAINING_SAMPLES
+    min_samples_per_hour: int = DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR
+    max_history_gap_hours: float = DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS
+    max_implied_tap_m3_per_h: float = DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H
+
+    def __post_init__(self) -> None:
+        if self.min_training_samples <= 0:
+            raise ValueError("min_training_samples must be strictly positive.")
+        if self.min_samples_per_hour <= 0:
+            raise ValueError("min_samples_per_hour must be strictly positive.")
+        if self.max_history_gap_hours <= 0.0:
+            raise ValueError("max_history_gap_hours must be strictly positive.")
+        if self.max_implied_tap_m3_per_h <= 0.0:
+            raise ValueError("max_implied_tap_m3_per_h must be strictly positive.")
 
 
 @dataclass(frozen=True, slots=True)

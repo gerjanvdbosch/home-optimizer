@@ -446,6 +446,7 @@ class MPCController:
         dt = self.ufh_model.parameters.dt_hours
         refs = ufh_forecast.room_temperature_ref_c
         prices = ufh_forecast.price_eur_per_kwh
+        feed_in_prices = ufh_forecast.feed_in_price_eur_per_kwh
         pv = ufh_forecast.pv_kw
         rho_ufh = p_ufh.rho_factor * max(p_ufh.Q_c, 1.0)
         has_pv = bool(np.any(pv > 0.0))
@@ -473,6 +474,7 @@ class MPCController:
         u_ufh = cp.Variable(N)
         u_dhw = cp.Variable(N) if self._dhw_enabled else None
         P_import = cp.Variable(N, nonneg=True) if has_pv else None
+        P_export = cp.Variable(N, nonneg=True) if has_pv else None
         s_lo_ufh = cp.Variable(N, nonneg=True)
         s_hi_ufh = cp.Variable(N, nonneg=True)
         s_dhw = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
@@ -508,9 +510,11 @@ class MPCController:
                 P_elec_k = P_ufh_elec_k
 
             if has_pv:
-                assert P_import is not None
-                # Net grid import = electrical HP demand minus on-site PV generation.
+                assert P_import is not None and P_export is not None
+                # Net grid import/export split. Export carries an opportunity cost via
+                # the configured feed-in tariff, so PV surplus is not treated as free heat.
                 constraints.append(P_import[k] >= P_elec_k - float(pv[k]))
+                constraints.append(P_export[k] >= float(pv[k]) - P_elec_k)
 
             # UFH actuator bounds (thermal) and ramp-rate
             constraints.extend([u_ufh[k] >= 0.0, u_ufh[k] <= p_ufh.P_max])
@@ -548,7 +552,11 @@ class MPCController:
             #   - Comfort quadratic penalty on room temperature deviation
             #   - Regularisation on UFH thermal power (damps spikes)
             #   - Soft-constraint penalties
-            energy_cost_k = prices[k] * P_import[k] * dt if has_pv else prices[k] * P_elec_k * dt  # type: ignore[index]
+            energy_cost_k = (
+                prices[k] * P_import[k] * dt - feed_in_prices[k] * P_export[k] * dt  # type: ignore[index]
+                if has_pv
+                else prices[k] * P_elec_k * dt
+            )
             cost_k = (
                 p_ufh.Q_c * cp.square(x[0, k] - refs[k])
                 + energy_cost_k

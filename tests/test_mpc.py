@@ -490,6 +490,35 @@ def test_optimizer_build_ufh_forecast_prefers_explicit_shutter_forecast() -> Non
     )
 
 
+def test_optimizer_build_ufh_forecast_includes_feed_in_prices_for_dual_tariff() -> None:
+    """UFH forecast construction must propagate feed-in prices so PV surplus has an opportunity cost."""
+    horizon_steps = 4
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": horizon_steps,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0] * horizon_steps,
+            "gti_window_forecast": [0.0] * horizon_steps,
+            "gti_pv_forecast": [0.0] * horizon_steps,
+            "price_config": {
+                "mode": "dual",
+                "high_rate_eur_per_kwh": 0.30,
+                "low_rate_eur_per_kwh": 0.20,
+                "feed_in_rate_eur_per_kwh": 0.07,
+                "low_tariff_hours": [0, 1, 2, 3],
+            },
+        }
+    )
+
+    forecast = Optimizer._build_ufh_forecast(
+        run_request,
+        start_hour=0,
+        cop_model=HeatPumpCOPModel(COP_PARAMS),
+    )
+
+    np.testing.assert_allclose(forecast.feed_in_price_eur_per_kwh, np.full(horizon_steps, 0.07))
+
+
 def test_optimizer_build_ufh_forecast_rejects_short_shutter_forecast() -> None:
     """Explicit shutter forecasts must cover the full MPC horizon."""
     horizon_steps = 4
@@ -510,6 +539,47 @@ def test_optimizer_build_ufh_forecast_rejects_short_shutter_forecast() -> None:
             run_request,
             start_hour=0,
             cop_model=HeatPumpCOPModel(COP_PARAMS),
+        )
+
+
+def test_optimizer_build_dhw_forecast_prefers_explicit_tap_flow_forecast() -> None:
+    """A caller-supplied DHW tap-flow forecast must override the scalar fallback disturbance."""
+    horizon_steps = 4
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": horizon_steps,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0] * horizon_steps,
+            "dhw_v_tap_m3_per_h": 0.0,
+            "dhw_v_tap_forecast": [0.0, 0.0, 0.03, 0.04],
+        }
+    )
+
+    forecast = Optimizer._build_dhw_forecast(
+        run_request,
+        horizon_steps,
+        HeatPumpCOPModel(COP_PARAMS),
+    )
+
+    np.testing.assert_allclose(forecast.v_tap_m3_per_h, np.array([0.0, 0.0, 0.03, 0.04]))
+
+
+def test_optimizer_build_dhw_forecast_rejects_short_tap_flow_forecast() -> None:
+    """Explicit DHW tap-flow forecasts must cover the full MPC horizon."""
+    run_request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "outdoor_temperature_c": 8.0,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "dhw_v_tap_forecast": [0.02, 0.01],
+        }
+    )
+
+    with pytest.raises(ValueError, match="dhw_v_tap_forecast must provide at least 4 values"):
+        Optimizer._build_dhw_forecast(
+            run_request,
+            4,
+            HeatPumpCOPModel(COP_PARAMS),
         )
 
 

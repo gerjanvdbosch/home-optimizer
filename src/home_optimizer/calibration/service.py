@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from collections import Counter
 from datetime import datetime, timezone
@@ -57,15 +58,39 @@ from ..telemetry.repository import TelemetryRepository
 from ..types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult, DHWParameters, ThermalParameters
 
 
-class SimpleNamespace:
-    """Minimal local namespace helper for SQL row projection helpers.
+@dataclass(frozen=True, slots=True)
+class _CalibrationAggregateRow:
+    """Typed SQL projection row for offline calibration aggregate loading.
 
-    The calibration service uses lightweight attribute access for partially selected
-    SQL result rows. A local helper avoids relying on a top-level ``types`` import.
+    The calibration service selects only the telemetry columns required by the
+    offline calibrators, so this lightweight dataclass preserves attribute access
+    without pretending the row is a full ORM ``TelemetryAggregate`` instance.
     """
 
-    def __init__(self, **kwargs: object) -> None:
-        self.__dict__.update(kwargs)
+    bucket_start_utc: datetime
+    bucket_end_utc: datetime
+    hp_mode_last: str
+    defrost_active_fraction: float
+    booster_heater_active_fraction: float
+    room_temperature_last_c: float
+    outdoor_temperature_mean_c: float
+    hp_supply_temperature_mean_c: float
+    hp_supply_target_temperature_mean_c: float
+    household_elec_power_mean_kw: float
+    hp_thermal_power_mean_kw: float
+    hp_electric_energy_delta_kwh: float
+    dhw_top_temperature_last_c: float
+    dhw_bottom_temperature_last_c: float
+    boiler_ambient_temp_mean_c: float
+    t_mains_estimated_mean_c: float
+
+
+@dataclass(frozen=True, slots=True)
+class _CalibrationForecastRow:
+    """Typed SQL projection row for offline forecast loading."""
+
+    valid_at_utc: datetime
+    gti_w_per_m2: float
 
 
 def _parse_utc(value: object) -> datetime:
@@ -77,7 +102,7 @@ def _parse_utc(value: object) -> datetime:
     raise TypeError(f"Unsupported timestamp type for calibration loader: {type(value)!r}")
 
 
-def _load_calibration_aggregates(repository: TelemetryRepository) -> list[SimpleNamespace]:
+def _load_calibration_aggregates(repository: TelemetryRepository) -> list[_CalibrationAggregateRow]:
     """Load the telemetry columns required by the offline UFH calibrators."""
     statement = text(
         """
@@ -105,7 +130,7 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
     with repository.engine.connect() as connection:
         rows = connection.execute(statement).mappings().all()
     return [
-        SimpleNamespace(
+        _CalibrationAggregateRow(
             bucket_start_utc=_parse_utc(row["bucket_start_utc"]),
             bucket_end_utc=_parse_utc(row["bucket_end_utc"]),
             hp_mode_last=str(row["hp_mode_last"]),
@@ -127,7 +152,7 @@ def _load_calibration_aggregates(repository: TelemetryRepository) -> list[Simple
     ]
 
 
-def _load_calibration_forecasts(repository: TelemetryRepository) -> list[SimpleNamespace]:
+def _load_calibration_forecasts(repository: TelemetryRepository) -> list[_CalibrationForecastRow]:
     """Load only the forecast columns required by the first-stage UFH calibrator."""
     statement = text(
         """
@@ -139,7 +164,7 @@ def _load_calibration_forecasts(repository: TelemetryRepository) -> list[SimpleN
     with repository.engine.connect() as connection:
         rows = connection.execute(statement).mappings().all()
     return [
-        SimpleNamespace(
+        _CalibrationForecastRow(
             valid_at_utc=_parse_utc(row["valid_at_utc"]),
             gti_w_per_m2=float(row["gti_w_per_m2"]),
         )
@@ -156,12 +181,12 @@ def _infer_calibration_replay_dt_hours(repository: TelemetryRepository) -> float
     the dataset builders compare consecutive telemetry-pair spacing against the
     reference model Δt with a strict compatibility tolerance.
     """
-    aggregates = _load_calibration_aggregates(repository)
+    bucket_end_utc = [row.bucket_end_utc for row in _load_calibration_aggregates(repository)]
     candidate_dt_seconds = [
-        round((next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds())
-        for previous_row, next_row in zip(aggregates, aggregates[1:])
+        round((next_bucket_end_utc - previous_bucket_end_utc).total_seconds())
+        for previous_bucket_end_utc, next_bucket_end_utc in zip(bucket_end_utc, bucket_end_utc[1:])
         if 0.0
-        < (next_row.bucket_end_utc - previous_row.bucket_end_utc).total_seconds() / 3600.0
+        < (next_bucket_end_utc - previous_bucket_end_utc).total_seconds() / 3600.0
         <= DEFAULT_MAX_PAIR_DT_HOURS
     ]
     if not candidate_dt_seconds:

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from .baseload import BaseloadForecaster
+from .dhw_tap import DHWTapForecaster
 from .models import ForecastServiceSettings
 from .shutter import ShutterForecaster
 
@@ -126,6 +128,69 @@ class BaseloadForecastProvider(ForecastProvider):
         return self._forecaster.train_and_persist_from_repository(repository=repository)
 
 
+class DHWTapForecastProvider(ForecastProvider):
+    """Build a recurring hour-of-day DHW tap-flow forecast from persisted telemetry."""
+
+    def __init__(self, forecaster: DHWTapForecaster | None = None) -> None:
+        self._forecaster = forecaster or DHWTapForecaster()
+
+    def build_overrides(
+        self,
+        *,
+        request_data: Mapping[str, object],
+        repository: "TelemetryRepository",
+        weather_rows: Sequence[Any],
+        current_overrides: Mapping[str, object],
+    ) -> dict[str, object]:
+        explicit_request_forecast = request_data.get("dhw_v_tap_forecast")
+        if explicit_request_forecast is not None or "dhw_v_tap_forecast" in current_overrides:
+            return {}
+        if not bool(request_data.get("dhw_enabled", True)):
+            return {}
+        if not weather_rows:
+            return {}
+
+        c_top_raw = current_overrides.get("dhw_C_top", request_data.get("dhw_C_top"))
+        c_bot_raw = current_overrides.get("dhw_C_bot", request_data.get("dhw_C_bot"))
+        r_loss_raw = current_overrides.get("dhw_R_loss", request_data.get("dhw_R_loss"))
+        lambda_raw = current_overrides.get(
+            "dhw_lambda_water_kwh_per_m3k",
+            request_data.get("dhw_lambda_water_kwh_per_m3k"),
+        )
+        for field_name, raw_value in (
+            ("dhw_C_top", c_top_raw),
+            ("dhw_C_bot", c_bot_raw),
+            ("dhw_R_loss", r_loss_raw),
+            ("dhw_lambda_water_kwh_per_m3k", lambda_raw),
+        ):
+            if not isinstance(raw_value, (int, float)):
+                return {}
+
+        horizon_valid_at_utc: list[datetime] = []
+        for row in weather_rows:
+            valid_at_utc = getattr(row, "valid_at_utc", None)
+            if not isinstance(valid_at_utc, datetime):
+                raise ValueError("weather_rows must expose datetime valid_at_utc values for DHW tap forecasting.")
+            horizon_valid_at_utc.append(valid_at_utc)
+
+        predicted = self._forecaster.predict_from_repository(
+            repository=repository,
+            horizon_valid_at_utc=horizon_valid_at_utc,
+            c_top_kwh_per_k=float(cast(int | float, c_top_raw)),
+            c_bot_kwh_per_k=float(cast(int | float, c_bot_raw)),
+            r_loss_k_per_kw=float(cast(int | float, r_loss_raw)),
+            lambda_water_kwh_per_m3_k=float(cast(int | float, lambda_raw)),
+        )
+        if predicted is None:
+            return {}
+        return {"dhw_v_tap_forecast": predicted.tolist()}
+
+    def train_and_persist(self, *, repository: "TelemetryRepository") -> object | None:
+        """No-op: the DHW tap forecast is derived directly from telemetry at runtime."""
+        _ = repository
+        return None
+
+
 class ForecastService:
     """Compose multiple ML forecast providers into one runtime enrichment step.
 
@@ -136,6 +201,7 @@ class ForecastService:
     def __init__(self, settings: ForecastServiceSettings | None = None) -> None:
         effective_settings = settings or ForecastServiceSettings()
         self._providers: tuple[tuple[str, ForecastProvider], ...] = (
+            ("dhw_v_tap_forecast", DHWTapForecastProvider(DHWTapForecaster(effective_settings.dhw_tap))),
             ("baseload_forecast", BaseloadForecastProvider(BaseloadForecaster(effective_settings.baseload))),
             ("shutter_forecast", ShutterForecastProvider(ShutterForecaster(effective_settings.shutter))),
         )

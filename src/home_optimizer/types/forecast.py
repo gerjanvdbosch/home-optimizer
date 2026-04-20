@@ -31,6 +31,7 @@ class ForecastHorizon:
     internal_gains_kw: np.ndarray
     price_eur_per_kwh: np.ndarray
     room_temperature_ref_c: np.ndarray
+    feed_in_price_eur_per_kwh: np.ndarray | None = None
     pv_kw: np.ndarray | None = None
     cop_ufh_k: np.ndarray | None = None
     shutter_pct: np.ndarray | None = None
@@ -52,6 +53,15 @@ class ForecastHorizon:
             raise ValueError("gti_w_per_m2 cannot be negative.")
         if np.any(price < 0.0):
             raise ValueError("price_eur_per_kwh cannot be negative.")
+
+        if self.feed_in_price_eur_per_kwh is None:
+            feed_in = np.zeros(n)
+        else:
+            feed_in = _as_1d("feed_in_price_eur_per_kwh", self.feed_in_price_eur_per_kwh)
+            if feed_in.size != n:
+                raise ValueError(f"feed_in_price_eur_per_kwh must have length {n}.")
+            if np.any(feed_in < 0.0):
+                raise ValueError("feed_in_price_eur_per_kwh cannot be negative.")
 
         if self.pv_kw is None:
             pv = np.zeros(n)
@@ -82,6 +92,7 @@ class ForecastHorizon:
         object.__setattr__(self, "gti_w_per_m2", gti)
         object.__setattr__(self, "internal_gains_kw", q_int)
         object.__setattr__(self, "price_eur_per_kwh", price)
+        object.__setattr__(self, "feed_in_price_eur_per_kwh", feed_in)
         object.__setattr__(self, "room_temperature_ref_c", t_ref)
         object.__setattr__(self, "pv_kw", pv)
 
@@ -123,6 +134,7 @@ class ForecastHorizon:
             gti_w_per_m2=np.full(n, gti_w_per_m2),
             internal_gains_kw=np.full(n, internal_gains_kw),
             price_eur_per_kwh=np.full(n, price_eur_per_kwh),
+            feed_in_price_eur_per_kwh=np.zeros(n),
             room_temperature_ref_c=np.full(n + 1, room_temperature_ref_c),
             pv_kw=np.full(n, pv_kw),
         )

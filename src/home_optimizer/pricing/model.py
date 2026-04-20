@@ -146,6 +146,10 @@ class PriceConfig(BaseModel):
                 raise ValueError("high_rate_eur_per_kwh must be > 0 for dual-tariff mode.")
             if self.low_rate_eur_per_kwh <= 0.0:
                 raise ValueError("low_rate_eur_per_kwh must be > 0 for dual-tariff mode.")
+            if self.feed_in_rate_eur_per_kwh > min(self.high_rate_eur_per_kwh, self.low_rate_eur_per_kwh):
+                raise ValueError(
+                    "feed_in_rate_eur_per_kwh must not exceed the import tariff in dual-tariff mode."
+                )
             invalid_hours = [h for h in self.low_tariff_hours if not 0 <= h <= 23]
             if invalid_hours:
                 raise ValueError(f"low_tariff_hours contains invalid values: {invalid_hours}")
