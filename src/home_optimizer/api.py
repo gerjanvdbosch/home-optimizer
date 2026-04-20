@@ -348,11 +348,17 @@ class HomeOptimizerAPI:
             t_out:  Outdoor temperature forecast array [°C], length N+1.
                     Plotted as a dotted reference trace.
         """
+        # Use numeric x-values to avoid categorical string-collapsing when labels
+        # (HH:MM) repeat across days. The visible tick labels remain the provided
+        # "labels" via ticktext so the axis still shows human-friendly times.
         fig = go.Figure()
         n = len(labels)
+        x_vals = list(range(n))
+
+        # Comfort band polygon — use numeric x to avoid Plotly category merging
         fig.add_trace(
             go.Scatter(
-                x=labels + labels[::-1],
+                x=x_vals + x_vals[::-1],
                 y=[t_max] * n + [t_min] * n,
                 fill="toself",
                 fillcolor="rgba(100,149,237,0.18)",
@@ -363,7 +369,7 @@ class HomeOptimizerAPI:
         )
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=t_out,
                 name="T<sub>buiten</sub> (forecast)",
                 mode="lines",
@@ -372,7 +378,7 @@ class HomeOptimizerAPI:
         )
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=[t_ref] * n,
                 name="T<sub>ref</sub>",
                 mode="lines",
@@ -381,7 +387,7 @@ class HomeOptimizerAPI:
         )
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=t_r,
                 name="T<sub>r</sub> (kamer)",
                 mode="lines+markers",
@@ -389,6 +395,9 @@ class HomeOptimizerAPI:
                 marker=dict(size=5),
             )
         )
+
+        # Show human-readable time labels while keeping x numeric for plotting
+        fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
             yaxis=dict(title="Temperatuur [degC]", gridcolor="#f5f5f5", zeroline=False),
@@ -403,11 +412,16 @@ class HomeOptimizerAPI:
     @staticmethod
     def _dhw_figure(labels: list[str], t_top: np.ndarray, t_bot: np.ndarray, t_dhw_min: float) -> str:
         """Build DHW tank-temperature figure."""
+        # Use numeric x-values and explicit tick labels to prevent duplicate
+        # categorical labels (same HH:MM across multiple days) from collapsing
+        # separate time points onto a single x-category.
         fig = go.Figure()
         n = len(labels)
+        x_vals = list(range(n))
+
         fig.add_trace(
             go.Scatter(
-                x=labels + labels[::-1],
+                x=x_vals + x_vals[::-1],
                 y=[t_dhw_min] * n + [20.0] * n,
                 fill="toself",
                 fillcolor="rgba(255,165,0,0.12)",
@@ -418,7 +432,7 @@ class HomeOptimizerAPI:
         )
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=t_top,
                 name="T<sub>top</sub>",
                 mode="lines+markers",
@@ -428,7 +442,7 @@ class HomeOptimizerAPI:
         )
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=t_bot,
                 name="T<sub>bot</sub>",
                 mode="lines+markers",
@@ -436,6 +450,9 @@ class HomeOptimizerAPI:
                 marker=dict(size=4),
             )
         )
+
+        # Keep human-readable time labels
+        fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
             yaxis=dict(title="Temperatuur [degC]", gridcolor="#f5f5f5", zeroline=False),

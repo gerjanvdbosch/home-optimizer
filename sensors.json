@@ -11,7 +11,7 @@
     "pv_output_kw": 0.6,
     "thermostat_setpoint_c": 20.0,
     "dhw_top_temperature_c": 52.0,
-    "dhw_bottom_temperature_c": 45.5,
+    "dhw_bottom_temperature_c": 51.5,
     "shutter_living_room_pct": 100.0,
     "defrost_active": 0,
     "booster_heater_active": 0,
