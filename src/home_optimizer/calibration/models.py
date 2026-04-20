@@ -226,10 +226,10 @@ class UFHOffCalibrationSettings:
 
     off_mode_name: str = DEFAULT_OFF_MODE_NAME
     max_pair_dt_hours: float = DEFAULT_MAX_PAIR_DT_HOURS
-    max_gti_w_per_m2: float = DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
+    max_gti_w_per_m2: float = DEFAULT_MAX_GTI_W_PER_M2
     max_defrost_active_fraction: float = DEFAULT_MAX_DEFROST_ACTIVE_FRACTION
     max_booster_active_fraction: float = DEFAULT_MAX_BOOSTER_ACTIVE_FRACTION
-    min_sample_count: int = DEFAULT_MIN_DHW_ACTIVE_SAMPLE_COUNT
+    min_sample_count: int = DEFAULT_MIN_SAMPLE_COUNT
     forecast_alignment_tolerance_hours: float = DEFAULT_FORECAST_ALIGNMENT_TOLERANCE_HOURS
     initial_tau_hours: float = DEFAULT_INITIAL_TAU_HOURS
     min_tau_hours: float = DEFAULT_MIN_TAU_HOURS

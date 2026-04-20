@@ -39,7 +39,11 @@ from home_optimizer.calibration import (
     build_ufh_off_calibration_dataset,
     calibrate_ufh_off_envelope,
 )
-from home_optimizer.calibration.models import DEFAULT_ACTIVE_MAX_GTI_W_PER_M2
+from home_optimizer.calibration.models import (
+    DEFAULT_ACTIVE_MAX_GTI_W_PER_M2,
+    DEFAULT_MAX_GTI_W_PER_M2,
+    DEFAULT_MIN_SAMPLE_COUNT,
+)
 from home_optimizer.application.optimizer import RunRequest
 from home_optimizer.domain.dhw.model import DHWModel
 from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
@@ -117,6 +121,14 @@ def test_build_ufh_off_calibration_dataset_filters_to_low_solar_off_windows() ->
     assert sample.room_temperature_start_c == 20.0
     assert sample.room_temperature_end_c == 19.9
     assert sample.gti_w_per_m2 == 0.0
+
+
+def test_ufh_off_calibration_settings_use_passive_defaults() -> None:
+    """Passive UFH calibration defaults must stay aligned with the low-solar off-stage design."""
+    settings = UFHOffCalibrationSettings()
+
+    assert settings.max_gti_w_per_m2 == DEFAULT_MAX_GTI_W_PER_M2
+    assert settings.min_sample_count == DEFAULT_MIN_SAMPLE_COUNT
 
 
 def test_calibrate_ufh_off_envelope_recovers_synthetic_parameters() -> None:
