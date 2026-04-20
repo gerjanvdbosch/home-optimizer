@@ -271,10 +271,13 @@ class HomeOptimizerAPI:
         gti_pv: list[float],
     ) -> tuple[str, str]:
         """Build weather forecast figures (temperature + irradiance)."""
+        # Use numeric x + ticktext for consistency across all dashboard charts
         t_fig = go.Figure()
+        n = len(labels)
+        x_vals = list(range(n))
         t_fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=temps,
                 name="T<sub>buiten</sub> [degC]",
                 mode="lines+markers",
@@ -284,12 +287,13 @@ class HomeOptimizerAPI:
                 fillcolor="rgba(30,107,191,0.08)",
             )
         )
+        t_fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         t_fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="Temperatuur [degC]", gridcolor="#f5f5f5", zeroline=True, zerolinecolor="#ccc"),
-            xaxis=dict(gridcolor="#f5f5f5"),
+            yaxis=dict(title="Temperatuur [degC]", gridcolor="rgba(0,0,0,0.04)", zeroline=True, zerolinecolor="rgba(0,0,0,0.06)"),
+            xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             hovermode="x unified",
         )
@@ -297,7 +301,7 @@ class HomeOptimizerAPI:
         s_fig = go.Figure()
         s_fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=gti_window,
                 name="GTI ramen [W/m2]",
                 mode="lines",
@@ -308,7 +312,7 @@ class HomeOptimizerAPI:
         )
         s_fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=gti_pv,
                 name="GTI PV-panelen [W/m2]",
                 mode="lines",
@@ -317,12 +321,13 @@ class HomeOptimizerAPI:
                 fillcolor="rgba(241,196,15,0.10)",
             )
         )
+        s_fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         s_fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="Instraling [W/m2]", gridcolor="#f5f5f5", zeroline=False),
-            xaxis=dict(gridcolor="#f5f5f5"),
+            yaxis=dict(title="Instraling [W/m2]", gridcolor="rgba(0,0,0,0.04)", zeroline=False),
+            xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             hovermode="x unified",
         )
@@ -476,22 +481,32 @@ class HomeOptimizerAPI:
         pv_kw: np.ndarray,
         prices: np.ndarray,
         p_max: float,
+        baseload_kw: np.ndarray | None = None,
     ) -> str:
-        """Build power + PV + price figure."""
+        """Build power + PV + price figure.
+
+        Adds an optional baseload (electrical household demand) line to the
+        primary y-axis so the user can compare heat-pump power vs household
+        consumption.
+        """
+        # numeric x + ticktext for consistency; baseload (electrical) can be
+        # plotted as a line on the primary axis to show household demand.
+        n = len(labels)
+        x_vals = list(range(n))
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_trace(
             go.Bar(
-                x=labels,
+                x=x_vals,
                 y=p_ufh,
                 name="P<sub>UFH</sub> [kW therm]",
-                marker_color=[f"rgba(30,107,191,{0.5 + 0.5 * v / max(p_max, 0.01)})" for v in p_ufh],
+                marker_color=[f"rgba(30,107,191,{0.5 + 0.5 * float(v) / max(p_max, 0.01)})" for v in p_ufh],
             ),
             secondary_y=False,
         )
         if np.any(p_dhw > 0):
             fig.add_trace(
                 go.Bar(
-                    x=labels,
+                    x=x_vals,
                     y=p_dhw,
                     name="P<sub>DHW</sub> [kW therm]",
                     marker_color="rgba(231,76,60,0.65)",
@@ -501,7 +516,7 @@ class HomeOptimizerAPI:
         if np.any(pv_kw > 0):
             fig.add_trace(
                 go.Scatter(
-                    x=labels,
+                    x=x_vals,
                     y=pv_kw,
                     name="P<sub>PV</sub> [kW]",
                     mode="lines",
@@ -511,7 +526,7 @@ class HomeOptimizerAPI:
             )
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=prices,
                 name="Prijs [EUR/kWh]",
                 mode="lines+markers",
@@ -520,9 +535,22 @@ class HomeOptimizerAPI:
             ),
             secondary_y=True,
         )
+        # Baseload: optional electrical household demand forecast
+        if baseload_kw is not None:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_vals,
+                    y=baseload_kw,
+                    name="Baseload [kW elec]",
+                    mode="lines",
+                    line=dict(color="#7f8c8d", width=2, dash="dash"),
+                ),
+                secondary_y=False,
+            )
+        fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             legend=dict(orientation="h", y=-0.22, font=dict(size=11)),
             hovermode="x unified",
@@ -545,8 +573,6 @@ class HomeOptimizerAPI:
         )
         # Make x-grid less prominent / hidden so price and power bars stand out
         fig.update_xaxes(showgrid=False)
-        # Use transparent plotting area so card background is visually dominant
-        fig.update_layout(plot_bgcolor="rgba(255,255,255,0)")
         return fig.to_json()
 
     @staticmethod
@@ -557,10 +583,13 @@ class HomeOptimizerAPI:
         cop_min: float,
     ) -> str:
         """Build COP profile figure."""
+        # numeric x + ticktext for consistency
         fig = go.Figure()
+        n = len(labels)
+        x_vals = list(range(n))
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=cop_ufh,
                 name="COP<sub>UFH</sub> (stooklijn + Carnot)",
                 mode="lines+markers",
@@ -573,7 +602,7 @@ class HomeOptimizerAPI:
         if cop_dhw is not None:
             fig.add_trace(
                 go.Scatter(
-                    x=labels,
+                    x=x_vals,
                     y=cop_dhw,
                     name="COP<sub>DHW</sub> (vaste aanvoertemp)",
                     mode="lines+markers",
@@ -590,12 +619,13 @@ class HomeOptimizerAPI:
             annotation_position="top left",
             annotation_font_size=10,
         )
+        fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="COP [-]", gridcolor="#f5f5f5", zeroline=False, rangemode="tozero"),
-            xaxis=dict(gridcolor="#f5f5f5"),
+            yaxis=dict(title="COP [-]", gridcolor="rgba(0,0,0,0.04)", zeroline=False, rangemode="tozero"),
+            xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             hovermode="x unified",
         )
@@ -605,9 +635,11 @@ class HomeOptimizerAPI:
     def _pv_forecast_figure(labels: list[str], pv_kw: np.ndarray) -> str:
         """Build PV forecast figure."""
         fig = go.Figure()
+        n = len(labels)
+        x_vals = list(range(n))
         fig.add_trace(
             go.Scatter(
-                x=labels,
+                x=x_vals,
                 y=pv_kw,
                 name="P<sub>PV</sub> forecast [kW]",
                 mode="lines+markers",
@@ -617,12 +649,13 @@ class HomeOptimizerAPI:
                 fillcolor="rgba(241,196,15,0.18)",
             )
         )
+        fig.update_xaxes(tickmode="array", tickvals=x_vals, ticktext=labels)
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="PV forecast [kW]", gridcolor="#f5f5f5", zeroline=False),
-            xaxis=dict(gridcolor="#f5f5f5"),
+            yaxis=dict(title="PV forecast [kW]", gridcolor="rgba(0,0,0,0.04)", zeroline=False),
+            xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
-            plot_bgcolor="white",
+            plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="white",
             hovermode="x unified",
         )
@@ -692,6 +725,21 @@ class HomeOptimizerAPI:
             t_out_states,
         )
         power_fig = self._power_figure(labels_ctrl, p_ufh, p_dhw, pv_kw, prices, req.P_max)
+        # Baseload: optional household electrical demand forecast supplied in the
+        # RunRequest (may have been injected by the ForecastService). Materialize
+        # to length N and fall back to zeros when absent.
+        if req.baseload_forecast is None:
+            baseload_kw = np.zeros(len(labels_ctrl), dtype=float)
+        else:
+            arr = np.asarray(req.baseload_forecast, dtype=float)
+            if arr.size >= len(labels_ctrl):
+                baseload_kw = arr[: len(labels_ctrl)].copy()
+            else:
+                # pad by repeating last known value to reach horizon length
+                pad_len = len(labels_ctrl) - arr.size
+                pad_val = arr[-1] if arr.size > 0 else 0.0
+                baseload_kw = np.concatenate([arr, np.full(pad_len, pad_val, dtype=float)])
+        power_fig = self._power_figure(labels_ctrl, p_ufh, p_dhw, pv_kw, prices, req.P_max, baseload_kw=baseload_kw)
         cop_fig = self._cop_figure(
             labels_ctrl,
             cop_ufh=cop_ufh_arr,

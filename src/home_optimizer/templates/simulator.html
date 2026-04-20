@@ -337,11 +337,7 @@
         <input type="number" id="shutter_living_room_pct" value="100.0" min="0" max="100" step="1" oninput="upd('vShutter', this.value)" />
       </div>
       <div class="hint">Deze waarde schaalt de zoninstraling voor de zuidramen: 100% = volledig open, 0% = volledig dicht.</div>
-      <div class="field">
-        <label for="shutter_forecast">Shutter forecast horizon [% open]</label>
-        <textarea id="shutter_forecast" placeholder="Optioneel: JSON-array of komma-gescheiden profiel, bv. [100, 100, 60, 20, 0]"></textarea>
-      </div>
-      <div class="hint">Leeg = gebruik de actuele shutter-stand voor alle stappen. Gevuld = overschrijft `shutter_living_room_pct` stap-voor-stap over de hele MPC-horizon.</div>
+      <!-- shutter_forecast removed from simulator UI per user request -->
       <div class="field">
         <label>Interne warmte [kW] <span id="vQint">0.3</span></label>
         <input type="number" id="internal_gains_kw" value="0.30" min="0" max="3" step="0.05" oninput="upd('vQint', this.value)" />
@@ -677,20 +673,7 @@
     const i = (id) => parseInt(document.getElementById(id).value, 10);
     const b = (id) => document.getElementById(id).checked;
     const s = (id) => document.getElementById(id).value;
-    const parseOptionalForecastArray = (id) => {
-      const raw = document.getElementById(id).value.trim();
-      if (!raw) return null;
-      try {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) throw new Error('geen array');
-        return parsed.map((value) => Number(value));
-      } catch {
-        return raw
-          .split(/[\s,;]+/)
-          .filter(Boolean)
-          .map((value) => Number(value));
-      }
-    };
+    // parseOptionalForecastArray removed as shutter_forecast was removed from the UI
     const mode = s('price_mode');
     const price_config = { mode };
     if (mode === 'flat') {
@@ -713,7 +696,6 @@
       P_max: n('P_max'), delta_P_max: n('delta_P_max'),
       T_min: n('T_min'), T_max: n('T_max'), T_ref: n('T_ref'),
       shutter_living_room_pct: n('shutter_living_room_pct'),
-      shutter_forecast: parseOptionalForecastArray('shutter_forecast'),
       price_config,
       internal_gains_kw: n('internal_gains_kw'),
       pv_enabled: b('pv_enabled'), pv_peak_kw: n('pv_peak_kw'),
