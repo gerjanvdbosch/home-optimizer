@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel
 
+from .application import optimizer as optimizer_module
 from .application.optimizer import (
     MPCStepResult,
     Optimizer,
@@ -78,6 +79,7 @@ class HomeOptimizerAPI:
     """Class-based HTTP layer for Home Optimizer."""
 
     def __init__(self) -> None:
+        self._base_request: RunRequest | None = None
         self.app = FastAPI(
             title="Home Optimizer",
             description=(
@@ -139,9 +141,26 @@ class HomeOptimizerAPI:
         """Serve simulator HTML."""
         return HTMLResponse(self._template_simulator.read_text(encoding="utf-8"))
 
+    def set_base_request(self, base_request: RunRequest | None) -> None:
+        """Store the canonical runtime base request used by API defaults/simulations.
+
+        Args:
+            base_request: Fully validated runtime request assembled by the addon or
+                local runner. ``None`` restores the plain ``RunRequest`` defaults.
+        """
+
+        self._base_request = base_request
+
+    def _runtime_base_request(self) -> RunRequest:
+        """Return the canonical runtime base request for interactive API calls."""
+
+        if self._base_request is not None:
+            return self._base_request
+        return RunRequest.model_validate({})
+
     async def defaults(self) -> RunRequest:
         """Return calibrated ``RunRequest`` defaults when a snapshot is available."""
-        defaults = RunRequest.model_validate({})
+        defaults = self._runtime_base_request()
         try:
             snapshot = self._get_repository().get_latest_calibration_snapshot()
         except Exception as exc:  # noqa: BLE001
@@ -196,16 +215,25 @@ class HomeOptimizerAPI:
         caller).  Raises 502 on DB error, 422 when no forecast rows exist.
         """
         repository = self._get_repository()
+        effective_request = merge_run_request_updates(
+            self._runtime_base_request(),
+            req.model_dump(mode="python", exclude_unset=True),
+        )
 
         try:
-            rows, forecast_overrides = build_repository_forecast_overrides(req, repository)
+            calibration_overrides = optimizer_module.build_safe_calibration_overrides(effective_request, repository)
+            rows, forecast_overrides = build_repository_forecast_overrides(
+                effective_request,
+                repository,
+                existing=calibration_overrides,
+            )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=502,
                 detail=f"Kon forecast niet uit de database lezen: {exc}",
             ) from exc
 
-        if req.gti_window_forecast is None or req.t_out_forecast is None:
+        if effective_request.gti_window_forecast is None or effective_request.t_out_forecast is None:
             if not rows:
                 raise HTTPException(
                     status_code=422,
@@ -215,17 +243,18 @@ class HomeOptimizerAPI:
                         "voordat je /api/simulate aanroept."
                     ),
                 )
-        elif req.shutter_forecast is not None or not rows:
+        elif effective_request.shutter_forecast is not None or not rows:
             forecast_overrides = {}
 
-        if forecast_overrides:
-            req = merge_run_request_updates(req, forecast_overrides)
+        effective_overrides = {**calibration_overrides, **forecast_overrides}
+        if effective_overrides:
+            effective_request = merge_run_request_updates(effective_request, effective_overrides)
 
         try:
-            result = Optimizer().solve(req)
+            result = Optimizer().solve(effective_request)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return self._build_optimize_response(req=req, result=result)
+        return self._build_optimize_response(req=effective_request, result=result)
 
 
 

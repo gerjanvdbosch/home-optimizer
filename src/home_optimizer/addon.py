@@ -35,7 +35,7 @@ from typing import Any
 import uvicorn
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .api import app
+from .api import api_service, app
 from .forecasting import ForecastService
 from .application.optimizer import Optimizer
 from .pricing import PriceConfig, PriceMode, build_price_model
@@ -691,6 +691,7 @@ def main() -> None:
             "cop_max": opts.mpc_cop_max,
         }
     )
+    api_service.set_base_request(mpc_base_input)
 
     # ── 4d. Start nightly persisted ML forecast-model training (optional) ──
     if opts.forecast_training_enabled:

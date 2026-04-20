@@ -6,8 +6,9 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+import home_optimizer.application.optimizer as optimizer_module
 
-from home_optimizer.api import HomeOptimizerAPI, app
+from home_optimizer.api import HomeOptimizerAPI, api_service, app
 from home_optimizer.application.optimizer import Optimizer, RunRequest
 from home_optimizer.sensors import LiveReadings, SensorBackend
 from home_optimizer.telemetry import TelemetryRepository
@@ -97,6 +98,76 @@ def test_simulate_supports_combined_mode_through_unified_mpc() -> None:
     assert len(payload["control_labels"]) == 8
     assert len(payload["pv_forecast_kw"]) == 8
     assert payload["max_dhw_comfort_violation_c"] >= 0.0
+
+
+def test_simulate_passes_safe_calibration_overrides_into_ml_forecast_generation(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """API simulation must materialise calibrated DHW parameters before ML forecast providers run.
+
+    DHW tap-profile artifacts are keyed by the effective physical tank tuple. When
+    the simulate endpoint skipped calibration overrides, the ML forecaster saw the
+    static request defaults instead of the calibrated runtime tuple and therefore
+    refused to reuse the persisted DHW artifact. This regression asserts that the
+    calibrated fields are now present in both ``current_overrides`` and the fully
+    materialised request passed into the forecast service.
+    """
+
+    database_url = f"sqlite:///{tmp_path / 'simulate-calibrated-forecast.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    fetched_at = datetime(2026, 4, 18, 10, 0, tzinfo=timezone.utc)
+    repository.bulk_add_forecast_snapshots(
+        [
+            {
+                "fetched_at_utc": fetched_at,
+                "valid_at_utc": fetched_at + timedelta(hours=step_k),
+                "step_k": step_k,
+                "dt_hours": 1.0,
+                "t_out_c": 8.0,
+                "gti_w_per_m2": 0.0,
+                "gti_pv_w_per_m2": 0.0,
+            }
+            for step_k in range(4)
+        ]
+    )
+    repository.add_calibration_snapshot(
+        CalibrationSnapshotPayload(
+            generated_at_utc=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+            effective_parameters=CalibrationParameterOverrides(
+                dhw_R_loss=92.0,
+                dhw_boiler_ambient_bias_c=4.0,
+            ),
+        )
+    )
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    captured: dict[str, dict[str, object]] = {}
+
+    def _fake_build_missing_overrides(*, request_data, repository, weather_rows, current_overrides=None):  # noqa: ANN001
+        captured["request_data"] = dict(request_data)
+        captured["current_overrides"] = dict(current_overrides or {})
+        return {}
+
+    monkeypatch.setattr(optimizer_module._FORECAST_SERVICE, "build_missing_overrides", _fake_build_missing_overrides)
+
+    response = client.post(
+        "/api/simulate",
+        json={
+            "horizon_hours": 4,
+            "dhw_enabled": True,
+            "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
+            "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+            "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["current_overrides"]["dhw_R_loss"] == 92.0
+    assert captured["current_overrides"]["dhw_boiler_ambient_bias_c"] == 4.0
+    assert captured["request_data"]["dhw_R_loss"] == 92.0
+    assert captured["request_data"]["dhw_boiler_ambient_bias_c"] == 4.0
 
 
 def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
@@ -469,6 +540,37 @@ def test_defaults_returns_latest_calibration_snapshot_over_static_defaults(monke
     assert payload["T_supply_min"] == 26.8
 
 
+def test_defaults_prefers_registered_runtime_base_request(monkeypatch, tmp_path) -> None:
+    """`/api/defaults` must expose the configured runtime base request, not bare model defaults."""
+
+    database_url = f"sqlite:///{tmp_path / 'defaults-runtime-base.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    original_base_request = api_service._base_request
+    try:
+        runtime_base_request = RunRequest.model_validate(
+            {
+                "horizon_hours": 8,
+                "dhw_C_top": 0.11628,
+                "dhw_C_bot": 0.11628,
+                "dhw_R_loss": 80.0,
+            }
+        )
+        api_service.set_base_request(runtime_base_request)
+
+        response = client.get("/api/defaults")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["dhw_C_top"] == runtime_base_request.dhw_C_top
+        assert payload["dhw_C_bot"] == runtime_base_request.dhw_C_bot
+        assert payload["dhw_R_loss"] == runtime_base_request.dhw_R_loss
+    finally:
+        api_service.set_base_request(original_base_request)
+
+
 def test_defaults_ignores_invalid_ufh_calibration_tuple_but_keeps_safe_groups(monkeypatch, tmp_path) -> None:
     """/api/defaults must not expose calibrated values that fail runtime validation."""
     database_url = f"sqlite:///{tmp_path / 'defaults-unsafe-calibrated.sqlite3'}"
@@ -498,6 +600,74 @@ def test_defaults_ignores_invalid_ufh_calibration_tuple_but_keeps_safe_groups(mo
     assert payload["R_br"] == defaults.R_br
     assert payload["R_ro"] == defaults.R_ro
     assert payload["dhw_R_loss"] == 55.0
+
+
+def test_simulate_uses_registered_runtime_base_request_for_dhw_forecast_lookup(monkeypatch, tmp_path) -> None:
+    """`/api/simulate` must materialize the configured DHW tank before ML forecast lookup.
+
+    The persisted DHW tap-profile artifact is keyed by the effective DHW physics.
+    When the API started from plain `RunRequest` defaults, the artifact lookup
+    missed because `dhw_C_top`/`dhw_C_bot` did not match the real configured tank.
+    This regression verifies that the registered runtime base request is now what
+    the forecast provider sees.
+    """
+
+    database_url = f"sqlite:///{tmp_path / 'simulate-runtime-dhw-base.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+    fetched_at = datetime(2026, 4, 18, 10, 0, tzinfo=timezone.utc)
+    repository.bulk_add_forecast_snapshots(
+        [
+            {
+                "fetched_at_utc": fetched_at,
+                "valid_at_utc": fetched_at + timedelta(hours=step_k),
+                "step_k": step_k,
+                "dt_hours": 1.0,
+                "t_out_c": 8.0,
+                "gti_w_per_m2": 0.0,
+                "gti_pv_w_per_m2": 0.0,
+            }
+            for step_k in range(4)
+        ]
+    )
+    monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
+
+    original_base_request = api_service._base_request
+    try:
+        runtime_base_request = RunRequest.model_validate(
+            {
+                "horizon_hours": 4,
+                "dhw_enabled": True,
+                "dhw_C_top": 0.11628,
+                "dhw_C_bot": 0.11628,
+                "dhw_R_loss": 80.0,
+            }
+        )
+        api_service.set_base_request(runtime_base_request)
+
+        captured: dict[str, object] = {}
+
+        def _fake_build_missing_overrides(*, request_data, repository, weather_rows, current_overrides=None):  # noqa: ANN001
+            captured["request_data"] = dict(request_data)
+            return {"dhw_v_tap_forecast": [0.0, 0.01, 0.0, 0.0]}
+
+        monkeypatch.setattr(optimizer_module._FORECAST_SERVICE, "build_missing_overrides", _fake_build_missing_overrides)
+
+        response = client.post(
+            "/api/simulate",
+            json={
+                "dhw_enabled": True,
+                "horizon_hours": 4,
+            },
+        )
+
+        assert response.status_code == 200
+        request_data = captured["request_data"]
+        assert isinstance(request_data, dict)
+        assert request_data["dhw_C_top"] == runtime_base_request.dhw_C_top
+        assert request_data["dhw_C_bot"] == runtime_base_request.dhw_C_bot
+    finally:
+        api_service.set_base_request(original_base_request)
 
 
 def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(

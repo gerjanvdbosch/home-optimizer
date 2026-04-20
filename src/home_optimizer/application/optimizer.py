@@ -593,6 +593,44 @@ def sanitize_calibration_overrides(
     return accepted_overrides, rejection_reasons
 
 
+def build_safe_calibration_overrides(
+    base_request: RunRequest,
+    repository: "TelemetryRepository",
+) -> dict[str, object]:
+    """Return the latest runtime-safe calibration overrides for one request.
+
+    The persisted calibration snapshot may contain parameter groups that are valid
+    for offline fitting but unstable or otherwise incompatible with the current MPC
+    timestep. This helper reuses :func:`sanitize_calibration_overrides` so every
+    runtime entry point applies the same fail-fast acceptance rules.
+
+    Args:
+        base_request: Validated runtime request whose timestep and physical limits
+            define the admissible override region.
+        repository: Telemetry repository exposing the latest persisted calibration
+            snapshot.
+
+    Returns:
+        Mapping with only the calibration overrides that remain safe for runtime MPC.
+    """
+
+    calibration_snapshot = repository.get_latest_calibration_snapshot()
+    if calibration_snapshot is None or not calibration_snapshot.has_effective_parameters:
+        return {}
+
+    safe_overrides, rejection_reasons = sanitize_calibration_overrides(
+        base_request,
+        calibration_snapshot.effective_parameters,
+    )
+    for group_name, reason in rejection_reasons.items():
+        log.warning(
+            "Ignoring unsafe calibration override group '%s' for runtime MPC input: %s",
+            group_name,
+            reason,
+        )
+    return safe_overrides.as_run_request_updates()
+
+
 # ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
@@ -1304,19 +1342,7 @@ class Optimizer:
         # ── 1. Persisted calibration overrides ────────────────────────────
         if repository is not None:
             try:
-                calibration_snapshot = repository.get_latest_calibration_snapshot()
-                if calibration_snapshot is not None and calibration_snapshot.has_effective_parameters:
-                    safe_overrides, rejection_reasons = sanitize_calibration_overrides(
-                        base_input,
-                        calibration_snapshot.effective_parameters,
-                    )
-                    overrides.update(safe_overrides.as_run_request_updates())
-                    for group_name, reason in rejection_reasons.items():
-                        log.warning(
-                            "Ignoring unsafe calibration override group '%s' for scheduled MPC input: %s",
-                            group_name,
-                            reason,
-                        )
+                overrides.update(build_safe_calibration_overrides(base_input, repository))
             except Exception as exc:  # noqa: BLE001
                 log.warning("Calibration snapshot DB read failed: %s", exc)
 

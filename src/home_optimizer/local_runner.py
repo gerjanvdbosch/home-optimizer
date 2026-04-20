@@ -56,7 +56,7 @@ from pathlib import Path
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from .api import app
+from .api import api_service, app
 from .calibration import AutomaticCalibrationSettings, run_and_persist_automatic_calibration
 from .forecasting import ForecastService
 from .application.optimizer import Optimizer
@@ -526,6 +526,7 @@ def main(argv: list[str] | None = None) -> None:
             "price_config": price_cfg,
         }
     )
+    api_service.set_base_request(mpc_base_input)
 
     # ── 5c. Nightly ML forecast-model training (currently shutter model) ───
     if args.forecast_training_enabled:

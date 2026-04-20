@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 
 from home_optimizer.forecasting import DHWTapForecaster, ForecastService, ShutterForecaster
+from home_optimizer.forecasting.common import PersistedRegressorArtifactMetadata
+from home_optimizer.forecasting.dhw_tap import _PersistedDHWTapProfile
 from home_optimizer.application.optimizer import Optimizer, RunRequest
 from home_optimizer.sensors import LiveReadings
 from home_optimizer.telemetry import TelemetryRepository, aggregate_readings
@@ -496,6 +498,73 @@ def test_dhw_tap_forecaster_reuses_persisted_profile_without_recomputing_history
     assert prediction.shape == (4,)
     assert [row.valid_at_utc.hour for row in rows[:4]] == [20, 21, 22, 23]
     assert float(np.max(prediction[2:4])) > float(np.max(prediction[:2]))
+
+
+def test_dhw_tap_forecaster_rejects_flat_positive_background_profile(
+    tmp_path,
+) -> None:
+    """Runtime DHW forecasting must reject flat positive profiles that mimic all-day draw.
+
+    A nearly uniform positive ``V_tap`` profile usually indicates that the inferred
+    tank energy balance is absorbing model mismatch (for example a small bias in
+    ``R_loss`` or a sensor correction) instead of representing real sparse tap
+    events. Passing such a profile to the MPC would make it keep the tank at
+    ``T_dhw_min`` almost continuously.
+    """
+
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-flat-profile.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    future_fetched_at_utc = datetime(2026, 4, 15, 0, 0, tzinfo=timezone.utc)
+    _add_future_forecast_batch(
+        repository,
+        fetched_at_utc=future_fetched_at_utc,
+        gti_profile_w_per_m2=[0.0, 0.0, 0.0, 0.0],
+    )
+    rows = repository.get_latest_forecast_batch()
+
+    forecaster = DHWTapForecaster()
+    flat_profile = _PersistedDHWTapProfile(
+        hourly_mean_m3_per_h=np.full(24, 0.02, dtype=float),
+        hourly_sample_count=np.full(24, 4, dtype=int),
+    )
+
+    physical_signature = forecaster._physical_signature(
+        c_top_kwh_per_k=0.11628,
+        c_bot_kwh_per_k=0.11628,
+        r_loss_k_per_kw=462.0,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
+    )
+    metadata = PersistedRegressorArtifactMetadata(
+        model_version=1,
+        trained_at_utc=future_fetched_at_utc,
+        sample_count=int(np.sum(flat_profile.hourly_sample_count)),
+        settings_signature=forecaster._settings_signature(physical_signature=physical_signature),
+        training_fingerprint=repository.forecast_training_fingerprint(),
+    )
+    forecaster._persist_artifact(
+        artifact_path=repository.forecast_artifact_path("dhw_tap_profile"),
+        profile=flat_profile,
+        metadata=metadata,
+    )
+    DHWTapForecaster.clear_model_cache()
+    prediction = forecaster.predict_from_repository(
+        repository=repository,
+        horizon_valid_at_utc=[row.valid_at_utc for row in rows[:4]],
+        c_top_kwh_per_k=0.11628,
+        c_bot_kwh_per_k=0.11628,
+        r_loss_k_per_kw=462.0,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
+    )
+
+    assert prediction is None
 
 
 def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_request(tmp_path) -> None:

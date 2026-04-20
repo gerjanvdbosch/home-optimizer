@@ -104,6 +104,49 @@ class DHWTapForecaster:
         """Return total tank energy proxy ``C_top·T_top + C_bot·T_bot`` [kWh]."""
         return c_top_kwh_per_k * t_top_c + c_bot_kwh_per_k * t_bot_c
 
+    def _is_profile_runtime_trustworthy(self, profile: _PersistedDHWTapProfile) -> bool:
+        """Return whether a recurring DHW profile is informative enough for runtime MPC use.
+
+        The hour-of-day forecaster estimates ``V_tap`` indirectly from the DHW
+        total-energy balance. Small bias errors in ``R_loss`` / sensor corrections can
+        therefore create a *flat positive floor* across most hours even when the real
+        demand is sparse. Feeding such a profile into the MPC makes it maintain
+        ``T_top`` almost continuously, which is the wrong operational response to a
+        forecasting artifact.
+
+        This guard accepts only profiles whose retained hourly means exhibit enough
+        contrast between the daily peak and the daily mean. A profile whose mean is
+        too close to its peak is treated as a model-mismatch artifact and rejected so
+        runtime control safely falls back to the scalar DHW draw setting.
+
+        Args:
+            profile: Persisted recurring hourly tap profile [m³/h].
+
+        Returns:
+            ``True`` when the profile is trustworthy for runtime MPC use.
+        """
+
+        sampled_hour_mask = profile.hourly_sample_count >= self._settings.min_samples_per_hour
+        if not np.any(sampled_hour_mask):
+            return False
+
+        sampled_hourly_means = profile.hourly_mean_m3_per_h[sampled_hour_mask]
+        peak_hourly_mean_m3_per_h = float(np.max(sampled_hourly_means))
+        if peak_hourly_mean_m3_per_h <= 0.0:
+            return False
+
+        mean_hourly_mean_m3_per_h = float(np.mean(sampled_hourly_means))
+        hourly_mean_to_peak_ratio = mean_hourly_mean_m3_per_h / peak_hourly_mean_m3_per_h
+        if hourly_mean_to_peak_ratio > self._settings.max_hourly_mean_to_peak_ratio:
+            log.info(
+                "Rejecting DHW tap profile because it is too flat for runtime use: "
+                "mean/peak=%.4f > %.4f.",
+                hourly_mean_to_peak_ratio,
+                self._settings.max_hourly_mean_to_peak_ratio,
+            )
+            return False
+        return True
+
     def _infer_v_tap_m3_per_h(
         self,
         *,
@@ -298,13 +341,13 @@ class DHWTapForecaster:
             if hour_samples:
                 hourly_mean_m3_per_h[hour] = float(np.mean(hour_samples))
 
-        return (
-            _PersistedDHWTapProfile(
-                hourly_mean_m3_per_h=hourly_mean_m3_per_h,
-                hourly_sample_count=hourly_sample_count,
-            ),
-            valid_sample_count,
+        profile = _PersistedDHWTapProfile(
+            hourly_mean_m3_per_h=hourly_mean_m3_per_h,
+            hourly_sample_count=hourly_sample_count,
         )
+        if not self._is_profile_runtime_trustworthy(profile):
+            return None, valid_sample_count
+        return profile, valid_sample_count
 
     def _predict_from_history(
         self,
@@ -444,6 +487,12 @@ class DHWTapForecaster:
         if metadata.settings_signature != self._settings_signature(physical_signature=physical_signature):
             log.info(
                 "Ignoring DHW tap-profile artifact %s because the settings/physics signature changed.",
+                artifact_path,
+            )
+            return _CachedDHWTapProfile(profile=None, sample_count=0, artifact_mtime_ns=None)
+        if not self._is_profile_runtime_trustworthy(profile):
+            log.info(
+                "Ignoring DHW tap-profile artifact %s because the recurring profile is too flat.",
                 artifact_path,
             )
             return _CachedDHWTapProfile(profile=None, sample_count=0, artifact_mtime_ns=None)

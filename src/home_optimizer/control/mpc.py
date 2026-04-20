@@ -44,8 +44,8 @@ Key design choices:
   function of outdoor temperature via a Carnot / heating-curve model).  The
   MPC accepts pre-computed arrays from ``ForecastHorizon.cop_ufh_k`` and
   ``DHWForecastHorizon.cop_dhw_k``.
-* **Soft constraints**: Room temperature and DHW temperature bounds are
-  enforced via slack variables to prevent QP infeasibility (§14.3).
+* **Soft constraints**: Room temperature bounds and a DHW top-layer target band
+  are enforced via slack variables to prevent QP infeasibility (§14.3).
 * **Shared electrical budget** (combined mode only):
       P_UFH[k]/COP_UFH[k] + P_dhw[k]/COP_dhw[k]  ≤  P_hp_max_elec
 * **Legionella**: Managed by an external State Machine that injects a
@@ -477,7 +477,8 @@ class MPCController:
         P_export = cp.Variable(N, nonneg=True) if has_pv else None
         s_lo_ufh = cp.Variable(N, nonneg=True)
         s_hi_ufh = cp.Variable(N, nonneg=True)
-        s_dhw = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
+        s_dhw_lo = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
+        s_dhw_hi = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
         s_leg = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
 
         # x[:, 0] is fixed to the estimated current state; optimisation starts from
@@ -542,8 +543,14 @@ class MPCController:
             )
 
             if self._dhw_enabled:
-                assert s_dhw is not None and s_leg is not None and p_dhw is not None
-                constraints.append(x[2, k + 1] >= p_dhw.T_dhw_min - s_dhw[k])
+                assert s_dhw_lo is not None and s_dhw_hi is not None and s_leg is not None and p_dhw is not None
+                # Keep the DHW top-layer temperature close to the active comfort target.
+                # The lower slack preserves feasibility when the tank is genuinely too cold.
+                # The upper slack suppresses opportunistic preheating above T_dhw_min when
+                # PV or low prices make extra heat artificially cheap.
+                dhw_target_c = p_dhw.T_legionella if (leg_req is not None and leg_req[k]) else p_dhw.T_dhw_min
+                constraints.append(x[2, k + 1] >= p_dhw.T_dhw_min - s_dhw_lo[k])
+                constraints.append(x[2, k + 1] <= dhw_target_c + s_dhw_hi[k])
                 if leg_req is not None and leg_req[k]:
                     constraints.append(x[2, k + 1] >= p_dhw.T_legionella - s_leg[k])
 
@@ -564,8 +571,10 @@ class MPCController:
                 + rho_ufh * (cp.square(s_lo_ufh[k]) + cp.square(s_hi_ufh[k]))
             )
             if self._dhw_enabled:
-                assert s_dhw is not None and s_leg is not None and p_dhw is not None
-                cost_k = cost_k + p_dhw.comfort_rho_factor * cp.square(s_dhw[k])
+                assert s_dhw_lo is not None and s_dhw_hi is not None and s_leg is not None and p_dhw is not None
+                cost_k = cost_k + p_dhw.comfort_rho_factor * (
+                    cp.square(s_dhw_lo[k]) + cp.square(s_dhw_hi[k])
+                )
                 cost_k = cost_k + p_dhw.legionella_rho_factor * cp.square(s_leg[k])
             cost_terms.append(cost_k)
 

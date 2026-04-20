@@ -261,6 +261,42 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
     ), f"Electrical budget violated: max={elec_combined.max():.4f} kW > 3.0 kW"
 
 
+@pytest.mark.filterwarnings("ignore:Solution may be inaccurate:UserWarning")
+def test_optimizer_does_not_preheat_dhw_above_minimum_just_because_pv_is_available() -> None:
+    """Sunny surplus hours must not trigger DHW heating while T_top is still above ``dhw_T_min``.
+
+    This regression covers the user-facing failure mode where the convex MPC used
+    free PV hours to opportunistically charge the tank even though the top layer
+    was still comfortably above the minimum tap temperature. The updated DHW
+    target-band penalty should keep the first control action at zero until the
+    top layer actually approaches the lower comfort bound.
+    """
+
+    request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "pv_enabled": True,
+            "pv_peak_power_kw": 10.0,
+            "gti_pv_forecast": [1000.0, 1000.0, 1000.0, 1000.0],
+            "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
+            "t_out_forecast": [15.0, 15.0, 15.0, 15.0],
+            "price_buy_forecast": [0.22, 0.22, 0.22, 0.22],
+            "price_sell_forecast": [0.07, 0.07, 0.07, 0.07],
+            "dhw_enabled": True,
+            "dhw_T_top_init": 55.0,
+            "dhw_T_bot_init": 50.0,
+            "dhw_T_min": 50.0,
+            "dhw_v_tap_m3_per_h": 0.0,
+            "dhw_v_tap_forecast": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+
+    result = Optimizer().solve(request)
+
+    assert result.solution.first_dhw_control_kw <= 1e-4
+    assert result.solution.predicted_states_c[1, 2] > request.dhw_T_min
+
+
 def test_optimizer_request_validation_accepts_dhw_high_tap_flow_with_exact_zoh() -> None:
     """Runtime request validation must accept DHW tap flows when exact ZOH discretisation is used."""
     req = RunRequest.model_validate(

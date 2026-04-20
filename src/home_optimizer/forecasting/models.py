@@ -35,6 +35,7 @@ DEFAULT_DHW_TAP_MIN_TRAINING_SAMPLES: int = 24
 DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR: int = 2
 DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS: float = 2.0
 DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H: float = 0.2
+DEFAULT_DHW_TAP_MAX_HOURLY_MEAN_TO_PEAK_RATIO: float = 0.30
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,7 @@ class DHWTapForecastSettings:
     min_samples_per_hour: int = DEFAULT_DHW_TAP_MIN_SAMPLES_PER_HOUR
     max_history_gap_hours: float = DEFAULT_DHW_TAP_MAX_HISTORY_GAP_HOURS
     max_implied_tap_m3_per_h: float = DEFAULT_DHW_TAP_MAX_IMPLIED_TAP_M3_PER_H
+    max_hourly_mean_to_peak_ratio: float = DEFAULT_DHW_TAP_MAX_HOURLY_MEAN_TO_PEAK_RATIO
 
     def __post_init__(self) -> None:
         if self.min_training_samples <= 0:
@@ -111,6 +113,8 @@ class DHWTapForecastSettings:
             raise ValueError("max_history_gap_hours must be strictly positive.")
         if self.max_implied_tap_m3_per_h <= 0.0:
             raise ValueError("max_implied_tap_m3_per_h must be strictly positive.")
+        if not 0.0 < self.max_hourly_mean_to_peak_ratio <= 1.0:
+            raise ValueError("max_hourly_mean_to_peak_ratio must lie in (0, 1].")
 
 
 @dataclass(frozen=True, slots=True)
