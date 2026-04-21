@@ -3,7 +3,7 @@ name: "Home Optimizer"
 description: >-
   Slimme warmtepompregeling met MPC en automatische kalibratie, gericht op 
   maximale zelfconsumptie van zonne-energie en minimale energiekosten.
-version: "0.10"
+version: "0.9"
 slug: "home_optimizer"
 url: "https://github.com/gerjanvandenbosch/home-optimizer"
 init: false
@@ -26,18 +26,34 @@ ports:
   8099/tcp: 8099
 
 ports_description:
-  8099/tcp: "Home Optimizer API"
+  8099/tcp: "Home Optimizer dashboard & REST API"
 
 map:
-  - addon_config:rw
+  - addon_config:rw  # /config → /addon_configs/home_optimizer/ on host
+                     # Accessible via SSH and Samba: \\homeassistant\addon_configs\home_optimizer\
 
+# ---------------------------------------------------------------------------
+# Default option values — user can override via the addon Configuration tab.
+# ---------------------------------------------------------------------------
 options:
+  # --- Telemetry storage ---
   database_path: "/config/database.sqlite3"
   models_path: "/config/models"
   sampling_interval_seconds: 10
   flush_interval_seconds: 300
   api_port: 8099
 
+  # --- MPC scheduling ---
+  mpc_enabled: true
+  mpc_interval_seconds: 3600
+
+  # --- Automatic calibration scheduling ---
+  calibration_enabled: true
+  calibration_interval_seconds: 21600
+  calibration_min_history_hours: 24.0
+
+  # --- Sensor entity IDs ---
+  # Temperatures (°C — no scaling needed)
   sensor_room_temperature: "sensor.danfoss_15_temperature"
   sensor_outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
   sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
@@ -63,14 +79,19 @@ options:
   sensor_pv_output: "sensor.pv_output"
   sensor_pv_output_scale: 0.001
 
+  # Text / categorical
   sensor_hp_mode: "sensor.warmtepomp_mode"
 
-  # Shutter position (0–100% open)
+  # Shutter position (0–100 %)
   sensor_shutter_living_room: "sensor.woonkamer_rolluik"
 
   # Binary sensors (on/off or 1/0)
   sensor_defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
   sensor_booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
+
+  # Fraction of learned household electrical baseload that ends up as useful
+  # sensible heat indoors (used when mapping baseload_forecast -> Q_int).
+  internal_gains_heat_fraction: 0.70
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
@@ -78,21 +99,68 @@ options:
   pv_tilt: 50.0
   pv_azimuth: 148.0
 
+  # DHW boiler tank volume [litres]
   boiler_tank_liters: 200
 
+  # ---------------------------------------------------------------------------
+  # Elektriciteitsprijsmodel — kies één van de drie modi:
+  #   flat     : vaste prijs (price_flat_rate) voor alle uren
+  #   dual     : piek/dal-tarief met terugleververgoeding
+  #   nordpool : live dagvoordprijzen van de Entso-E / Nordpool API
+  # ---------------------------------------------------------------------------
+  price_mode: "dual"
+
+  # flat-modus
+  price_flat_rate: 0.22
+
+  # dual-modus (piek/dal + terugleververgoeding)
+  price_high_rate: 0.22
+  price_low_rate: 0.21
+  price_feed_in_rate: 0.07
+  # Uren (0–23) die gelden als daltarief; standaard 23:00–06:00
+  price_low_tariff_hours:
+    - 23
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+
+  # nordpool-modus (Nordpool Data Portal — geen API-token nodig)
+  nordpool_country_code: "NL"
+  nordpool_vat_factor: 1.21     # 21% BTW + opslag
+
+  # Optional monotonically-increasing energy counters [kWh].
+  # Leave blank ("") or omit to disable.  When present, the telemetry layer
+  # records ΔkWh per flush window for accurate COP validation (§14.1) and
+  # PV self-consumption tracking.
   sensor_pv_total_kwh: "sensor.pv_energie_totaal"
   sensor_hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
   # P1 smart-meter energy counters — two separate monotonically-increasing totals
   # because the P1 net-power signal is signed (import > 0, export < 0).
+  # ΔE_import and ΔE_export per flush window enable:
+  #   • Actual grid cost = Δimport_kwh × price [€]
+  #   • PV self-consumption ratio = (ΔPV − Δexport) / ΔPV
+  #   • MPC cost-function validation (§14.2): predicted vs. actual grid cost.
   sensor_p1_import_total_kwh: "sensor.p1_meter_energy_import"
   sensor_p1_export_total_kwh: "sensor.p1_meter_energy_export"
 
+# ---------------------------------------------------------------------------
+# Schema — types validated by the HA supervisor before the addon starts.
+# Use "type?" for optional fields that have a sensible default in options:.
+# ---------------------------------------------------------------------------
 schema:
   database_path: str
-  models_path: str
   sampling_interval_seconds: int
   flush_interval_seconds: int
   api_port: int
+  mpc_enabled: bool
+  mpc_interval_seconds: int
+  calibration_enabled: bool
+  calibration_interval_seconds: int
+  calibration_min_history_hours: float
 
   sensor_room_temperature: str
   sensor_outdoor_temperature: str
@@ -106,22 +174,40 @@ schema:
   sensor_refrigerant_condensation_temperature: str
   sensor_refrigerant_liquid_line_temperature: str
   sensor_discharge_temperature: str
+
   sensor_hp_flow_lpm: str
   sensor_hp_flow_scale: float
+
   sensor_hp_electric_power: str
   sensor_hp_electric_power_scale: float
   sensor_p1_net_power: str
   sensor_p1_net_power_scale: float
   sensor_pv_output: str
   sensor_pv_output_scale: float
+
   sensor_hp_mode: str
+
   sensor_shutter_living_room: str
   sensor_defrost_active: str
   sensor_booster_heater_active: str
+  internal_gains_heat_fraction: float
+
   pv_tilt: float
   pv_azimuth: float
   boiler_tank_liters: int
+
   sensor_pv_total_kwh: str
   sensor_hp_electric_total_kwh: str
   sensor_p1_import_total_kwh: str
   sensor_p1_export_total_kwh: str
+
+  models_path: str
+
+  price_mode: list(flat|dual|nordpool)
+  price_flat_rate: float
+  price_high_rate: float
+  price_low_rate: float
+  price_feed_in_rate: float
+  price_low_tariff_hours: [int]
+  nordpool_country_code: str
+  nordpool_vat_factor: float

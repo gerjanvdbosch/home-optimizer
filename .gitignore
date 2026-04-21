@@ -1,2 +1,3 @@
-/.idea/
+/.idea
 /database.sqlite3
+/models/
