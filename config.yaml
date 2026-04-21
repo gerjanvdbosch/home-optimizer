@@ -38,8 +38,90 @@ options:
   flush_interval_seconds: 300
   api_port: 8099
 
+  sensor_room_temperature: "sensor.danfoss_15_temperature"
+  sensor_outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
+  sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
+  sensor_hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
+  sensor_hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
+  sensor_thermostat_setpoint: "sensor.danfoss_15_setpoint"
+  sensor_dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
+  sensor_dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+  sensor_boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
+  sensor_refrigerant_condensation_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_condensatie_temp"
+  sensor_refrigerant_liquid_line_temperature: "sensor.ecodan_heatpump_ca09ec_buitenunit_vloeistofleiding_1"
+  sensor_discharge_temperature: "sensor.ecodan_heatpump_ca09ec_ontladingstemperatuur"
+
+  # Flow (L/min; set scale=16.667 if HA reports m³/h)
+  sensor_hp_flow_lpm: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
+  sensor_hp_flow_scale: 1.0
+
+  # Power (kW; set scale=0.001 if HA reports W)
+  sensor_hp_electric_power: "sensor.warmtepomp_geschat_vermogen"
+  sensor_hp_electric_power_scale: 0.001
+  sensor_p1_net_power: "sensor.p1_meter_power"
+  sensor_p1_net_power_scale: 0.001
+  sensor_pv_output: "sensor.pv_output"
+  sensor_pv_output_scale: 0.001
+
+  sensor_hp_mode: "sensor.warmtepomp_mode"
+
+  # Shutter position (0–100% open)
+  sensor_shutter_living_room: "sensor.woonkamer_rolluik"
+
+  # Binary sensors (on/off or 1/0)
+  sensor_defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
+  sensor_booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
+
+  # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
+  # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
+  # pv_tilt:    0=horizontal, 90=vertical wall
+  pv_tilt: 50.0
+  pv_azimuth: 148.0
+
+  boiler_tank_liters: 200
+
+  sensor_pv_total_kwh: "sensor.pv_energie_totaal"
+  sensor_hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
+  # P1 smart-meter energy counters — two separate monotonically-increasing totals
+  # because the P1 net-power signal is signed (import > 0, export < 0).
+  sensor_p1_import_total_kwh: "sensor.p1_meter_energy_import"
+  sensor_p1_export_total_kwh: "sensor.p1_meter_energy_export"
+
 schema:
   database_path: str
+  models_path: str
   sampling_interval_seconds: int
   flush_interval_seconds: int
   api_port: int
+
+  sensor_room_temperature: str
+  sensor_outdoor_temperature: str
+  sensor_hp_supply_temperature: str
+  sensor_hp_supply_target_temperature: str
+  sensor_hp_return_temperature: str
+  sensor_thermostat_setpoint: str
+  sensor_dhw_top_temperature: str
+  sensor_dhw_bottom_temperature: str
+  sensor_boiler_ambient_temperature: str
+  sensor_refrigerant_condensation_temperature: str
+  sensor_refrigerant_liquid_line_temperature: str
+  sensor_discharge_temperature: str
+  sensor_hp_flow_lpm: str
+  sensor_hp_flow_scale: float
+  sensor_hp_electric_power: str
+  sensor_hp_electric_power_scale: float
+  sensor_p1_net_power: str
+  sensor_p1_net_power_scale: float
+  sensor_pv_output: str
+  sensor_pv_output_scale: float
+  sensor_hp_mode: str
+  sensor_shutter_living_room: str
+  sensor_defrost_active: str
+  sensor_booster_heater_active: str
+  pv_tilt: float
+  pv_azimuth: float
+  boiler_tank_liters: int
+  sensor_pv_total_kwh: str
+  sensor_hp_electric_total_kwh: str
+  sensor_p1_import_total_kwh: str
+  sensor_p1_export_total_kwh: str
