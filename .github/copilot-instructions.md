@@ -1338,7 +1338,7 @@ Deze beperkingen zijn toegestaan, maar moeten expliciet in code en documentatie 
 - COP-precalculatie houdt de optimalisatie convex, maar veroorzaakt dispatch-fout bij hoge sinktemperaturen.
 - Een convex QP met continue vermogensvariabelen veronderstelt dat de installatie effectief moduleerbaar is binnen het toegestane bereik.
 
-## 11. Samenvatting van expliciete correcties ten opzichte van het ruwe concept
+## 11. Samenvatting van expliciete correcties
 
 Deze versie legt de volgende fysische correcties vast:
 
