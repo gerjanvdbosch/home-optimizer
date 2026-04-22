@@ -3,14 +3,16 @@
 Physical model assumptions
 --------------------------
 * UFH (§3–§6): 2-state grey-box model [T_r, T_b]; heat transport via Newton's
-  law; solar irradiance split by fraction α; forward-Euler discretisation.
+  law; solar irradiance split by fraction α; continuous physics discretised via
+  the shared state-space backend.
 * DHW (§7–§12): 2-node stratification tank [T_top, T_bot]; time-varying LTV
   state-space (depends on V_tap[k]); λ = 1.1628 kWh/(m³·K); tap-stream split
-  correctly between layers.
+  correctly between layers; exact-ZOH runtime discretisation.
 * Combined MPC (§13–§14): block-diagonal state-space; shared heat-pump power
   budget; legionella constraint as stiff soft constraint.
 * All energy quantities use kW (power) and kWh (energy); temperatures in °C.
-* Discretisation: forward-Euler with time step dt_hours.
+* Discretisation: shared exact-ZOH / forward-Euler primitives with explicit
+  subsystem choice.
 """
 
 from .application.optimizer import Optimizer, RunRequest

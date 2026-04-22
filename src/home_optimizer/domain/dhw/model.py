@@ -48,8 +48,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.linalg import expm
 
+from ..state_space import (
+    ContinuousLinearModel,
+    DiscreteLinearModel,
+    DiscretizationConfig,
+    Discretizer,
+    observability_matrix,
+)
 from ...types.constants import ABSOLUTE_ZERO_C
 from ...types.physical import DHWParameters
 
@@ -81,18 +87,14 @@ class DHWModel:
     # Constant auxiliary scalars
     # ------------------------------------------------------------------
 
-    def _continuous_matrices(
+    def continuous_model(
         self,
         v_tap_m3_per_h: float,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return continuous-time ``(F, G_u, G_d)`` matrices for the DHW physics.
+    ) -> ContinuousLinearModel:
+        """Return the continuous-time DHW state-space model for one tap-flow level.
 
         Args:
             v_tap_m3_per_h: Piecewise-constant tap-flow rate over the interval [m³/h].
-
-        Returns:
-            Tuple with continuous-time state matrix ``F`` [1/h], input matrix
-            ``G_u`` [K/(kWh)], and disturbance matrix ``G_d`` [1/h].
         """
         p = self.parameters
         strat_top_per_h = 1.0 / (p.C_top * p.R_strat)
@@ -102,26 +104,41 @@ class DHWModel:
         tap_top_per_h = p.lambda_water * v_tap_m3_per_h / p.C_top
         tap_bot_per_h = p.lambda_water * v_tap_m3_per_h / p.C_bot
 
-        F = np.array(
-            [
-                [-(strat_top_per_h + loss_top_per_h + tap_top_per_h), strat_top_per_h],
-                [strat_bot_per_h, -(strat_bot_per_h + loss_bot_per_h)],
-            ],
-            dtype=float,
+        return ContinuousLinearModel(
+            A=np.array(
+                [
+                    [-(strat_top_per_h + loss_top_per_h + tap_top_per_h), strat_top_per_h],
+                    [strat_bot_per_h, -(strat_bot_per_h + loss_bot_per_h)],
+                ],
+                dtype=float,
+            ),
+            B=np.array([[0.0], [1.0 / p.C_bot]], dtype=float),
+            E=np.array(
+                [
+                    [loss_top_per_h, 0.0],
+                    [loss_bot_per_h, tap_bot_per_h],
+                ],
+                dtype=float,
+            ),
+            C=MEASUREMENT_MATRIX_DHW,
         )
-        G_u = np.array([[0.0], [1.0 / p.C_bot]], dtype=float)
-        G_d = np.array(
-            [
-                [loss_top_per_h, 0.0],
-                [loss_bot_per_h, tap_bot_per_h],
-            ],
-            dtype=float,
-        )
-        return F, G_u, G_d
 
     # ------------------------------------------------------------------
     # Time-varying state-space matrices
     # ------------------------------------------------------------------
+
+    def discrete_model(
+        self,
+        v_tap_m3_per_h: float,
+    ) -> DiscreteLinearModel:
+        """Return the exact-ZOH discrete DHW model for a given tap flow."""
+        return Discretizer.discretize(
+            continuous_model=self.continuous_model(v_tap_m3_per_h),
+            config=DiscretizationConfig(
+                method="exact_zoh",
+                dt_hours=self.parameters.dt_hours,
+            ),
+        )
 
     def state_matrices(
         self,
@@ -136,17 +153,8 @@ class DHWModel:
         """
         if v_tap_m3_per_h < 0.0:
             raise ValueError("v_tap_m3_per_h must be non-negative.")
-        p = self.parameters
-        F, G_u, G_d = self._continuous_matrices(v_tap_m3_per_h)
-        augmented = np.zeros((5, 5), dtype=float)
-        augmented[:2, :2] = F
-        augmented[:2, 2:3] = G_u
-        augmented[:2, 3:] = G_d
-        discretised = expm(augmented * p.dt_hours)
-        A = discretised[:2, :2]
-        B = discretised[:2, 2:3]
-        E = discretised[:2, 3:]
-        return A, B, E
+        discrete_model = self.discrete_model(v_tap_m3_per_h)
+        return discrete_model.A, discrete_model.B, discrete_model.E
 
     # ------------------------------------------------------------------
     # Simulation helpers
@@ -225,8 +233,7 @@ class DHWModel:
 
     def observability_matrix(self, v_tap_m3_per_h: float = 0.0) -> np.ndarray:
         """O = [C_obs; C_obs·A_dhw[k]]  (2×2)."""
-        A, _, _ = self.state_matrices(v_tap_m3_per_h)
-        return np.vstack([MEASUREMENT_MATRIX_DHW, MEASUREMENT_MATRIX_DHW @ A])
+        return observability_matrix(self.discrete_model(v_tap_m3_per_h))
 
     def observability_rank(self, v_tap_m3_per_h: float = 0.0) -> int:
         """rank(O) must equal 2 for full observability (requires a_strat ≠ 0)."""

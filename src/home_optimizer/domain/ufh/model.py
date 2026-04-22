@@ -31,6 +31,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..state_space import (
+    ContinuousLinearModel,
+    DiscreteLinearModel,
+    DiscretizationConfig,
+    Discretizer,
+    controllability_matrix,
+    observability_matrix,
+)
 from ...types.constants import W_PER_KW
 from ...types.physical import ThermalParameters
 
@@ -74,33 +82,54 @@ class ThermalModel:
     # Continuous-time system matrices (for reference / ZOH conversion)
     # ------------------------------------------------------------------
 
-    def continuous_matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return (A_c, B_c, E_c) of the continuous-time state-space model."""
+    def continuous_model(self) -> ContinuousLinearModel:
+        """Return the continuous-time UFH state-space model.
+
+        State vector ``x = [T_r, T_b]`` [°C], control ``u = [P_ufh]`` [kW], and
+        disturbances ``d = [T_out, Q_solar, Q_int_eff]``.
+        """
         p = self.parameters
         inv_CrRbr = 1.0 / (p.C_r * p.R_br)
         inv_CrRro = 1.0 / (p.C_r * p.R_ro)
         inv_CbRbr = 1.0 / (p.C_b * p.R_br)
 
-        A_c = np.array(
-            [
-                [-(inv_CrRbr + inv_CrRro), inv_CrRbr],
-                [inv_CbRbr, -inv_CbRbr],
-            ],
-            dtype=float,
+        return ContinuousLinearModel(
+            A=np.array(
+                [
+                    [-(inv_CrRbr + inv_CrRro), inv_CrRbr],
+                    [inv_CbRbr, -inv_CbRbr],
+                ],
+                dtype=float,
+            ),
+            B=np.array([[0.0], [1.0 / p.C_b]], dtype=float),
+            E=np.array(
+                [
+                    [inv_CrRro, p.alpha / p.C_r, 1.0 / p.C_r],
+                    [0.0, (1.0 - p.alpha) / p.C_b, 0.0],
+                ],
+                dtype=float,
+            ),
+            C=MEASUREMENT_MATRIX,
         )
-        B_c = np.array([[0.0], [1.0 / p.C_b]], dtype=float)
-        E_c = np.array(
-            [
-                [inv_CrRro, p.alpha / p.C_r, 1.0 / p.C_r],
-                [0.0, (1.0 - p.alpha) / p.C_b, 0.0],
-            ],
-            dtype=float,
-        )
-        return A_c, B_c, E_c
+
+    def continuous_matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return ``(A_c, B_c, E_c)`` of the continuous-time UFH model."""
+        model = self.continuous_model()
+        return model.A, model.B, model.E
 
     # ------------------------------------------------------------------
     # Discrete-time state-space matrices (forward Euler)
     # ------------------------------------------------------------------
+
+    def discrete_model(self) -> DiscreteLinearModel:
+        """Return the UFH discrete model assembled through the shared discretizer."""
+        return Discretizer.discretize(
+            continuous_model=self.continuous_model(),
+            config=DiscretizationConfig(
+                method="forward_euler",
+                dt_hours=self.parameters.dt_hours,
+            ),
+        )
 
     def state_matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return (A, B, E) of the forward-Euler discrete state-space model.
@@ -118,25 +147,8 @@ class ThermalModel:
           E = [[a_ro,  α·Δt/C_r,    Δt/C_r ],
                [0,     (1-α)·Δt/C_b, 0    ]]
         """
-        p = self.parameters
-        dt = p.dt_hours
-        a_br = dt / (p.C_r * p.R_br)
-        a_ro = dt / (p.C_r * p.R_ro)
-        b_br = dt / (p.C_b * p.R_br)
-
-        A = np.array(
-            [[1.0 - a_br - a_ro, a_br], [b_br, 1.0 - b_br]],
-            dtype=float,
-        )
-        B = np.array([[0.0], [dt / p.C_b]], dtype=float)
-        E = np.array(
-            [
-                [a_ro, p.alpha * dt / p.C_r, dt / p.C_r],
-                [0.0, (1.0 - p.alpha) * dt / p.C_b, 0.0],
-            ],
-            dtype=float,
-        )
-        return A, B, E
+        discrete_model = self.discrete_model()
+        return discrete_model.A, discrete_model.B, discrete_model.E
 
     # ------------------------------------------------------------------
     # Simulation helpers
@@ -201,16 +213,14 @@ class ThermalModel:
 
     def observability_matrix(self) -> np.ndarray:
         """O = [C; C·A]  (2×2)."""
-        A, _, _ = self.state_matrices()
-        return np.vstack([MEASUREMENT_MATRIX, MEASUREMENT_MATRIX @ A])
+        return observability_matrix(self.discrete_model())
 
     def observability_rank(self) -> int:
         return int(np.linalg.matrix_rank(self.observability_matrix()))
 
     def controllability_matrix(self) -> np.ndarray:
         """Mc = [B, A·B]  (2×2)."""
-        A, B, _ = self.state_matrices()
-        return np.column_stack([B, A @ B])
+        return controllability_matrix(self.discrete_model())
 
     def controllability_rank(self) -> int:
         return int(np.linalg.matrix_rank(self.controllability_matrix()))
