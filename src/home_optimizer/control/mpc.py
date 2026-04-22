@@ -69,6 +69,8 @@ from typing import Union
 
 import numpy as np
 
+from .problem_builder import MpcProblemBuilder
+from .supervisors import HeatPumpTopologySupervisor, LegionellaSupervisor
 from ..domain.dhw.model import DHWModel
 from ..domain.ufh.model import ThermalModel
 from ..types.control import CombinedMPCParameters, DHWMPCParameters, MPCParameters
@@ -444,12 +446,6 @@ class MPCController:
         p_dhw = self._p_dhw
         N = p_ufh.horizon_steps
         dt = self.ufh_model.parameters.dt_hours
-        refs = ufh_forecast.room_temperature_ref_c
-        prices = ufh_forecast.price_eur_per_kwh
-        feed_in_prices = ufh_forecast.feed_in_price_eur_per_kwh
-        pv = ufh_forecast.pv_kw
-        rho_ufh = p_ufh.rho_factor * max(p_ufh.Q_c, 1.0)
-        has_pv = bool(np.any(pv > 0.0))
 
         # Decision variables remain thermal powers [kW]. Electrical power is derived
         # as P_thermal / COP, which keeps the problem convex because COP is known.
@@ -463,123 +459,33 @@ class MPCController:
         )
 
         A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
-        n_states = A_list[0].shape[0]
-
-        # CVXPY variable shapes:
-        # - x:      (n_states, N+1)
-        # - u_ufh:  (N,)
-        # - u_dhw:  (N,) in combined mode
-        # - slacks: (N,)
-        x = cp.Variable((n_states, N + 1))
-        u_ufh = cp.Variable(N)
-        u_dhw = cp.Variable(N) if self._dhw_enabled else None
-        P_import = cp.Variable(N, nonneg=True) if has_pv else None
-        P_export = cp.Variable(N, nonneg=True) if has_pv else None
-        s_lo_ufh = cp.Variable(N, nonneg=True)
-        s_hi_ufh = cp.Variable(N, nonneg=True)
-        s_dhw_lo = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
-        s_dhw_hi = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
-        s_leg = cp.Variable(N, nonneg=True) if self._dhw_enabled else None
-
-        # x[:, 0] is fixed to the estimated current state; optimisation starts from
-        # there and only future states x[:, 1:] are decision-dependent.
-        constraints: list = [x[:, 0] == x0]
-        cost_terms = []
-        leg_req = dhw_forecast.legionella_required if dhw_forecast is not None else None
-
-        for k in range(N):
-            if self._dhw_enabled:
-                u_k = cp.hstack([u_ufh[k : k + 1], u_dhw[k : k + 1]])  # type: ignore[index]
-            else:
-                u_k = u_ufh[k : k + 1]
-            # Discrete thermal dynamics: x[k+1] = A[k] x[k] + B u[k] + E[k] d[k].
-            constraints.append(
-                x[:, k + 1] == A_list[k] @ x[:, k] + B_mat @ u_k + E_list[k] @ D_tot[k]
-            )
-
-            # §14.1: Electrical power = thermal / COP.  COP values are known floats,
-            # so these are affine CVXPY expressions (linear in the decision variables).
-            inv_cop_ufh_k = 1.0 / float(cop_ufh[k])
-            P_ufh_elec_k = u_ufh[k] * inv_cop_ufh_k  # [kW elec]
-
-            if self._dhw_enabled:
-                assert u_dhw is not None and cop_dhw is not None
-                inv_cop_dhw_k = 1.0 / float(cop_dhw[k])
-                P_dhw_elec_k = u_dhw[k] * inv_cop_dhw_k  # type: ignore[index]  # [kW elec]
-                P_elec_k = P_ufh_elec_k + P_dhw_elec_k
-            else:
-                P_elec_k = P_ufh_elec_k
-
-            if has_pv:
-                assert P_import is not None and P_export is not None
-                # Net grid import/export split. Export carries an opportunity cost via
-                # the configured feed-in tariff, so PV surplus is not treated as free heat.
-                constraints.append(P_import[k] >= P_elec_k - float(pv[k]))
-                constraints.append(P_export[k] >= float(pv[k]) - P_elec_k)
-
-            # UFH actuator bounds (thermal) and ramp-rate
-            constraints.extend([u_ufh[k] >= 0.0, u_ufh[k] <= p_ufh.P_max])
-            prev_ufh = prev_u_ufh if k == 0 else u_ufh[k - 1]
-            constraints.append(cp.abs(u_ufh[k] - prev_ufh) <= p_ufh.delta_P_max)
-
-            if self._dhw_enabled:
-                assert u_dhw is not None and p_dhw is not None
-                # DHW actuator bounds (thermal) and ramp-rate
-                constraints.extend([u_dhw[k] >= 0.0, u_dhw[k] <= p_dhw.P_dhw_max])  # type: ignore[index]
-                prev_dhw = prev_u_dhw if k == 0 else u_dhw[k - 1]  # type: ignore[index]
-                constraints.append(cp.abs(u_dhw[k] - prev_dhw) <= p_dhw.delta_P_dhw_max)  # type: ignore[index]
-                # §14: Shared WP electrical budget constraint:
-                #   P_UFH/COP_UFH + P_dhw/COP_dhw ≤ P_hp_max_elec
-                constraints.append(P_elec_k <= self._p_hp_max_elec)
-
-            # UFH comfort (soft constraints via slack variables)
-            # Soft constraints keep the QP feasible under thermal inertia; violating
-            # comfort is allowed but penalised quadratically in the objective.
-            constraints.extend(
-                [
-                    x[0, k + 1] >= p_ufh.T_min - s_lo_ufh[k],
-                    x[0, k + 1] <= p_ufh.T_max + s_hi_ufh[k],
-                ]
-            )
-
-            if self._dhw_enabled:
-                assert s_dhw_lo is not None and s_dhw_hi is not None and s_leg is not None and p_dhw is not None
-                # Keep the DHW top-layer temperature close to the active comfort target.
-                # The lower slack preserves feasibility when the tank is genuinely too cold.
-                # The upper slack suppresses opportunistic preheating above T_dhw_min when
-                # PV or low prices make extra heat artificially cheap.
-                dhw_target_c = p_dhw.T_legionella if (leg_req is not None and leg_req[k]) else p_dhw.T_dhw_min
-                constraints.append(x[2, k + 1] >= p_dhw.T_dhw_min - s_dhw_lo[k])
-                constraints.append(x[2, k + 1] <= dhw_target_c + s_dhw_hi[k])
-                if leg_req is not None and leg_req[k]:
-                    constraints.append(x[2, k + 1] >= p_dhw.T_legionella - s_leg[k])
-
-            # §14.2 Cost terms:
-            #   - Electrical energy cost: p[k] * (P_UFH/COP_UFH + P_dhw/COP_dhw) * dt  [€]
-            #   - Comfort quadratic penalty on room temperature deviation
-            #   - Regularisation on UFH thermal power (damps spikes)
-            #   - Soft-constraint penalties
-            energy_cost_k = (
-                prices[k] * P_import[k] * dt - feed_in_prices[k] * P_export[k] * dt  # type: ignore[index]
-                if has_pv
-                else prices[k] * P_elec_k * dt
-            )
-            cost_k = (
-                p_ufh.Q_c * cp.square(x[0, k] - refs[k])
-                + energy_cost_k
-                + p_ufh.R_c * cp.square(u_ufh[k])
-                + rho_ufh * (cp.square(s_lo_ufh[k]) + cp.square(s_hi_ufh[k]))
-            )
-            if self._dhw_enabled:
-                assert s_dhw_lo is not None and s_dhw_hi is not None and s_leg is not None and p_dhw is not None
-                cost_k = cost_k + p_dhw.comfort_rho_factor * (
-                    cp.square(s_dhw_lo[k]) + cp.square(s_dhw_hi[k])
-                )
-                cost_k = cost_k + p_dhw.legionella_rho_factor * cp.square(s_leg[k])
-            cost_terms.append(cost_k)
-
-        obj = cp.Minimize(cp.sum(cost_terms) + p_ufh.Q_N * cp.square(x[0, N] - refs[N]))
-        problem = cp.Problem(obj, constraints)
+        builder = MpcProblemBuilder(
+            ufh_parameters=p_ufh,
+            dhw_parameters=p_dhw,
+            topology_supervisor=HeatPumpTopologySupervisor(
+                ufh_parameters=p_ufh,
+                dhw_parameters=p_dhw,
+                shared_hp_max_elec_kw=self._p_hp_max_elec,
+            ),
+            legionella_supervisor=LegionellaSupervisor(p_dhw) if p_dhw is not None else None,
+            dhw_enabled=self._dhw_enabled,
+        )
+        build = builder.build(
+            x0=x0,
+            ufh_forecast=ufh_forecast,
+            dhw_forecast=dhw_forecast,
+            prev_u_ufh=prev_u_ufh,
+            prev_u_dhw=prev_u_dhw,
+            a_list=A_list,
+            b_matrix=B_mat,
+            e_list=E_list,
+            disturbance_matrix=D_tot,
+            cop_ufh=cop_ufh,
+            cop_dhw=cop_dhw,
+            dt_hours=dt,
+        )
+        problem = build.problem
+        variables = build.variables
 
         attempt_log: list[str] = []
         last_exception: Exception | None = None
@@ -600,15 +506,19 @@ class MPCController:
                 f"Attempts: {attempts}"
             ) from last_exception
 
-        if u_ufh.value is None or x.value is None:
+        if variables.u_ufh.value is None or variables.x.value is None:
             raise RuntimeError("Solver returned no variable values.")
 
         return self._package_solution(
-            x_val=np.asarray(x.value, dtype=float).T,
-            u_ufh_val=np.asarray(u_ufh.value, dtype=float).reshape(N),
+            x_val=np.asarray(variables.x.value, dtype=float).T,
+            u_ufh_val=np.asarray(variables.u_ufh.value, dtype=float).reshape(N),
             u_dhw_val=(
-                np.asarray(u_dhw.value, dtype=float).reshape(N)
-                if (self._dhw_enabled and u_dhw is not None and u_dhw.value is not None)
+                np.asarray(variables.u_dhw.value, dtype=float).reshape(N)
+                if (
+                    self._dhw_enabled
+                    and variables.u_dhw is not None
+                    and variables.u_dhw.value is not None
+                )
                 else np.zeros(N)
             ),
             objective=float(problem.value),
