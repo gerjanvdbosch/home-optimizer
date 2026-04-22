@@ -41,6 +41,7 @@ Gebruik geen “AI-achtige” shortcuts als de fysica niet expliciet klopt.
 - Maak geen vereenvoudigingen zonder ze als modelaanname te documenteren.
 - Respecteer hardwaretopologie: modelleer exclusieve UFH/DHW-bedrijfsvormen niet alsof ze tegelijk kunnen draaien.
 - Documenteer de volledige codebase: elke module, klasse, functie, belangrijke datastroom en modelaanname moet expliciet beschreven zijn met fysische betekenis, eenheden en relevante ontwerpkeuzes.
+- Houd type annotaties volledig, correct en consistent; elke publieke functie, methode, dataclass en belangrijke interne datastructuur moet passend getypeerd zijn.
 
 ## Wat nooit mag
 
@@ -69,3 +70,4 @@ Bij elke wijziging aan model, filter, solver of configuratie:
 - refactor bestaande code wanneer dat de architectuur of fysische explicietheid aantoonbaar verbetert
 - documenteer waarom de wijziging fysisch klopt
 - werk documentatie van alle geraakte code en interfaces mee bij, zodat de codebase als geheel volledig gedocumenteerd blijft
+- werk type hints mee bij; zorg dat gewijzigde code slaagt voor de afgesproken type checker en geen nieuwe typefouten introduceert
