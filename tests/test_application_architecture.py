@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from home_optimizer.application.forecasting import ForecastBuilder
+from home_optimizer.application.models import RunRequest as RunRequestModel
 from home_optimizer.application.optimizer import RunRequest
 from home_optimizer.application.pipeline import OptimizerPipeline
 from home_optimizer.application.request_projection import (
@@ -98,3 +99,8 @@ def test_run_request_exposes_domain_specific_projections() -> None:
         request.dhw_forecast_config.v_tap_forecast_m3_per_h,
         [0.0, 0.01, 0.0, 0.0],
     )
+
+
+def test_optimizer_reexports_run_request_from_models_module() -> None:
+    """Legacy imports from optimizer.py should still point at the canonical request model."""
+    assert RunRequest is RunRequestModel
