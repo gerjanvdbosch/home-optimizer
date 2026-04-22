@@ -7,6 +7,12 @@ import numpy as np
 from home_optimizer.application.forecasting import ForecastBuilder
 from home_optimizer.application.optimizer import RunRequest
 from home_optimizer.application.pipeline import OptimizerPipeline
+from home_optimizer.application.request_projection import (
+    DhwForecastConfig,
+    SharedHeatPumpConfig,
+    UfhControlConfig,
+    UfhPhysicalConfig,
+)
 from home_optimizer.domain.heat_pump.cop import HeatPumpCOPParameters
 
 
@@ -68,4 +74,27 @@ def test_optimizer_pipeline_builds_cop_model_from_request_parameters() -> None:
         heating_curve_slope=0.9,
         cop_min=1.6,
         cop_max=6.8,
+    )
+
+
+def test_run_request_exposes_domain_specific_projections() -> None:
+    """RunRequest should provide explicit domain projections for downstream services."""
+    request = RunRequest.model_validate(
+        {
+            "horizon_hours": 4,
+            "T_r_init": 20.0,
+            "T_b_init": 22.0,
+            "dhw_enabled": True,
+            "dhw_v_tap_forecast": [0.0, 0.01, 0.0, 0.0],
+        }
+    )
+
+    assert isinstance(request.ufh_physical_config, UfhPhysicalConfig)
+    assert isinstance(request.ufh_control_config, UfhControlConfig)
+    assert isinstance(request.dhw_forecast_config, DhwForecastConfig)
+    assert isinstance(request.shared_heat_pump_config, SharedHeatPumpConfig)
+    np.testing.assert_allclose(request.ufh_physical_config.initial_state_c, [20.0, 22.0])
+    np.testing.assert_allclose(
+        request.dhw_forecast_config.v_tap_forecast_m3_per_h,
+        [0.0, 0.01, 0.0, 0.0],
     )

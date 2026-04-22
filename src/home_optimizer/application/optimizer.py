@@ -49,6 +49,15 @@ from .forecasting import (
     inject_forecast_overrides,
 )
 from .pipeline import OptimizerPipeline
+from .request_projection import (
+    DhwControlConfig,
+    DhwForecastConfig,
+    DhwPhysicalConfig,
+    SharedHeatPumpConfig,
+    UfhControlConfig,
+    UfhForecastConfig,
+    UfhPhysicalConfig,
+)
 from ..control.mpc import MPCController, MPCSolution
 from ..domain.dhw.model import DHWModel
 from ..domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
@@ -367,6 +376,124 @@ class RunRequest(BaseModel):
         7.0, ge=2.0, le=15.0, description="Upper bound on COP for fail-fast validation [-]"
     )
 
+    @property
+    def ufh_physical_config(self) -> UfhPhysicalConfig:
+        """Return the explicit UFH physical configuration and initial state."""
+        return UfhPhysicalConfig(
+            parameters=ThermalParameters(
+                dt_hours=self.dt_hours,
+                C_r=self.C_r,
+                C_b=self.C_b,
+                R_br=self.R_br,
+                R_ro=self.R_ro,
+                alpha=self.alpha,
+                eta=self.eta,
+                A_glass=self.A_glass,
+            ),
+            initial_state_c=np.array([self.T_r_init, self.T_b_init], dtype=float),
+            room_temperature_bias_c=self.room_temperature_bias_c,
+        )
+
+    @property
+    def ufh_control_config(self) -> UfhControlConfig:
+        """Return the explicit UFH MPC settings."""
+        return UfhControlConfig(
+            horizon_steps=self.horizon_hours,
+            q_c=self.Q_c,
+            r_c=self.R_c,
+            q_n=self.Q_N,
+            p_max_kw=self.P_max,
+            delta_p_max_kw_per_step=self.delta_P_max,
+            t_min_c=self.T_min,
+            t_max_c=self.T_max,
+            t_ref_c=self.T_ref,
+            previous_power_kw=self.previous_power_kw,
+        )
+
+    @property
+    def ufh_forecast_config(self) -> UfhForecastConfig:
+        """Return the explicit UFH forecast inputs."""
+        return UfhForecastConfig(
+            horizon_steps=self.horizon_hours,
+            outdoor_temperature_c=self.outdoor_temperature_c,
+            t_out_forecast=self.t_out_forecast,
+            gti_window_forecast=self.gti_window_forecast,
+            shutter_living_room_pct=self.shutter_living_room_pct,
+            shutter_forecast=self.shutter_forecast,
+            gti_pv_forecast=self.gti_pv_forecast,
+            price_config=self.price_config,
+            pv_enabled=self.pv_enabled,
+            pv_peak_kw=self.pv_peak_kw,
+            baseload_forecast=self.baseload_forecast,
+            internal_gains_kw=self.internal_gains_kw,
+            internal_gains_forecast=self.internal_gains_forecast,
+            internal_gains_heat_fraction=self.internal_gains_heat_fraction,
+            room_temperature_ref_c=self.T_ref,
+        )
+
+    @property
+    def dhw_physical_config(self) -> DhwPhysicalConfig:
+        """Return the explicit DHW physical configuration and initial state."""
+        return DhwPhysicalConfig(
+            enabled=self.dhw_enabled,
+            parameters=DHWParameters(
+                dt_hours=self.dt_hours,
+                C_top=self.dhw_C_top,
+                C_bot=self.dhw_C_bot,
+                R_strat=self.dhw_R_strat,
+                R_loss=self.dhw_R_loss,
+                lambda_water=self.dhw_lambda_water_kwh_per_m3k,
+            ),
+            initial_state_c=np.array([self.dhw_T_top_init, self.dhw_T_bot_init], dtype=float),
+            top_temperature_bias_c=self.dhw_top_temperature_bias_c,
+            bottom_temperature_bias_c=self.dhw_bottom_temperature_bias_c,
+            boiler_ambient_bias_c=self.dhw_boiler_ambient_bias_c,
+        )
+
+    @property
+    def dhw_control_config(self) -> DhwControlConfig:
+        """Return the explicit DHW MPC settings."""
+        return DhwControlConfig(
+            enabled=self.dhw_enabled,
+            p_max_kw=self.dhw_P_max,
+            delta_p_max_kw_per_step=self.dhw_delta_P_max,
+            t_min_c=self.dhw_T_min,
+            t_legionella_c=self.dhw_T_legionella,
+            legionella_period_steps=self.dhw_legionella_period_steps,
+            legionella_duration_steps=self.dhw_legionella_duration_steps,
+        )
+
+    @property
+    def dhw_forecast_config(self) -> DhwForecastConfig:
+        """Return the explicit DHW forecast inputs."""
+        return DhwForecastConfig(
+            horizon_steps=self.horizon_hours,
+            outdoor_temperature_c=self.outdoor_temperature_c,
+            t_out_forecast=self.t_out_forecast,
+            v_tap_forecast_m3_per_h=self.dhw_v_tap_forecast,
+            t_mains_c=self.dhw_t_mains_c,
+            t_ambient_c=self.dhw_t_amb_c,
+            t_dhw_min_c=self.dhw_T_min,
+        )
+
+    @property
+    def shared_heat_pump_config(self) -> SharedHeatPumpConfig:
+        """Return the heat-pump COP and shared-budget configuration."""
+        return SharedHeatPumpConfig(
+            cop_parameters=HeatPumpCOPParameters(
+                eta_carnot=self.eta_carnot,
+                delta_T_cond=self.delta_T_cond,
+                delta_T_evap=self.delta_T_evap,
+                T_supply_min=self.T_supply_min,
+                T_ref_outdoor=self.T_ref_outdoor_curve,
+                heating_curve_slope=self.heating_curve_slope,
+                cop_min=self.cop_min,
+                cop_max=self.cop_max,
+            ),
+            cop_max=self.cop_max,
+            hp_max_electrical_power_kw=self.P_hp_max_elec,
+        )
+
 
 _UFH_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
     "C_r",
@@ -406,31 +533,11 @@ def validate_run_request_physics(req: RunRequest) -> None:
             if the DHW tuple/disturbances are non-physical for runtime discretisation.
     """
     # Implements the UFH state-space validity checks from §4/§5.
-    ThermalModel(
-        ThermalParameters(
-            dt_hours=req.dt_hours,
-            C_r=req.C_r,
-            C_b=req.C_b,
-            R_br=req.R_br,
-            R_ro=req.R_ro,
-            alpha=req.alpha,
-            eta=req.eta,
-            A_glass=req.A_glass,
-        )
-    )
-    if req.dhw_enabled:
+    ThermalModel(req.ufh_physical_config.parameters)
+    if req.dhw_physical_config.enabled:
         # DHW runtime uses exact ZOH discretisation; validate only the physical
         # parameter tuple and the supplied tap-flow disturbance.
-        dhw_model = DHWModel(
-            DHWParameters(
-                dt_hours=req.dt_hours,
-                C_top=req.dhw_C_top,
-                C_bot=req.dhw_C_bot,
-                R_strat=req.dhw_R_strat,
-                R_loss=req.dhw_R_loss,
-                lambda_water=req.dhw_lambda_water_kwh_per_m3k,
-            )
-        )
+        dhw_model = DHWModel(req.dhw_physical_config.parameters)
         dhw_model.state_matrices(0.0)
 
 

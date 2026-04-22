@@ -104,21 +104,22 @@ class ForecastBuilder:
         cop_model: HeatPumpCOPModel,
     ) -> ForecastHorizon:
         """Build the UFH disturbance, price, PV, and COP forecast over the horizon."""
-        horizon_steps = req.horizon_hours
-        price_model: BasePriceModel = build_price_model(req.price_config)
+        forecast_config = req.ufh_forecast_config
+        horizon_steps = forecast_config.horizon_steps
+        price_model: BasePriceModel = build_price_model(forecast_config.price_config)
         prices = price_model.prices(start_hour, horizon_steps)
         feed_in_prices = price_model.feed_in_prices(start_hour, horizon_steps)
 
         t_out_arr = ForecastBuilder.materialize_horizon_array(
             name="t_out_forecast",
             horizon_steps=horizon_steps,
-            values=req.t_out_forecast,
-            fallback_scalar=req.outdoor_temperature_c,
+            values=forecast_config.t_out_forecast,
+            fallback_scalar=forecast_config.outdoor_temperature_c,
         )
         gti_window = ForecastBuilder.materialize_horizon_array(
             name="gti_window_forecast",
             horizon_steps=horizon_steps,
-            values=req.gti_window_forecast,
+            values=forecast_config.gti_window_forecast,
             fallback_scalar=0.0,
         )
         internal_gains = ForecastBuilder.build_internal_gains_profile(
@@ -128,18 +129,18 @@ class ForecastBuilder:
         shutter_pct = ForecastBuilder.materialize_horizon_array(
             name="shutter_forecast",
             horizon_steps=horizon_steps,
-            values=req.shutter_forecast,
-            fallback_scalar=req.shutter_living_room_pct,
+            values=forecast_config.shutter_forecast,
+            fallback_scalar=forecast_config.shutter_living_room_pct,
         )
 
-        if req.pv_enabled:
+        if forecast_config.pv_enabled:
             gti_pv = ForecastBuilder.materialize_horizon_array(
                 name="gti_pv_forecast",
                 horizon_steps=horizon_steps,
-                values=req.gti_pv_forecast,
+                values=forecast_config.gti_pv_forecast,
                 fallback_scalar=0.0,
             )
-            pv_kw = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
+            pv_kw = np.maximum(gti_pv / W_PER_KW * forecast_config.pv_peak_kw, 0.0)
         else:
             pv_kw = np.zeros(horizon_steps)
 
@@ -149,7 +150,7 @@ class ForecastBuilder:
             internal_gains_kw=internal_gains,
             price_eur_per_kwh=prices,
             feed_in_price_eur_per_kwh=feed_in_prices,
-            room_temperature_ref_c=np.full(horizon_steps + 1, req.T_ref),
+            room_temperature_ref_c=np.full(horizon_steps + 1, forecast_config.room_temperature_ref_c),
             pv_kw=pv_kw,
             cop_ufh_k=cop_model.cop_ufh(t_out_arr),
             shutter_pct=shutter_pct,
@@ -158,29 +159,33 @@ class ForecastBuilder:
     @staticmethod
     def build_internal_gains_profile(req: Any, *, horizon_steps: int) -> np.ndarray:
         """Return the internal-gains horizon using explicit forecast or baseload mapping."""
-        if req.internal_gains_forecast is not None:
+        forecast_config = req.ufh_forecast_config
+        if forecast_config.internal_gains_forecast is not None:
             explicit_internal_gains = ForecastBuilder.materialize_horizon_array(
                 name="internal_gains_forecast",
                 horizon_steps=horizon_steps,
-                values=req.internal_gains_forecast,
+                values=forecast_config.internal_gains_forecast,
             )
             if np.any(explicit_internal_gains < 0.0):
                 raise ValueError("internal_gains_forecast must remain non-negative [kW].")
             return explicit_internal_gains
 
-        baseline_internal_gains = np.full(horizon_steps, req.internal_gains_kw, dtype=float)
-        if req.baseload_forecast is None or req.internal_gains_heat_fraction == 0.0:
+        baseline_internal_gains = np.full(horizon_steps, forecast_config.internal_gains_kw, dtype=float)
+        if (
+            forecast_config.baseload_forecast is None
+            or forecast_config.internal_gains_heat_fraction == 0.0
+        ):
             return baseline_internal_gains
 
         baseload_profile = ForecastBuilder.materialize_horizon_array(
             name="baseload_forecast",
             horizon_steps=horizon_steps,
-            values=req.baseload_forecast,
+            values=forecast_config.baseload_forecast,
         )
         return baseline_internal_gains + ForecastBuilder.map_baseload_to_internal_gains_increment(
             baseload_profile_kw=baseload_profile,
-            baseline_internal_gains_kw=req.internal_gains_kw,
-            heat_fraction=req.internal_gains_heat_fraction,
+            baseline_internal_gains_kw=forecast_config.internal_gains_kw,
+            heat_fraction=forecast_config.internal_gains_heat_fraction,
         )
 
     @staticmethod
@@ -208,24 +213,25 @@ class ForecastBuilder:
         cop_model: HeatPumpCOPModel,
     ) -> DHWForecastHorizon:
         """Build the DHW disturbance and COP forecast over the horizon."""
+        forecast_config = req.dhw_forecast_config
         t_out_arr = ForecastBuilder.materialize_horizon_array(
             name="t_out_forecast",
             horizon_steps=horizon_steps,
-            values=req.t_out_forecast,
-            fallback_scalar=req.outdoor_temperature_c,
+            values=forecast_config.t_out_forecast,
+            fallback_scalar=forecast_config.outdoor_temperature_c,
         )
         v_tap_arr = ForecastBuilder.materialize_horizon_array(
             name="dhw_v_tap_forecast",
             horizon_steps=horizon_steps,
-            values=req.dhw_v_tap_forecast,
+            values=forecast_config.v_tap_forecast_m3_per_h,
             fallback_scalar=0.0,
         )
         return DHWForecastHorizon(
             v_tap_m3_per_h=v_tap_arr,
-            t_mains_c=np.full(horizon_steps, req.dhw_t_mains_c),
-            t_amb_c=np.full(horizon_steps, req.dhw_t_amb_c),
+            t_mains_c=np.full(horizon_steps, forecast_config.t_mains_c),
+            t_amb_c=np.full(horizon_steps, forecast_config.t_ambient_c),
             legionella_required=np.zeros(horizon_steps, dtype=bool),
-            cop_dhw_k=cop_model.cop_dhw(t_out_arr, t_dhw_supply=req.dhw_T_min),
+            cop_dhw_k=cop_model.cop_dhw(t_out_arr, t_dhw_supply=forecast_config.t_dhw_min_c),
         )
 
 
