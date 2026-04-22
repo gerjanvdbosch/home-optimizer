@@ -143,6 +143,14 @@ De basisvariant van deze specificatie gebruikt:
 - `Q_ufh`: discrete procesruiscovariantie
 - `Q_dhw_aug`: discrete procesruiscovariantie
 
+Voor het augmented DHW-EKF-model geldt aanvullend:
+
+- `Q_dhw_aug` is de volledige discrete procesruiscovariantie van de augmented state `\begin{bmatrix} T_{top} & T_{bot} & \dot{V}_{tap} \end{bmatrix}^{T}`
+- `Q_vtap` is de benoemde discrete procesruisvariantie van de random-walk state `\dot{V}_{tap}`
+- als `Q_dhw_aug` direct wordt geconfigureerd, dan moet de implementatie expliciet vastleggen hoe `Q_vtap` correspondeert met het `(3,3)`-element of subblok van `Q_dhw_aug`
+- als `Q_dhw_aug` programmatisch wordt opgebouwd, dan moet `Q_vtap` expliciet worden gebruikt als de procesruis voor de derde augmented state
+- de code mag `Q_vtap` niet behandelen als een extra, losstaande covariantie naast `Q_dhw_aug`; het is een benoemde parameter binnen dezelfde augmented-ruissemantiek
+
 ### 2.5 Discretisatiebeleid
 
 De productie-implementatie ondersteunt precies twee schema's:
@@ -153,6 +161,7 @@ De productie-implementatie ondersteunt precies twee schema's:
 Regels:
 
 - `exact_zoh` is de standaard voor lineaire modellen en lineair bevroren LTV-stappen.
+- `forward_euler` is nooit de impliciete default; het is uitsluitend toegestaan als expliciet geconfigureerde en runtime-gevalideerde fallback.
 - `forward_euler` mag alleen gebruikt worden als een runtime-validator aantoont dat de discrete stap voor de actuele parameters numeriek stabiel is en geen onfysische tekenomkeringen introduceert.
 - De code mag nooit impliciet van schema wisselen.
 
@@ -1096,7 +1105,7 @@ Belangrijke numerieke nuance:
 
 - deze projectie is een bewuste projected-EKF heuristic
 - de geprojecteerde state is fysisch correcter dan de ongeprojecteerde Gaussian-update
-- de implementatie moet documenteren dat deze stap buiten de zuivere lineair-Gaussian EKF-theorie valt
+- de implementatie moet documenteren dat deze stap buiten de standaard Gaussian EKF-formulering valt
 - als frequente of grote clamping optreedt, moet de filtertuning worden herzien
 
 Bindende covariantieregel:
@@ -1485,6 +1494,19 @@ Alle parameters komen uit een gevalideerd configuratiemodel. De implementatie he
 - `MpcConfig`
 - `SupervisorConfig`
 
+Naamgevingsregel voor configuratievelden:
+
+- configuratievelden gebruiken consequent `snake_case`
+- eenzelfde fysische of numerieke grootheid mag niet met meerdere naamstijlen door elkaar worden benoemd
+- documentatie, configmodellen, serialisatie en tests gebruiken voor dezelfde parameter exact dezelfde veldnaam
+
+Voor numerieke observeerbaarheidsdiagnostiek bevat `EstimatorConfig` minimaal benoemde drempels zoals:
+
+- `observability_rank_tolerance`
+- `observability_condition_min_sv`
+  of, als alternatief beleid expliciet gekozen wordt:
+- `observability_condition_max`
+
 ### 7.2 Verplichte validatieregels
 
 #### Statische validatie
@@ -1530,6 +1552,13 @@ Observeerbaarheid:
 - UFH: numerieke rang én conditioneringscheck na parametrisatie
 - 2-state DHW-model: numerieke rang én conditioneringscheck na parametrisatie
 - augmented EKF: lokale observeerbaarheidsdiagnostiek; geen hard fail op tijdelijke operationele degeneratie
+
+Voor conditioneringschecks geldt bindend:
+
+- de implementatie moet een configureerbare numerieke drempel gebruiken
+- die drempel moet normatief uit config komen en mag niet impliciet in code verstopt zijn
+- de implementatie gebruikt ofwel een minimale singuliere waarde met drempel `observability_condition_min_sv`, ofwel een maximale conditiegetaldrempel `observability_condition_max`
+- de gekozen maat en drempel moeten consistent in validatie, diagnostiek en tests worden gebruikt
 
 Koppeling en topologie:
 
@@ -1610,6 +1639,7 @@ $$
 - `test_dhw_observability_rank`
 - `test_ufh_observability_conditioning`
 - `test_dhw_observability_conditioning`
+- `test_observability_condition_threshold_is_config_driven`
 - `test_ekf_augmented_observability_rank`
   - gebruikt een toestand met `T_top != T_bot` of `T_bot != T_mains`
 - `test_block_diagonal_forbidden_when_tank_losses_couple_to_room`
