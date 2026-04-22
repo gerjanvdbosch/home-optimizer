@@ -11,7 +11,13 @@ src/home_optimizer.egg-info/entry_points.txt
 src/home_optimizer.egg-info/requires.txt
 src/home_optimizer.egg-info/top_level.txt
 src/home_optimizer/application/__init__.py
+src/home_optimizer/application/forecasting.py
+src/home_optimizer/application/models.py
 src/home_optimizer/application/optimizer.py
+src/home_optimizer/application/pipeline.py
+src/home_optimizer/application/request_handling.py
+src/home_optimizer/application/request_projection.py
+src/home_optimizer/application/runtime.py
 src/home_optimizer/calibration/__init__.py
 src/home_optimizer/calibration/__main__.py
 src/home_optimizer/calibration/cop_offline.py
@@ -25,7 +31,10 @@ src/home_optimizer/calibration/ufh_active.py
 src/home_optimizer/calibration/ufh_offline.py
 src/home_optimizer/control/__init__.py
 src/home_optimizer/control/mpc.py
+src/home_optimizer/control/problem_builder.py
+src/home_optimizer/control/supervisors.py
 src/home_optimizer/domain/__init__.py
+src/home_optimizer/domain/state_space.py
 src/home_optimizer/domain/dhw/__init__.py
 src/home_optimizer/domain/dhw/model.py
 src/home_optimizer/domain/estimation/__init__.py
@@ -66,6 +75,7 @@ src/home_optimizer/types/estimation.py
 src/home_optimizer/types/forecast.py
 src/home_optimizer/types/physical.py
 tests/test_api.py
+tests/test_application_architecture.py
 tests/test_calibration.py
 tests/test_calibration_cli.py
 tests/test_cop_model.py
@@ -75,5 +85,7 @@ tests/test_forecasting.py
 tests/test_kalman.py
 tests/test_local_runner.py
 tests/test_mpc.py
+tests/test_mpc_architecture.py
+tests/test_state_space.py
 tests/test_telemetry.py
 tests/test_thermal_model.py

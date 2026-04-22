@@ -19,6 +19,7 @@ Requires-Dist: pydantic<3.0,>=2.0
 Provides-Extra: dev
 Requires-Dist: black>=24.0; extra == "dev"
 Requires-Dist: pyflakes>=3.2; extra == "dev"
+Requires-Dist: pyright<2.0,>=1.1; extra == "dev"
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: ruff>=0.4; extra == "dev"
 
@@ -51,3 +52,11 @@ Zie ook: `docs/calibration.md` en `docs/local_runner.md`.
 
 [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgerjanvdbosch%2Fhome-optimizer)
 
+Voor lokale ontwikkeling met linting, type-checking en tests:
+
+```bash
+.venv/bin/pip install -e ".[dev]"
+ruff check .
+pyright
+pytest -q
+```
