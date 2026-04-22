@@ -72,13 +72,20 @@ Environment-variabelen
 Start voorbeelden
 -----------------
 
-1) Snelle start (standaard modellen map `./models`):
+1) Installatie
+----------
+
+```bash
+.venv/bin/pip install -e ".[dev]"
+```
+
+2) Snelle start (standaard modellen map `./models`):
 
 ```bash
 python -m home_optimizer.local_runner
 ```
 
-2) Start met expliciete models-dir en sensors.json (lokale telemetry collection):
+3) Start met expliciete models-dir en sensors.json (lokale telemetry collection):
 
 ```bash
 python -m home_optimizer.local_runner \
@@ -88,7 +95,7 @@ python -m home_optimizer.local_runner \
   --port 8099
 ```
 
-3) Gebruik env-variabelen in plaats van CLI-args:
+4) Gebruik env-variabelen in plaats van CLI-args:
 
 ```bash
 export DATABASE_URL=sqlite:///dev_data/telemetry.db
