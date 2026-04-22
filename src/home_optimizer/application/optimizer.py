@@ -42,11 +42,17 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pydantic import BaseModel, Field
 
+from .forecasting import (
+    ForecastBuilder,
+    _FORECAST_SERVICE,
+    build_repository_forecast_overrides,
+    inject_forecast_overrides,
+)
+from .pipeline import OptimizerPipeline
 from ..control.mpc import MPCController, MPCSolution
 from ..domain.dhw.model import DHWModel
 from ..domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 from ..domain.ufh.model import ThermalModel
-from ..forecasting import ForecastService
 from ..pricing import BasePriceModel, PriceConfig, build_price_model  # noqa: F401 — PriceConfig re-exported via RunRequest
 from ..types.calibration import CalibrationParameterOverrides
 from ..types.constants import LAMBDA_WATER_KWH_PER_M3_K, W_PER_KW
@@ -61,96 +67,6 @@ if TYPE_CHECKING:
     from ..telemetry.repository import TelemetryRepository
 
 log = logging.getLogger("home_optimizer.application.optimizer")
-_FORECAST_SERVICE = ForecastService()
-
-
-# ---------------------------------------------------------------------------
-# Shared forecast-injection helper
-# ---------------------------------------------------------------------------
-
-
-def inject_forecast_overrides(
-    rows: list,
-    n_steps: int,
-    existing: "dict | None" = None,
-) -> dict:
-    """Build forecast override fields from persisted :class:`ForecastSnapshot` rows.
-
-    Produces ``t_out_forecast``, ``gti_window_forecast``, and
-    ``gti_pv_forecast`` lists ready to be passed to
-    :meth:`RunRequest.model_copy`.  Only fields whose key is absent from
-    ``existing`` (or when ``existing`` is ``None``) are populated, so
-    callers that already have a value keep it.
-
-    Args:
-        rows:     Ordered :class:`~home_optimizer.telemetry.models.ForecastSnapshot`
-                  rows from :meth:`~home_optimizer.telemetry.TelemetryRepository.get_latest_forecast_batch`.
-        n_steps:  Horizon length; at most ``n_steps`` rows are consumed.
-        existing: Optional dict of overrides already accumulated by the caller.
-                  Keys present here are **not** overwritten.
-
-    Returns:
-        Dict with zero or more of: ``t_out_forecast``, ``gti_window_forecast``,
-        ``gti_pv_forecast``.
-    """
-    existing = existing or {}
-    slice_ = rows[:n_steps]
-    overrides: dict = {}
-    if "t_out_forecast" not in existing:
-        overrides["t_out_forecast"] = [r.t_out_c for r in slice_]
-    if "gti_window_forecast" not in existing:
-        overrides["gti_window_forecast"] = [r.gti_w_per_m2 for r in slice_]
-    if "gti_pv_forecast" not in existing:
-        overrides["gti_pv_forecast"] = [r.gti_pv_w_per_m2 for r in slice_]
-    return overrides
-
-
-def build_repository_forecast_overrides(
-    request: "RunRequest",
-    repository: "TelemetryRepository",
-    existing: "dict | None" = None,
-) -> tuple[list, dict]:
-    """Load persisted weather data and derived ML forecasts for one runtime request.
-
-    Args:
-        request: Runtime request whose horizon length and explicit user forecasts
-            determine what still needs to be injected.
-        repository: Telemetry repository containing persisted forecast rows and
-            the historical telemetry used to train ML enrichments.
-        existing: Optional overrides already accumulated by the caller.
-
-    Returns:
-        Tuple ``(rows, overrides)`` where ``rows`` is the latest forecast batch and
-        ``overrides`` contains weather arrays plus any additional ML forecasts such
-        as ``shutter_forecast``.
-    """
-
-    current_overrides = dict(existing or {})
-    rows = repository.get_latest_forecast_batch()
-    if not rows:
-        return [], {}
-
-    explicit_request_fields = request.model_dump(mode="python", exclude_none=True)
-    forecast_overrides = inject_forecast_overrides(
-        rows,
-        request.horizon_hours,
-        existing={**explicit_request_fields, **current_overrides},
-    )
-    current_overrides.update(forecast_overrides)
-    materialized_request_data = {
-        **request.model_dump(mode="python"),
-        **current_overrides,
-    }
-    ml_overrides = _FORECAST_SERVICE.build_missing_overrides(
-        request_data=materialized_request_data,
-        repository=repository,
-        weather_rows=rows[: request.horizon_hours],
-        current_overrides=current_overrides,
-    )
-    forecast_overrides.update(ml_overrides)
-    return rows, forecast_overrides
-
-
 
 # ---------------------------------------------------------------------------
 # Shared request model (API + scheduler + local runners)
@@ -735,138 +651,7 @@ class Optimizer:
                 reaches an optimal MPC solution).
         """
         start_hour = datetime.now(tz=timezone.utc).hour
-        N = req.horizon_hours
-
-        # ── Step 1: UFH thermal model ────────────────────────────────────
-        thermal_params = ThermalParameters(
-            dt_hours=req.dt_hours,
-            C_r=req.C_r,
-            C_b=req.C_b,
-            R_br=req.R_br,
-            R_ro=req.R_ro,
-            alpha=req.alpha,
-            eta=req.eta,
-            A_glass=req.A_glass,
-        )
-        ufh_model = ThermalModel(thermal_params)
-
-        # ── Step 2: Carnot COP model (§14.1) ────────────────────────────
-        cop_model = self._build_cop_model(req)
-
-        # ── Step 3: Scalar COP for MPCParameters validation ─────────────
-        # A single representative outdoor-temperature sample is sufficient
-        # for the Pydantic validators inside MPCParameters / DHWMPCParameters.
-        t_rep = np.array([req.outdoor_temperature_c])
-        cop_ufh_scalar = float(cop_model.cop_ufh(t_rep)[0])
-        cop_dhw_scalar = float(cop_model.cop_dhw(t_rep, req.dhw_T_min)[0])
-
-        mpc_params = MPCParameters(
-            horizon_steps=N,
-            Q_c=req.Q_c,
-            R_c=req.R_c,
-            Q_N=req.Q_N,
-            P_max=req.P_max,
-            delta_P_max=req.delta_P_max,
-            T_min=req.T_min,
-            T_max=req.T_max,
-            cop_ufh=cop_ufh_scalar,
-            cop_max=req.cop_max,
-        )
-
-        # ── Step 4: Forecast horizons with embedded COP arrays ───────────
-        ufh_forecast = self._build_ufh_forecast(req, start_hour, cop_model)
-        dt = thermal_params.dt_hours
-        pv_kw = ufh_forecast.pv_kw
-        prices = ufh_forecast.price_eur_per_kwh
-        feed_in_prices = ufh_forecast.feed_in_price_eur_per_kwh
-
-        # ── Step 5: Optional DHW setup ───────────────────────────────────
-        dhw_model: DHWModel | None = None
-        dhw_forecast: DHWForecastHorizon | None = None
-        controller_params: MPCParameters | CombinedMPCParameters = mpc_params
-        initial_dhw_state: np.ndarray | None = None
-
-        if req.dhw_enabled:
-            dhw_params = DHWParameters(
-                dt_hours=req.dt_hours,
-                C_top=req.dhw_C_top,
-                C_bot=req.dhw_C_bot,
-                R_strat=req.dhw_R_strat,
-                R_loss=req.dhw_R_loss,
-                lambda_water=req.dhw_lambda_water_kwh_per_m3k,
-            )
-            dhw_mpc_params = DHWMPCParameters(
-                P_dhw_max=req.dhw_P_max,
-                delta_P_dhw_max=req.dhw_delta_P_max,
-                T_dhw_min=req.dhw_T_min,
-                T_legionella=req.dhw_T_legionella,
-                legionella_period_steps=req.dhw_legionella_period_steps,
-                legionella_duration_steps=req.dhw_legionella_duration_steps,
-                cop_dhw=cop_dhw_scalar,
-                cop_max=req.cop_max,
-            )
-            controller_params = CombinedMPCParameters(
-                ufh=mpc_params,
-                dhw=dhw_mpc_params,
-                P_hp_max_elec=req.P_hp_max_elec,
-            )
-            dhw_model = DHWModel(dhw_params)
-            dhw_forecast = self._build_dhw_forecast(req, N, cop_model)
-            dhw_forecast.assert_compatible_with_parameters(dhw_params)
-            initial_dhw_state = np.array([req.dhw_T_top_init, req.dhw_T_bot_init])
-
-        # ── Step 6: Solve MPC through the canonical CVXPY formulation ───
-        controller = MPCController(
-            ufh_model=ufh_model,
-            params=controller_params,
-            dhw_model=dhw_model,
-        )
-        solution = controller.solve(
-            initial_ufh_state_c=np.array([req.T_r_init, req.T_b_init]),
-            ufh_forecast=ufh_forecast,
-            initial_dhw_state_c=initial_dhw_state,
-            dhw_forecast=dhw_forecast,
-            previous_p_ufh_kw=req.previous_power_kw,
-        )
-
-        p_ufh = np.maximum(solution.ufh_control_sequence_kw, 0.0)
-        p_dhw = np.maximum(solution.dhw_control_sequence_kw, 0.0)
-
-        # ── Step 7: Energy / cost summaries (electrical basis, §14.1) ───
-        assert (
-            ufh_forecast.cop_ufh_k is not None
-        ), "cop_ufh_k must be set on ufh_forecast after _build_ufh_forecast"
-        cop_ufh_arr = ufh_forecast.cop_ufh_k
-        cop_dhw_arr = (
-            dhw_forecast.cop_dhw_k
-            if dhw_forecast is not None and dhw_forecast.cop_dhw_k is not None
-            else np.ones(N)
-        )
-
-        p_ufh_elec = p_ufh / cop_ufh_arr
-        p_dhw_elec = p_dhw / cop_dhw_arr
-        assert pv_kw is not None
-        net_grid_power_kw = p_ufh_elec + p_dhw_elec - pv_kw
-        p_import = np.maximum(net_grid_power_kw, 0.0)
-        p_export = np.maximum(-net_grid_power_kw, 0.0)
-        total_cost = float(np.sum((p_import * prices - p_export * feed_in_prices) * dt))
-        ufh_energy = float(np.sum(p_ufh) * dt)
-        dhw_energy = float(np.sum(p_dhw) * dt)
-
-        return MPCStepResult(
-            solution=solution,
-            ufh_forecast=ufh_forecast,
-            dhw_forecast=dhw_forecast,
-            p_ufh_kw=p_ufh,
-            p_dhw_kw=p_dhw,
-            cop_ufh_arr=cop_ufh_arr,
-            cop_dhw_arr=cop_dhw_arr,
-            pv_kw=pv_kw,
-            total_cost_eur=total_cost,
-            ufh_energy_kwh=ufh_energy,
-            dhw_energy_kwh=dhw_energy,
-            start_hour=start_hour,
-        )
+        return OptimizerPipeline.solve(req, start_hour=start_hour)
 
     def run_scheduled_once(
         self,
@@ -1022,20 +807,12 @@ class Optimizer:
             ValueError: If the provided forecast is not one-dimensional or does not
                 contain enough samples for the MPC horizon.
         """
-        if values is None:
-            if fallback_scalar is None:
-                raise ValueError(f"{name} forecast is required for the full MPC horizon.")
-            return np.full(horizon_steps, fallback_scalar, dtype=float)
-
-        arr = np.asarray(values, dtype=float)
-        if arr.ndim != 1:
-            raise ValueError(f"{name} must be a 1-D forecast array.")
-        if arr.size < horizon_steps:
-            raise ValueError(
-                f"{name} must provide at least {horizon_steps} values for the MPC horizon; "
-                f"received {arr.size}."
-            )
-        return arr[:horizon_steps].copy()
+        return ForecastBuilder.materialize_horizon_array(
+            name=name,
+            horizon_steps=horizon_steps,
+            values=values,
+            fallback_scalar=fallback_scalar,
+        )
 
     @staticmethod
     def _build_cop_model(req: RunRequest) -> HeatPumpCOPModel:
@@ -1054,17 +831,7 @@ class Optimizer:
         Raises:
             ValueError: If any parameter violates a physical constraint.
         """
-        params = HeatPumpCOPParameters(
-            eta_carnot=req.eta_carnot,
-            delta_T_cond=req.delta_T_cond,
-            delta_T_evap=req.delta_T_evap,
-            T_supply_min=req.T_supply_min,
-            T_ref_outdoor=req.T_ref_outdoor_curve,
-            heating_curve_slope=req.heating_curve_slope,
-            cop_min=req.cop_min,
-            cop_max=req.cop_max,
-        )
-        return HeatPumpCOPModel(params)
+        return OptimizerPipeline.build_cop_model(req)
 
     @staticmethod
     def _build_ufh_forecast(
@@ -1090,67 +857,10 @@ class Optimizer:
             :class:`~home_optimizer.types.ForecastHorizon` with N steps,
             including the COP array.
         """
-        N = req.horizon_hours
-        # Build the configured price model (flat / dual / nordpool).
-        price_model: BasePriceModel = build_price_model(req.price_config)
-        prices = price_model.prices(start_hour, N)
-        feed_in_prices = price_model.feed_in_prices(start_hour, N)
-
-        # ── Outdoor temperature ──────────────────────────────────────────
-        # Use the explicit forecast when available; otherwise broadcast the scalar
-        # outdoor reading across the horizon. Short forecasts are rejected to avoid
-        # silently inventing data via padding.
-        t_out_arr = Optimizer._materialize_horizon_array(
-            name="t_out_forecast",
-            horizon_steps=N,
-            values=req.t_out_forecast,
-            fallback_scalar=req.outdoor_temperature_c,
-        )
-
-        # ── Solar gain through windows — real Open-Meteo GTI preferred ───
-        gti = Optimizer._materialize_horizon_array(
-            name="gti_window_forecast",
-            horizon_steps=N,
-            values=req.gti_window_forecast,
-            fallback_scalar=0.0,
-        )
-        internal_gains = Optimizer._build_internal_gains_profile(req, horizon_steps=N)
-        # Real shutter forecasts are optional. When absent, the latest measured
-        # or manually configured scalar shutter position is broadcast across the
-        # horizon, preserving the previous scheduled-MPC behavior.
-        shutter_pct = Optimizer._materialize_horizon_array(
-            name="shutter_forecast",
-            horizon_steps=N,
-            values=req.shutter_forecast,
-            fallback_scalar=req.shutter_living_room_pct,
-        )
-
-        # ── PV generation — real Open-Meteo GTI_pv when PV enabled ──
-        # P_pv = (GTI_pv [W/m²] / W_PER_KW) * pv_peak_kw [kW/kWp].
-        if req.pv_enabled:
-
-            gti_pv = Optimizer._materialize_horizon_array(
-                name="gti_pv_forecast",
-                horizon_steps=N,
-                values=req.gti_pv_forecast,
-                fallback_scalar=0.0,
-            )
-            pv = np.maximum(gti_pv / W_PER_KW * req.pv_peak_kw, 0.0)
-        else:
-            pv = np.zeros(N)
-        # §14.1: Time-varying COP from the Carnot model + heating curve.
-        # Colder outdoor → higher T_supply (heating curve) AND lower T_evap → lower COP.
-        cop_ufh_k = cop_model.cop_ufh(t_out_arr)
-        return ForecastHorizon(
-            outdoor_temperature_c=t_out_arr,
-            gti_w_per_m2=gti,
-            internal_gains_kw=internal_gains,
-            price_eur_per_kwh=prices,
-            feed_in_price_eur_per_kwh=feed_in_prices,
-            room_temperature_ref_c=np.full(N + 1, req.T_ref),
-            pv_kw=pv,
-            cop_ufh_k=cop_ufh_k,
-            shutter_pct=shutter_pct,
+        return ForecastBuilder.build_ufh_forecast(
+            req,
+            start_hour=start_hour,
+            cop_model=cop_model,
         )
 
     @staticmethod
@@ -1171,31 +881,9 @@ class Optimizer:
         separate user parameter.
         """
 
-        if req.internal_gains_forecast is not None:
-            explicit_internal_gains = Optimizer._materialize_horizon_array(
-                name="internal_gains_forecast",
-                horizon_steps=horizon_steps,
-                values=req.internal_gains_forecast,
-            )
-            if np.any(explicit_internal_gains < 0.0):
-                raise ValueError("internal_gains_forecast must remain non-negative [kW].")
-            return explicit_internal_gains
-
-        baseline_internal_gains = np.full(horizon_steps, req.internal_gains_kw, dtype=float)
-        if req.baseload_forecast is None:
-            return baseline_internal_gains
-        if req.internal_gains_heat_fraction == 0.0:
-            return baseline_internal_gains
-
-        baseload_profile = Optimizer._materialize_horizon_array(
-            name="baseload_forecast",
+        return ForecastBuilder.build_internal_gains_profile(
+            req,
             horizon_steps=horizon_steps,
-            values=req.baseload_forecast,
-        )
-        return baseline_internal_gains + Optimizer._map_baseload_to_internal_gains_increment(
-            baseload_profile_kw=baseload_profile,
-            baseline_internal_gains_kw=req.internal_gains_kw,
-            heat_fraction=req.internal_gains_heat_fraction,
         )
 
     @staticmethod
@@ -1238,18 +926,11 @@ class Optimizer:
                 ``heat_fraction`` is negative.
         """
 
-        if np.any(baseload_profile_kw < 0.0):
-            raise ValueError("baseload_forecast must remain non-negative [kW].")
-        if heat_fraction < 0.0:
-            raise ValueError("internal_gains_heat_fraction must remain non-negative [-].")
-        if heat_fraction == 0.0:
-            return np.zeros_like(baseload_profile_kw)
-
-        # Implements the derived-reference mapping: the implied electrical floor
-        # is Q_int,baseline / heat_fraction, which is algebraically equivalent to
-        # max(heat_fraction * P_baseload - Q_int,baseline, 0) for the increment.
-        useful_baseload_heat_kw = heat_fraction * baseload_profile_kw
-        return np.maximum(useful_baseload_heat_kw - baseline_internal_gains_kw, 0.0)
+        return ForecastBuilder.map_baseload_to_internal_gains_increment(
+            baseload_profile_kw=baseload_profile_kw,
+            baseline_internal_gains_kw=baseline_internal_gains_kw,
+            heat_fraction=heat_fraction,
+        )
 
     @staticmethod
     def _build_dhw_forecast(
@@ -1272,31 +953,10 @@ class Optimizer:
             :class:`~home_optimizer.types.DHWForecastHorizon` with N steps,
             including the COP array.
         """
-        t_out_arr = Optimizer._materialize_horizon_array(
-            name="t_out_forecast",
+        return ForecastBuilder.build_dhw_forecast(
+            req,
             horizon_steps=N,
-            values=req.t_out_forecast,
-            fallback_scalar=req.outdoor_temperature_c,
-        )
-        # DHW supply temperature ≈ comfort setpoint T_dhw_min (normal operation).
-        # During a legionella cycle the effective supply temp would be T_legionella;
-        # the legionella scheduler adjusts the constraint, not the COP model here.
-        cop_dhw_k = cop_model.cop_dhw(t_out_arr, t_dhw_supply=req.dhw_T_min)
-        # When no forecast is available from the DHW tap forecaster (cold start or
-        # insufficient history), assume zero tap demand: conservative but physically
-        # correct — the MPC will not pre-heat unnecessarily.
-        v_tap_arr = Optimizer._materialize_horizon_array(
-            name="dhw_v_tap_forecast",
-            horizon_steps=N,
-            values=req.dhw_v_tap_forecast,
-            fallback_scalar=0.0,
-        )
-        return DHWForecastHorizon(
-            v_tap_m3_per_h=v_tap_arr,
-            t_mains_c=np.full(N, req.dhw_t_mains_c),
-            t_amb_c=np.full(N, req.dhw_t_amb_c),
-            legionella_required=np.zeros(N, dtype=bool),
-            cop_dhw_k=cop_dhw_k,
+            cop_model=cop_model,
         )
 
     @staticmethod
@@ -1399,4 +1059,3 @@ class Optimizer:
         if not overrides:
             return merge_run_request_updates(base_input, {})
         return merge_run_request_updates(base_input, overrides)
-
