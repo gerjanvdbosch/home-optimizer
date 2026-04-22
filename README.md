@@ -19,19 +19,13 @@ Belangrijkste features:
  - Offline calibration tools voor het schatten van thermische parameters
  - FastAPI dashboard en simulator voor inspectie en handmatige runs
 
-Zie ook: `docs/calibration.md` en `docs/local_runner.md`.
+Zie ook:
+ -  [calibration.md](./docs/calibration.md)
+ -  [local_runner.md](./docs/local_runner.md)
+ -  [instructions.md](./instructions.md)
 
 ---
 
 ## Installeren
 
 [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgerjanvdbosch%2Fhome-optimizer)
-
-Voor lokale ontwikkeling met linting, type-checking en tests:
-
-```bash
-.venv/bin/pip install -e ".[dev]"
-ruff check .
-pyright
-pytest -q
-```
