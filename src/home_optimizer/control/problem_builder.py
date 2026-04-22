@@ -200,6 +200,10 @@ class MpcProblemBuilder:
             cp.sum(cost_terms)
             + self.ufh_parameters.Q_N * cp.square(x[0, n_horizon] - references_c[n_horizon])
         )
+        if self.dhw_enabled:
+            if self.dhw_parameters is None:
+                raise ValueError("Combined MPC problem requires DHW parameters.")
+            constraints.append(x[2, n_horizon] >= float(self.dhw_parameters.terminal_top_min))
         return MpcBuildArtifacts(problem=cp.Problem(objective, constraints), variables=variables)
 
     def _create_variables(

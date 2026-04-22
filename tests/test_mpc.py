@@ -306,10 +306,24 @@ def test_optimizer_request_validation_accepts_dhw_high_tap_flow_with_exact_zoh()
             "dhw_C_bot": 0.05,
             "dhw_R_strat": 100.0,
             "dhw_R_loss": 200.0,
+            "dhw_v_tap_forecast": [0.3] * 24,
         }
     )
 
     validate_run_request_physics(req)
+
+
+def test_optimizer_request_validation_rejects_missing_dhw_tap_forecast() -> None:
+    """DHW solve-context assembly must fail fast when the tap-flow forecast is absent."""
+    req = RunRequest.model_validate(
+        {
+            "dt_hours": 1.0,
+            "dhw_enabled": True,
+        }
+    )
+
+    with pytest.raises(ValueError, match="dhw_v_tap_forecast is required"):
+        Optimizer().solve(req)
 
 
 # ---------------------------------------------------------------------------

@@ -201,6 +201,18 @@ class RunRequest(BaseModel):
             "older heuristic ceilings, so only a physical lower bound is enforced."
         ),
     )
+    dhw_R_loss_top: float | None = Field(
+        None, gt=0.0, description="Top-node DHW standby-loss resistance R_loss_top [K/kW]."
+    )
+    dhw_R_loss_bot: float | None = Field(
+        None, gt=0.0, description="Bottom-node DHW standby-loss resistance R_loss_bot [K/kW]."
+    )
+    dhw_heater_split_top: float = Field(
+        0.0, ge=0.0, le=1.0, description="Fraction of DHW heating power injected into the top node [-]."
+    )
+    dhw_heater_split_bottom: float = Field(
+        1.0, ge=0.0, le=1.0, description="Fraction of DHW heating power injected into the bottom node [-]."
+    )
     dhw_lambda_water_kwh_per_m3k: float = Field(
         LAMBDA_WATER_KWH_PER_M3_K,
         gt=0.0,
@@ -257,12 +269,18 @@ class RunRequest(BaseModel):
     dhw_legionella_duration_steps: int = Field(
         1, ge=1, le=4, description="Min consecutive steps at T_legionella for legionella kill"
     )
+    dhw_terminal_top_min: float | None = Field(
+        None,
+        ge=10.0,
+        le=85.0,
+        description="Optional terminal lower bound on DHW top-layer temperature at horizon end [degC].",
+    )
     dhw_v_tap_forecast: list[float] | None = Field(
         None,
         description=(
             "Hourly DHW tap-flow forecast Vdot_tap [m³/h], length N. "
             "Provided by the DHW tap forecaster once enough history is available. "
-            "When absent the MPC assumes zero tap demand (conservative cold-start). "
+            "DHW solve paths require an explicit horizon forecast; there is no hidden zero-demand default. "
             "Can also be set explicitly for simulation or testing."
         ),
     )
@@ -281,6 +299,10 @@ class RunRequest(BaseModel):
             "Shared heat-pump electrical power budget P_hp,max,elec [kW]. "
             "Enforces P_UFH/COP_UFH + P_dhw/COP_dhw <= P_hp_max_elec (section 14)."
         ),
+    )
+    heat_pump_topology: str = Field(
+        "shared",
+        description="Heat-pump topology policy: shared, exclusive_ufh, or exclusive_dhw.",
     )
 
     eta_carnot: float = Field(0.45, ge=0.1, le=0.99, description="Carnot efficiency factor eta [-]")
@@ -368,7 +390,10 @@ class RunRequest(BaseModel):
                 C_top=self.dhw_C_top,
                 C_bot=self.dhw_C_bot,
                 R_strat=self.dhw_R_strat,
-                R_loss=self.dhw_R_loss,
+                R_loss_top=self.dhw_R_loss_top if self.dhw_R_loss_top is not None else self.dhw_R_loss,
+                R_loss_bot=self.dhw_R_loss_bot if self.dhw_R_loss_bot is not None else self.dhw_R_loss,
+                heater_split_top=self.dhw_heater_split_top,
+                heater_split_bottom=self.dhw_heater_split_bottom,
                 lambda_water=self.dhw_lambda_water_kwh_per_m3k,
             ),
             initial_state_c=np.array([self.dhw_T_top_init, self.dhw_T_bot_init], dtype=float),
@@ -387,6 +412,7 @@ class RunRequest(BaseModel):
             t_legionella_c=self.dhw_T_legionella,
             legionella_period_steps=self.dhw_legionella_period_steps,
             legionella_duration_steps=self.dhw_legionella_duration_steps,
+            terminal_top_min_c=self.dhw_terminal_top_min,
         )
 
     @property
@@ -416,6 +442,7 @@ class RunRequest(BaseModel):
             ),
             cop_max=self.cop_max,
             hp_max_electrical_power_kw=self.P_hp_max_elec,
+            topology=self.heat_pump_topology,
         )
 
 

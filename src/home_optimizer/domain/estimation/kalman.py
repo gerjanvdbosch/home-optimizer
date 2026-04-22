@@ -824,23 +824,24 @@ class DHWExtendedKalmanFilter:
         T_amb_c, T_mains_c = d
         T_top, T_bot, V_tap = np.asarray(state, dtype=float)
 
-        # Constant scalars (§10.1)
+        # Constant scalars
         a_strat = dt / (p.C_top * p.R_strat)
         b_strat = dt / (p.C_bot * p.R_strat)
-        a_loss = dt / (p.C_top * p.R_loss)
-        b_loss = dt / (p.C_bot * p.R_loss)
+        a_loss = dt / (p.C_top * p.R_loss_top)
+        b_loss = dt / (p.C_bot * p.R_loss_bot)
 
-        # Nonlinear propagation (§12.3) — bilinear tap terms
+        # Nonlinear propagation — bilinear tap terms with configured heater split
         T_top_next = T_top + dt / p.C_top * (
             -(T_top - T_bot) / p.R_strat
-            - p.lambda_water * V_tap * T_top
-            - (T_top - T_amb_c) / p.R_loss
+            + p.lambda_water * V_tap * (T_bot - T_top)
+            + p.heater_split_top * control_kw
+            - (T_top - T_amb_c) / p.R_loss_top
         )
         T_bot_next = T_bot + dt / p.C_bot * (
             (T_top - T_bot) / p.R_strat
-            + control_kw
-            + p.lambda_water * V_tap * T_mains_c
-            - (T_bot - T_amb_c) / p.R_loss
+            + p.lambda_water * V_tap * (T_mains_c - T_bot)
+            + p.heater_split_bottom * control_kw
+            - (T_bot - T_amb_c) / p.R_loss_bot
         )
         # Random-walk model for V_tap (§12.2): V_tap[k+1] = V_tap[k]
         V_tap_next = V_tap
@@ -875,9 +876,7 @@ class DHWExtendedKalmanFilter:
         Notes
         -----
         The third column of F[k] is the sensitivity of the temperature
-        states to V_tap.  This column drives observability of V_tap:
-        when T_top ≈ T_mains the sensitivity is near zero and the EKF
-        cannot estimate V_tap well (§12.5 edge case).
+        states to V_tap. This column drives local observability of V_tap.
         """
         p = self._model.parameters
         dt = p.dt_hours
@@ -886,26 +885,25 @@ class DHWExtendedKalmanFilter:
             raise ValueError("disturbance must be [T_amb, T_mains].")
         _ = control_kw  # control does not appear in ∂f/∂x for this DHW model.
         T_top_hat = float(state[0])
+        T_bot_hat = float(state[1])
         V_tap_hat = float(state[2])
         t_mains_c = float(d[1])
 
-        # Constant scalars (same as in §11 and §12.4)
+        # Constant scalars
         a_strat = dt / (p.C_top * p.R_strat)
         b_strat = dt / (p.C_bot * p.R_strat)
-        a_loss = dt / (p.C_top * p.R_loss)
-        b_loss = dt / (p.C_bot * p.R_loss)
+        a_loss = dt / (p.C_top * p.R_loss_top)
+        b_loss = dt / (p.C_bot * p.R_loss_bot)
         a_tap_hat = dt / p.C_top * p.lambda_water * V_tap_hat
+        b_tap_hat = dt / p.C_bot * p.lambda_water * V_tap_hat
 
-        # ∂f_T_top/∂V_tap = -Δt/C_top · λ · T̂_top  (third column, row 0)
-        df_Ttop_dVtap = -dt / p.C_top * p.lambda_water * T_top_hat
-        # ∂f_T_bot/∂V_tap = +Δt/C_bot · λ · T_mains  (third column, row 1)
-        df_Tbot_dVtap = dt / p.C_bot * p.lambda_water * t_mains_c
+        df_Ttop_dVtap = dt / p.C_top * p.lambda_water * (T_bot_hat - T_top_hat)
+        df_Tbot_dVtap = dt / p.C_bot * p.lambda_water * (t_mains_c - T_bot_hat)
 
-        # Jacobian matrix (§12.4)
         F = np.array(
             [
-                [1.0 - a_strat - a_loss - a_tap_hat, a_strat, df_Ttop_dVtap],
-                [b_strat, 1.0 - b_strat - b_loss, df_Tbot_dVtap],
+                [1.0 - a_strat - a_loss - a_tap_hat, a_strat + a_tap_hat, df_Ttop_dVtap],
+                [b_strat, 1.0 - b_strat - b_loss - b_tap_hat, df_Tbot_dVtap],
                 [0.0, 0.0, 1.0],
             ],
             dtype=float,
@@ -1026,8 +1024,6 @@ class DHWExtendedKalmanFilter:
         """Augmented observability matrix O_aug ∈ ℝ^{4×3} (§12.5).
 
         O_aug = [C_obs; C_obs · F[k]]
-
-        rank(O_aug) = 3  iff  a_strat ≠ 0  AND  T̂_top ≠ T_mains.
 
         Parameters
         ----------

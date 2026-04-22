@@ -70,18 +70,50 @@ class DHWParameters:
     C_top: float
     C_bot: float
     R_strat: float
-    R_loss: float
+    R_loss_top: float | None = None
+    R_loss_bot: float | None = None
+    R_loss: float | None = None
+    heater_split_top: float = 0.0
+    heater_split_bottom: float = 1.0
     lambda_water: float = LAMBDA_WATER_KWH_PER_M3_K
 
     def __post_init__(self) -> None:
-        for field_name in ("dt_hours", "C_top", "C_bot", "R_strat", "R_loss", "lambda_water"):
+        for field_name in ("dt_hours", "C_top", "C_bot", "R_strat", "lambda_water"):
             if getattr(self, field_name) <= 0.0:
                 raise ValueError(f"{field_name} must be strictly positive.")
+        r_loss_top = self.R_loss_top
+        r_loss_bot = self.R_loss_bot
+        if r_loss_top is None and r_loss_bot is None:
+            if self.R_loss is None or self.R_loss <= 0.0:
+                raise ValueError(
+                    "Provide positive R_loss_top/R_loss_bot or a positive legacy R_loss."
+                )
+            r_loss_top = self.R_loss
+            r_loss_bot = self.R_loss
+        elif r_loss_top is None or r_loss_bot is None:
+            raise ValueError("R_loss_top and R_loss_bot must both be provided together.")
+        if r_loss_top <= 0.0 or r_loss_bot <= 0.0:
+            raise ValueError("R_loss_top and R_loss_bot must be strictly positive.")
+        if not 0.0 <= self.heater_split_top <= 1.0:
+            raise ValueError("heater_split_top must be in [0, 1].")
+        if not 0.0 <= self.heater_split_bottom <= 1.0:
+            raise ValueError("heater_split_bottom must be in [0, 1].")
+        if not np.isclose(self.heater_split_top + self.heater_split_bottom, 1.0, atol=1e-9):
+            raise ValueError("heater_split_top + heater_split_bottom must equal 1 within tolerance.")
+        object.__setattr__(self, "R_loss_top", float(r_loss_top))
+        object.__setattr__(self, "R_loss_bot", float(r_loss_bot))
+        if self.R_loss is None:
+            object.__setattr__(self, "R_loss", float((r_loss_top + r_loss_bot) / 2.0))
 
     @property
     def euler_time_constants_hours(self) -> tuple[float, float, float]:
         """Dominant time constants for the Euler stability criterion [h]."""
-        return (self.C_top * self.R_strat, self.C_bot * self.R_strat, self.C_top * self.R_loss)
+        return (
+            self.C_top * self.R_strat,
+            self.C_bot * self.R_strat,
+            self.C_top * self.R_loss_top,
+            self.C_bot * self.R_loss_bot,
+        )
 
     def max_stable_euler_dt(self, safety_factor: float = 0.2) -> float:
         """Upper bound on dt for a stable forward-Euler step [h]."""
@@ -126,4 +158,3 @@ class DHWParameters:
 
 
 __all__ = ["DHWParameters", "ThermalParameters"]
-

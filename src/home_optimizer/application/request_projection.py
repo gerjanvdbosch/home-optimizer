@@ -96,6 +96,7 @@ class DhwControlConfig:
     t_legionella_c: float
     legionella_period_steps: int
     legionella_duration_steps: int
+    terminal_top_min_c: float | None
 
     def to_mpc_parameters(self, *, cop_dhw: float, cop_max: float) -> DHWMPCParameters:
         """Return validated DHW MPC parameters using a representative COP sample."""
@@ -108,6 +109,7 @@ class DhwControlConfig:
             legionella_duration_steps=self.legionella_duration_steps,
             cop_dhw=cop_dhw,
             cop_max=cop_max,
+            terminal_top_min=self.terminal_top_min_c,
         )
 
 
@@ -131,6 +133,7 @@ class SharedHeatPumpConfig:
     cop_parameters: HeatPumpCOPParameters
     cop_max: float
     hp_max_electrical_power_kw: float
+    topology: str = "shared"
 
 
 def build_combined_mpc_parameters(
@@ -146,6 +149,7 @@ def build_combined_mpc_parameters(
         ufh=ufh_control.to_mpc_parameters(cop_ufh=cop_ufh, cop_max=shared_heat_pump.cop_max),
         dhw=dhw_control.to_mpc_parameters(cop_dhw=cop_dhw, cop_max=shared_heat_pump.cop_max),
         P_hp_max_elec=shared_heat_pump.hp_max_electrical_power_kw,
+        heat_pump_topology=shared_heat_pump.topology,
     )
 
 

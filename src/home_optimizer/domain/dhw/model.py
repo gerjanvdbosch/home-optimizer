@@ -1,15 +1,17 @@
-"""2-state discrete thermal model for a DHW stratification tank (§7–§11 of spec).
+"""2-state discrete thermal model for a DHW stratification tank.
 
 State vector    x_dhw = [T_top, T_bot]ᵀ
-Control input   u_dhw = P_dhw  [kW]   (heat-pump output to bottom layer — assumption A5)
+Control input   u_dhw = P_dhw  [kW]
 Disturbances    d_dhw = [T_amb, T_mains]ᵀ
 
 The state-transition matrix A_dhw[k] is **time-varying** because it depends on the
 tap-water flow rate V_tap[k] at each time step (bilinear term, linearised as LTV).
 
-Physical equations (§9):
-  C_top · dT_top/dt = −(T_top−T_bot)/R_strat − λ·V_tap·T_top − (T_top−T_amb)/R_loss
-  C_bot · dT_bot/dt = +(T_top−T_bot)/R_strat + P_dhw + λ·V_tap·T_mains − (T_bot−T_amb)/R_loss
+Physical equations:
+  C_top · dT_top/dt = −(T_top−T_bot)/R_strat + λ·V_tap·(T_bot−T_top)
+                      + heater_split_top · P_dhw − (T_top−T_amb)/R_loss_top
+  C_bot · dT_bot/dt = +(T_top−T_bot)/R_strat + λ·V_tap·(T_mains−T_bot)
+                      + heater_split_bottom · P_dhw − (T_bot−T_amb)/R_loss_bot
 
 Discrete state-space (exact ZOH, step Δt [h], §10–§11):
 ──────────────────────────────────────────────────────────
@@ -36,8 +38,7 @@ Energy-balance verification (§9.5):
   d/dt(C_top·T_top + C_bot·T_bot) = P_dhw − λ·V_tap·(T_top−T_mains)
                                     − (T_top−T_amb)/R_loss − (T_bot−T_amb)/R_loss  ✓
 
-Measurement:  y = C_obs · x,  C_obs = [1, 0]  (only T_top is sensed)
-Observability: rank([C_obs; C_obs·A_dhw[k]]) = 2  iff  a_strat ≠ 0  (always true, §11).
+Measurement:  y = C_obs · x,  C_obs = [1, 0]  (legacy 2-state top sensor wrapper)
 
 Derived quantity (not a state, §8.1, assumption A6):
   T_dhw = (C_top · T_top + C_bot · T_bot) / (C_top + C_bot)
@@ -99,20 +100,23 @@ class DHWModel:
         p = self.parameters
         strat_top_per_h = 1.0 / (p.C_top * p.R_strat)
         strat_bot_per_h = 1.0 / (p.C_bot * p.R_strat)
-        loss_top_per_h = 1.0 / (p.C_top * p.R_loss)
-        loss_bot_per_h = 1.0 / (p.C_bot * p.R_loss)
+        loss_top_per_h = 1.0 / (p.C_top * p.R_loss_top)
+        loss_bot_per_h = 1.0 / (p.C_bot * p.R_loss_bot)
         tap_top_per_h = p.lambda_water * v_tap_m3_per_h / p.C_top
         tap_bot_per_h = p.lambda_water * v_tap_m3_per_h / p.C_bot
 
         return ContinuousLinearModel(
             A=np.array(
                 [
-                    [-(strat_top_per_h + loss_top_per_h + tap_top_per_h), strat_top_per_h],
-                    [strat_bot_per_h, -(strat_bot_per_h + loss_bot_per_h)],
+                    [-(strat_top_per_h + loss_top_per_h + tap_top_per_h), strat_top_per_h + tap_top_per_h],
+                    [strat_bot_per_h, -(strat_bot_per_h + loss_bot_per_h + tap_bot_per_h)],
                 ],
                 dtype=float,
             ),
-            B=np.array([[0.0], [1.0 / p.C_bot]], dtype=float),
+            B=np.array(
+                [[p.heater_split_top / p.C_top], [p.heater_split_bottom / p.C_bot]],
+                dtype=float,
+            ),
             E=np.array(
                 [
                     [loss_top_per_h, 0.0],
@@ -182,13 +186,23 @@ class DHWModel:
         p = self.parameters
 
         q_strat = (T_top - T_bot) / p.R_strat
-        q_loss_top = (T_top - t_amb_c) / p.R_loss
-        q_loss_bot = (T_bot - t_amb_c) / p.R_loss
-        tap_top = p.lambda_water * v_tap_m3_per_h * T_top  # heat leaving top
-        tap_bot = p.lambda_water * v_tap_m3_per_h * t_mains_c  # cold water entering bot
+        q_loss_top = (T_top - t_amb_c) / p.R_loss_top
+        q_loss_bot = (T_bot - t_amb_c) / p.R_loss_bot
+        q_tap_top = p.lambda_water * v_tap_m3_per_h * (T_bot - T_top)
+        q_tap_bot = p.lambda_water * v_tap_m3_per_h * (t_mains_c - T_bot)
 
-        dT_top = (-q_strat - tap_top - q_loss_top) / p.C_top
-        dT_bot = (q_strat + control_kw + tap_bot - q_loss_bot) / p.C_bot
+        dT_top = (
+            -q_strat
+            + q_tap_top
+            + p.heater_split_top * control_kw
+            - q_loss_top
+        ) / p.C_top
+        dT_bot = (
+            q_strat
+            + q_tap_bot
+            + p.heater_split_bottom * control_kw
+            - q_loss_bot
+        ) / p.C_bot
 
         return np.array([dT_top, dT_bot], dtype=float)
 

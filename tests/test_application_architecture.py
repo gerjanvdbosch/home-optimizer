@@ -35,6 +35,7 @@ def test_optimizer_pipeline_builds_combined_context_when_dhw_enabled() -> None:
         {
             "horizon_hours": 4,
             "dhw_enabled": True,
+            "dhw_v_tap_forecast": [0.0, 0.0, 0.0, 0.0],
             "t_out_forecast": [8.0, 8.0, 8.0, 8.0],
             "gti_window_forecast": [0.0, 0.0, 0.0, 0.0],
             "gti_pv_forecast": [0.0, 0.0, 0.0, 0.0],

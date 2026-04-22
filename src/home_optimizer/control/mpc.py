@@ -466,6 +466,11 @@ class MPCController:
                 ufh_parameters=p_ufh,
                 dhw_parameters=p_dhw,
                 shared_hp_max_elec_kw=self._p_hp_max_elec,
+                heat_pump_topology=(
+                    self.params.heat_pump_topology
+                    if isinstance(self.params, CombinedMPCParameters)
+                    else "shared"
+                ),
             ),
             legionella_supervisor=LegionellaSupervisor(p_dhw) if p_dhw is not None else None,
             dhw_enabled=self._dhw_enabled,
@@ -552,15 +557,17 @@ class MPCController:
 
         dhw_viol, leg_viol = 0.0, 0.0
         if self._dhw_enabled and p_dhw is not None and dhw_forecast is not None:
-            # Top-layer DHW temperature is the relevant comfort / legionella signal
-            # because it represents the actually available tap temperature.
             t_top_pred = x_val[1:, 2]
+            t_bot_pred = x_val[1:, 3]
             dhw_viol = float(np.max(np.maximum(p_dhw.T_dhw_min - t_top_pred, 0.0)))
             leg_viol = float(
                 np.max(
                     np.where(
                         dhw_forecast.legionella_required,
-                        np.maximum(p_dhw.T_legionella - t_top_pred, 0.0),
+                        np.maximum(
+                            np.maximum(p_dhw.T_legionella - t_top_pred, 0.0),
+                            np.maximum(p_dhw.T_legionella - t_bot_pred, 0.0),
+                        ),
                         0.0,
                     )
                 )

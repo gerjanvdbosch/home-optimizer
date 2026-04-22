@@ -48,8 +48,14 @@ def test_A_matrix_matches_specification(model: DHWModel, params: DHWParameters) 
     A, _, _ = model.state_matrices(v_tap)
     f_cont = np.array(
         [
-            [-(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss)), 1.0 / (params.C_top * params.R_strat)],
-            [1.0 / (params.C_bot * params.R_strat), -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss))],
+            [
+                -(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss_top)),
+                1.0 / (params.C_top * params.R_strat),
+            ],
+            [
+                1.0 / (params.C_bot * params.R_strat),
+                -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss_bot)),
+            ],
         ]
     )
     expected = expm(f_cont * params.dt_hours)
@@ -57,16 +63,32 @@ def test_A_matrix_matches_specification(model: DHWModel, params: DHWParameters) 
 
 
 def test_B_matrix_is_constant_and_correct(model: DHWModel, params: DHWParameters) -> None:
-    """B_dhw must be the exact ZOH actuation map with bottom-layer-only heating."""
+    """B_dhw must be the exact ZOH actuation map with configured heater split."""
     for v_tap in (0.0, 0.01, 0.05):
         _, B, _ = model.state_matrices(v_tap)
         f_cont = np.array(
             [
-                [-(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss) + params.lambda_water * v_tap / params.C_top), 1.0 / (params.C_top * params.R_strat)],
-                [1.0 / (params.C_bot * params.R_strat), -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss))],
+                [
+                    -(
+                        1.0 / (params.C_top * params.R_strat)
+                        + 1.0 / (params.C_top * params.R_loss_top)
+                        + params.lambda_water * v_tap / params.C_top
+                    ),
+                    1.0 / (params.C_top * params.R_strat) + params.lambda_water * v_tap / params.C_top,
+                ],
+                [
+                    1.0 / (params.C_bot * params.R_strat),
+                    -(
+                        1.0 / (params.C_bot * params.R_strat)
+                        + 1.0 / (params.C_bot * params.R_loss_bot)
+                        + params.lambda_water * v_tap / params.C_bot
+                    ),
+                ],
             ]
         )
-        g_u = np.array([[0.0], [1.0 / params.C_bot]])
+        g_u = np.array(
+            [[params.heater_split_top / params.C_top], [params.heater_split_bottom / params.C_bot]]
+        )
         augmented = np.zeros((3, 3), dtype=float)
         augmented[:2, :2] = f_cont
         augmented[:2, 2:3] = g_u
@@ -80,14 +102,28 @@ def test_E_matrix_matches_specification(model: DHWModel, params: DHWParameters) 
     _, _, E = model.state_matrices(v_tap)
     f_cont = np.array(
         [
-            [-(1.0 / (params.C_top * params.R_strat) + 1.0 / (params.C_top * params.R_loss) + params.lambda_water * v_tap / params.C_top), 1.0 / (params.C_top * params.R_strat)],
-            [1.0 / (params.C_bot * params.R_strat), -(1.0 / (params.C_bot * params.R_strat) + 1.0 / (params.C_bot * params.R_loss))],
+            [
+                -(
+                    1.0 / (params.C_top * params.R_strat)
+                    + 1.0 / (params.C_top * params.R_loss_top)
+                    + params.lambda_water * v_tap / params.C_top
+                ),
+                1.0 / (params.C_top * params.R_strat) + params.lambda_water * v_tap / params.C_top,
+            ],
+            [
+                1.0 / (params.C_bot * params.R_strat),
+                -(
+                    1.0 / (params.C_bot * params.R_strat)
+                    + 1.0 / (params.C_bot * params.R_loss_bot)
+                    + params.lambda_water * v_tap / params.C_bot
+                ),
+            ],
         ]
     )
     g_d = np.array(
         [
-            [1.0 / (params.C_top * params.R_loss), 0.0],
-            [1.0 / (params.C_bot * params.R_loss), params.lambda_water * v_tap / params.C_bot],
+            [1.0 / (params.C_top * params.R_loss_top), 0.0],
+            [1.0 / (params.C_bot * params.R_loss_bot), params.lambda_water * v_tap / params.C_bot],
         ]
     )
     augmented = np.zeros((4, 4), dtype=float)
@@ -125,7 +161,7 @@ def test_dhw_energy_balance(model: DHWModel, params: DHWParameters) -> None:
 
     # RHS from §9.5
     q_tap = params.lambda_water * v_tap * (T_top - t_mains)
-    q_loss = (T_top - t_amb) / params.R_loss + (T_bot - t_amb) / params.R_loss
+    q_loss = (T_top - t_amb) / params.R_loss_top + (T_bot - t_amb) / params.R_loss_bot
     rhs = P_dhw - q_tap - q_loss
 
     np.testing.assert_allclose(lhs, rhs, atol=1e-10, err_msg="DHW energy balance violated.")
@@ -137,15 +173,15 @@ def test_dhw_energy_balance(model: DHWModel, params: DHWParameters) -> None:
 
 
 def test_tap_stream_split_correct(model: DHWModel, params: DHWParameters) -> None:
-    """Top layer loses λ·V̇·T_top; bottom layer gains λ·V̇·T_mains (§9.1)."""
+    """Tap terms must match λ·V̇·(T_bot−T_top) and λ·V̇·(T_mains−T_bot)."""
     T_top, T_bot = 55.0, 40.0
     state = np.array([T_top, T_bot])
     v_tap = 0.01
     t_mains = 10.0
     dxdt = model.continuous_derivative(state, 0.0, v_tap, t_mains, 20.0)
 
-    tap_top_expected = -params.lambda_water * v_tap * T_top / params.C_top
-    tap_bot_expected = params.lambda_water * v_tap * t_mains / params.C_bot
+    tap_top_expected = params.lambda_water * v_tap * (T_bot - T_top) / params.C_top
+    tap_bot_expected = params.lambda_water * v_tap * (t_mains - T_bot) / params.C_bot
 
     # Isolate just the tap contribution by comparing with v_tap=0 run
     dxdt_no_tap = model.continuous_derivative(state, 0.0, 0.0, t_mains, 20.0)
@@ -168,7 +204,10 @@ def test_step_and_continuous_derivative_agree(model: DHWModel, params: DHWParame
         C_top=params.C_top,
         C_bot=params.C_bot,
         R_strat=params.R_strat,
-        R_loss=params.R_loss,
+        R_loss_top=params.R_loss_top,
+        R_loss_bot=params.R_loss_bot,
+        heater_split_top=params.heater_split_top,
+        heater_split_bottom=params.heater_split_bottom,
         lambda_water=params.lambda_water,
     )
     small_dt_model = DHWModel(small_dt_params)
@@ -192,10 +231,28 @@ def test_t_dhw_mean_is_weighted_average(model: DHWModel, params: DHWParameters) 
 
 
 def test_heating_raises_bottom_layer(model: DHWModel) -> None:
-    """P_dhw enters the bottom layer (B[0,0]=0, B[1,0]>0 — assumption A5)."""
+    """With the default split, DHW heating must raise the bottom layer."""
     state = np.array([50.0, 30.0])
     x_next = model.step(state, control_kw=3.0, v_tap_m3_per_h=0.0, t_mains_c=10.0, t_amb_c=20.0)
     assert x_next[1] > state[1], "Heating should raise T_bot."
+
+
+def test_heater_split_can_raise_top_layer() -> None:
+    """Configured top-node heater split must feed power into the top layer dynamics."""
+    params = DHWParameters(
+        dt_hours=1.0,
+        C_top=0.5814,
+        C_bot=0.5814,
+        R_strat=10.0,
+        R_loss_top=50.0,
+        R_loss_bot=50.0,
+        heater_split_top=1.0,
+        heater_split_bottom=0.0,
+    )
+    model = DHWModel(params)
+    state = np.array([45.0, 35.0])
+    x_next = model.step(state, control_kw=2.0, v_tap_m3_per_h=0.0, t_mains_c=10.0, t_amb_c=20.0)
+    assert x_next[0] > state[0], "Top-node heater split should raise T_top."
 
 
 def test_tap_cools_top_layer(model: DHWModel) -> None:

@@ -220,11 +220,14 @@ class ForecastBuilder:
             values=forecast_config.t_out_forecast,
             fallback_scalar=forecast_config.outdoor_temperature_c,
         )
+        if forecast_config.v_tap_forecast_m3_per_h is None:
+            raise ValueError(
+                "dhw_v_tap_forecast is required when DHW control is enabled; hidden zero-demand defaults are forbidden."
+            )
         v_tap_arr = ForecastBuilder.materialize_horizon_array(
             name="dhw_v_tap_forecast",
             horizon_steps=horizon_steps,
             values=forecast_config.v_tap_forecast_m3_per_h,
-            fallback_scalar=0.0,
         )
         return DHWForecastHorizon(
             v_tap_m3_per_h=v_tap_arr,

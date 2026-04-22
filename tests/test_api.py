@@ -148,7 +148,7 @@ def test_simulate_passes_safe_calibration_overrides_into_ml_forecast_generation(
     def _fake_build_missing_overrides(*, request_data, repository, weather_rows, current_overrides=None):  # noqa: ANN001
         captured["request_data"] = dict(request_data)
         captured["current_overrides"] = dict(current_overrides or {})
-        return {}
+        return {"dhw_v_tap_forecast": [0.0, 0.0, 0.0, 0.0]}
 
     monkeypatch.setattr(optimizer_module._FORECAST_SERVICE, "build_missing_overrides", _fake_build_missing_overrides)
 
@@ -239,7 +239,7 @@ def test_optimizer_latest_returns_scheduled_optimizer_result() -> None:
     """Operational endpoint must expose the latest cached periodic Optimizer run."""
     Optimizer.clear_latest_scheduled_snapshot()
     optimizer = Optimizer()
-    req = RunRequest.model_validate({"horizon_hours": 8})
+    req = RunRequest.model_validate({"horizon_hours": 8, "dhw_v_tap_forecast": [0.0] * 8})
     result = optimizer.run_scheduled_once(base_input=req)
     assert result is not None
 
@@ -708,5 +708,4 @@ def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(
         "GTI PV-panelen [W/m2]",
     ]
     assert solar_fig["data"][1]["y"] == [0.0, 0.0, 0.0]
-
 

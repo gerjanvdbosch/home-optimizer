@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,7 @@ class DHWMPCParameters:
     legionella_duration_steps: int
     cop_dhw: float
     cop_max: float
+    terminal_top_min: float | None = None
     comfort_rho_factor: float = 1000.0
     legionella_rho_factor: float = 1e6
 
@@ -79,6 +81,10 @@ class DHWMPCParameters:
             raise ValueError(f"cop_dhw={self.cop_dhw} is physically impossible: COP must be > 1.")
         if self.cop_dhw > self.cop_max:
             raise ValueError(f"cop_dhw={self.cop_dhw} exceeds cop_max={self.cop_max}.")
+        if self.terminal_top_min is None:
+            object.__setattr__(self, "terminal_top_min", self.T_dhw_min)
+        elif self.terminal_top_min <= 0.0:
+            raise ValueError("terminal_top_min must be strictly positive when provided.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,11 +94,13 @@ class CombinedMPCParameters:
     ufh: MPCParameters
     dhw: DHWMPCParameters
     P_hp_max_elec: float
+    heat_pump_topology: Literal["shared", "exclusive_ufh", "exclusive_dhw"] = "shared"
 
     def __post_init__(self) -> None:
         if self.P_hp_max_elec <= 0.0:
             raise ValueError("P_hp_max_elec must be strictly positive.")
+        if self.heat_pump_topology not in {"shared", "exclusive_ufh", "exclusive_dhw"}:
+            raise ValueError("heat_pump_topology must be one of 'shared', 'exclusive_ufh', 'exclusive_dhw'.")
 
 
 __all__ = ["CombinedMPCParameters", "DHWMPCParameters", "MPCParameters"]
-

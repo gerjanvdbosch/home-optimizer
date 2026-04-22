@@ -26,6 +26,7 @@ class HeatPumpTopologySupervisor:
     ufh_parameters: MPCParameters
     dhw_parameters: DHWMPCParameters | None
     shared_hp_max_elec_kw: float
+    heat_pump_topology: str = "shared"
 
     def apply_step_constraints(
         self,
@@ -39,13 +40,17 @@ class HeatPumpTopologySupervisor:
         previous_u_dhw=None,
     ) -> None:
         """Append per-step actuator and shared electrical constraints."""
+        topology = self.heat_pump_topology
         constraints.extend(
             [
                 u_ufh[step_index] >= 0.0,
                 u_ufh[step_index] <= self.ufh_parameters.P_max,
-                cp.abs(u_ufh[step_index] - previous_u_ufh) <= self.ufh_parameters.delta_P_max,
             ]
         )
+        if not (topology == "exclusive_dhw" and step_index == 0):
+            constraints.append(
+                cp.abs(u_ufh[step_index] - previous_u_ufh) <= self.ufh_parameters.delta_P_max
+            )
         if u_dhw is None:
             return
         if self.dhw_parameters is None:
@@ -56,10 +61,20 @@ class HeatPumpTopologySupervisor:
             [
                 u_dhw[step_index] >= 0.0,
                 u_dhw[step_index] <= self.dhw_parameters.P_dhw_max,
-                cp.abs(u_dhw[step_index] - previous_u_dhw) <= self.dhw_parameters.delta_P_dhw_max,
-                total_electrical_power_kw <= self.shared_hp_max_elec_kw,
             ]
         )
+        if not (topology == "exclusive_ufh" and step_index == 0):
+            constraints.append(
+                cp.abs(u_dhw[step_index] - previous_u_dhw) <= self.dhw_parameters.delta_P_dhw_max
+            )
+        if topology == "shared":
+            constraints.append(total_electrical_power_kw <= self.shared_hp_max_elec_kw)
+        elif topology == "exclusive_ufh":
+            constraints.append(u_dhw[step_index] == 0.0)
+        elif topology == "exclusive_dhw":
+            constraints.append(u_ufh[step_index] == 0.0)
+        else:
+            raise ValueError(f"Unsupported heat-pump topology: {topology}.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +111,11 @@ class LegionellaSupervisor:
             ]
         )
         if legionella_required:
-            constraints.append(
-                predicted_state_matrix[2, step_index + 1]
-                >= self.dhw_parameters.T_legionella - legionella_slack[step_index]
+            constraints.extend(
+                [
+                    predicted_state_matrix[2, step_index + 1]
+                    >= self.dhw_parameters.T_legionella - legionella_slack[step_index],
+                    predicted_state_matrix[3, step_index + 1]
+                    >= self.dhw_parameters.T_legionella - legionella_slack[step_index],
+                ]
             )

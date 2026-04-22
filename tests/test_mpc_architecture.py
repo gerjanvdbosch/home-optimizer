@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import cvxpy as cp
+
 from home_optimizer.control.problem_builder import MpcProblemBuilder
 from home_optimizer.control.supervisors import HeatPumpTopologySupervisor, LegionellaSupervisor
 from home_optimizer.types import DHWMPCParameters, MPCParameters
@@ -88,3 +90,55 @@ def test_problem_builder_allocates_dhw_variables_in_combined_mode() -> None:
     assert variables.s_leg is not None
     assert variables.p_import is not None
     assert variables.p_export is not None
+
+
+def test_legionella_supervisor_constrains_both_dhw_nodes() -> None:
+    """Legionella surrogate must constrain both top and bottom DHW nodes."""
+    dhw_parameters = _dhw_params()
+    supervisor = LegionellaSupervisor(dhw_parameters)
+    x = cp.Variable((4, 3))
+    lower = cp.Variable(2, nonneg=True)
+    upper = cp.Variable(2, nonneg=True)
+    leg = cp.Variable(2, nonneg=True)
+    constraints: list = []
+
+    supervisor.apply_step_constraints(
+        constraints=constraints,
+        predicted_state_matrix=x,
+        step_index=0,
+        lower_slack=lower,
+        upper_slack=upper,
+        legionella_slack=leg,
+        legionella_required=True,
+    )
+
+    rendered = "\n".join(str(constraint) for constraint in constraints)
+    assert "[2, 1]" in rendered
+    assert "[3, 1]" in rendered
+    assert "60.0" in rendered
+
+
+def test_topology_supervisor_supports_exclusive_modes() -> None:
+    """Exclusive topology must disable one heat channel per supervisor mode."""
+    supervisor = HeatPumpTopologySupervisor(
+        ufh_parameters=_ufh_params(),
+        dhw_parameters=_dhw_params(),
+        shared_hp_max_elec_kw=3.0,
+        heat_pump_topology="exclusive_dhw",
+    )
+    u_ufh = cp.Variable(2)
+    u_dhw = cp.Variable(2)
+    constraints: list = []
+
+    supervisor.apply_step_constraints(
+        constraints=constraints,
+        step_index=0,
+        u_ufh=u_ufh,
+        previous_u_ufh=0.5,
+        total_electrical_power_kw=u_ufh[0] / 3.5 + u_dhw[0] / 3.0,
+        u_dhw=u_dhw,
+        previous_u_dhw=0.0,
+    )
+
+    rendered = "\n".join(str(constraint) for constraint in constraints)
+    assert "[0] == 0.0" in rendered
