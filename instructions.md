@@ -1356,6 +1356,8 @@ Toegestane opties:
 3. terminal penalty op relatieve energie-inhoud
 4. supervisorlogica die forecasted draws buiten de horizon meeneemt
 
+Als `T_dhw_energy[N]` als terminal bound wordt gebruikt, dan geldt die uitsluitend als energie-gewogen surrogate voor tanktoestand en niet als direct comfortcriterium voor tapwaterbeschikbaarheid.
+
 Bindende regel:
 
 - de productie-implementatie mag de tank niet impliciet "leeg optimaliseren" aan het horizon-einde zonder dat dit een expliciete ontwerpkeuze is
@@ -1570,6 +1572,7 @@ Voor numerieke rangbepaling geldt bindend:
 - de numerieke rang wordt bepaald via SVD
 - de gebruikte tolerantiedrempel is `observability_rank_tolerance`
 - de implementatie gebruikt dezelfde rangdefinitie consistent in validatie, diagnostiek en tests
+- dezelfde SVD-conventie geldt ook voor offline analyse en debugging-scripts
 
 Voor conditioneringschecks geldt bindend:
 
@@ -1644,10 +1647,10 @@ $$
 
 - `test_kalman_covariance_psd`
   - `P_ufh` blijft symmetrisch positief semidefiniet binnen `covariance_psd_tolerance`
-  - de kleinste eigenwaarde voldoet numeriek aan `lambda_min(P_ufh) >= -covariance_psd_tolerance`
+  - de kleinste eigenwaarde voldoet numeriek aan `\lambda_{\min}(P_{ufh}) \ge -covariance_psd_tolerance`
 - `test_ekf_covariance_psd`
   - `P_dhw_aug` blijft symmetrisch positief semidefiniet binnen `covariance_psd_tolerance`
-  - de kleinste eigenwaarde voldoet numeriek aan `lambda_min(P_dhw_aug) >= -covariance_psd_tolerance`
+  - de kleinste eigenwaarde voldoet numeriek aan `\lambda_{\min}(P_{dhw,aug}) \ge -covariance_psd_tolerance`
 - `test_ekf_vtap_nonnegative`
   - controleert de verplichte post-update clamp
 - `test_ekf_vtap_detection`
@@ -1726,7 +1729,7 @@ De estimator-laag ondersteunt expliciet:
 - discrete `Q`-semantiek
 - projected state updates
 - observability diagnostics
-- covariance symmetrization of numerieke regularisatie indien toegepast
+- covariance symmetrization of numerieke regularisatie alleen als dit expliciet is gedocumenteerd en identiek wordt behandeld in productiecode en tests
 
 ### 9.3 Control-laag
 
