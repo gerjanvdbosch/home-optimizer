@@ -919,6 +919,11 @@ De basisvariant van deze specificatie staat precies twee EKF-beleidskeuzes toe:
 1. basisbeleid: EKF gebruikt `forward_euler` als discrete procesmap
 2. uitgebreid beleid: een hogere-orde discrete procesmap is toegestaan, mits zowel predictiestap als Jacobiaan uit diezelfde map worden afgeleid
 
+Operationele default:
+
+- de productie-default is een Euler-EKF
+- een hogere-orde EKF is alleen toegestaan bij expliciete activatie in configuratie
+
 #### 4.9.4 Discrete niet-lineaire procesfunctie voor Euler
 
 Voor `forward_euler` is de expliciete procesmap:
@@ -1022,6 +1027,8 @@ $$
 $$
 
 De vuistregel "observeerbaar zolang `T_top != T_mains`" is onvoldoende precies en mag niet gebruikt worden.
+
+Deze diagnose is lokaal en linearisatie-gebaseerd rond het actuele lineariseerpunct; zij is geen globale observeerbaarheidsbewijsstelling voor de volledige niet-lineaire dynamica.
 
 Bindende interpretatie:
 
@@ -1503,9 +1510,14 @@ Naamgevingsregel voor configuratievelden:
 Voor numerieke observeerbaarheidsdiagnostiek bevat `EstimatorConfig` minimaal benoemde drempels zoals:
 
 - `observability_rank_tolerance`
-- `observability_condition_min_sv`
-  of, als alternatief beleid expliciet gekozen wordt:
-- `observability_condition_max`
+- exact één van de volgende conditioneringsbeleidskeuzes:
+  - `observability_condition_min_sv`
+  - `observability_condition_max`
+
+Bindende regel:
+
+- een deployment of configuratie kiest exact één conditioneringsbeleid
+- `observability_condition_min_sv` en `observability_condition_max` mogen niet tegelijk actief zijn
 
 ### 7.2 Verplichte validatieregels
 
@@ -1553,12 +1565,26 @@ Observeerbaarheid:
 - 2-state DHW-model: numerieke rang én conditioneringscheck na parametrisatie
 - augmented EKF: lokale observeerbaarheidsdiagnostiek; geen hard fail op tijdelijke operationele degeneratie
 
+Voor numerieke rangbepaling geldt bindend:
+
+- de numerieke rang wordt bepaald via SVD
+- de gebruikte tolerantiedrempel is `observability_rank_tolerance`
+- de implementatie gebruikt dezelfde rangdefinitie consistent in validatie, diagnostiek en tests
+
 Voor conditioneringschecks geldt bindend:
 
 - de implementatie moet een configureerbare numerieke drempel gebruiken
 - die drempel moet normatief uit config komen en mag niet impliciet in code verstopt zijn
 - de implementatie gebruikt ofwel een minimale singuliere waarde met drempel `observability_condition_min_sv`, ofwel een maximale conditiegetaldrempel `observability_condition_max`
+- exact één van beide beleidskeuzes is actief per deployment of configuratie
 - de gekozen maat en drempel moeten consistent in validatie, diagnostiek en tests worden gebruikt
+
+Voor PSD-validatie van covarianties geldt bindend:
+
+- PSD-validatie gebeurt numeriek
+- kleine negatieve eigenwaarden door floating-point afronding mogen worden getolereerd
+- de validatieregel luidt dat de kleinste eigenwaarde ten minste `-covariance_psd_tolerance` moet zijn
+- dezelfde PSD-definitie wordt consistent gebruikt in runtime-validatie en tests
 
 Koppeling en topologie:
 
@@ -1618,8 +1644,10 @@ $$
 
 - `test_kalman_covariance_psd`
   - `P_ufh` blijft symmetrisch positief semidefiniet binnen `covariance_psd_tolerance`
+  - de kleinste eigenwaarde voldoet numeriek aan `lambda_min(P_ufh) >= -covariance_psd_tolerance`
 - `test_ekf_covariance_psd`
   - `P_dhw_aug` blijft symmetrisch positief semidefiniet binnen `covariance_psd_tolerance`
+  - de kleinste eigenwaarde voldoet numeriek aan `lambda_min(P_dhw_aug) >= -covariance_psd_tolerance`
 - `test_ekf_vtap_nonnegative`
   - controleert de verplichte post-update clamp
 - `test_ekf_vtap_detection`
@@ -1640,7 +1668,7 @@ $$
 - `test_ufh_observability_conditioning`
 - `test_dhw_observability_conditioning`
 - `test_observability_condition_threshold_is_config_driven`
-- `test_ekf_augmented_observability_rank`
+- `test_ekf_augmented_local_observability_when_gradient_present`
   - gebruikt een toestand met `T_top != T_bot` of `T_bot != T_mains`
 - `test_block_diagonal_forbidden_when_tank_losses_couple_to_room`
 - `test_exclusive_heat_pump_topology_requires_supervisor_mode`
