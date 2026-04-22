@@ -19,6 +19,7 @@ from .request_projection import (
     UfhForecastConfig,
     UfhPhysicalConfig,
 )
+from .runtime import OptimizerRuntime
 
 __all__ = [
     "DhwControlConfig",
@@ -28,6 +29,7 @@ __all__ = [
     "MPCStepResult",
     "Optimizer",
     "OptimizerPipeline",
+    "OptimizerRuntime",
     "OptimizerSolveContext",
     "RunRequest",
     "ScheduledRunSnapshot",

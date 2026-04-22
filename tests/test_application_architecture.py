@@ -14,6 +14,7 @@ from home_optimizer.application.request_projection import (
     UfhControlConfig,
     UfhPhysicalConfig,
 )
+from home_optimizer.application.runtime import OptimizerRuntime
 from home_optimizer.domain.heat_pump.cop import HeatPumpCOPParameters
 
 
@@ -104,3 +105,16 @@ def test_run_request_exposes_domain_specific_projections() -> None:
 def test_optimizer_reexports_run_request_from_models_module() -> None:
     """Legacy imports from optimizer.py should still point at the canonical request model."""
     assert RunRequest is RunRequestModel
+
+
+def test_optimizer_runtime_build_scheduled_input_preserves_base_request_without_overrides() -> None:
+    """Runtime scheduled-input builder should return the validated base request when no overrides exist."""
+    request = RunRequest.model_validate({"horizon_hours": 4})
+
+    scheduled = OptimizerRuntime.build_scheduled_input(
+        base_input=request,
+        backend=None,
+        repository=None,
+    )
+
+    assert scheduled == request

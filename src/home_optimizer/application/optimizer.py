@@ -34,8 +34,6 @@ Units: power [kW], temperature [°C], energy [kWh], time [h].
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import logging
-from threading import Lock
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -54,7 +52,8 @@ from .request_handling import (
     sanitize_calibration_overrides,
     validate_run_request_physics,
 )
-from ..domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
+from .runtime import OptimizerRuntime
+from ..domain.heat_pump.cop import HeatPumpCOPModel
 from ..pricing import PriceConfig  # noqa: F401 — PriceConfig re-exported via RunRequest
 from ..types.forecast import DHWForecastHorizon, ForecastHorizon
 
@@ -63,8 +62,6 @@ if TYPE_CHECKING:
 
     from ..sensors.base import SensorBackend
     from ..telemetry.repository import TelemetryRepository
-
-log = logging.getLogger("home_optimizer.application.optimizer")
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +93,6 @@ class Optimizer:
         result = optimizer.solve(req)
         print(result.p_ufh_kw[0])  # first-step UFH power [kW]
     """
-
-    _latest_scheduled_snapshot: ScheduledRunSnapshot | None = None
-    _snapshot_lock: Lock = Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -149,37 +143,12 @@ class Optimizer:
             :class:`MPCStepResult` on success; ``None`` when the step is
             skipped due to a recoverable read/solve failure.
         """
-        try:
-            optimizer_input = self._build_scheduled_input(
-                base_input=base_input, backend=backend, repository=repository
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.warning("MPC run skipped — sensor read failed: %s", exc)
-            return None
-
-        try:
-            result = self.solve(optimizer_input)
-        except Exception as exc:  # noqa: BLE001
-            log.error("MPC solve failed: %s", exc)
-            return None
-
-        sol = result.solution
-        with type(self)._snapshot_lock:
-            type(self)._latest_scheduled_snapshot = ScheduledRunSnapshot(
-                solved_at_utc=datetime.now(tz=timezone.utc),
-                request=optimizer_input,
-                result=result,
-            )
-        log.info(
-            "MPC step complete | status=%s | obj=%.3f | "
-            "P_UFH[0]=%.2f kW | P_dhw[0]=%.2f kW | cost=%.4f EUR",
-            sol.solver_status,
-            sol.objective_value,
-            result.p_ufh_kw[0],
-            result.p_dhw_kw[0],
-            result.total_cost_eur,
+        return OptimizerRuntime.run_scheduled_once(
+            optimizer=self,
+            base_input=base_input,
+            backend=backend,
+            repository=repository,
         )
-        return result
 
     @classmethod
     def get_latest_scheduled_snapshot(cls) -> ScheduledRunSnapshot | None:
@@ -189,14 +158,12 @@ class Optimizer:
             :class:`ScheduledRunSnapshot` when at least one periodic run
             succeeded in this process; otherwise ``None``.
         """
-        with cls._snapshot_lock:
-            return cls._latest_scheduled_snapshot
+        return OptimizerRuntime.get_latest_scheduled_snapshot()
 
     @classmethod
     def clear_latest_scheduled_snapshot(cls) -> None:
         """Clear cached scheduled snapshot (mainly used by tests)."""
-        with cls._snapshot_lock:
-            cls._latest_scheduled_snapshot = None
+        OptimizerRuntime.clear_latest_scheduled_snapshot()
 
     def schedule_periodic(
         self,
@@ -223,29 +190,14 @@ class Optimizer:
         Raises:
             ValueError: If ``interval_seconds`` is not strictly positive.
         """
-        if interval_seconds <= 0:
-            raise ValueError(
-                f"interval_seconds must be > 0, got {interval_seconds}. "
-                "Pass 0 to disable MPC scheduling (do not call this method)."
-            )
-
-        if run_immediately:
-            log.info("Running initial MPC step before scheduling periodic job...")
-            self.run_scheduled_once(base_input=base_input, backend=backend, repository=repository)
-
-        scheduler.add_job(
-            self.run_scheduled_once,
-            trigger="interval",
-            seconds=interval_seconds,
-            kwargs={"base_input": base_input, "backend": backend, "repository": repository},
-            id="mpc_periodic",
-            replace_existing=True,
-            misfire_grace_time=max(1, interval_seconds // 2),
-        )
-        log.info(
-            "MPC periodic job scheduled: every %d s (%d min)",
-            interval_seconds,
-            interval_seconds // 60,
+        OptimizerRuntime.schedule_periodic(
+            optimizer=self,
+            base_input=base_input,
+            scheduler=scheduler,
+            interval_seconds=interval_seconds,
+            backend=backend,
+            repository=repository,
+            run_immediately=run_immediately,
         )
 
     # ------------------------------------------------------------------
@@ -464,69 +416,8 @@ class Optimizer:
         Raises:
             Exception: Re-raised backend read failures for fail-fast scheduling.
         """
-        overrides: dict = {}
-
-        # ── 1. Persisted calibration overrides ────────────────────────────
-        if repository is not None:
-            try:
-                overrides.update(build_safe_calibration_overrides(base_input, repository))
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Calibration snapshot DB read failed: %s", exc)
-
-        # ── 2. Live sensor overrides ─────────────────────────────────────
-        if backend is not None:
-            effective_request = merge_run_request_updates(base_input, overrides)
-            readings = backend.read_all()
-            corrected_room_temperature_c = (
-                readings.room_temperature_c + effective_request.room_temperature_bias_c
-            )
-
-            # Estimate slab temperature from supply/return average when possible.
-            t_b_estimate = (
-                (readings.hp_supply_temperature_c + readings.hp_return_temperature_c) / 2.0
-                if readings.hp_supply_temperature_c > corrected_room_temperature_c
-                else corrected_room_temperature_c + 2.0
-            )
-
-            overrides.update(
-                {
-                    "T_r_init": corrected_room_temperature_c,
-                    "T_b_init": t_b_estimate,
-                    "outdoor_temperature_c": readings.outdoor_temperature_c,
-                    "shutter_living_room_pct": readings.shutter_living_room_pct,
-                }
-            )
-
-            if base_input.dhw_enabled:
-                overrides["dhw_T_top_init"] = (
-                    readings.dhw_top_temperature_c + effective_request.dhw_top_temperature_bias_c
-                )
-                overrides["dhw_T_bot_init"] = (
-                    readings.dhw_bottom_temperature_c + effective_request.dhw_bottom_temperature_bias_c
-                )
-                overrides["dhw_t_mains_c"] = readings.t_mains_estimated_c
-                overrides["dhw_t_amb_c"] = (
-                    readings.boiler_ambient_temp_c + effective_request.dhw_boiler_ambient_bias_c
-                )
-
-        # ── 3. Open-Meteo forecast arrays from database ──────────────────
-        if repository is not None:
-            try:
-                rows, forecast_overrides = build_repository_forecast_overrides(
-                    base_input,
-                    repository,
-                    existing=overrides,
-                )
-                if rows:
-                    overrides.update(forecast_overrides)
-                    log.debug(
-                        "Injected Open-Meteo forecast (%d steps) into MPC run.", len(rows[:base_input.horizon_hours])
-                    )
-                else:
-                    log.debug("No forecast rows in DB — real GTI data unavailable.")
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Forecast DB read failed: %s", exc)
-
-        if not overrides:
-            return merge_run_request_updates(base_input, {})
-        return merge_run_request_updates(base_input, overrides)
+        return OptimizerRuntime.build_scheduled_input(
+            base_input=base_input,
+            backend=backend,
+            repository=repository,
+        )
