@@ -1,3 +1,5 @@
 /.idea
 /database.sqlite3
 /models/
+.pyright/
+.pyrightcache/

@@ -79,6 +79,14 @@ Start voorbeelden
 .venv/bin/pip install -e ".[dev]"
 ```
 
+Controleer daarna de codekwaliteit en type-annotaties:
+
+```bash
+ruff check .
+pyright
+pytest -q
+```
+
 2) Snelle start (standaard modellen map `./models`):
 
 ```bash

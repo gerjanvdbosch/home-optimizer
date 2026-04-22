@@ -29,6 +29,7 @@ dependencies = [
 dev = [
   "black>=24.0",
   "pyflakes>=3.2",
+  "pyright>=1.1,<2.0",
   "pytest>=8.0",
   "ruff>=0.4",
 ]
@@ -63,7 +64,14 @@ select = ["E", "F", "I", "B"]
 line-length = 100
 target-version = ["py311"]
 
+[tool.pyright]
+include = ["src", "tests"]
+exclude = ["**/__pycache__"]
+extraPaths = ["src"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-
