@@ -475,7 +475,10 @@ class DHWKalmanFilter:
         """
         d = np.array([t_amb_c, t_mains_c], dtype=float)
         # Use A_dhw[k-1]: time-varying matrix evaluated at the previous V_tap
-        A, B, E = self.model.state_matrices(v_tap_m3_per_h)
+        A, B, E = self.model.state_matrices(
+            v_tap_m3_per_h,
+            mean_water_temperature_c=self.model.t_dhw_mean(self._filter.estimate.mean_c),
+        )
         return self._filter.predict_from_matrices(
             control_kw=control_kw,
             disturbance=d,
@@ -513,7 +516,10 @@ class DHWKalmanFilter:
     ) -> tuple[KalmanEstimate, float, np.ndarray]:
         """Predict then update in a single call."""
         d = np.array([t_amb_c, t_mains_c], dtype=float)
-        A, B, E = self.model.state_matrices(v_tap_m3_per_h)
+        A, B, E = self.model.state_matrices(
+            v_tap_m3_per_h,
+            mean_water_temperature_c=self.model.t_dhw_mean(self._filter.estimate.mean_c),
+        )
         return self._filter.step_from_matrices(
             control_kw=control_kw,
             disturbance=d,
@@ -825,6 +831,8 @@ class DHWExtendedKalmanFilter:
             raise ValueError("disturbance must be [T_amb, T_mains].")
         T_amb_c, T_mains_c = d
         T_top, T_bot, V_tap = np.asarray(state, dtype=float)
+        mean_tank_temperature_c = 0.5 * (T_top + T_bot)
+        lambda_water = p.lambda_water_at_temperature_c(mean_tank_temperature_c)
 
         # Constant scalars
         a_strat = dt / (p.C_top * p.R_strat)
@@ -835,13 +843,13 @@ class DHWExtendedKalmanFilter:
         # Nonlinear propagation — bilinear tap terms with configured heater split
         T_top_next = T_top + dt / p.C_top * (
             -(T_top - T_bot) / p.R_strat
-            + p.lambda_water * V_tap * (T_bot - T_top)
+            + lambda_water * V_tap * (T_bot - T_top)
             + p.heater_split_top * control_kw
             - (T_top - T_amb_c) / p.R_loss_top
         )
         T_bot_next = T_bot + dt / p.C_bot * (
             (T_top - T_bot) / p.R_strat
-            + p.lambda_water * V_tap * (T_mains_c - T_bot)
+            + lambda_water * V_tap * (T_mains_c - T_bot)
             + p.heater_split_bottom * control_kw
             - (T_bot - T_amb_c) / p.R_loss_bot
         )
@@ -890,22 +898,57 @@ class DHWExtendedKalmanFilter:
         T_bot_hat = float(state[1])
         V_tap_hat = float(state[2])
         t_mains_c = float(d[1])
+        mean_tank_temperature_c = 0.5 * (T_top_hat + T_bot_hat)
+        lambda_water = p.lambda_water_at_temperature_c(mean_tank_temperature_c)
+        dlambda_dtemperature = p.lambda_water_temperature_derivative()
+        dlambda_dTtop = 0.5 * dlambda_dtemperature
+        dlambda_dTbot = 0.5 * dlambda_dtemperature
 
         # Constant scalars
         a_strat = dt / (p.C_top * p.R_strat)
         b_strat = dt / (p.C_bot * p.R_strat)
         a_loss = dt / (p.C_top * p.R_loss_top)
         b_loss = dt / (p.C_bot * p.R_loss_bot)
-        a_tap_hat = dt / p.C_top * p.lambda_water * V_tap_hat
-        b_tap_hat = dt / p.C_bot * p.lambda_water * V_tap_hat
+        a_tap_hat = dt / p.C_top * lambda_water * V_tap_hat
+        b_tap_hat = dt / p.C_bot * lambda_water * V_tap_hat
 
-        df_Ttop_dVtap = dt / p.C_top * p.lambda_water * (T_bot_hat - T_top_hat)
-        df_Tbot_dVtap = dt / p.C_bot * p.lambda_water * (t_mains_c - T_bot_hat)
+        tap_top_term_Ttop = V_tap_hat * (
+            dlambda_dTtop * (T_bot_hat - T_top_hat) - lambda_water
+        )
+        tap_top_term_Tbot = V_tap_hat * (
+            dlambda_dTbot * (T_bot_hat - T_top_hat) + lambda_water
+        )
+        tap_bot_term_Ttop = V_tap_hat * dlambda_dTtop * (t_mains_c - T_bot_hat)
+        tap_bot_term_Tbot = V_tap_hat * (
+            dlambda_dTbot * (t_mains_c - T_bot_hat) - lambda_water
+        )
+
+        df_Ttop_dTtop = 1.0 + dt / p.C_top * (
+            -1.0 / p.R_strat
+            - 1.0 / p.R_loss_top
+            + tap_top_term_Ttop
+        )
+        df_Ttop_dTbot = dt / p.C_top * (
+            1.0 / p.R_strat
+            + tap_top_term_Tbot
+        )
+        df_Tbot_dTtop = dt / p.C_bot * (
+            1.0 / p.R_strat
+            + tap_bot_term_Ttop
+        )
+        df_Tbot_dTbot = 1.0 + dt / p.C_bot * (
+            -1.0 / p.R_strat
+            - 1.0 / p.R_loss_bot
+            + tap_bot_term_Tbot
+        )
+
+        df_Ttop_dVtap = dt / p.C_top * lambda_water * (T_bot_hat - T_top_hat)
+        df_Tbot_dVtap = dt / p.C_bot * lambda_water * (t_mains_c - T_bot_hat)
 
         F = np.array(
             [
-                [1.0 - a_strat - a_loss - a_tap_hat, a_strat + a_tap_hat, df_Ttop_dVtap],
-                [b_strat, 1.0 - b_strat - b_loss - b_tap_hat, df_Tbot_dVtap],
+                [df_Ttop_dTtop, df_Ttop_dTbot, df_Ttop_dVtap],
+                [df_Tbot_dTtop, df_Tbot_dTbot, df_Tbot_dVtap],
                 [0.0, 0.0, 1.0],
             ],
             dtype=float,

@@ -359,6 +359,7 @@ class MPCController:
 
     def _build_matrices(
         self,
+        x0: np.ndarray,
         ufh_forecast: ForecastHorizon,
         dhw_forecast: DHWForecastHorizon | None,
     ) -> tuple[list[np.ndarray], np.ndarray, list[np.ndarray], np.ndarray]:
@@ -382,6 +383,7 @@ class MPCController:
         # thermally decoupled; they interact only via shared heat-pump constraints.
         B_mat = np.block([[B_ufh, np.zeros((2, 1))], [np.zeros((2, 1)), B_dhw]])
         dhw_d = dhw_forecast.disturbance_matrix()
+        dhw_mean_temperature_c = float(self.dhw_model.t_dhw_mean(np.asarray(x0[2:4], dtype=float)))
         # Disturbance vector per step becomes:
         # [T_out, Q_solar, Q_int, T_amb, T_mains]
         D_tot = np.hstack([ufh_d, dhw_d])
@@ -390,7 +392,10 @@ class MPCController:
         E_list: list[np.ndarray] = []
         for k in range(N):
             v_tap_k = float(dhw_forecast.v_tap_m3_per_h[k])
-            A_dhw_k, _, E_dhw_k = self.dhw_model.state_matrices(v_tap_k)
+            A_dhw_k, _, E_dhw_k = self.dhw_model.state_matrices(
+                v_tap_k,
+                mean_water_temperature_c=dhw_mean_temperature_c,
+            )
             # DHW is LTV: A_dhw[k] and E_dhw[k] must be rebuilt with the forecast
             # tap flow at each step. The combined system remains block diagonal.
             A_list.append(np.block([[A_ufh, np.zeros((2, 2))], [np.zeros((2, 2)), A_dhw_k]]))
@@ -458,7 +463,7 @@ class MPCController:
             else None
         )
 
-        A_list, B_mat, E_list, D_tot = self._build_matrices(ufh_forecast, dhw_forecast)
+        A_list, B_mat, E_list, D_tot = self._build_matrices(x0, ufh_forecast, dhw_forecast)
         builder = MpcProblemBuilder(
             ufh_parameters=p_ufh,
             dhw_parameters=p_dhw,

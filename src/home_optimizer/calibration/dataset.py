@@ -128,7 +128,8 @@ def _implied_v_tap_m3_per_h(
     mean_t_top_c = 0.5 * (t_top_start_c + t_top_end_c)
     mean_t_bot_c = 0.5 * (t_bot_start_c + t_bot_end_c)
     q_loss_kw = (mean_t_top_c - t_amb_c) / p.R_loss + (mean_t_bot_c - t_amb_c) / p.R_loss
-    tap_denominator = p.lambda_water * (mean_t_top_c - t_mains_c)
+    lambda_water = p.lambda_water_at_temperature_c(0.5 * (mean_t_top_c + mean_t_bot_c))
+    tap_denominator = lambda_water * (mean_t_top_c - t_mains_c)
     if tap_denominator <= 0.0:
         return float("inf")
     implied_v_tap = (p_dhw_mean_kw - q_loss_kw - delta_energy_rate_kw) / tap_denominator
@@ -1341,4 +1342,3 @@ def build_ufh_active_calibration_dataset(
         samples=tuple(selected_samples),
         segment_qualities=segment_qualities,
     )
-

@@ -201,6 +201,14 @@ class DHWTapForecastProvider(ForecastProvider):
             "dhw_lambda_water_kwh_per_m3k",
             request_data.get("dhw_lambda_water_kwh_per_m3k"),
         )
+        lambda_ref_temp_raw = current_overrides.get(
+            "dhw_lambda_water_reference_temperature_c",
+            request_data.get("dhw_lambda_water_reference_temperature_c"),
+        )
+        lambda_temp_coeff_raw = current_overrides.get(
+            "dhw_lambda_water_temperature_coefficient_per_k",
+            request_data.get("dhw_lambda_water_temperature_coefficient_per_k"),
+        )
         top_bias_raw = current_overrides.get(
             "dhw_top_temperature_bias_c",
             request_data.get("dhw_top_temperature_bias_c"),
@@ -219,6 +227,8 @@ class DHWTapForecastProvider(ForecastProvider):
             ("dhw_R_loss_top", r_loss_top_raw),
             ("dhw_R_loss_bot", r_loss_bot_raw),
             ("dhw_lambda_water_kwh_per_m3k", lambda_raw),
+            ("dhw_lambda_water_reference_temperature_c", lambda_ref_temp_raw),
+            ("dhw_lambda_water_temperature_coefficient_per_k", lambda_temp_coeff_raw),
             ("dhw_top_temperature_bias_c", top_bias_raw),
             ("dhw_bottom_temperature_bias_c", bottom_bias_raw),
             ("dhw_boiler_ambient_bias_c", ambient_bias_raw),
@@ -243,6 +253,8 @@ class DHWTapForecastProvider(ForecastProvider):
             c_bot_kwh_per_k=float(cast(int | float, c_bot_raw)),
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=float(cast(int | float, lambda_raw)),
+            lambda_water_reference_temperature_c=float(cast(int | float, lambda_ref_temp_raw)),
+            lambda_water_temperature_coefficient_per_k=float(cast(int | float, lambda_temp_coeff_raw)),
             top_temperature_bias_c=float(cast(int | float, top_bias_raw)),
             bottom_temperature_bias_c=float(cast(int | float, bottom_bias_raw)),
             boiler_ambient_bias_c=float(cast(int | float, ambient_bias_raw)),
@@ -293,6 +305,16 @@ class DHWTapForecastProvider(ForecastProvider):
             calibration_value=None,
             base_request_data=base_request_data,
         )
+        lambda_water_reference_temperature_c = self._resolve_numeric_field(
+            field_name="dhw_lambda_water_reference_temperature_c",
+            calibration_value=None,
+            base_request_data=base_request_data,
+        )
+        lambda_water_temperature_coefficient_per_k = self._resolve_numeric_field(
+            field_name="dhw_lambda_water_temperature_coefficient_per_k",
+            calibration_value=None,
+            base_request_data=base_request_data,
+        )
         top_bias = self._resolve_numeric_field(
             field_name="dhw_top_temperature_bias_c",
             calibration_value=None if effective_parameters is None else effective_parameters.dhw_top_temperature_bias_c,
@@ -314,6 +336,8 @@ class DHWTapForecastProvider(ForecastProvider):
             or r_loss_top is None
             or r_loss_bot is None
             or lambda_water is None
+            or lambda_water_reference_temperature_c is None
+            or lambda_water_temperature_coefficient_per_k is None
             or top_bias is None
             or bottom_bias is None
             or ambient_bias is None
@@ -322,7 +346,8 @@ class DHWTapForecastProvider(ForecastProvider):
                 "Skipping DHW tap-profile training: the effective DHW runtime tuple is incomplete. "
                 "Provide base_request_data and/or calibration overrides for dhw_C_top, dhw_C_bot, "
                 "dhw_R_loss_top, dhw_R_loss_bot, "
-                "dhw_lambda_water_kwh_per_m3k, dhw_top_temperature_bias_c, dhw_bottom_temperature_bias_c, "
+                "dhw_lambda_water_kwh_per_m3k, dhw_lambda_water_reference_temperature_c, "
+                "dhw_lambda_water_temperature_coefficient_per_k, dhw_top_temperature_bias_c, dhw_bottom_temperature_bias_c, "
                 "and dhw_boiler_ambient_bias_c."
             )
             return None
@@ -333,6 +358,8 @@ class DHWTapForecastProvider(ForecastProvider):
             c_bot_kwh_per_k=float(c_bot),
             r_loss_k_per_kw=0.5 * (float(r_loss_top) + float(r_loss_bot)),
             lambda_water_kwh_per_m3_k=float(lambda_water),
+            lambda_water_reference_temperature_c=float(lambda_water_reference_temperature_c),
+            lambda_water_temperature_coefficient_per_k=float(lambda_water_temperature_coefficient_per_k),
             top_temperature_bias_c=float(top_bias),
             bottom_temperature_bias_c=float(bottom_bias),
             boiler_ambient_bias_c=float(ambient_bias),

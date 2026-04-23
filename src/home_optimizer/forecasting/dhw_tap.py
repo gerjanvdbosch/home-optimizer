@@ -28,6 +28,7 @@ from .common import (
 )
 from .models import DHWTapForecastSettings
 from ..telemetry.models import TelemetryAggregate
+from ..types.constants import LAMBDA_WATER_REFERENCE_TEMPERATURE_C
 
 if TYPE_CHECKING:
     from ..telemetry.repository import TelemetryRepository
@@ -104,6 +105,26 @@ class DHWTapForecaster:
         """Return total tank energy proxy ``C_top·T_top + C_bot·T_bot`` [kWh]."""
         return c_top_kwh_per_k * t_top_c + c_bot_kwh_per_k * t_bot_c
 
+    @staticmethod
+    def _lambda_water_at_temperature_c(
+        *,
+        lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float,
+        lambda_water_temperature_coefficient_per_k: float,
+        temperature_c: float,
+    ) -> float:
+        """Return the affine DHW water-property law λ(T) [kWh/(m³·K)]."""
+        lambda_value = lambda_water_kwh_per_m3_k * (
+            1.0
+            + lambda_water_temperature_coefficient_per_k
+            * (temperature_c - lambda_water_reference_temperature_c)
+        )
+        if lambda_value <= 0.0:
+            raise ValueError(
+                f"lambda_water(T={temperature_c:.3f} °C) must remain strictly positive; got {lambda_value:.6g}."
+            )
+        return float(lambda_value)
+
     def _is_profile_runtime_trustworthy(self, profile: _PersistedDHWTapProfile) -> bool:
         """Return whether a recurring DHW profile is informative enough for runtime MPC use.
 
@@ -176,6 +197,8 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C,
+        lambda_water_temperature_coefficient_per_k: float = 0.0,
         top_temperature_bias_c: float,
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
@@ -215,7 +238,9 @@ class DHWTapForecaster:
             c_top_kwh_per_k: ``C_top`` [kWh/K].
             c_bot_kwh_per_k: ``C_bot`` [kWh/K].
             r_loss_k_per_kw: ``R_loss`` [K/kW].
-            lambda_water_kwh_per_m3_k: ``λ`` [kWh/(m³·K)].
+            lambda_water_kwh_per_m3_k: Reference ``λ_ref`` [kWh/(m³·K)].
+            lambda_water_reference_temperature_c: Reference temperature ``T_ref`` [°C].
+            lambda_water_temperature_coefficient_per_k: Affine λ(T) coefficient [1/K].
             top_temperature_bias_c: Sensor correction for ``T_top`` [°C / K].
             bottom_temperature_bias_c: Sensor correction for ``T_bot`` [°C / K].
             boiler_ambient_bias_c: Sensor correction for ``T_amb`` [°C / K].
@@ -281,7 +306,13 @@ class DHWTapForecaster:
 
         # V̇_tap [m³/h] = numerator [kW] / denominator [kWh/m³]
         #               = [kWh/h] / [kWh/m³] = [m³/h]  ✓
-        tap_denominator = lambda_water_kwh_per_m3_k * temp_diff_k
+        lambda_water = self._lambda_water_at_temperature_c(
+            lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+            lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
+            temperature_c=0.5 * (mean_t_top_c + mean_t_bot_c),
+        )
+        tap_denominator = lambda_water * temp_diff_k
         implied_v_tap = (p_dhw_kw - q_loss_kw - delta_energy_rate_kw) / tap_denominator
         # Clamp to [0, max]: negative values are physically impossible (§ fail-fast);
         # extreme positives indicate measurement noise, not actual demand.
@@ -296,6 +327,8 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C,
+        lambda_water_temperature_coefficient_per_k: float = 0.0,
         top_temperature_bias_c: float,
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
@@ -308,7 +341,7 @@ class DHWTapForecaster:
             c_top_kwh_per_k: DHW top-layer heat capacity ``C_top`` [kWh/K].
             c_bot_kwh_per_k: DHW bottom-layer heat capacity ``C_bot`` [kWh/K].
             r_loss_k_per_kw: DHW standby-loss resistance ``R_loss`` [K/kW].
-            lambda_water_kwh_per_m3_k: Water volumetric heat capacity ``λ`` [kWh/(m³·K)].
+            lambda_water_kwh_per_m3_k: Water volumetric heat-capacity reference ``λ_ref`` [kWh/(m³·K)].
 
         Returns:
             Persisted artifact metadata, or ``None`` when history is too sparse to
@@ -321,6 +354,8 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+            lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
             top_temperature_bias_c=top_temperature_bias_c,
             bottom_temperature_bias_c=bottom_temperature_bias_c,
             boiler_ambient_bias_c=boiler_ambient_bias_c,
@@ -343,6 +378,8 @@ class DHWTapForecaster:
                     c_bot_kwh_per_k=c_bot_kwh_per_k,
                     r_loss_k_per_kw=r_loss_k_per_kw,
                     lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+                    lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+                    lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
                     top_temperature_bias_c=top_temperature_bias_c,
                     bottom_temperature_bias_c=bottom_temperature_bias_c,
                     boiler_ambient_bias_c=boiler_ambient_bias_c,
@@ -362,6 +399,8 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C,
+        lambda_water_temperature_coefficient_per_k: float = 0.0,
         top_temperature_bias_c: float,
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
@@ -394,6 +433,8 @@ class DHWTapForecaster:
                 c_bot_kwh_per_k=c_bot_kwh_per_k,
                 r_loss_k_per_kw=r_loss_k_per_kw,
                 lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+                lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+                lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
                 top_temperature_bias_c=top_temperature_bias_c,
                 bottom_temperature_bias_c=bottom_temperature_bias_c,
                 boiler_ambient_bias_c=boiler_ambient_bias_c,
@@ -431,6 +472,8 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C,
+        lambda_water_temperature_coefficient_per_k: float = 0.0,
         top_temperature_bias_c: float,
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
@@ -443,6 +486,8 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+            lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
             top_temperature_bias_c=top_temperature_bias_c,
             bottom_temperature_bias_c=bottom_temperature_bias_c,
             boiler_ambient_bias_c=boiler_ambient_bias_c,
@@ -475,10 +520,12 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C,
+        lambda_water_temperature_coefficient_per_k: float = 0.0,
         top_temperature_bias_c: float,
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
-    ) -> tuple[float, float, float, float, float, float, float]:
+    ) -> tuple[float, float, float, float, float, float, float, float, float]:
         """Return the physical parameter tuple that the persisted profile depends on."""
 
         return (
@@ -486,6 +533,8 @@ class DHWTapForecaster:
             float(c_bot_kwh_per_k),
             float(r_loss_k_per_kw),
             float(lambda_water_kwh_per_m3_k),
+            float(lambda_water_reference_temperature_c),
+            float(lambda_water_temperature_coefficient_per_k),
             float(top_temperature_bias_c),
             float(bottom_temperature_bias_c),
             float(boiler_ambient_bias_c),
@@ -494,7 +543,7 @@ class DHWTapForecaster:
     def _settings_signature(
         self,
         *,
-        physical_signature: tuple[float, float, float, float],
+        physical_signature: tuple[float, float, float, float, float, float, float, float, float],
     ) -> tuple[object, ...]:
         """Return the full artifact-compatibility signature for this DHW profile."""
 
@@ -531,7 +580,7 @@ class DHWTapForecaster:
         self,
         repository: "TelemetryRepository",
         *,
-        physical_signature: tuple[float, float, float, float],
+        physical_signature: tuple[float, float, float, float, float, float, float, float, float],
     ) -> _CachedDHWTapProfile:
         """Load the persisted DHW tap profile, reusing an in-process cache."""
 
@@ -646,6 +695,8 @@ class DHWTapForecaster:
         c_bot_kwh_per_k: float,
         r_loss_k_per_kw: float,
         lambda_water_kwh_per_m3_k: float,
+        lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C,
+        lambda_water_temperature_coefficient_per_k: float = 0.0,
         top_temperature_bias_c: float,
         bottom_temperature_bias_c: float,
         boiler_ambient_bias_c: float,
@@ -672,6 +723,8 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+            lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
             top_temperature_bias_c=top_temperature_bias_c,
             bottom_temperature_bias_c=bottom_temperature_bias_c,
             boiler_ambient_bias_c=boiler_ambient_bias_c,
@@ -690,8 +743,9 @@ class DHWTapForecaster:
             c_bot_kwh_per_k=c_bot_kwh_per_k,
             r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=lambda_water_kwh_per_m3_k,
+            lambda_water_reference_temperature_c=lambda_water_reference_temperature_c,
+            lambda_water_temperature_coefficient_per_k=lambda_water_temperature_coefficient_per_k,
             top_temperature_bias_c=top_temperature_bias_c,
             bottom_temperature_bias_c=bottom_temperature_bias_c,
             boiler_ambient_bias_c=boiler_ambient_bias_c,
         )
-

@@ -14,6 +14,9 @@ ABSOLUTE_ZERO_C: float = -273.15
 #: Water volumetric heat capacity λ = ρ·c_p [kWh/(m³·K)] (§8.4, §15).
 LAMBDA_WATER_KWH_PER_M3_K: float = 1.1628
 
+#: Reference temperature for the configurable DHW water-property law λ(T) [°C].
+LAMBDA_WATER_REFERENCE_TEMPERATURE_C: float = 20.0
+
 #: Number of litres in one cubic metre [L/m³].
 LITERS_PER_CUBIC_METER: float = 1000.0
 

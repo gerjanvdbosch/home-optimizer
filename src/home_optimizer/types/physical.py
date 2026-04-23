@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .constants import LAMBDA_WATER_KWH_PER_M3_K
+from .constants import LAMBDA_WATER_KWH_PER_M3_K, LAMBDA_WATER_REFERENCE_TEMPERATURE_C
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +76,8 @@ class DHWParameters:
     heater_split_top: float = 0.0
     heater_split_bottom: float = 1.0
     lambda_water: float = LAMBDA_WATER_KWH_PER_M3_K
+    lambda_water_reference_temperature_c: float = LAMBDA_WATER_REFERENCE_TEMPERATURE_C
+    lambda_water_temperature_coefficient_per_k: float = 0.0
 
     def __post_init__(self) -> None:
         for field_name in ("dt_hours", "C_top", "C_bot", "R_strat", "lambda_water"):
@@ -104,6 +106,37 @@ class DHWParameters:
         object.__setattr__(self, "R_loss_bot", float(r_loss_bot))
         if self.R_loss is None:
             object.__setattr__(self, "R_loss", float((r_loss_top + r_loss_bot) / 2.0))
+        if self.lambda_water_at_temperature_c(self.lambda_water_reference_temperature_c) <= 0.0:
+            raise ValueError("lambda_water(T_reference) must remain strictly positive.")
+
+    def lambda_water_at_temperature_c(self, temperature_c: float) -> float:
+        """Return the volumetric water heat capacity λ(T) [kWh/(m³·K)].
+
+        The default implementation is affine around a named reference temperature:
+
+            λ(T) = λ_ref · (1 + k_λ · (T - T_ref))
+
+        with:
+        - ``λ_ref = lambda_water``
+        - ``T_ref = lambda_water_reference_temperature_c``
+        - ``k_λ = lambda_water_temperature_coefficient_per_k``
+
+        Setting ``k_λ = 0`` recovers the legacy constant-property model exactly.
+        """
+        lambda_value = self.lambda_water * (
+            1.0
+            + self.lambda_water_temperature_coefficient_per_k
+            * (temperature_c - self.lambda_water_reference_temperature_c)
+        )
+        if lambda_value <= 0.0:
+            raise ValueError(
+                f"lambda_water(T={temperature_c:.3f} °C) must remain strictly positive; got {lambda_value:.6g}."
+            )
+        return float(lambda_value)
+
+    def lambda_water_temperature_derivative(self) -> float:
+        """Return dλ/dT for the affine λ(T) law [kWh/(m³·K²)]."""
+        return float(self.lambda_water * self.lambda_water_temperature_coefficient_per_k)
 
     @property
     def euler_time_constants_hours(self) -> tuple[float, float, float]:
@@ -136,7 +169,8 @@ class DHWParameters:
             raise ValueError("v_tap_m3_per_h must be non-negative.")
         if v_tap_m3_per_h == 0.0:
             return float("inf")
-        return self.C_top / (self.lambda_water * v_tap_m3_per_h)
+        lambda_water = self.lambda_water_at_temperature_c(self.lambda_water_reference_temperature_c)
+        return self.C_top / (lambda_water * v_tap_m3_per_h)
 
     def max_stable_euler_dt_for_tap_flow(self, v_tap_m3_per_h: float, safety_factor: float = 0.2) -> float:
         """Return the most restrictive Euler bound [h] for the supplied tap flow."""

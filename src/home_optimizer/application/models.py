@@ -210,6 +210,21 @@ class RunRequest(BaseModel):
         gt=0.0,
         description="Water volumetric heat capacity lambda [kWh/(m^3·K)] (§8.4)",
     )
+    dhw_lambda_water_reference_temperature_c: float = Field(
+        20.0,
+        ge=0.0,
+        le=100.0,
+        description="Reference temperature T_ref for the affine DHW lambda_water(T) law [degC].",
+    )
+    dhw_lambda_water_temperature_coefficient_per_k: float = Field(
+        0.0,
+        ge=-0.01,
+        le=0.01,
+        description=(
+            "Affine temperature coefficient k_lambda for DHW lambda_water(T) = lambda_ref * "
+            "(1 + k_lambda * (T - T_ref)) [1/K]. Set to 0 for the legacy constant-water model."
+        ),
+    )
     dhw_T_top_init: float = Field(
         55.0, ge=20.0, le=85.0, description="Initial top-layer temperature T_top [degC]"
     )
@@ -392,6 +407,8 @@ class RunRequest(BaseModel):
                 heater_split_top=self.dhw_heater_split_top,
                 heater_split_bottom=self.dhw_heater_split_bottom,
                 lambda_water=self.dhw_lambda_water_kwh_per_m3k,
+                lambda_water_reference_temperature_c=self.dhw_lambda_water_reference_temperature_c,
+                lambda_water_temperature_coefficient_per_k=self.dhw_lambda_water_temperature_coefficient_per_k,
             ),
             initial_state_c=np.array([self.dhw_T_top_init, self.dhw_T_bot_init], dtype=float),
             top_temperature_bias_c=self.dhw_top_temperature_bias_c,

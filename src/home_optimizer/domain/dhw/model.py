@@ -98,6 +98,8 @@ class DHWModel:
     def continuous_model(
         self,
         v_tap_m3_per_h: float,
+        *,
+        mean_water_temperature_c: float | None = None,
     ) -> ContinuousLinearModel:
         """Return the continuous-time DHW state-space model for one tap-flow level.
 
@@ -105,12 +107,17 @@ class DHWModel:
             v_tap_m3_per_h: Piecewise-constant tap-flow rate over the interval [m³/h].
         """
         p = self.parameters
+        lambda_water = p.lambda_water_at_temperature_c(
+            p.lambda_water_reference_temperature_c
+            if mean_water_temperature_c is None
+            else mean_water_temperature_c
+        )
         strat_top_per_h = 1.0 / (p.C_top * p.R_strat)
         strat_bot_per_h = 1.0 / (p.C_bot * p.R_strat)
         loss_top_per_h = 1.0 / (p.C_top * p.R_loss_top)
         loss_bot_per_h = 1.0 / (p.C_bot * p.R_loss_bot)
-        tap_top_per_h = p.lambda_water * v_tap_m3_per_h / p.C_top
-        tap_bot_per_h = p.lambda_water * v_tap_m3_per_h / p.C_bot
+        tap_top_per_h = lambda_water * v_tap_m3_per_h / p.C_top
+        tap_bot_per_h = lambda_water * v_tap_m3_per_h / p.C_bot
 
         return ContinuousLinearModel(
             A=np.array(
@@ -141,10 +148,15 @@ class DHWModel:
     def discrete_model(
         self,
         v_tap_m3_per_h: float,
+        *,
+        mean_water_temperature_c: float | None = None,
     ) -> DiscreteLinearModel:
         """Return the exact-ZOH discrete DHW model for a given tap flow."""
         return Discretizer.discretize(
-            continuous_model=self.continuous_model(v_tap_m3_per_h),
+            continuous_model=self.continuous_model(
+                v_tap_m3_per_h,
+                mean_water_temperature_c=mean_water_temperature_c,
+            ),
             config=DiscretizationConfig(
                 method="exact_zoh",
                 dt_hours=self.parameters.dt_hours,
@@ -154,6 +166,8 @@ class DHWModel:
     def state_matrices(
         self,
         v_tap_m3_per_h: float,
+        *,
+        mean_water_temperature_c: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return exact discrete ``(A_dhw, B_dhw, E_dhw)`` for a given tap flow.
 
@@ -164,7 +178,10 @@ class DHWModel:
         """
         if v_tap_m3_per_h < 0.0:
             raise ValueError("v_tap_m3_per_h must be non-negative.")
-        discrete_model = self.discrete_model(v_tap_m3_per_h)
+        discrete_model = self.discrete_model(
+            v_tap_m3_per_h,
+            mean_water_temperature_c=mean_water_temperature_c,
+        )
         return discrete_model.A, discrete_model.B, discrete_model.E
 
     # ------------------------------------------------------------------
@@ -191,12 +208,14 @@ class DHWModel:
         _assert_temperature_above_absolute_zero(name="t_mains_c", temperature_c=float(t_mains_c))
         _assert_temperature_above_absolute_zero(name="t_amb_c", temperature_c=float(t_amb_c))
         p = self.parameters
+        mean_tank_temperature_c = self.t_dhw_mean(x)
+        lambda_water = p.lambda_water_at_temperature_c(mean_tank_temperature_c)
 
         q_strat = (T_top - T_bot) / p.R_strat
         q_loss_top = (T_top - t_amb_c) / p.R_loss_top
         q_loss_bot = (T_bot - t_amb_c) / p.R_loss_bot
-        q_tap_top = p.lambda_water * v_tap_m3_per_h * (T_bot - T_top)
-        q_tap_bot = p.lambda_water * v_tap_m3_per_h * (t_mains_c - T_bot)
+        q_tap_top = lambda_water * v_tap_m3_per_h * (T_bot - T_top)
+        q_tap_bot = lambda_water * v_tap_m3_per_h * (t_mains_c - T_bot)
 
         dT_top = (
             -q_strat
@@ -230,7 +249,10 @@ class DHWModel:
         _assert_temperature_above_absolute_zero(name="t_mains_c", temperature_c=float(t_mains_c))
         _assert_temperature_above_absolute_zero(name="t_amb_c", temperature_c=float(t_amb_c))
         d = np.array([t_amb_c, t_mains_c], dtype=float)
-        A, B, E = self.state_matrices(v_tap_m3_per_h)
+        A, B, E = self.state_matrices(
+            v_tap_m3_per_h,
+            mean_water_temperature_c=self.t_dhw_mean(x),
+        )
         return A @ x + B[:, 0] * control_kw + E @ d
 
     # ------------------------------------------------------------------
