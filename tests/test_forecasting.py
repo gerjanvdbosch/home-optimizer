@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, cast
 
 import numpy as np
 import pytest
@@ -313,7 +314,8 @@ def _add_dhw_calibration_snapshot(
         effective_parameters=CalibrationParameterOverrides(
             dhw_C_top=c_top_kwh_per_k,
             dhw_C_bot=c_bot_kwh_per_k,
-            dhw_R_loss=r_loss_k_per_kw,
+            dhw_R_loss_top=r_loss_k_per_kw,
+            dhw_R_loss_bot=r_loss_k_per_kw,
         ),
     )
     return repository.add_calibration_snapshot(payload)
@@ -431,7 +433,8 @@ def test_forecast_service_builds_dhw_tap_forecast_from_history(tmp_path) -> None
                 "dhw_enabled": True,
                 "dhw_C_top": 0.11628,
                 "dhw_C_bot": 0.11628,
-                "dhw_R_loss": 462.0,
+                "dhw_R_loss_top": 462.0,
+                "dhw_R_loss_bot": 462.0,
             }
         ).model_dump(mode="python"),
         repository=repository,
@@ -545,7 +548,7 @@ def test_dhw_tap_forecaster_rejects_flat_positive_background_profile(
         boiler_ambient_bias_c=0.0,
     )
     metadata = PersistedRegressorArtifactMetadata(
-        model_version=1,
+        model_version=2,
         trained_at_utc=future_fetched_at_utc,
         sample_count=int(np.sum(flat_profile.hourly_sample_count)),
         settings_signature=forecaster._settings_signature(physical_signature=physical_signature),
@@ -615,7 +618,7 @@ def test_dhw_tap_forecaster_accepts_sparse_evening_shower_profile(
         boiler_ambient_bias_c=0.0,
     )
     metadata = PersistedRegressorArtifactMetadata(
-        model_version=1,
+        model_version=2,
         trained_at_utc=future_fetched_at_utc,
         sample_count=int(np.sum(sparse_profile.hourly_sample_count)),
         settings_signature=forecaster._settings_signature(physical_signature=physical_signature),
@@ -658,8 +661,6 @@ def test_dhw_tap_inferrer_skips_cold_tank_intervals(tmp_path) -> None:
     would then produce a spuriously large inferred V_tap.  The observability guard
     must clamp such intervals to 0.0, exactly as the EKF does when T_top ≈ T_mains.
     """
-    from home_optimizer.forecasting.models import DHWTapForecastSettings
-
     database_url = f"sqlite:///{tmp_path / 'dhw-tap-cold-tank.sqlite3'}"
     repository = TelemetryRepository(database_url=database_url)
     repository.create_schema()
@@ -729,6 +730,78 @@ def test_dhw_tap_inferrer_skips_cold_tank_intervals(tmp_path) -> None:
     )
 
 
+def test_dhw_tap_forecaster_skips_dhw_heating_buckets(tmp_path) -> None:
+    """Buckets ending in DHW mode must not be treated as tap-demand samples.
+
+    This guards against the old behavior where thermal energy used to heat or mix
+    the tank during ``hp_mode='dhw'`` could leak into the inferred tap curve.
+    Tap flow is only a valid signal for non-DHW buckets.
+    """
+
+    database_url = f"sqlite:///{tmp_path / 'dhw-tap-dhw-mode.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    history_start_utc = datetime(2026, 4, 10, 0, 0, tzinfo=timezone.utc)
+    for step in range(48):
+        valid_at_utc = history_start_utc + timedelta(hours=step)
+        aggregate = aggregate_readings(
+            [
+                _reading(
+                    valid_at_utc - timedelta(minutes=5),
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=8.0,
+                    household_elec_power_kw=0.4,
+                    hp_mode="dhw",
+                    hp_supply_temperature_c=55.0,
+                    hp_supply_target_temperature_c=55.0,
+                    hp_return_temperature_c=50.0,
+                    hp_flow_lpm=9.0,
+                    hp_electric_power_kw=2.6,
+                    dhw_top_temperature_c=48.0,
+                    dhw_bottom_temperature_c=44.0,
+                ),
+                _reading(
+                    valid_at_utc,
+                    shutter_living_room_pct=100.0,
+                    outdoor_temperature_c=8.0,
+                    household_elec_power_kw=0.4,
+                    hp_mode="dhw",
+                    hp_supply_temperature_c=55.0,
+                    hp_supply_target_temperature_c=55.0,
+                    hp_return_temperature_c=50.0,
+                    hp_flow_lpm=9.0,
+                    hp_electric_power_kw=2.6,
+                    dhw_top_temperature_c=49.0,
+                    dhw_bottom_temperature_c=45.0,
+                ),
+            ]
+        )
+        aggregate.update(
+            {
+                "electricity_price_mean_eur_per_kwh": 0.25,
+                "electricity_price_last_eur_per_kwh": 0.25,
+                "feed_in_price_eur_per_kwh": 0.0,
+            }
+        )
+        repository.add_aggregate(aggregate)
+
+    forecaster = DHWTapForecaster()
+    profile, sample_count = forecaster._build_hourly_profile_from_history(
+        repository=repository,
+        c_top_kwh_per_k=0.11628,
+        c_bot_kwh_per_k=0.11628,
+        r_loss_k_per_kw=462.0,
+        lambda_water_kwh_per_m3_k=LAMBDA_WATER_KWH_PER_M3_K,
+        top_temperature_bias_c=0.0,
+        bottom_temperature_bias_c=0.0,
+        boiler_ambient_bias_c=0.0,
+    )
+
+    assert sample_count == 0
+    assert profile is None
+
+
 def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_request(tmp_path) -> None:
     """Nightly DHW training must work from the effective runtime tuple, not only from snapshot deltas."""
 
@@ -744,7 +817,10 @@ def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_r
     repository.add_calibration_snapshot(
         CalibrationSnapshotPayload(
             generated_at_utc=history_start_utc + timedelta(hours=72),
-            effective_parameters=CalibrationParameterOverrides(dhw_R_loss=r_loss_k_per_kw),
+            effective_parameters=CalibrationParameterOverrides(
+                dhw_R_loss_top=r_loss_k_per_kw,
+                dhw_R_loss_bot=r_loss_k_per_kw,
+            ),
         )
     )
 
@@ -753,7 +829,8 @@ def test_forecast_service_trains_persisted_dhw_tap_profile_from_effective_base_r
             "dhw_enabled": True,
             "dhw_C_top": c_top_kwh_per_k,
             "dhw_C_bot": c_bot_kwh_per_k,
-            "dhw_R_loss": 50.0,
+            "dhw_R_loss_top": 50.0,
+            "dhw_R_loss_bot": 50.0,
             "dhw_lambda_water_kwh_per_m3k": LAMBDA_WATER_KWH_PER_M3_K,
             "dhw_top_temperature_bias_c": 0.0,
             "dhw_bottom_temperature_bias_c": 0.0,
@@ -1035,7 +1112,7 @@ def test_shutter_forecaster_reuses_cached_model_for_unchanged_history(tmp_path, 
     rows = repository.get_latest_forecast_batch()
 
     load_calls = 0
-    original_load = ShutterForecaster._load_artifact_from_disk
+    original_load: Callable[[ShutterForecaster, Any], Any] = cast(Any, ShutterForecaster._load_artifact_from_disk)
 
     def counting_load(self: ShutterForecaster, artifact_path):  # noqa: ANN001
         nonlocal load_calls
@@ -1084,7 +1161,7 @@ def test_shutter_forecaster_refreshes_cached_model_after_retraining(tmp_path, mo
     rows = repository.get_latest_forecast_batch()
 
     load_calls = 0
-    original_load = ShutterForecaster._load_artifact_from_disk
+    original_load: Callable[[ShutterForecaster, Any], Any] = cast(Any, ShutterForecaster._load_artifact_from_disk)
 
     def counting_load(self: ShutterForecaster, artifact_path):  # noqa: ANN001
         nonlocal load_calls

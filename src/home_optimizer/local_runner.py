@@ -58,6 +58,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from .api import api_service, app
 from .calibration import AutomaticCalibrationSettings, run_and_persist_automatic_calibration
+from .application.runtime import OptimizerRuntime
 from .forecasting import ForecastService
 from .application.optimizer import Optimizer
 from .pricing import PriceConfig, PriceMode, build_price_model
@@ -503,6 +504,10 @@ def main(argv: list[str] | None = None) -> None:
     log.info("Hourly forecast refresh scheduled.")
 
     # ── 5b. Build shared baseline RunRequest for calibration + MPC ─────────
+    # Seed the request from the live sensors.json snapshot when available so
+    # simulator defaults match the actual runner state. Forecast arrays stay out
+    # of the base request and are injected from the persisted repository when
+    # the MPC solves.
     from .application.optimizer import RunRequest  # noqa: PLC0415
 
     t_out_init = args.mpc_t_out
@@ -526,6 +531,16 @@ def main(argv: list[str] | None = None) -> None:
             "price_config": price_cfg,
         }
     )
+    if mpc_sensor_backend is not None:
+        try:
+            mpc_base_input = OptimizerRuntime.build_scheduled_input(
+                base_input=mpc_base_input,
+                backend=mpc_sensor_backend,
+                repository=None,
+            )
+            log.info("MPC base request seeded from live sensors.json snapshot.")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not seed MPC base request from sensors.json; using CLI defaults: %s", exc)
     api_service.set_base_request(mpc_base_input)
 
     # ── 5c. Nightly ML forecast-model training (currently shutter model) ───

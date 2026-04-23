@@ -37,7 +37,7 @@ _SECONDS_PER_HOUR: float = 3600.0
 _DHW_MODE_NAME: str = "dhw"
 _HOURS_PER_DAY: int = 24
 _ARTIFACT_NAME: str = "dhw_tap_profile"
-_ARTIFACT_VERSION: int = 1
+_ARTIFACT_VERSION: int = 2
 
 log = logging.getLogger("home_optimizer.forecasting.dhw_tap")
 
@@ -219,11 +219,10 @@ class DHWTapForecaster:
             result     : [kWh/h] / [kWh/m³]      = [m³/h]  ✓
 
         Approximations (explicitly named):
-        - ``P_dhw``: ``hp_thermal_power_mean_kw`` from ``next_row`` (mean over the bucket).
-          Mode is determined by ``hp_mode_last`` (end-of-bucket), not a weighted mean.
-          If the HP switched modes mid-bucket this introduces an error, but for 1-h
-          buckets mode switches are infrequent and the clamping to [0, max_tap] limits
-          the damage.
+        - This inference is only used for buckets whose end-of-bucket mode is *not*
+          ``dhw``.  DHW-heating buckets are excluded entirely so compressor/mixing
+          energy during tank heating cannot be misclassified as hot-water tap draw.
+        - ``P_dhw`` is therefore treated as 0.0 in the retained non-DHW buckets.
         - ``T_top``, ``T_bot``: midpoint estimate (mean of start and end temperatures).
         - ``T_amb``, ``T_mains``: mean over the bucket from ``next_row``.
 
@@ -426,6 +425,8 @@ class DHWTapForecaster:
         samples_by_hour: dict[int, list[float]] = defaultdict(list)
         valid_sample_count = 0
         for previous_row, next_row in zip(rows, rows[1:]):
+            if str(next_row.hp_mode_last).strip().lower() == _DHW_MODE_NAME:
+                continue
             inferred_v_tap = self._infer_v_tap_m3_per_h(
                 previous_row=previous_row,
                 next_row=next_row,

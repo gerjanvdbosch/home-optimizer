@@ -531,28 +531,6 @@
           <input type="number" id="dhw_schedule_target_c" value="55.0" min="20" max="85" step="0.5" oninput="upd('vDhwScheduleTarget', this.value)" />
         </div>
       </div>
-      <div class="toggle">
-        <input type="checkbox" id="dhw_tap_schedule_enabled" checked />
-        <label for="dhw_tap_schedule_enabled">Gebruik tapschema in simulator</label>
-      </div>
-      <div id="dhw-tap-schedule-fields">
-        <div class="field">
-          <label>Tap schema start [lokale uur] <span id="vDhwTapStart">22.0</span></label>
-          <input type="number" id="dhw_tap_schedule_start_hour_local" value="22" min="0" max="23" step="1" oninput="upd('vDhwTapStart', this.value)" />
-        </div>
-        <div class="field">
-          <label>Tap schema duur [h] <span id="vDhwTapDuration">1.0</span></label>
-          <input type="number" id="dhw_tap_schedule_duration_hours" value="1" min="1" max="6" step="1" oninput="upd('vDhwTapDuration', this.value)" />
-        </div>
-        <div class="field">
-          <label>Tapflow tijdens schema [m&sup3;/h] <span id="vDhwVtap">0.08</span></label>
-          <input type="number" id="dhw_tap_schedule_flow_m3_per_h" value="0.08" min="0" max="0.3" step="0.005" oninput="upd('vDhwVtap', this.value)" />
-        </div>
-      </div>
-      <div class="field">
-        <label>Basis tapflow buiten schema [m&sup3;/h] <span id="vDhwVtapBase">0.00</span></label>
-        <input type="number" id="dhw_v_tap_sim_base" value="0.0" min="0" max="0.1" step="0.001" oninput="upd('vDhwVtapBase', this.value)" />
-      </div>
       <div class="field">
         <label>Significant tap threshold [m&sup3;/h] <span id="vDhwTapThresh">0.01</span></label>
         <input type="number" id="dhw_significant_tap_threshold_m3_per_h" value="0.01" min="0" max="0.5" step="0.001" oninput="upd('vDhwTapThresh', this.value)" />
@@ -627,7 +605,7 @@
     </div>
 
     <div class="chart-card" id="dhw-chart-card">
-      <h3>DHW &mdash; top/bottom, target en tapflow</h3>
+      <h3>DHW &mdash; top/bottom, target en tapforecast</h3>
       <div id="dhw-chart" class="chart-inner"></div>
     </div>
 
@@ -708,10 +686,6 @@
     dhw_schedule_target_c: 'vDhwScheduleTarget',
     dhw_legionella_period_steps: 'vDhwLegP',
     dhw_legionella_duration_steps: 'vDhwLegD',
-    dhw_tap_schedule_start_hour_local: 'vDhwTapStart',
-    dhw_tap_schedule_duration_hours: 'vDhwTapDuration',
-    dhw_tap_schedule_flow_m3_per_h: 'vDhwVtap',
-    dhw_v_tap_sim_base: 'vDhwVtapBase',
     dhw_significant_tap_threshold_m3_per_h: 'vDhwTapThresh',
     dhw_t_mains_c: 'vDhwTmains',
     dhw_t_amb_c: 'vDhwTamb',
@@ -775,44 +749,12 @@
     setVisible('dhw-chart-card',   document.getElementById('dhw_enabled').checked);
     setVisible('exclusive-mode-field', heatPumpTopology === 'exclusive');
     setVisible('dhw-schedule-fields', document.getElementById('dhw_schedule_enabled').checked);
-    setVisible('dhw-tap-schedule-fields', document.getElementById('dhw_tap_schedule_enabled').checked);
   }
 
   document.getElementById('price_mode').addEventListener('change', syncVisibility);
   document.getElementById('dhw_enabled').addEventListener('change', syncVisibility);
   document.getElementById('heat_pump_topology').addEventListener('change', syncVisibility);
   document.getElementById('dhw_schedule_enabled').addEventListener('change', syncVisibility);
-  document.getElementById('dhw_tap_schedule_enabled').addEventListener('change', syncVisibility);
-
-  function hourIsInWindow(hourOfDay, startHour, durationHours) {
-    const normalizedHour = ((hourOfDay % 24) + 24) % 24;
-    const windowStart = ((startHour % 24) + 24) % 24;
-    const windowEnd = windowStart + durationHours;
-    if (windowEnd <= 24) return normalizedHour >= windowStart && normalizedHour < windowEnd;
-    return normalizedHour >= windowStart || normalizedHour < (windowEnd % 24);
-  }
-
-  function buildDhwTapForecast(horizonSteps, dtHours) {
-    const numberValue = (id) => parseFloat(document.getElementById(id).value);
-    const checkedValue = (id) => document.getElementById(id).checked;
-    const baseFlow = numberValue('dhw_v_tap_sim_base');
-    const tapForecast = Array(horizonSteps).fill(baseFlow);
-    if (!checkedValue('dhw_tap_schedule_enabled')) return tapForecast;
-
-    const scheduleStartHour = numberValue('dhw_tap_schedule_start_hour_local');
-    const scheduleDurationHours = numberValue('dhw_tap_schedule_duration_hours');
-    const scheduleFlow = numberValue('dhw_tap_schedule_flow_m3_per_h');
-    const now = new Date();
-    const currentLocalHour = now.getHours() + now.getMinutes() / 60;
-
-    for (let stepIndex = 0; stepIndex < horizonSteps; stepIndex += 1) {
-      const stepHour = currentLocalHour + stepIndex * dtHours;
-      if (hourIsInWindow(stepHour, scheduleStartHour, scheduleDurationHours)) {
-        tapForecast[stepIndex] = scheduleFlow;
-      }
-    }
-    return tapForecast;
-  }
 
   function getReq() {
     const n = (id) => parseFloat(document.getElementById(id).value);
@@ -865,7 +807,6 @@
       dhw_schedule_target_c: n('dhw_schedule_target_c'),
       dhw_legionella_period_steps: i('dhw_legionella_period_steps'),
       dhw_legionella_duration_steps: i('dhw_legionella_duration_steps'),
-      dhw_v_tap_forecast: buildDhwTapForecast(horizonHours, dtHours),
       dhw_preheat_lead_steps: 0,
       dhw_significant_tap_threshold_m3_per_h: n('dhw_significant_tap_threshold_m3_per_h'),
       dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),

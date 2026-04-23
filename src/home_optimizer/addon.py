@@ -36,6 +36,8 @@ import uvicorn
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .api import api_service, app
+from .application.runtime import OptimizerRuntime
+from .application.optimizer import RunRequest
 from .forecasting import ForecastService
 from .application.optimizer import Optimizer
 from .pricing import PriceConfig, PriceMode, build_price_model
@@ -501,8 +503,8 @@ class AddonOptions(BaseModel):
 def _build_runtime_base_request(
     opts: AddonOptions,
     *,
-    defaults: "RunRequest | None" = None,
-) -> "RunRequest":
+    defaults: RunRequest | None = None,
+) -> RunRequest:
     """Build the canonical runtime base request from validated addon options.
 
     The returned request is the single source of truth for periodic MPC,
@@ -822,7 +824,20 @@ def main() -> None:
     log.info("ForecastPersister started (hourly Open-Meteo updates)")
 
     # ── 4c. Build the shared baseline MPC/calibration input ───────────────
+    # Seed the request with the current Home Assistant sensor snapshot so the
+    # simulator defaults mirror the real installation. Forecast arrays stay out
+    # of the base request; they are injected from the persisted repository at
+    # solve time.
     mpc_base_input = _build_runtime_base_request(opts)
+    try:
+        mpc_base_input = OptimizerRuntime.build_scheduled_input(
+            base_input=mpc_base_input,
+            backend=backend,
+            repository=None,
+        )
+        log.info("MPC base request seeded from live Home Assistant sensors.")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not seed MPC base request from live sensors; using config defaults: %s", exc)
     api_service.set_base_request(mpc_base_input)
 
     # ── 4d. Start nightly persisted ML forecast-model training (optional) ──

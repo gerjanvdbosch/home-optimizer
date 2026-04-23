@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import numpy as np
+import pytest
 
 from home_optimizer.application.forecasting import ForecastBuilder
 from home_optimizer.application.models import RunRequest as RunRequestModel
@@ -16,6 +19,55 @@ from home_optimizer.application.request_projection import (
 )
 from home_optimizer.application.runtime import OptimizerRuntime
 from home_optimizer.domain.heat_pump.cop import HeatPumpCOPParameters
+from home_optimizer.sensors import LiveReadings, SensorBackend
+
+
+def _live_readings() -> LiveReadings:
+    """Return one live telemetry snapshot for runtime-seeding tests."""
+    return LiveReadings(
+        room_temperature_c=20.25,
+        outdoor_temperature_c=6.75,
+        hp_supply_temperature_c=31.5,
+        hp_supply_target_temperature_c=33.0,
+        hp_return_temperature_c=27.0,
+        hp_flow_lpm=8.5,
+        hp_electric_power_kw=1.9,
+        hp_mode="ufh",
+        p1_net_power_kw=1.2,
+        pv_output_kw=0.4,
+        thermostat_setpoint_c=20.5,
+        dhw_top_temperature_c=52.0,
+        dhw_bottom_temperature_c=45.5,
+        shutter_living_room_pct=78.0,
+        defrost_active=False,
+        booster_heater_active=False,
+        boiler_ambient_temp_c=18.4,
+        refrigerant_condensation_temp_c=37.8,
+        refrigerant_liquid_line_temp_c=27.9,
+        discharge_temp_c=64.0,
+        t_mains_estimated_c=10.2,
+        timestamp=datetime(2026, 4, 23, 10, 0, tzinfo=timezone.utc),
+        pv_total_kwh=1234.5,
+        hp_electric_total_kwh=678.9,
+        p1_import_total_kwh=910.11,
+        p1_export_total_kwh=12.13,
+    )
+
+
+class _StaticBackend(SensorBackend):
+    """Deterministic backend that always returns one fixed live snapshot."""
+
+    def __init__(self, readings: LiveReadings) -> None:
+        self._readings = readings
+
+    def read_all(self) -> LiveReadings:
+        return self._readings
+
+    def close(self) -> None:
+        """Release backend resources.
+
+        The deterministic backend has no external resources.
+        """
 
 
 def test_forecast_builder_materializes_scalar_fallback_to_full_horizon() -> None:
@@ -163,6 +215,27 @@ def test_optimizer_runtime_build_scheduled_input_preserves_base_request_without_
     )
 
     assert scheduled == request
+
+
+def test_optimizer_runtime_build_scheduled_input_seeds_live_sensors_without_tap_forecast() -> None:
+    """Runtime seeding must use live sensor values but leave DHW tap demand to the repository forecast."""
+    request = RunRequest.model_validate({"horizon_hours": 4, "dhw_enabled": True})
+
+    scheduled = OptimizerRuntime.build_scheduled_input(
+        base_input=request,
+        backend=_StaticBackend(_live_readings()),
+        repository=None,
+    )
+
+    assert scheduled.T_r_init == pytest.approx(20.25)
+    assert scheduled.T_b_init == pytest.approx(29.25)
+    assert scheduled.outdoor_temperature_c == pytest.approx(6.75)
+    assert scheduled.shutter_living_room_pct == pytest.approx(78.0)
+    assert scheduled.dhw_T_top_init == pytest.approx(52.0)
+    assert scheduled.dhw_T_bot_init == pytest.approx(45.5)
+    assert scheduled.dhw_t_mains_c == pytest.approx(10.2)
+    assert scheduled.dhw_t_amb_c == pytest.approx(18.4)
+    assert scheduled.dhw_v_tap_forecast is None
 
 
 def test_run_request_accepts_exclusive_topology_without_fixed_mode_when_on_off_controls_are_enabled() -> None:
