@@ -62,7 +62,7 @@ class OptimizerPipeline:
 
         representative_outdoor = np.array([req.ufh_forecast_config.outdoor_temperature_c], dtype=float)
         cop_ufh_scalar = float(cop_model.cop_ufh(representative_outdoor)[0])
-        cop_dhw_scalar = float(cop_model.cop_dhw(representative_outdoor, dhw_control.t_min_c)[0])
+        cop_dhw_scalar = float(cop_model.cop_dhw(representative_outdoor, dhw_control.t_target_c)[0])
 
         mpc_parameters = ufh_control.to_mpc_parameters(
             cop_ufh=cop_ufh_scalar,
@@ -92,6 +92,7 @@ class OptimizerPipeline:
                 req,
                 horizon_steps=horizon_steps,
                 cop_model=cop_model,
+                start_hour=start_hour,
             )
             dhw_forecast.assert_compatible_with_parameters(dhw_physical.parameters)
             initial_dhw_state_c = dhw_physical.initial_state_c

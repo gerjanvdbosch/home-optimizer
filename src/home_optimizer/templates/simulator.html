@@ -312,8 +312,20 @@
         <input type="number" id="P_max" value="4.5" min="0.5" max="20" step="0.5" oninput="upd('vPmax', this.value)" />
       </div>
       <div class="field">
+        <label>P_UFH,min [kW therm] <span id="vPmin">1.5</span></label>
+        <input type="number" id="P_min" value="1.5" min="0" max="20" step="0.1" oninput="upd('vPmin', this.value)" />
+      </div>
+      <div class="field">
         <label>&Delta;P_UFH,max [kW/stap] <span id="vDPmax">1.0</span></label>
         <input type="number" id="delta_P_max" value="1.0" min="0.1" max="10" step="0.1" oninput="upd('vDPmax', this.value)" />
+      </div>
+      <div class="field">
+        <input type="checkbox" id="ufh_on_off_control_enabled" checked />
+        <label for="ufh_on_off_control_enabled">UFH aan/uit-planning met minimumvermogen</label>
+      </div>
+      <div class="field">
+        <label>UFH switch-penalty [&euro;/switch] <span id="vUfhSwitchPenalty">0.05</span></label>
+        <input type="number" id="ufh_switch_penalty_eur" value="0.05" min="0" max="5" step="0.01" oninput="upd('vUfhSwitchPenalty', this.value)" />
       </div>
       <div class="field">
         <label>Q_c <span id="vQc">8.0</span></label>
@@ -430,12 +442,12 @@
     <div class="panel" id="dhw-settings">
       <div class="panel-title">DHW &mdash; tank en constraints</div>
       <div class="field">
-        <label>C_top [kWh/K] <span id="vDhwCtop">0.58</span></label>
-        <input type="number" id="dhw_C_top" value="0.5814" min="0.01" max="5" step="0.01" oninput="upd('vDhwCtop', this.value)" />
+        <label>C_top [kWh/K] <span id="vDhwCtop">0.12</span></label>
+        <input type="number" id="dhw_C_top" value="0.11628" min="0.01" max="5" step="0.01" oninput="upd('vDhwCtop', this.value)" />
       </div>
       <div class="field">
-        <label>C_bot [kWh/K] <span id="vDhwCbot">0.58</span></label>
-        <input type="number" id="dhw_C_bot" value="0.5814" min="0.01" max="5" step="0.01" oninput="upd('vDhwCbot', this.value)" />
+        <label>C_bot [kWh/K] <span id="vDhwCbot">0.12</span></label>
+        <input type="number" id="dhw_C_bot" value="0.11628" min="0.01" max="5" step="0.01" oninput="upd('vDhwCbot', this.value)" />
       </div>
       <div class="field">
         <label>R_strat [K/kW] <span id="vDhwRstrat">10.0</span></label>
@@ -454,24 +466,44 @@
         <input type="number" id="dhw_T_top_init" value="55.0" min="20" max="85" step="0.5" oninput="upd('vDhwTtop', this.value)" />
       </div>
       <div class="field">
-        <label>T_bot init [&deg;C] <span id="vDhwTbot">55.0</span></label>
-        <input type="number" id="dhw_T_bot_init" value="55.0" min="15" max="80" step="0.5" oninput="upd('vDhwTbot', this.value)" />
+        <label>T_bot init [&deg;C] <span id="vDhwTbot">45.0</span></label>
+        <input type="number" id="dhw_T_bot_init" value="45.0" min="15" max="80" step="0.5" oninput="upd('vDhwTbot', this.value)" />
       </div>
       <div class="field">
         <label>P_DHW,max [kW therm] <span id="vDhwPmax">3.0</span></label>
         <input type="number" id="dhw_P_max" value="3.0" min="0.5" max="15" step="0.5" oninput="upd('vDhwPmax', this.value)" />
       </div>
       <div class="field">
+        <label>P_DHW,min [kW therm] <span id="vDhwPmin">1.5</span></label>
+        <input type="number" id="dhw_P_min" value="1.5" min="0" max="15" step="0.1" oninput="upd('vDhwPmin', this.value)" />
+      </div>
+      <div class="field">
         <label>&Delta;P_DHW,max [kW/stap] <span id="vDhwDPmax">1.0</span></label>
         <input type="number" id="dhw_delta_P_max" value="1.0" min="0.1" max="10" step="0.1" oninput="upd('vDhwDPmax', this.value)" />
+      </div>
+      <div class="field">
+        <input type="checkbox" id="dhw_on_off_control_enabled" checked />
+        <label for="dhw_on_off_control_enabled">DHW aan/uit-planning met minimumvermogen</label>
+      </div>
+      <div class="field">
+        <label>DHW switch-penalty [&euro;/switch] <span id="vDhwSwitchPenalty">0.05</span></label>
+        <input type="number" id="dhw_switch_penalty_eur" value="0.05" min="0" max="5" step="0.01" oninput="upd('vDhwSwitchPenalty', this.value)" />
       </div>
       <div class="field">
         <label>T_DHW,min [&deg;C] <span id="vDhwTmin">30.0</span></label>
         <input type="number" id="dhw_T_min" value="30.0" min="10" max="70" step="0.5" oninput="upd('vDhwTmin', this.value)" />
       </div>
       <div class="field">
+        <label>T_DHW,target [&deg;C] <span id="vDhwTtarget">55.0</span></label>
+        <input type="number" id="dhw_T_target" value="55.0" min="20" max="85" step="0.5" oninput="upd('vDhwTtarget', this.value)" />
+      </div>
+      <div class="field">
         <label>T_legionella [&deg;C] <span id="vDhwTleg">60.0</span></label>
         <input type="number" id="dhw_T_legionella" value="60.0" min="55" max="85" step="0.5" oninput="upd('vDhwTleg', this.value)" />
+      </div>
+      <div class="field">
+        <label>DHW target-weight <span id="vDhwTargetWeight">25.0</span></label>
+        <input type="number" id="dhw_target_rho_factor" value="25.0" min="0.1" max="10000" step="0.5" oninput="upd('vDhwTargetWeight', this.value)" />
       </div>
       <div class="field">
         <label>Legionella periode [stappen] <span id="vDhwLegP">168</span></label>
@@ -481,9 +513,49 @@
         <label>Legionella duur [stappen] <span id="vDhwLegD">1</span></label>
         <input type="number" id="dhw_legionella_duration_steps" value="1" min="1" max="4" step="1" oninput="upd('vDhwLegD', this.value)" />
       </div>
+      <div class="toggle">
+        <input type="checkbox" id="dhw_schedule_enabled" checked />
+        <label for="dhw_schedule_enabled">Gebruik dagelijks DHW-doelschema</label>
+      </div>
+      <div id="dhw-schedule-fields">
+        <div class="field">
+          <label>Schema start [lokale uur] <span id="vDhwScheduleStart">22.0</span></label>
+          <input type="number" id="dhw_schedule_start_hour_local" value="22" min="0" max="23" step="1" oninput="upd('vDhwScheduleStart', this.value)" />
+        </div>
+        <div class="field">
+          <label>Schema duur [h] <span id="vDhwScheduleDuration">2.0</span></label>
+          <input type="number" id="dhw_schedule_duration_hours" value="2" min="1" max="12" step="1" oninput="upd('vDhwScheduleDuration', this.value)" />
+        </div>
+        <div class="field">
+          <label>Schema target [&deg;C] <span id="vDhwScheduleTarget">55.0</span></label>
+          <input type="number" id="dhw_schedule_target_c" value="55.0" min="20" max="85" step="0.5" oninput="upd('vDhwScheduleTarget', this.value)" />
+        </div>
+      </div>
+      <div class="toggle">
+        <input type="checkbox" id="dhw_tap_schedule_enabled" checked />
+        <label for="dhw_tap_schedule_enabled">Gebruik tapschema in simulator</label>
+      </div>
+      <div id="dhw-tap-schedule-fields">
+        <div class="field">
+          <label>Tap schema start [lokale uur] <span id="vDhwTapStart">22.0</span></label>
+          <input type="number" id="dhw_tap_schedule_start_hour_local" value="22" min="0" max="23" step="1" oninput="upd('vDhwTapStart', this.value)" />
+        </div>
+        <div class="field">
+          <label>Tap schema duur [h] <span id="vDhwTapDuration">1.0</span></label>
+          <input type="number" id="dhw_tap_schedule_duration_hours" value="1" min="1" max="6" step="1" oninput="upd('vDhwTapDuration', this.value)" />
+        </div>
+        <div class="field">
+          <label>Tapflow tijdens schema [m&sup3;/h] <span id="vDhwVtap">0.08</span></label>
+          <input type="number" id="dhw_tap_schedule_flow_m3_per_h" value="0.08" min="0" max="0.3" step="0.005" oninput="upd('vDhwVtap', this.value)" />
+        </div>
+      </div>
       <div class="field">
-        <label>V&#775;_tap (flat, sim) [m&sup3;/h] <span id="vDhwVtap">0.01</span></label>
-        <input type="number" id="dhw_v_tap_sim" value="0.01" min="0" max="0.2" step="0.005" oninput="upd('vDhwVtap', this.value)" />
+        <label>Basis tapflow buiten schema [m&sup3;/h] <span id="vDhwVtapBase">0.00</span></label>
+        <input type="number" id="dhw_v_tap_sim_base" value="0.0" min="0" max="0.1" step="0.001" oninput="upd('vDhwVtapBase', this.value)" />
+      </div>
+      <div class="field">
+        <label>Significant tap threshold [m&sup3;/h] <span id="vDhwTapThresh">0.01</span></label>
+        <input type="number" id="dhw_significant_tap_threshold_m3_per_h" value="0.01" min="0" max="0.5" step="0.001" oninput="upd('vDhwTapThresh', this.value)" />
       </div>
       <div class="field">
         <label>T_mains [&deg;C] <span id="vDhwTmains">10.0</span></label>
@@ -507,6 +579,7 @@
       <div class="field hidden" id="exclusive-mode-field">
         <label>Actieve exclusieve modus</label>
         <select id="exclusive_heat_pump_mode" style="width:100%;padding:.38rem .5rem;border:1px solid #d8dde3;border-radius:4px;font-size:.82rem;">
+          <option value="">auto (MPC kiest)</option>
           <option value="ufh">ufh</option>
           <option value="dhw">dhw</option>
         </select>
@@ -554,7 +627,7 @@
     </div>
 
     <div class="chart-card" id="dhw-chart-card">
-      <h3>DHW &mdash; tanktemperaturen</h3>
+      <h3>DHW &mdash; top/bottom, target en tapflow</h3>
       <div id="dhw-chart" class="chart-inner"></div>
     </div>
 
@@ -593,7 +666,9 @@
     T_min: 'vTmin',
     T_max: 'vTmax',
     P_max: 'vPmax',
+    P_min: 'vPmin',
     delta_P_max: 'vDPmax',
+    ufh_switch_penalty_eur: 'vUfhSwitchPenalty',
     Q_c: 'vQc',
     R_c: 'vRc',
     Q_N: 'vQn',
@@ -622,12 +697,22 @@
     dhw_T_top_init: 'vDhwTtop',
     dhw_T_bot_init: 'vDhwTbot',
     dhw_P_max: 'vDhwPmax',
+    dhw_P_min: 'vDhwPmin',
     dhw_delta_P_max: 'vDhwDPmax',
     dhw_T_min: 'vDhwTmin',
+    dhw_T_target: 'vDhwTtarget',
     dhw_T_legionella: 'vDhwTleg',
+    dhw_target_rho_factor: 'vDhwTargetWeight',
+    dhw_schedule_start_hour_local: 'vDhwScheduleStart',
+    dhw_schedule_duration_hours: 'vDhwScheduleDuration',
+    dhw_schedule_target_c: 'vDhwScheduleTarget',
     dhw_legionella_period_steps: 'vDhwLegP',
     dhw_legionella_duration_steps: 'vDhwLegD',
-    dhw_v_tap_sim: 'vDhwVtap',
+    dhw_tap_schedule_start_hour_local: 'vDhwTapStart',
+    dhw_tap_schedule_duration_hours: 'vDhwTapDuration',
+    dhw_tap_schedule_flow_m3_per_h: 'vDhwVtap',
+    dhw_v_tap_sim_base: 'vDhwVtapBase',
+    dhw_significant_tap_threshold_m3_per_h: 'vDhwTapThresh',
     dhw_t_mains_c: 'vDhwTmains',
     dhw_t_amb_c: 'vDhwTamb',
     P_hp_max_elec: 'vPhpMaxElec',
@@ -689,11 +774,45 @@
     setVisible('dhw-settings',     document.getElementById('dhw_enabled').checked);
     setVisible('dhw-chart-card',   document.getElementById('dhw_enabled').checked);
     setVisible('exclusive-mode-field', heatPumpTopology === 'exclusive');
+    setVisible('dhw-schedule-fields', document.getElementById('dhw_schedule_enabled').checked);
+    setVisible('dhw-tap-schedule-fields', document.getElementById('dhw_tap_schedule_enabled').checked);
   }
 
   document.getElementById('price_mode').addEventListener('change', syncVisibility);
   document.getElementById('dhw_enabled').addEventListener('change', syncVisibility);
   document.getElementById('heat_pump_topology').addEventListener('change', syncVisibility);
+  document.getElementById('dhw_schedule_enabled').addEventListener('change', syncVisibility);
+  document.getElementById('dhw_tap_schedule_enabled').addEventListener('change', syncVisibility);
+
+  function hourIsInWindow(hourOfDay, startHour, durationHours) {
+    const normalizedHour = ((hourOfDay % 24) + 24) % 24;
+    const windowStart = ((startHour % 24) + 24) % 24;
+    const windowEnd = windowStart + durationHours;
+    if (windowEnd <= 24) return normalizedHour >= windowStart && normalizedHour < windowEnd;
+    return normalizedHour >= windowStart || normalizedHour < (windowEnd % 24);
+  }
+
+  function buildDhwTapForecast(horizonSteps, dtHours) {
+    const numberValue = (id) => parseFloat(document.getElementById(id).value);
+    const checkedValue = (id) => document.getElementById(id).checked;
+    const baseFlow = numberValue('dhw_v_tap_sim_base');
+    const tapForecast = Array(horizonSteps).fill(baseFlow);
+    if (!checkedValue('dhw_tap_schedule_enabled')) return tapForecast;
+
+    const scheduleStartHour = numberValue('dhw_tap_schedule_start_hour_local');
+    const scheduleDurationHours = numberValue('dhw_tap_schedule_duration_hours');
+    const scheduleFlow = numberValue('dhw_tap_schedule_flow_m3_per_h');
+    const now = new Date();
+    const currentLocalHour = now.getHours() + now.getMinutes() / 60;
+
+    for (let stepIndex = 0; stepIndex < horizonSteps; stepIndex += 1) {
+      const stepHour = currentLocalHour + stepIndex * dtHours;
+      if (hourIsInWindow(stepHour, scheduleStartHour, scheduleDurationHours)) {
+        tapForecast[stepIndex] = scheduleFlow;
+      }
+    }
+    return tapForecast;
+  }
 
   function getReq() {
     const n = (id) => parseFloat(document.getElementById(id).value);
@@ -713,15 +832,18 @@
       price_config.nordpool_country_code = s('nordpool_country_code');
       price_config.nordpool_vat_factor   = n('nordpool_vat_factor');
     }
+    const horizonHours = i('horizon_hours');
+    const dtHours = n('dt_hours');
     return {
       C_r: n('C_r'), C_b: n('C_b'), R_br: n('R_br'), R_ro: n('R_ro'),
       alpha: n('alpha'), eta: n('eta'), A_glass: n('A_glass'),
       T_r_init: n('T_r_init'), T_b_init: n('T_b_init'),
       previous_power_kw: n('previous_power_kw'),
-      horizon_hours: i('horizon_hours'), dt_hours: n('dt_hours'),
+      horizon_hours: horizonHours, dt_hours: dtHours,
       Q_c: n('Q_c'), R_c: n('R_c'), Q_N: n('Q_N'),
-      P_max: n('P_max'), delta_P_max: n('delta_P_max'),
+      P_max: n('P_max'), P_min: n('P_min'), delta_P_max: n('delta_P_max'),
       T_min: n('T_min'), T_max: n('T_max'), T_ref: n('T_ref'),
+      ufh_on_off_control_enabled: b('ufh_on_off_control_enabled'), ufh_switch_penalty_eur: n('ufh_switch_penalty_eur'),
       shutter_living_room_pct: n('shutter_living_room_pct'),
       price_config,
       internal_gains_kw: n('internal_gains_kw'),
@@ -732,17 +854,24 @@
       dhw_R_loss_top: n('dhw_R_loss_top'),
       dhw_R_loss_bot: n('dhw_R_loss_bot'),
       dhw_T_top_init: n('dhw_T_top_init'), dhw_T_bot_init: n('dhw_T_bot_init'),
-      dhw_P_max: n('dhw_P_max'), dhw_delta_P_max: n('dhw_delta_P_max'),
-      dhw_T_min: n('dhw_T_min'), dhw_T_legionella: n('dhw_T_legionella'),
+      dhw_P_max: n('dhw_P_max'), dhw_P_min: n('dhw_P_min'), dhw_delta_P_max: n('dhw_delta_P_max'),
+      dhw_on_off_control_enabled: b('dhw_on_off_control_enabled'),
+      dhw_switch_penalty_eur: n('dhw_switch_penalty_eur'),
+      dhw_T_min: n('dhw_T_min'), dhw_T_target: n('dhw_T_target'), dhw_T_legionella: n('dhw_T_legionella'),
+      dhw_target_rho_factor: n('dhw_target_rho_factor'),
+      dhw_schedule_enabled: b('dhw_schedule_enabled'),
+      dhw_schedule_start_hour_local: i('dhw_schedule_start_hour_local'),
+      dhw_schedule_duration_hours: i('dhw_schedule_duration_hours'),
+      dhw_schedule_target_c: n('dhw_schedule_target_c'),
       dhw_legionella_period_steps: i('dhw_legionella_period_steps'),
       dhw_legionella_duration_steps: i('dhw_legionella_duration_steps'),
-      // Expand the scalar V_tap slider into a flat horizon-length forecast array so
-      // the backend sees dhw_v_tap_forecast (the only accepted field) without a scalar.
-      dhw_v_tap_forecast: Array(i('horizon_hours')).fill(n('dhw_v_tap_sim')),
+      dhw_v_tap_forecast: buildDhwTapForecast(horizonHours, dtHours),
+      dhw_preheat_lead_steps: 0,
+      dhw_significant_tap_threshold_m3_per_h: n('dhw_significant_tap_threshold_m3_per_h'),
       dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),
       P_hp_max_elec: n('P_hp_max_elec'),
       heat_pump_topology: s('heat_pump_topology'),
-      exclusive_heat_pump_mode: s('heat_pump_topology') === 'exclusive' ? s('exclusive_heat_pump_mode') : null,
+      exclusive_heat_pump_mode: s('heat_pump_topology') === 'exclusive' && s('exclusive_heat_pump_mode') !== '' ? s('exclusive_heat_pump_mode') : null,
       eta_carnot_ufh: n('eta_carnot_ufh'),
       eta_carnot_dhw: n('eta_carnot_dhw'),
       delta_T_cond: n('delta_T_cond'), delta_T_evap: n('delta_T_evap'),

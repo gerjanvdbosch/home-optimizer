@@ -93,8 +93,11 @@ DEFAULT_INITIAL_DHW_AMBIENT_TEMPERATURE_BIAS_C: float = 0.0
 DEFAULT_MIN_DHW_AMBIENT_TEMPERATURE_BIAS_C: float = -5.0
 DEFAULT_MAX_DHW_AMBIENT_TEMPERATURE_BIAS_C: float = 5.0
 DEFAULT_FIT_DHW_CAPACITY_SPLIT: bool = False
+DEFAULT_FIT_DHW_TOTAL_CAPACITY: bool = False
 DEFAULT_MIN_DHW_C_TOP_FRACTION: float = 0.1
 DEFAULT_MAX_DHW_C_TOP_FRACTION: float = 0.9
+DEFAULT_MIN_DHW_C_TOTAL_SCALE: float = 0.25
+DEFAULT_MAX_DHW_C_TOTAL_SCALE: float = 4.0
 DEFAULT_FIT_DHW_TEMPERATURE_BIASES: bool = False
 DEFAULT_INITIAL_DHW_TOP_TEMPERATURE_BIAS_C: float = 0.0
 DEFAULT_INITIAL_DHW_BOTTOM_TEMPERATURE_BIAS_C: float = 0.0
@@ -925,6 +928,11 @@ class AutomaticCalibrationSettings:
             stage may fit a boiler-ambient sensor bias [°C]. Disabled by default
             because the current production telemetry makes this bias weakly
             identifiable and prone to bound-hits without materially improving the fit.
+        dhw_active_fit_total_capacity: Whether the automatic active-DHW stage is
+            allowed to fit the total DHW heat capacity ``C_top + C_bot`` relative
+            to the reference tuple [-]. Enabled by default because the runtime
+            should not rely on a fixed tank-capacity assumption when charging data
+            is available.
         dhw_active_fit_capacity_split: Whether the automatic active-DHW stage is
             allowed to fit the top/bottom heat-capacity split [-]. Disabled by
             default because the current production database drives this parameter
@@ -954,6 +962,7 @@ class AutomaticCalibrationSettings:
     dhw_active_min_selected_segments: int = DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS
     dhw_standby_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO
     dhw_standby_fit_ambient_temperature_bias: bool = DEFAULT_AUTOMATIC_DHW_STANDBY_FIT_AMBIENT_TEMPERATURE_BIAS
+    dhw_active_fit_total_capacity: bool = True
     dhw_active_fit_capacity_split: bool = False
     dhw_active_fit_temperature_biases: bool = False
     dhw_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO
@@ -1208,8 +1217,9 @@ class DHWActiveCalibrationDataset:
 class DHWActiveCalibrationSettings:
     """Validated settings for active DHW stratification identification.
 
-    This stage fits only ``R_strat`` from contiguous DHW charging windows that are
-    filtered to look like no-draw events.  ``C_top``, ``C_bot``, ``R_loss`` and
+    This stage fits ``R_strat`` and can optionally fit the total DHW heat
+    capacity and/or the top/bottom capacity split from contiguous charging windows
+    that are filtered to look like no-draw events. ``R_loss`` and
     ``lambda_water`` remain fixed from the injected reference parameter object.
 
     The fitter replays the 2-state DHW model with ``V_tap = 0`` and minimises the
@@ -1257,6 +1267,10 @@ class DHWActiveCalibrationSettings:
     segment_score_weight_tap_margin: float = DEFAULT_DHW_SEGMENT_SCORE_WEIGHT_TAP_MARGIN
     min_r_strat_k_per_kw: float = DEFAULT_MIN_DHW_R_STRAT_K_PER_KW
     max_r_strat_k_per_kw: float = DEFAULT_MAX_DHW_R_STRAT_K_PER_KW
+    fit_total_capacity: bool = DEFAULT_FIT_DHW_TOTAL_CAPACITY
+    initial_c_total_scale: float = 1.0
+    min_c_total_scale: float = DEFAULT_MIN_DHW_C_TOTAL_SCALE
+    max_c_total_scale: float = DEFAULT_MAX_DHW_C_TOTAL_SCALE
     fit_capacity_split: bool = DEFAULT_FIT_DHW_CAPACITY_SPLIT
     initial_c_top_fraction: float | None = None
     min_c_top_fraction: float = DEFAULT_MIN_DHW_C_TOP_FRACTION
@@ -1320,6 +1334,12 @@ class DHWActiveCalibrationSettings:
             )
         if self.regularization_weight < 0.0:
             raise ValueError("regularization_weight must be non-negative.")
+        if self.min_c_total_scale <= 0.0:
+            raise ValueError("min_c_total_scale must be strictly positive.")
+        if self.min_c_total_scale >= self.max_c_total_scale:
+            raise ValueError("min_c_total_scale must be < max_c_total_scale.")
+        if not (self.min_c_total_scale <= self.initial_c_total_scale <= self.max_c_total_scale):
+            raise ValueError("initial_c_total_scale must lie within [min_c_total_scale, max_c_total_scale].")
         if self.min_c_top_fraction <= 0.0 or self.max_c_top_fraction >= 1.0:
             raise ValueError("Capacity split bounds must satisfy 0 < min_c_top_fraction < max_c_top_fraction < 1.")
         if self.min_c_top_fraction >= self.max_c_top_fraction:
@@ -1360,6 +1380,8 @@ class DHWActiveCalibrationResult:
     """Result of fitting active DHW stratification parameters from no-draw charging runs."""
 
     fitted_parameters: DHWParameters
+    fit_total_capacity: bool
+    fitted_c_total_scale: float
     fit_capacity_split: bool
     fitted_c_top_fraction: float
     fit_temperature_biases: bool

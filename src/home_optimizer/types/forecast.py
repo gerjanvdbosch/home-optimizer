@@ -148,6 +148,7 @@ class DHWForecastHorizon:
     t_mains_c: np.ndarray
     t_amb_c: np.ndarray
     legionella_required: np.ndarray
+    target_top_c: np.ndarray | None = None
     cop_dhw_k: np.ndarray | None = None
 
     def __post_init__(self) -> None:
@@ -164,6 +165,11 @@ class DHWForecastHorizon:
             raise ValueError("legionella_required must have length N.")
         if np.any(v_tap < 0.0):
             raise ValueError("v_tap_m3_per_h cannot be negative.")
+        if self.target_top_c is not None:
+            target_top = _as_1d("target_top_c", self.target_top_c)
+            if target_top.size != n:
+                raise ValueError(f"target_top_c must have length {n}.")
+            object.__setattr__(self, "target_top_c", target_top)
 
         if self.cop_dhw_k is not None:
             cop_arr = _as_1d("cop_dhw_k", self.cop_dhw_k)
@@ -216,8 +222,8 @@ class DHWForecastHorizon:
             t_mains_c=np.full(n, t_mains_c),
             t_amb_c=np.full(n, t_amb_c),
             legionella_required=np.full(n, legionella_required, dtype=bool),
+            target_top_c=None,
         )
 
 
 __all__ = ["DHWForecastHorizon", "ForecastHorizon"]
-

@@ -178,6 +178,7 @@ def build_dhw_active_calibration_settings(
     min_r_strat_k_per_kw: float = DEFAULT_MIN_DHW_R_STRAT_K_PER_KW,
     max_r_strat_k_per_kw: float = DEFAULT_MAX_DHW_R_STRAT_K_PER_KW,
     max_selected_segments: int | None = None,
+    fit_total_capacity: bool = False,
     fit_capacity_split: bool = False,
     fit_temperature_biases: bool = False,
     ambient_temperature_bias_c: float = 0.0,
@@ -203,6 +204,8 @@ def build_dhw_active_calibration_settings(
         min_r_strat_k_per_kw: Explicit lower optimiser bound for ``R_strat`` [K/kW].
         max_r_strat_k_per_kw: Explicit upper optimiser bound for ``R_strat`` [K/kW].
         max_selected_segments: Optional cap on retained segments [-].
+        fit_total_capacity: Whether the total DHW heat capacity is fitted relative
+            to the reference tuple [-].
         fit_capacity_split: Whether the top/bottom DHW capacity split is fitted [-].
         fit_temperature_biases: Whether DHW top/bottom sensor biases are fitted [°C].
 
@@ -225,6 +228,7 @@ def build_dhw_active_calibration_settings(
         min_r_strat_k_per_kw=min_r_strat_k_per_kw,
         max_r_strat_k_per_kw=max_r_strat_k_per_kw,
         max_selected_segments=max_selected_segments,
+        fit_total_capacity=fit_total_capacity,
         fit_capacity_split=fit_capacity_split,
         ambient_temperature_bias_c=ambient_temperature_bias_c,
         fit_temperature_biases=fit_temperature_biases,

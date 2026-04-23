@@ -97,6 +97,10 @@ def test_simulate_supports_combined_mode_through_unified_mpc() -> None:
     assert payload["power_fig"]
     assert len(payload["control_labels"]) == 8
     assert len(payload["pv_forecast_kw"]) == 8
+    assert len(payload["dhw_top_profile_c"]) == 9
+    assert len(payload["dhw_bottom_profile_c"]) == 9
+    assert len(payload["dhw_target_profile_c"]) == 9
+    assert len(payload["dhw_tap_profile_m3_per_h"]) == 8
     assert payload["max_dhw_comfort_violation_c"] >= 0.0
 
 
@@ -184,6 +188,17 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw-chart-card"' in html
     assert 'id="dhw_R_loss_top"' in html
     assert 'id="dhw_R_loss_bot"' in html
+    assert 'id="dhw_T_target"' in html
+    assert 'id="dhw_schedule_enabled"' in html
+    assert 'id="dhw_schedule_start_hour_local"' in html
+    assert 'id="dhw_schedule_duration_hours"' in html
+    assert 'id="dhw_schedule_target_c"' in html
+    assert 'id="dhw_tap_schedule_enabled"' in html
+    assert 'id="dhw_tap_schedule_start_hour_local"' in html
+    assert 'id="dhw_tap_schedule_duration_hours"' in html
+    assert 'id="dhw_tap_schedule_flow_m3_per_h"' in html
+    assert 'id="dhw_P_min"' in html
+    assert 'id="dhw_on_off_control_enabled"' in html
     assert 'id="pv_enabled"' in html
     assert 'id="shutter_living_room_pct"' in html
     assert 'id="heat_pump_topology"' in html
@@ -191,6 +206,7 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert "UFH + DHW + PV MPC" in html
     assert "fetch(apiUrl('/api/defaults'))" in html
     assert "applyRunRequestDefaults" in html
+    assert "buildDhwTapForecast" in html
     assert "exclusive_heat_pump_mode: s('heat_pump_topology') === 'exclusive'" in html
 
 

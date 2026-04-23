@@ -59,6 +59,10 @@ class OptimizeResponse(BaseModel):
     cop_fig: str = ""
     pv_forecast_fig: str = ""
     dhw_fig: str = ""
+    dhw_top_profile_c: list[float] = []
+    dhw_bottom_profile_c: list[float] = []
+    dhw_target_profile_c: list[float] = []
+    dhw_tap_profile_m3_per_h: list[float] = []
 
 
 class ForecastResponse(BaseModel):
@@ -447,12 +451,19 @@ class HomeOptimizerAPI:
         return fig.to_json()
 
     @staticmethod
-    def _dhw_figure(labels: list[str], t_top: np.ndarray, t_bot: np.ndarray, t_dhw_min: float) -> str:
+    def _dhw_figure(
+        labels: list[str],
+        t_top: np.ndarray,
+        t_bot: np.ndarray,
+        t_dhw_min: float,
+        t_dhw_target: np.ndarray | None,
+        v_tap_m3_per_h: np.ndarray | None,
+    ) -> str:
         """Build DHW tank-temperature figure."""
         # Use numeric x-values and explicit tick labels to prevent duplicate
         # categorical labels (same HH:MM across multiple days) from collapsing
         # separate time points onto a single x-category.
-        fig = go.Figure()
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
         n = len(labels)
         x_vals = list(range(n))
 
@@ -467,6 +478,26 @@ class HomeOptimizerAPI:
                 hoverinfo="skip",
             )
         )
+        if t_dhw_target is not None:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_vals,
+                    y=t_dhw_target,
+                    name="T<sub>target</sub>",
+                    mode="lines",
+                    line=dict(color="#8e44ad", width=2, dash="dash"),
+                )
+            )
+        if v_tap_m3_per_h is not None:
+            fig.add_trace(
+                go.Bar(
+                    x=x_vals[:-1],
+                    y=v_tap_m3_per_h,
+                    name="V̇<sub>tap</sub>",
+                    marker_color="rgba(52,152,219,0.30)",
+                ),
+                secondary_y=True,
+            )
         fig.add_trace(
             go.Scatter(
                 x=x_vals,
@@ -494,6 +525,7 @@ class HomeOptimizerAPI:
         fig.update_layout(
             margin=dict(l=0, r=0, t=10, b=0),
             yaxis=dict(title="Temperatuur [degC]", gridcolor="rgba(0,0,0,0.04)", zeroline=False),
+            yaxis2=dict(title="Tapflow [m³/h]", rangemode="tozero", showgrid=False),
             xaxis=dict(showgrid=False),
             legend=dict(orientation="h", y=-0.18, font=dict(size=11)),
             plot_bgcolor="rgba(255,255,255,0)",
@@ -777,10 +809,35 @@ class HomeOptimizerAPI:
         )
         pv_forecast_fig = self._pv_forecast_figure(labels_ctrl, pv_kw)
         dhw_fig = ""
+        dhw_top_profile: list[float] = []
+        dhw_bottom_profile: list[float] = []
+        dhw_target_profile: list[float] = []
+        dhw_tap_profile: list[float] = []
         if req.dhw_enabled:
             t_top = states[:, 2]
             t_bot = states[:, 3]
-            dhw_fig = self._dhw_figure(labels_states, t_top, t_bot, req.dhw_T_min)
+            dhw_top_profile = t_top.tolist()
+            dhw_bottom_profile = t_bot.tolist()
+            dhw_target_arr = (
+                result.dhw_forecast.target_top_c
+                if result.dhw_forecast is not None and result.dhw_forecast.target_top_c is not None
+                else np.full(n, req.dhw_T_target, dtype=float)
+            )
+            dhw_target_profile = np.append(dhw_target_arr, dhw_target_arr[-1]).tolist()
+            dhw_tap_arr = (
+                result.dhw_forecast.v_tap_m3_per_h
+                if result.dhw_forecast is not None
+                else np.zeros(n, dtype=float)
+            )
+            dhw_tap_profile = dhw_tap_arr.tolist()
+            dhw_fig = self._dhw_figure(
+                labels_states,
+                t_top,
+                t_bot,
+                req.dhw_T_min,
+                np.append(dhw_target_arr, dhw_target_arr[-1]),
+                dhw_tap_arr,
+            )
 
         return OptimizeResponse(
             status=solver_status,
@@ -810,9 +867,12 @@ class HomeOptimizerAPI:
             cop_fig=cop_fig,
             pv_forecast_fig=pv_forecast_fig,
             dhw_fig=dhw_fig,
+            dhw_top_profile_c=dhw_top_profile,
+            dhw_bottom_profile_c=dhw_bottom_profile,
+            dhw_target_profile_c=dhw_target_profile,
+            dhw_tap_profile_m3_per_h=dhw_tap_profile,
         )
 
 
 api_service = HomeOptimizerAPI()
 app = api_service.app
-

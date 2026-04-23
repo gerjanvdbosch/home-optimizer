@@ -79,7 +79,9 @@ class Optimizer:
     3. Compute time-varying COP arrays over the MPC horizon.
     4. Construct UFH and DHW :class:`~home_optimizer.types.ForecastHorizon` objects.
     5. Optionally build the :class:`~home_optimizer.domain.dhw.model.DHWModel`.
-    6. Solve the QP via :class:`~home_optimizer.control.mpc.MPCController` (CVXPY only).
+    6. Solve the MPC via :class:`~home_optimizer.control.mpc.MPCController`
+       using either the continuous convex formulation or the mixed-integer
+       on/off formulation (CVXPY only).
     7. Compute energy and electricity-cost summaries.
 
     The class is *stateless* between calls: no mutable attributes are
@@ -115,7 +117,7 @@ class Optimizer:
                 (e.g. COP ≤ 1 after Carnot pre-calculation, or no convex solver
                 reaches an optimal MPC solution).
         """
-        start_hour = datetime.now(tz=timezone.utc).hour
+        start_hour = datetime.now().astimezone().hour
         return OptimizerPipeline.solve(req, start_hour=start_hour)
 
     def run_scheduled_once(
@@ -381,6 +383,7 @@ class Optimizer:
             req,
             horizon_steps=N,
             cop_model=cop_model,
+            start_hour=datetime.now().astimezone().hour,
         )
 
     @staticmethod

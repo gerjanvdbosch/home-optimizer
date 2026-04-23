@@ -48,6 +48,12 @@ def test_build_runtime_base_request_projects_split_dhw_losses_and_exclusive_mode
         mpc_dhw_R_loss_bot=88.0,
         mpc_heat_pump_topology="exclusive",
         mpc_exclusive_heat_pump_mode="dhw",
+        mpc_P_min=1.6,
+        mpc_dhw_P_min=1.7,
+        mpc_dhw_schedule_enabled=True,
+        mpc_dhw_schedule_start_hour_local=22,
+        mpc_dhw_schedule_duration_hours=2,
+        mpc_dhw_schedule_target_c=56.0,
     )
 
     request = _build_runtime_base_request(options)
@@ -56,6 +62,14 @@ def test_build_runtime_base_request_projects_split_dhw_losses_and_exclusive_mode
     assert request.dhw_R_loss_bot == 88.0
     assert request.heat_pump_topology == "exclusive"
     assert request.exclusive_heat_pump_mode == "dhw"
+    assert request.P_min == 1.6
+    assert request.dhw_P_min == 1.7
+    assert request.dhw_schedule_enabled is True
+    assert request.dhw_schedule_start_hour_local == 22
+    assert request.dhw_schedule_duration_hours == 2
+    assert request.dhw_schedule_target_c == 56.0
+    assert request.ufh_on_off_control_enabled is True
+    assert request.dhw_on_off_control_enabled is True
 
 
 def test_addon_options_reject_exclusive_mode_when_topology_is_shared() -> None:
@@ -64,4 +78,15 @@ def test_addon_options_reject_exclusive_mode_when_topology_is_shared() -> None:
         _valid_addon_options(
             mpc_heat_pump_topology="shared",
             mpc_exclusive_heat_pump_mode="ufh",
+        )
+
+
+def test_addon_options_reject_exclusive_mpc_without_on_off_controls() -> None:
+    """Free exclusive scheduling requires on/off control on both heat channels."""
+    with pytest.raises(ValueError, match="on/off control"):
+        _valid_addon_options(
+            mpc_heat_pump_topology="exclusive",
+            mpc_exclusive_heat_pump_mode=None,
+            mpc_ufh_on_off_control_enabled=False,
+            mpc_dhw_on_off_control_enabled=False,
         )

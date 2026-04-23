@@ -76,6 +76,7 @@ DHW_MPC_PARAMS = DHWMPCParameters(
     P_dhw_max=3.0,
     delta_P_dhw_max=1.0,
     T_dhw_min=50.0,
+    T_dhw_target=55.0,
     T_legionella=60.0,
     legionella_period_steps=168,
     legionella_duration_steps=1,
@@ -149,6 +150,117 @@ def test_mpc_prefers_cheap_hours() -> None:
     cheap_idx = 3
     avg_expensive = np.mean(np.delete(sol.ufh_control_sequence_kw, cheap_idx))
     assert sol.ufh_control_sequence_kw[cheap_idx] >= avg_expensive - 1e-3
+
+
+def test_mpc_on_off_enforces_minimum_ufh_power() -> None:
+    """Mixed-integer UFH scheduling must either stay off or respect the configured minimum power."""
+    model = ThermalModel(THERMAL_PARAMS)
+    on_off_params = MPCParameters(
+        horizon_steps=4,
+        Q_c=5.0,
+        R_c=0.01,
+        Q_N=5.0,
+        P_max=4.0,
+        delta_P_max=1.0,
+        T_min=19.0,
+        T_max=22.5,
+        cop_ufh=3.5,
+        cop_max=7.0,
+        P_min=1.5,
+        on_off_control_enabled=True,
+        switch_penalty_eur=0.05,
+    )
+    controller = MPCController(ufh_model=model, params=on_off_params, solver="HIGHS")
+    sol = controller.solve(
+        initial_ufh_state_c=np.array([20.2, 23.5]),
+        ufh_forecast=ForecastHorizon(
+            outdoor_temperature_c=np.full(4, 8.0),
+            gti_w_per_m2=np.zeros(4),
+            internal_gains_kw=np.full(4, 0.25),
+            price_eur_per_kwh=np.array([0.12, 0.14, 0.40, 0.45]),
+            room_temperature_ref_c=np.full(5, 20.5),
+        ),
+        previous_p_ufh_kw=0.0,
+    )
+
+    positive_powers = sol.ufh_control_sequence_kw[sol.ufh_control_sequence_kw > 1e-6]
+    assert positive_powers.size > 0
+    assert np.all(positive_powers >= on_off_params.P_min - 1e-6)
+
+
+@pytest.mark.filterwarnings("ignore:Solution may be inaccurate:UserWarning")
+def test_exclusive_on_off_topology_never_runs_ufh_and_dhw_simultaneously() -> None:
+    """Exclusive mixed-integer topology must let the MPC schedule the active mode per step."""
+    ufh_model = ThermalModel(THERMAL_PARAMS)
+    dhw_model = DHWModel(DHW_PARAMS)
+    on_off_ufh = MPCParameters(
+        horizon_steps=4,
+        Q_c=2.0,
+        R_c=0.02,
+        Q_N=2.0,
+        P_max=4.0,
+        delta_P_max=1.0,
+        T_min=18.5,
+        T_max=22.5,
+        cop_ufh=3.5,
+        cop_max=7.0,
+        P_min=1.5,
+        on_off_control_enabled=True,
+        switch_penalty_eur=0.05,
+    )
+    on_off_dhw = DHWMPCParameters(
+        P_dhw_max=3.0,
+        delta_P_dhw_max=1.0,
+        T_dhw_min=45.0,
+        T_dhw_target=55.0,
+        T_legionella=60.0,
+        legionella_period_steps=168,
+        legionella_duration_steps=1,
+        cop_dhw=3.0,
+        cop_max=7.0,
+        P_dhw_min=1.5,
+        on_off_control_enabled=True,
+        switch_penalty_eur=0.05,
+        terminal_top_min=45.0,
+    )
+    controller = MPCController(
+        ufh_model=ufh_model,
+        dhw_model=dhw_model,
+        params=CombinedMPCParameters(
+            ufh=on_off_ufh,
+            dhw=on_off_dhw,
+            P_hp_max_elec=3.0,
+            heat_pump_topology="exclusive",
+            exclusive_active_mode=None,
+        ),
+        solver="HIGHS",
+    )
+    ufh_forecast = ForecastHorizon(
+        outdoor_temperature_c=np.full(4, 7.0),
+        gti_w_per_m2=np.zeros(4),
+        internal_gains_kw=np.full(4, 0.25),
+        price_eur_per_kwh=np.array([0.10, 0.12, 0.35, 0.38]),
+        room_temperature_ref_c=np.full(5, 20.5),
+    )
+    dhw_forecast = DHWForecastHorizon(
+        v_tap_m3_per_h=np.array([0.0, 0.0, 0.0, 0.0]),
+        t_mains_c=np.full(4, 10.0),
+        t_amb_c=np.full(4, 20.0),
+        legionella_required=np.zeros(4, dtype=bool),
+    )
+    sol = controller.solve(
+        initial_ufh_state_c=np.array([19.8, 23.0]),
+        initial_dhw_state_c=np.array([44.8, 44.5]),
+        ufh_forecast=ufh_forecast,
+        dhw_forecast=dhw_forecast,
+        previous_p_ufh_kw=0.0,
+        previous_p_dhw_kw=0.0,
+    )
+
+    ufh_on = sol.ufh_control_sequence_kw > 1e-6
+    dhw_on = sol.dhw_control_sequence_kw > 1e-6
+    assert np.all(~(ufh_on & dhw_on))
+    assert ufh_on.any() or dhw_on.any()
 
 
 def test_mpc_always_returns_solution_when_physics_prevent_comfort() -> None:
@@ -263,14 +375,12 @@ def test_unified_controller_supports_combined_ufh_and_dhw() -> None:
 
 
 @pytest.mark.filterwarnings("ignore:Solution may be inaccurate:UserWarning")
-def test_optimizer_does_not_preheat_dhw_above_minimum_just_because_pv_is_available() -> None:
-    """Sunny surplus hours must not trigger DHW heating while T_top is still above the ``dhw_T_min``.
+def test_optimizer_charges_dhw_toward_target_temperature_not_only_minimum() -> None:
+    """When the DHW storage target is above the minimum, the controller must charge toward the target.
 
-    This regression covers the user-facing failure mode where the convex MPC used
-    free PV hours to opportunistically charge the tank even though the top layer
-    was still comfortably above the minimum tap temperature. The updated DHW
-    target-band penalty should keep the first control action at zero until the
-    top layer actually approaches the lower comfort bound.
+    This covers the user-facing requirement that ``dhw_T_min`` is an availability
+    floor, not the normal operational charge target. With a low minimum and a
+    higher target the optimizer should actively charge the tank above the minimum.
     """
 
     request = RunRequest.model_validate(
@@ -284,17 +394,19 @@ def test_optimizer_does_not_preheat_dhw_above_minimum_just_because_pv_is_availab
             "price_buy_forecast": [0.22, 0.22, 0.22, 0.22],
             "price_sell_forecast": [0.07, 0.07, 0.07, 0.07],
             "dhw_enabled": True,
-            "dhw_T_top_init": 55.0,
-            "dhw_T_bot_init": 50.0,
-            "dhw_T_min": 50.0,
+            "dhw_T_top_init": 43.0,
+            "dhw_T_bot_init": 40.0,
+            "dhw_T_min": 40.0,
+            "dhw_T_target": 55.0,
             "dhw_v_tap_forecast": [0.0, 0.0, 0.0, 0.0],
         }
     )
 
     result = Optimizer().solve(request)
 
-    assert result.solution.first_dhw_control_kw <= 1e-4
-    assert result.solution.predicted_states_c[1, 2] > request.dhw_T_min
+    assert result.solution.first_dhw_control_kw > 0.1
+    assert result.solution.predicted_states_c[-1, 2] > request.dhw_T_top_init - 1.5
+    assert result.dhw_energy_kwh > 0.5
 
 
 def test_optimizer_request_validation_accepts_dhw_high_tap_flow_with_exact_zoh() -> None:
@@ -390,6 +502,7 @@ def test_cop_validation_dhw_rejects_cop_below_or_equal_one() -> None:
             P_dhw_max=3.0,
             delta_P_dhw_max=1.0,
             T_dhw_min=50.0,
+            T_dhw_target=55.0,
             T_legionella=60.0,
             legionella_period_steps=168,
             legionella_duration_steps=1,
@@ -405,6 +518,7 @@ def test_cop_validation_dhw_rejects_cop_above_max() -> None:
             P_dhw_max=3.0,
             delta_P_dhw_max=1.0,
             T_dhw_min=50.0,
+            T_dhw_target=55.0,
             T_legionella=60.0,
             legionella_period_steps=168,
             legionella_duration_steps=1,
@@ -692,6 +806,7 @@ def test_combined_mpc_with_carnot_cop_arrays() -> None:
         P_dhw_max=DHW_MPC_PARAMS.P_dhw_max,
         delta_P_dhw_max=DHW_MPC_PARAMS.delta_P_dhw_max,
         T_dhw_min=DHW_MPC_PARAMS.T_dhw_min,
+        T_dhw_target=DHW_MPC_PARAMS.T_dhw_target,
         T_legionella=DHW_MPC_PARAMS.T_legionella,
         legionella_period_steps=DHW_MPC_PARAMS.legionella_period_steps,
         legionella_duration_steps=DHW_MPC_PARAMS.legionella_duration_steps,

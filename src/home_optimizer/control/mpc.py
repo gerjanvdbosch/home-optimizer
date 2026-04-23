@@ -53,11 +53,16 @@ Key design choices:
 
 Solver architecture
 -------------------
-The MPC has exactly one canonical execution path: a convex QP formulated in
-CVXPY. The configured backend is tried first (OSQP by default). When that
-backend stalls or returns a non-optimal status, the controller may retry with
-other installed CVXPY solvers, but it never switches to a heuristic control law.
-If no convex solver reaches an optimal status, the controller raises.
+The MPC has exactly one canonical execution path inside CVXPY, but now supports
+two mathematically distinct problem classes:
+
+* **Convex QP** for continuously modulating thermal power.
+* **Mixed-integer linear MPC** for real heat-pump on/off scheduling with
+  minimum-power enforcement and explicit UFH/DHW mode planning.
+
+The controller chooses the correct formulation from the validated parameter
+block. It never falls back to heuristics. If no suitable CVXPY solver reaches
+an optimal status, the controller raises.
 
 Units: power [kW], energy [kWh], temperature [°C], time step [h], cost [€].
 """
@@ -87,6 +92,7 @@ except ImportError:  # pragma: no cover
 _AnyMPCParams = Union[MPCParameters, CombinedMPCParameters]
 _OPTIMAL_STATUSES = {"optimal", "optimal_inaccurate"}
 _CONVEX_SOLVER_RETRY_ORDER = ("CLARABEL", "HIGHS", "SCS")
+_MIXED_INTEGER_SOLVER_ORDER = ("HIGHS",)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +154,9 @@ class MPCController:
     """Receding-horizon MPC controller for UFH or UFH + DHW combined.
 
     This is the **single authoritative solver implementation**.  Both UFH-only
-    and combined operation are solved through the same convex CVXPY model.
+    and combined operation are solved through one CVXPY-based architecture with
+    either a convex continuous-power formulation or a mixed-integer on/off
+    formulation, depending on the validated actuator settings.
 
     Operating principle
     -------------------
@@ -349,6 +357,15 @@ class MPCController:
                 "does not provide a heuristic fallback solver."
             )
 
+        if self._uses_mixed_integer_mpc:
+            return self._solve_mixed_integer(
+                x0,
+                ufh_forecast,
+                dhw_forecast,
+                float(previous_p_ufh_kw),
+                float(previous_p_dhw_kw),
+            )
+
         return self._solve_convex(
             x0,
             ufh_forecast,
@@ -356,6 +373,11 @@ class MPCController:
             float(previous_p_ufh_kw),
             float(previous_p_dhw_kw),
         )
+
+    @property
+    def _uses_mixed_integer_mpc(self) -> bool:
+        p_dhw = self._p_dhw
+        return self._p_ufh.on_off_control_enabled or (p_dhw.on_off_control_enabled if p_dhw is not None else False)
 
     def _build_matrices(
         self,
@@ -420,6 +442,20 @@ class MPCController:
             raise RuntimeError("No supported CVXPY solvers are installed for the MPC problem.")
         return ordered
 
+    def _mixed_integer_solver_candidates(self) -> list[str]:
+        """Return the ordered list of installed mixed-integer solvers to try."""
+        assert cp is not None
+        installed = {name.upper() for name in cp.installed_solvers()}
+        ordered: list[str] = []
+        for solver_name in (self.solver.upper(), *_MIXED_INTEGER_SOLVER_ORDER):
+            if solver_name in installed and solver_name not in ordered:
+                ordered.append(solver_name)
+        if not ordered:
+            raise RuntimeError(
+                "No supported mixed-integer CVXPY solver is installed for the on/off MPC problem."
+            )
+        return ordered
+
     @staticmethod
     def _solver_options(solver_name: str) -> dict[str, object]:
         """Return backend-specific CVXPY solve options for a convex MPC solve."""
@@ -435,6 +471,8 @@ class MPCController:
             )
         elif solver_name == "SCS":
             options.update({"eps": 1e-6, "max_iters": 50_000})
+        elif solver_name == "HIGHS":
+            options.update({"mip_rel_gap": 1e-4})
         return options
 
     def _solve_convex(
@@ -498,6 +536,7 @@ class MPCController:
             cop_ufh=cop_ufh,
             cop_dhw=cop_dhw,
             dt_hours=dt,
+            mixed_integer_mode=False,
         )
         problem = build.problem
         variables = build.variables
@@ -523,6 +562,107 @@ class MPCController:
 
         if variables.u_ufh.value is None or variables.x.value is None:
             raise RuntimeError("Solver returned no variable values.")
+
+        return self._package_solution(
+            x_val=np.asarray(variables.x.value, dtype=float).T,
+            u_ufh_val=np.asarray(variables.u_ufh.value, dtype=float).reshape(N),
+            u_dhw_val=(
+                np.asarray(variables.u_dhw.value, dtype=float).reshape(N)
+                if (
+                    self._dhw_enabled
+                    and variables.u_dhw is not None
+                    and variables.u_dhw.value is not None
+                )
+                else np.zeros(N)
+            ),
+            objective=float(problem.value),
+            status=str(problem.status),
+            ufh_forecast=ufh_forecast,
+            dhw_forecast=dhw_forecast,
+        )
+
+    def _solve_mixed_integer(
+        self,
+        x0: np.ndarray,
+        ufh_forecast: ForecastHorizon,
+        dhw_forecast: DHWForecastHorizon | None,
+        prev_u_ufh: float,
+        prev_u_dhw: float,
+    ) -> MPCSolution:
+        assert cp is not None
+
+        p_ufh = self._p_ufh
+        p_dhw = self._p_dhw
+        N = p_ufh.horizon_steps
+        dt = self.ufh_model.parameters.dt_hours
+        cop_ufh = self._resolve_cop_ufh(ufh_forecast)
+        cop_dhw = (
+            self._resolve_cop_dhw(dhw_forecast)
+            if self._dhw_enabled and dhw_forecast is not None
+            else None
+        )
+
+        A_list, B_mat, E_list, D_tot = self._build_matrices(x0, ufh_forecast, dhw_forecast)
+        builder = MpcProblemBuilder(
+            ufh_parameters=p_ufh,
+            dhw_parameters=p_dhw,
+            topology_supervisor=HeatPumpTopologySupervisor(
+                ufh_parameters=p_ufh,
+                dhw_parameters=p_dhw,
+                shared_hp_max_elec_kw=self._p_hp_max_elec,
+                heat_pump_topology=(
+                    self.params.heat_pump_topology
+                    if isinstance(self.params, CombinedMPCParameters)
+                    else "shared"
+                ),
+                exclusive_active_mode=(
+                    self.params.exclusive_active_mode
+                    if isinstance(self.params, CombinedMPCParameters)
+                    else None
+                ),
+            ),
+            legionella_supervisor=LegionellaSupervisor(p_dhw) if p_dhw is not None else None,
+            dhw_enabled=self._dhw_enabled,
+        )
+        build = builder.build(
+            x0=x0,
+            ufh_forecast=ufh_forecast,
+            dhw_forecast=dhw_forecast,
+            prev_u_ufh=prev_u_ufh,
+            prev_u_dhw=prev_u_dhw,
+            a_list=A_list,
+            b_matrix=B_mat,
+            e_list=E_list,
+            disturbance_matrix=D_tot,
+            cop_ufh=cop_ufh,
+            cop_dhw=cop_dhw,
+            dt_hours=dt,
+            mixed_integer_mode=True,
+        )
+        problem = build.problem
+        variables = build.variables
+
+        attempt_log: list[str] = []
+        last_exception: Exception | None = None
+        for solver_name in self._mixed_integer_solver_candidates():
+            try:
+                problem.solve(**self._solver_options(solver_name))
+            except Exception as exc:  # noqa: BLE001
+                last_exception = exc
+                attempt_log.append(f"{solver_name}: {type(exc).__name__}({exc})")
+                continue
+            attempt_log.append(f"{solver_name}: {problem.status}")
+            if str(problem.status).lower() in _OPTIMAL_STATUSES:
+                break
+        else:
+            attempts = "; ".join(attempt_log)
+            raise RuntimeError(
+                "No mixed-integer solver reached an optimal MPC solution. "
+                f"Attempts: {attempts}"
+            ) from last_exception
+
+        if variables.u_ufh.value is None or variables.x.value is None:
+            raise RuntimeError("Mixed-integer solver returned no variable values.")
 
         return self._package_solution(
             x_val=np.asarray(variables.x.value, dtype=float).T,
@@ -584,8 +724,8 @@ class MPCController:
             )
 
         return MPCSolution(
-            ufh_control_sequence_kw=u_ufh_val,
-            dhw_control_sequence_kw=u_dhw_val,
+            ufh_control_sequence_kw=np.maximum(u_ufh_val, 0.0),
+            dhw_control_sequence_kw=np.maximum(u_dhw_val, 0.0),
             predicted_states_c=x_val,
             objective_value=objective,
             solver_status=status,

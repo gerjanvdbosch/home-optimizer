@@ -181,6 +181,11 @@ class AddonOptions(BaseModel):
         description="Fraction of household baseload that becomes useful indoor heat gains [-]",
     )
     mpc_P_max: float = Field(4.5, gt=0.0, description="Max UFH thermal power P_UFH,max [kW]")
+    mpc_P_min: float = Field(
+        0.5,
+        ge=0.0,
+        description="Minimum UFH thermal power when the heat pump is switched on [kW]",
+    )
     mpc_delta_P_max: float = Field(1.0, gt=0.0, description="Max UFH ramp-rate [kW/step]")
     mpc_T_min: float = Field(19.0, description="Min comfort temperature [°C]")
     mpc_T_max: float = Field(22.5, description="Max comfort temperature [°C]")
@@ -190,6 +195,15 @@ class AddonOptions(BaseModel):
     mpc_Q_c: float = Field(8.0, ge=0.0, description="Comfort weight Q_c")
     mpc_R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
     mpc_Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
+    mpc_ufh_on_off_control_enabled: bool = Field(
+        True,
+        description="Enable UFH mixed-integer on/off scheduling with minimum-power enforcement.",
+    )
+    mpc_ufh_switch_penalty_eur: float = Field(
+        0.05,
+        ge=0.0,
+        description="Per-switch penalty for UFH on/off transitions [€ per switch].",
+    )
     mpc_P_hp_max_elec: float = Field(2.5, gt=0.0, description="Max HP electrical power [kW]")
     mpc_heat_pump_topology: str = Field(
         "shared",
@@ -207,9 +221,63 @@ class AddonOptions(BaseModel):
     mpc_cop_max: float = Field(7.0, ge=2.0, le=15.0, description="COP upper bound [-]")
     mpc_dhw_enabled: bool = Field(True, description="Include DHW in periodic MPC")
     mpc_dhw_P_max: float = Field(3.0, gt=0.0, description="Max DHW thermal power [kW]")
+    mpc_dhw_P_min: float = Field(
+        1.5,
+        ge=0.0,
+        description="Minimum DHW thermal power when the heat pump is switched on [kW]",
+    )
     mpc_dhw_delta_P_max: float = Field(1.0, gt=0.0, description="Max DHW ramp-rate [kW/step]")
+    mpc_dhw_on_off_control_enabled: bool = Field(
+        True,
+        description="Enable DHW mixed-integer on/off scheduling with minimum-power enforcement.",
+    )
+    mpc_dhw_switch_penalty_eur: float = Field(
+        0.05,
+        ge=0.0,
+        description="Per-switch penalty for DHW on/off transitions [€ per switch].",
+    )
     mpc_dhw_T_min: float = Field(30.0, description="Min DHW tap temperature [°C]")
+    mpc_dhw_T_target: float = Field(55.0, description="Target DHW storage temperature used by the scheduled optimizer [°C]")
     mpc_dhw_T_legionella: float = Field(60.0, description="Legionella target temperature [°C]")
+    mpc_dhw_target_rho_factor: float = Field(
+        25.0,
+        gt=0.0,
+        description="Penalty weight for DHW shortfall relative to the scheduled target.",
+    )
+    mpc_dhw_schedule_enabled: bool = Field(
+        True,
+        description="Enable a daily DHW schedule window in which the target temperature becomes active.",
+    )
+    mpc_dhw_schedule_start_hour_local: int = Field(
+        22,
+        ge=0,
+        le=23,
+        description="Local clock hour at which the scheduled DHW target window starts.",
+    )
+    mpc_dhw_schedule_duration_hours: int = Field(
+        2,
+        ge=1,
+        le=12,
+        description="Duration of the scheduled DHW target window [h].",
+    )
+    mpc_dhw_schedule_target_c: float = Field(
+        55.0,
+        ge=20.0,
+        le=85.0,
+        description="Target DHW temperature during the scheduled window [°C].",
+    )
+    mpc_dhw_preheat_lead_steps: int = Field(
+        0,
+        ge=0,
+        le=24,
+        description="Legacy fallback lead time before a significant DHW draw when no explicit schedule is active.",
+    )
+    mpc_dhw_significant_tap_threshold_m3_per_h: float = Field(
+        0.01,
+        ge=0.0,
+        le=0.5,
+        description="Tap-flow threshold above which the controller treats a DHW draw as significant [m³/h].",
+    )
     mpc_dhw_R_strat: float = Field(10.0, gt=0.0, description="DHW stratification resistance [K/kW]")
     mpc_dhw_R_loss_top: float = Field(50.0, gt=0.0, description="Top-node DHW standby-loss resistance [K/kW]")
     mpc_dhw_R_loss_bot: float = Field(50.0, gt=0.0, description="Bottom-node DHW standby-loss resistance [K/kW]")
@@ -411,10 +479,21 @@ class AddonOptions(BaseModel):
                 raise ValueError(
                     "mpc_exclusive_heat_pump_mode must be omitted when mpc_heat_pump_topology='shared'."
                 )
-        elif self.mpc_exclusive_heat_pump_mode not in {"ufh", "dhw"}:
+        elif self.mpc_exclusive_heat_pump_mode is not None and self.mpc_exclusive_heat_pump_mode not in {"ufh", "dhw"}:
             raise ValueError(
-                "mpc_exclusive_heat_pump_mode must be 'ufh' or 'dhw' when "
-                "mpc_heat_pump_topology='exclusive'."
+                "mpc_exclusive_heat_pump_mode must be 'ufh' or 'dhw' when provided."
+            )
+        if self.mpc_P_min > self.mpc_P_max:
+            raise ValueError("mpc_P_min must be less than or equal to mpc_P_max.")
+        if self.mpc_dhw_P_min > self.mpc_dhw_P_max:
+            raise ValueError("mpc_dhw_P_min must be less than or equal to mpc_dhw_P_max.")
+        if (
+            self.mpc_heat_pump_topology == "exclusive"
+            and self.mpc_exclusive_heat_pump_mode is None
+            and not (self.mpc_ufh_on_off_control_enabled and self.mpc_dhw_on_off_control_enabled)
+        ):
+            raise ValueError(
+                "exclusive topology without a fixed mode requires both UFH and DHW on/off control."
             )
         return self
 
@@ -460,10 +539,13 @@ def _build_runtime_base_request(
             "R_c": opts.mpc_R_c,
             "Q_N": opts.mpc_Q_N,
             "P_max": opts.mpc_P_max,
+            "P_min": opts.mpc_P_min,
             "delta_P_max": opts.mpc_delta_P_max,
             "T_min": opts.mpc_T_min,
             "T_max": opts.mpc_T_max,
             "T_ref": opts.mpc_T_ref,
+            "ufh_on_off_control_enabled": opts.mpc_ufh_on_off_control_enabled,
+            "ufh_switch_penalty_eur": opts.mpc_ufh_switch_penalty_eur,
             "outdoor_temperature_c": runtime_defaults.outdoor_temperature_c,
             "t_out_forecast": None,
             "gti_window_forecast": None,
@@ -483,9 +565,20 @@ def _build_runtime_base_request(
             "dhw_T_top_init": runtime_defaults.dhw_T_top_init,
             "dhw_T_bot_init": runtime_defaults.dhw_T_bot_init,
             "dhw_P_max": opts.mpc_dhw_P_max,
+            "dhw_P_min": opts.mpc_dhw_P_min,
             "dhw_delta_P_max": opts.mpc_dhw_delta_P_max,
+            "dhw_on_off_control_enabled": opts.mpc_dhw_on_off_control_enabled,
+            "dhw_switch_penalty_eur": opts.mpc_dhw_switch_penalty_eur,
             "dhw_T_min": opts.mpc_dhw_T_min,
+            "dhw_T_target": opts.mpc_dhw_T_target,
             "dhw_T_legionella": opts.mpc_dhw_T_legionella,
+            "dhw_target_rho_factor": opts.mpc_dhw_target_rho_factor,
+            "dhw_schedule_enabled": opts.mpc_dhw_schedule_enabled,
+            "dhw_schedule_start_hour_local": opts.mpc_dhw_schedule_start_hour_local,
+            "dhw_schedule_duration_hours": opts.mpc_dhw_schedule_duration_hours,
+            "dhw_schedule_target_c": opts.mpc_dhw_schedule_target_c,
+            "dhw_preheat_lead_steps": opts.mpc_dhw_preheat_lead_steps,
+            "dhw_significant_tap_threshold_m3_per_h": opts.mpc_dhw_significant_tap_threshold_m3_per_h,
             "dhw_legionella_period_steps": runtime_defaults.dhw_legionella_period_steps,
             "dhw_legionella_duration_steps": runtime_defaults.dhw_legionella_duration_steps,
             "dhw_t_mains_c": runtime_defaults.dhw_t_mains_c,

@@ -29,6 +29,7 @@ def _dhw_params() -> DHWMPCParameters:
         P_dhw_max=3.0,
         delta_P_dhw_max=1.0,
         T_dhw_min=50.0,
+        T_dhw_target=55.0,
         T_legionella=60.0,
         legionella_period_steps=168,
         legionella_duration_steps=1,
@@ -41,7 +42,7 @@ def test_legionella_supervisor_switches_target_temperature() -> None:
     """LegionellaSupervisor must expose the active DHW target from the requirement flag."""
     supervisor = LegionellaSupervisor(_dhw_params())
 
-    assert supervisor.target_temperature_c(False) == 50.0
+    assert supervisor.target_temperature_c(False) == 55.0
     assert supervisor.target_temperature_c(True) == 60.0
 
 
@@ -90,6 +91,41 @@ def test_problem_builder_allocates_dhw_variables_in_combined_mode() -> None:
     assert variables.s_leg is not None
     assert variables.p_import is not None
     assert variables.p_export is not None
+
+
+def test_problem_builder_allocates_binary_switch_variables_in_mixed_integer_mode() -> None:
+    """Mixed-integer MPC must allocate on/off and switching helper variables."""
+    builder = MpcProblemBuilder(
+        ufh_parameters=MPCParameters(
+            horizon_steps=4,
+            Q_c=10.0,
+            R_c=0.05,
+            Q_N=15.0,
+            P_max=4.0,
+            delta_P_max=1.0,
+            T_min=19.0,
+            T_max=22.5,
+            cop_ufh=3.5,
+            cop_max=7.0,
+            P_min=1.5,
+            on_off_control_enabled=True,
+        ),
+        dhw_parameters=None,
+        topology_supervisor=HeatPumpTopologySupervisor(
+            ufh_parameters=_ufh_params(),
+            dhw_parameters=None,
+            shared_hp_max_elec_kw=2.0,
+        ),
+        legionella_supervisor=None,
+        dhw_enabled=False,
+    )
+
+    variables = builder._create_variables(n_horizon=4, n_states=2, has_pv=False, mixed_integer_mode=True)
+
+    assert variables.z_ufh is not None
+    assert variables.sw_ufh is not None
+    assert variables.d_room is not None
+    assert variables.d_room_terminal is not None
 
 
 def test_legionella_supervisor_constrains_both_dhw_nodes() -> None:

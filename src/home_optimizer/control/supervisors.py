@@ -30,23 +30,23 @@ class HeatPumpTopologySupervisor:
     heat_pump_topology: str = "shared"
     exclusive_active_mode: Literal["ufh", "dhw"] | None = None
 
-    def _ufh_available_power_kw(self) -> float:
+    def ufh_available_power_kw(self) -> float:
         if self.heat_pump_topology == "shared":
             return self.ufh_parameters.P_max
         if self.heat_pump_topology != "exclusive":
             raise ValueError(f"Unsupported heat-pump topology: {self.heat_pump_topology}.")
-        if self.exclusive_active_mode == "ufh":
+        if self.exclusive_active_mode in {None, "ufh"}:
             return self.ufh_parameters.P_max
         return 0.0
 
-    def _dhw_available_power_kw(self) -> float:
+    def dhw_available_power_kw(self) -> float:
         if self.dhw_parameters is None:
             return 0.0
         if self.heat_pump_topology == "shared":
             return self.dhw_parameters.P_dhw_max
         if self.heat_pump_topology != "exclusive":
             raise ValueError(f"Unsupported heat-pump topology: {self.heat_pump_topology}.")
-        if self.exclusive_active_mode == "dhw":
+        if self.exclusive_active_mode in {None, "dhw"}:
             return self.dhw_parameters.P_dhw_max
         return 0.0
 
@@ -60,19 +60,49 @@ class HeatPumpTopologySupervisor:
         total_electrical_power_kw,
         u_dhw=None,
         previous_u_dhw=None,
+        ufh_on=None,
+        dhw_on=None,
+        ufh_switch=None,
+        dhw_switch=None,
     ) -> None:
         """Append per-step actuator and shared electrical constraints."""
         topology = self.heat_pump_topology
-        ufh_available_power_kw = self._ufh_available_power_kw()
-        constraints.extend(
-            [
-                u_ufh[step_index] >= 0.0,
-                u_ufh[step_index] <= ufh_available_power_kw,
-            ]
-        )
-        if not (topology == "exclusive" and ufh_available_power_kw == 0.0 and step_index == 0):
-            constraints.append(
-                cp.abs(u_ufh[step_index] - previous_u_ufh) <= self.ufh_parameters.delta_P_max
+        ufh_available_power_kw = self.ufh_available_power_kw()
+        if ufh_on is None:
+            constraints.extend(
+                [
+                    u_ufh[step_index] >= 0.0,
+                    u_ufh[step_index] <= ufh_available_power_kw,
+                ]
+            )
+            constraints.extend(
+                [
+                    u_ufh[step_index] - previous_u_ufh <= self.ufh_parameters.delta_P_max,
+                    previous_u_ufh - u_ufh[step_index] <= self.ufh_parameters.delta_P_max,
+                ]
+            )
+        else:
+            if ufh_switch is None:
+                raise ValueError("ufh_switch is required when ufh_on is provided.")
+            if step_index == 0:
+                on_reference_ufh = (
+                    1.0
+                    if float(previous_u_ufh) >= max(self.ufh_parameters.P_min, 1e-9)
+                    else 0.0
+                )
+            else:
+                on_reference_ufh = ufh_on[step_index - 1]
+            constraints.extend(
+                [
+                    u_ufh[step_index] >= self.ufh_parameters.P_min * ufh_on[step_index],
+                    u_ufh[step_index] <= ufh_available_power_kw * ufh_on[step_index],
+                    ufh_switch[step_index] >= ufh_on[step_index] - on_reference_ufh,
+                    ufh_switch[step_index] >= on_reference_ufh - ufh_on[step_index],
+                    u_ufh[step_index] - previous_u_ufh
+                    <= self.ufh_parameters.delta_P_max + self.ufh_parameters.P_max * ufh_switch[step_index],
+                    previous_u_ufh - u_ufh[step_index]
+                    <= self.ufh_parameters.delta_P_max + self.ufh_parameters.P_max * ufh_switch[step_index],
+                ]
             )
         if u_dhw is None:
             return
@@ -80,19 +110,50 @@ class HeatPumpTopologySupervisor:
             raise ValueError("DHW constraints requested without DHW parameters.")
         if previous_u_dhw is None:
             raise ValueError("previous_u_dhw is required when DHW control is active.")
-        constraints.extend(
-            [
-                u_dhw[step_index] >= 0.0,
-                u_dhw[step_index] <= self._dhw_available_power_kw(),
-            ]
-        )
-        if not (topology == "exclusive" and self._dhw_available_power_kw() == 0.0 and step_index == 0):
-            constraints.append(
-                cp.abs(u_dhw[step_index] - previous_u_dhw) <= self.dhw_parameters.delta_P_dhw_max
+        dhw_available_power_kw = self.dhw_available_power_kw()
+        if dhw_on is None:
+            constraints.extend(
+                [
+                    u_dhw[step_index] >= 0.0,
+                    u_dhw[step_index] <= dhw_available_power_kw,
+                    u_dhw[step_index] - previous_u_dhw <= self.dhw_parameters.delta_P_dhw_max,
+                    previous_u_dhw - u_dhw[step_index] <= self.dhw_parameters.delta_P_dhw_max,
+                ]
+            )
+        else:
+            if dhw_switch is None:
+                raise ValueError("dhw_switch is required when dhw_on is provided.")
+            if step_index == 0:
+                on_reference_dhw = (
+                    1.0
+                    if float(previous_u_dhw) >= max(self.dhw_parameters.P_dhw_min, 1e-9)
+                    else 0.0
+                )
+            else:
+                on_reference_dhw = dhw_on[step_index - 1]
+            constraints.extend(
+                [
+                    u_dhw[step_index] >= self.dhw_parameters.P_dhw_min * dhw_on[step_index],
+                    u_dhw[step_index] <= dhw_available_power_kw * dhw_on[step_index],
+                    dhw_switch[step_index] >= dhw_on[step_index] - on_reference_dhw,
+                    dhw_switch[step_index] >= on_reference_dhw - dhw_on[step_index],
+                    u_dhw[step_index] - previous_u_dhw
+                    <= self.dhw_parameters.delta_P_dhw_max + self.dhw_parameters.P_dhw_max * dhw_switch[step_index],
+                    previous_u_dhw - u_dhw[step_index]
+                    <= self.dhw_parameters.delta_P_dhw_max + self.dhw_parameters.P_dhw_max * dhw_switch[step_index],
+                ]
             )
         if topology == "shared":
             constraints.append(total_electrical_power_kw <= self.shared_hp_max_elec_kw)
-        elif topology != "exclusive":
+        elif topology == "exclusive":
+            if ufh_on is not None and dhw_on is not None:
+                if self.exclusive_active_mode == "ufh":
+                    constraints.append(dhw_on[step_index] == 0.0)
+                elif self.exclusive_active_mode == "dhw":
+                    constraints.append(ufh_on[step_index] == 0.0)
+                else:
+                    constraints.append(ufh_on[step_index] + dhw_on[step_index] <= 1.0)
+        else:
             raise ValueError(f"Unsupported heat-pump topology: {topology}.")
 
 
@@ -105,7 +166,7 @@ class LegionellaSupervisor:
     def target_temperature_c(self, legionella_required: bool) -> float:
         """Return the active upper-band target for the DHW top layer [°C]."""
         return (
-            self.dhw_parameters.T_legionella if legionella_required else self.dhw_parameters.T_dhw_min
+            self.dhw_parameters.T_legionella if legionella_required else self.dhw_parameters.T_dhw_target
         )
 
     def apply_step_constraints(

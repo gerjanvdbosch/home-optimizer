@@ -112,6 +112,8 @@ def _as_arrays(dataset: DHWActiveCalibrationDataset) -> _ActiveCalibrationArrays
 def _initial_theta(settings: DHWActiveCalibrationSettings) -> np.ndarray:
     """Return the initial optimisation vector from the reference parameter set."""
     theta_values = [settings.reference_parameters.R_strat]
+    if settings.fit_total_capacity:
+        theta_values.append(settings.initial_c_total_scale)
     if settings.fit_capacity_split:
         if settings.initial_c_top_fraction is None:
             raise ValueError("initial_c_top_fraction must be populated when fit_capacity_split is enabled.")
@@ -144,6 +146,9 @@ def _theta_bounds(settings: DHWActiveCalibrationSettings) -> tuple[np.ndarray, n
     lower_bound, upper_bound = dhw_active_r_strat_bounds(settings)
     lower_bounds = [lower_bound]
     upper_bounds = [upper_bound]
+    if settings.fit_total_capacity:
+        lower_bounds.append(settings.min_c_total_scale)
+        upper_bounds.append(settings.max_c_total_scale)
     if settings.fit_capacity_split:
         lower_bounds.append(settings.min_c_top_fraction)
         upper_bounds.append(settings.max_c_top_fraction)
@@ -156,17 +161,23 @@ def _theta_bounds(settings: DHWActiveCalibrationSettings) -> tuple[np.ndarray, n
 def _parameters_from_theta(theta: np.ndarray, settings: DHWActiveCalibrationSettings) -> DHWParameters:
     """Map the optimisation vector back to a full DHW parameter object."""
     theta_arr = np.asarray(theta, dtype=float)
-    expected_size = 1 + int(settings.fit_capacity_split) + (2 if settings.fit_temperature_biases else 0)
+    expected_size = 1 + int(settings.fit_total_capacity) + int(settings.fit_capacity_split) + (
+        2 if settings.fit_temperature_biases else 0
+    )
     if theta_arr.shape != (expected_size,):
         raise ValueError(f"theta must have shape ({expected_size},) for active DHW calibration.")
     reference = settings.reference_parameters
     theta_index = 1
+    if settings.fit_total_capacity:
+        c_total = settings.reference_c_total_kwh_per_k * float(theta_arr[theta_index])
+        theta_index += 1
+    else:
+        c_total = settings.reference_c_total_kwh_per_k
     if settings.fit_capacity_split:
         c_top_fraction = float(theta_arr[theta_index])
         theta_index += 1
     else:
         c_top_fraction = reference.C_top / (reference.C_top + reference.C_bot)
-    c_total = settings.reference_c_total_kwh_per_k
     return DHWParameters(
         dt_hours=reference.dt_hours,
         C_top=c_total * c_top_fraction,
@@ -182,6 +193,15 @@ def _c_top_fraction_from_theta(theta: np.ndarray, settings: DHWActiveCalibration
     if not settings.fit_capacity_split:
         reference = settings.reference_parameters
         return reference.C_top / (reference.C_top + reference.C_bot)
+    theta_arr = np.asarray(theta, dtype=float)
+    split_index = 1 + int(settings.fit_total_capacity)
+    return float(theta_arr[split_index])
+
+
+def _c_total_scale_from_theta(theta: np.ndarray, settings: DHWActiveCalibrationSettings) -> float:
+    """Return the fitted or fixed total-capacity scale ``C_total / C_total,ref``."""
+    if not settings.fit_total_capacity:
+        return 1.0
     theta_arr = np.asarray(theta, dtype=float)
     return float(theta_arr[1])
 
@@ -305,6 +325,7 @@ def calibrate_dhw_active_stratification(
         raise RuntimeError(f"DHW active stratification calibration failed: {result.message}")
 
     fitted_parameters = _parameters_from_theta(result.x, settings)
+    fitted_c_total_scale = _c_total_scale_from_theta(result.x, settings)
     fitted_c_top_fraction = _c_top_fraction_from_theta(result.x, settings)
     fitted_t_top_bias_c, fitted_t_bot_bias_c = _temperature_biases_from_theta(result.x, settings)
     diagnostics = _replay_with_parameters(
@@ -315,6 +336,8 @@ def calibrate_dhw_active_stratification(
     )
     return DHWActiveCalibrationResult(
         fitted_parameters=fitted_parameters,
+        fit_total_capacity=settings.fit_total_capacity,
+        fitted_c_total_scale=fitted_c_total_scale,
         fit_capacity_split=settings.fit_capacity_split,
         fitted_c_top_fraction=fitted_c_top_fraction,
         fit_temperature_biases=settings.fit_temperature_biases,
@@ -330,4 +353,3 @@ def calibrate_dhw_active_stratification(
         optimizer_status=str(result.message),
         optimizer_cost=float(result.cost),
     )
-

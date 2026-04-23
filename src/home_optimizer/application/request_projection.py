@@ -30,11 +30,14 @@ class UfhControlConfig:
     r_c: float
     q_n: float
     p_max_kw: float
+    p_min_kw: float
     delta_p_max_kw_per_step: float
     t_min_c: float
     t_max_c: float
     t_ref_c: float
     previous_power_kw: float
+    on_off_control_enabled: bool
+    switch_penalty_eur: float
 
     def to_mpc_parameters(self, *, cop_ufh: float, cop_max: float) -> MPCParameters:
         """Return validated UFH MPC parameters using a representative COP sample."""
@@ -44,11 +47,14 @@ class UfhControlConfig:
             R_c=self.r_c,
             Q_N=self.q_n,
             P_max=self.p_max_kw,
+            P_min=self.p_min_kw,
             delta_P_max=self.delta_p_max_kw_per_step,
             T_min=self.t_min_c,
             T_max=self.t_max_c,
             cop_ufh=cop_ufh,
             cop_max=cop_max,
+            on_off_control_enabled=self.on_off_control_enabled,
+            switch_penalty_eur=self.switch_penalty_eur,
         )
 
 
@@ -91,25 +97,35 @@ class DhwControlConfig:
 
     enabled: bool
     p_max_kw: float
+    p_min_kw: float
     delta_p_max_kw_per_step: float
     t_min_c: float
+    t_target_c: float
     t_legionella_c: float
     legionella_period_steps: int
     legionella_duration_steps: int
     terminal_top_min_c: float | None
+    on_off_control_enabled: bool
+    switch_penalty_eur: float
+    target_rho_factor: float
 
     def to_mpc_parameters(self, *, cop_dhw: float, cop_max: float) -> DHWMPCParameters:
         """Return validated DHW MPC parameters using a representative COP sample."""
         return DHWMPCParameters(
             P_dhw_max=self.p_max_kw,
+            P_dhw_min=self.p_min_kw,
             delta_P_dhw_max=self.delta_p_max_kw_per_step,
             T_dhw_min=self.t_min_c,
+            T_dhw_target=self.t_target_c,
             T_legionella=self.t_legionella_c,
             legionella_period_steps=self.legionella_period_steps,
             legionella_duration_steps=self.legionella_duration_steps,
             cop_dhw=cop_dhw,
             cop_max=cop_max,
+            on_off_control_enabled=self.on_off_control_enabled,
+            switch_penalty_eur=self.switch_penalty_eur,
             terminal_top_min=self.terminal_top_min_c,
+            target_rho_factor=self.target_rho_factor,
         )
 
 
@@ -124,6 +140,13 @@ class DhwForecastConfig:
     t_mains_c: float
     t_ambient_c: float
     t_dhw_min_c: float
+    t_dhw_target_c: float
+    schedule_enabled: bool
+    schedule_start_hour_local: int
+    schedule_duration_hours: int
+    schedule_target_c: float
+    preheat_lead_steps: int
+    significant_tap_threshold_m3_per_h: float
 
 
 @dataclass(frozen=True, slots=True)

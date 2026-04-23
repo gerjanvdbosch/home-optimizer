@@ -211,6 +211,7 @@ class ForecastBuilder:
         *,
         horizon_steps: int,
         cop_model: HeatPumpCOPModel,
+        start_hour: int,
     ) -> DHWForecastHorizon:
         """Build the DHW disturbance and COP forecast over the horizon."""
         forecast_config = req.dhw_forecast_config
@@ -229,12 +230,33 @@ class ForecastBuilder:
             horizon_steps=horizon_steps,
             values=forecast_config.v_tap_forecast_m3_per_h,
         )
+        target_top_arr = np.full(horizon_steps, forecast_config.t_dhw_min_c, dtype=float)
+        if forecast_config.schedule_enabled:
+            for step_index in range(horizon_steps):
+                local_hour = (float(start_hour) + step_index * float(req.dt_hours)) % 24.0
+                schedule_start = float(forecast_config.schedule_start_hour_local)
+                schedule_end = schedule_start + float(forecast_config.schedule_duration_hours)
+                in_schedule_window = (
+                    schedule_start <= local_hour < schedule_end
+                    if schedule_end <= 24.0
+                    else (local_hour >= schedule_start or local_hour < (schedule_end % 24.0))
+                )
+                if in_schedule_window:
+                    target_top_arr[step_index] = max(
+                        target_top_arr[step_index],
+                        forecast_config.schedule_target_c,
+                    )
+        elif float(req.dhw_T_top_init) < float(forecast_config.t_dhw_target_c):
+            target_top_arr[:] = np.maximum(target_top_arr, forecast_config.t_dhw_target_c)
+        else:
+            target_top_arr[-1] = max(target_top_arr[-1], forecast_config.t_dhw_target_c)
         return DHWForecastHorizon(
             v_tap_m3_per_h=v_tap_arr,
             t_mains_c=np.full(horizon_steps, forecast_config.t_mains_c),
             t_amb_c=np.full(horizon_steps, forecast_config.t_ambient_c),
             legionella_required=np.zeros(horizon_steps, dtype=bool),
-            cop_dhw_k=cop_model.cop_dhw(t_out_arr, t_dhw_supply=forecast_config.t_dhw_min_c),
+            target_top_c=target_top_arr,
+            cop_dhw_k=cop_model.cop_dhw(t_out_arr, t_dhw_supply=target_top_arr),
         )
 
 

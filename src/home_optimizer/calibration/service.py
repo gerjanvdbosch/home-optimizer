@@ -493,6 +493,9 @@ def _build_dhw_active_diagnostics(
         "fitted_r_strat_k_per_kw": result.fitted_parameters.R_strat,
         "fitted_c_top_kwh_per_k": result.fitted_parameters.C_top,
         "fitted_c_bot_kwh_per_k": result.fitted_parameters.C_bot,
+        "fit_total_capacity": getattr(result, "fit_total_capacity", False),
+        "fitted_c_total_kwh_per_k": result.fitted_parameters.C_top + result.fitted_parameters.C_bot,
+        "fitted_c_total_scale": getattr(result, "fitted_c_total_scale", 1.0),
         "fit_capacity_split": getattr(result, "fit_capacity_split", False),
         "fitted_c_top_fraction": getattr(
             result,
@@ -949,6 +952,28 @@ def _validate_automatic_dhw_active_fit(
                 automatic_settings=automatic_settings,
             ),
         )
+    if bool(getattr(result, "fit_total_capacity", False)):
+        c_total_scale = float(getattr(result, "fitted_c_total_scale"))
+        if _hits_lower_bound(
+            fitted_value=c_total_scale,
+            lower_bound=active_settings.min_c_total_scale,
+            upper_bound=active_settings.max_c_total_scale,
+            tolerance_ratio=tolerance_ratio,
+        ) or _hits_upper_bound(
+            fitted_value=c_total_scale,
+            lower_bound=active_settings.min_c_total_scale,
+            upper_bound=active_settings.max_c_total_scale,
+            tolerance_ratio=tolerance_ratio,
+        ):
+            raise _CalibrationValidationError(
+                "Automatic DHW active fit rejected: C_total scale converged to its bound. "
+                f"C_total_scale={c_total_scale:.6g}, bounds=[{active_settings.min_c_total_scale:.6g}, {active_settings.max_c_total_scale:.6g}].",
+                diagnostics=_build_dhw_active_diagnostics(
+                    result,
+                    active_settings=active_settings,
+                    automatic_settings=automatic_settings,
+                ),
+            )
     if bool(getattr(result, "fit_capacity_split", False)):
         c_top_fraction = float(getattr(result, "fitted_c_top_fraction"))
         if _hits_lower_bound(
@@ -1222,6 +1247,7 @@ def build_automatic_calibration_snapshot(
             )
             dhw_active_settings = build_dhw_active_calibration_settings(
                 reference_parameters=dhw_reference_parameters,
+                fit_total_capacity=settings.dhw_active_fit_total_capacity,
                 fit_capacity_split=settings.dhw_active_fit_capacity_split,
                 fit_temperature_biases=settings.dhw_active_fit_temperature_biases,
                 ambient_temperature_bias_c=effective_request.dhw_boiler_ambient_bias_c,
@@ -1240,12 +1266,14 @@ def build_automatic_calibration_snapshot(
             overrides = CalibrationParameterOverrides(
                 dhw_C_top=(
                     result.fitted_parameters.C_top
-                    if bool(getattr(result, "fit_capacity_split", False))
+                    if bool(getattr(result, "fit_total_capacity", False))
+                    or bool(getattr(result, "fit_capacity_split", False))
                     else None
                 ),
                 dhw_C_bot=(
                     result.fitted_parameters.C_bot
-                    if bool(getattr(result, "fit_capacity_split", False))
+                    if bool(getattr(result, "fit_total_capacity", False))
+                    or bool(getattr(result, "fit_capacity_split", False))
                     else None
                 ),
                 dhw_R_strat=result.fitted_parameters.R_strat,

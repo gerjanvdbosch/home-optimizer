@@ -105,9 +105,51 @@ def test_run_request_exposes_domain_specific_projections() -> None:
     )
 
 
+def test_run_request_default_dhw_capacities_match_a_200l_tank_split_over_two_nodes() -> None:
+    """The bare runtime defaults should not silently assume a tank that is 5× too large."""
+    request = RunRequest.model_validate({})
+
+    np.testing.assert_allclose(
+        [request.dhw_C_top, request.dhw_C_bot],
+        [0.11628, 0.11628],
+    )
+
+
 def test_optimizer_reexports_run_request_from_models_module() -> None:
     """Legacy imports from optimizer.py should still point at the canonical request model."""
     assert RunRequest is RunRequestModel
+
+
+def test_dhw_schedule_target_respects_dt_hours_across_fractional_steps() -> None:
+    """The DHW target schedule must use the physical step size instead of assuming 1 h steps."""
+    request = RunRequest.model_validate(
+        {
+            "horizon_hours": 8,
+            "dt_hours": 0.25,
+            "dhw_enabled": True,
+            "dhw_T_min": 40.0,
+            "dhw_schedule_enabled": True,
+            "dhw_schedule_start_hour_local": 22,
+            "dhw_schedule_duration_hours": 1,
+            "dhw_schedule_target_c": 55.0,
+            "dhw_v_tap_forecast": [0.0] * 8,
+            "t_out_forecast": [8.0] * 8,
+            "gti_window_forecast": [0.0] * 8,
+            "gti_pv_forecast": [0.0] * 8,
+        }
+    )
+
+    forecast = ForecastBuilder.build_dhw_forecast(
+        request,
+        horizon_steps=8,
+        cop_model=OptimizerPipeline.build_cop_model(request),
+        start_hour=21,
+    )
+
+    np.testing.assert_allclose(
+        forecast.target_top_c,
+        np.array([40.0, 40.0, 40.0, 40.0, 55.0, 55.0, 55.0, 55.0]),
+    )
 
 
 def test_optimizer_runtime_build_scheduled_input_preserves_base_request_without_overrides() -> None:
@@ -121,3 +163,36 @@ def test_optimizer_runtime_build_scheduled_input_preserves_base_request_without_
     )
 
     assert scheduled == request
+
+
+def test_run_request_accepts_exclusive_topology_without_fixed_mode_when_on_off_controls_are_enabled() -> None:
+    """The simulator/addon may leave the exclusive mode empty so the mixed-integer MPC can choose it."""
+    common_data = {
+        "horizon_hours": 4,
+        "dhw_enabled": True,
+        "dhw_v_tap_forecast": [0.0] * 4,
+        "t_out_forecast": [8.0] * 4,
+        "gti_window_forecast": [0.0] * 4,
+        "gti_pv_forecast": [0.0] * 4,
+        "heat_pump_topology": "exclusive",
+        "ufh_on_off_control_enabled": True,
+        "dhw_on_off_control_enabled": True,
+    }
+
+    request_empty = RunRequest.model_validate(
+        {
+            **common_data,
+            "exclusive_heat_pump_mode": "",
+        }
+    )
+    request_null = RunRequest.model_validate(
+        {
+            **common_data,
+            "exclusive_heat_pump_mode": None,
+        }
+    )
+
+    assert request_empty.shared_heat_pump_config.topology == "exclusive"
+    assert request_empty.shared_heat_pump_config.exclusive_active_mode is None
+    assert request_null.shared_heat_pump_config.topology == "exclusive"
+    assert request_null.shared_heat_pump_config.exclusive_active_mode is None

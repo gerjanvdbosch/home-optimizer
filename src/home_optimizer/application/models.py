@@ -73,6 +73,12 @@ class RunRequest(BaseModel):
     R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
     Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
     P_max: float = Field(4.5, ge=0.5, le=20.0, description="Max UFH thermal power P_UFH,max [kW]")
+    P_min: float = Field(
+        0.0,
+        ge=0.0,
+        le=20.0,
+        description="Minimum UFH thermal power when the UFH heat pump is switched on [kW].",
+    )
     delta_P_max: float = Field(
         1.0, ge=0.1, le=10.0, description="Max UFH ramp-rate delta_P_UFH,max [kW/step]"
     )
@@ -83,6 +89,16 @@ class RunRequest(BaseModel):
         22.5, ge=16.0, le=30.0, description="Maximum comfort temperature T_max [degC]"
     )
     T_ref: float = Field(20.5, ge=15.0, le=26.0, description="Comfort setpoint T_ref [degC]")
+    ufh_on_off_control_enabled: bool = Field(
+        False,
+        description="Enable mixed-integer UFH on/off scheduling with minimum-power enforcement.",
+    )
+    ufh_switch_penalty_eur: float = Field(
+        0.0,
+        ge=0.0,
+        le=5.0,
+        description="Linear per-switch penalty for UFH on/off transitions [€ per switch].",
+    )
 
     outdoor_temperature_c: float = Field(
         6.0, ge=-20.0, le=35.0, description="Outdoor temperature T_out [degC] (scalar fallback)"
@@ -179,10 +195,22 @@ class RunRequest(BaseModel):
 
     dhw_enabled: bool = Field(True, description="Enable DHW (domestic hot water) control")
     dhw_C_top: float = Field(
-        0.5814, ge=0.01, le=5.0, description="DHW top-layer thermal capacity C_top [kWh/K]"
+        0.11628,
+        ge=0.01,
+        le=5.0,
+        description=(
+            "DHW top-layer thermal capacity C_top [kWh/K]. "
+            "The runtime default represents half of a 200 L water tank at λ_water_ref."
+        ),
     )
     dhw_C_bot: float = Field(
-        0.5814, ge=0.01, le=5.0, description="DHW bottom-layer thermal capacity C_bot [kWh/K]"
+        0.11628,
+        ge=0.01,
+        le=5.0,
+        description=(
+            "DHW bottom-layer thermal capacity C_bot [kWh/K]. "
+            "The runtime default represents half of a 200 L water tank at λ_water_ref."
+        ),
     )
     dhw_R_strat: float = Field(
         10.0,
@@ -261,11 +289,33 @@ class RunRequest(BaseModel):
     dhw_P_max: float = Field(
         3.0, ge=0.5, le=15.0, description="Max DHW thermal power P_dhw,max [kW]"
     )
+    dhw_P_min: float = Field(
+        0.0,
+        ge=0.0,
+        le=15.0,
+        description="Minimum DHW thermal power when the DHW heat pump is switched on [kW].",
+    )
     dhw_delta_P_max: float = Field(
         1.0, ge=0.1, le=10.0, description="Max DHW ramp-rate delta_P_dhw,max [kW/step]"
     )
+    dhw_on_off_control_enabled: bool = Field(
+        False,
+        description="Enable mixed-integer DHW on/off scheduling with minimum-power enforcement.",
+    )
+    dhw_switch_penalty_eur: float = Field(
+        0.0,
+        ge=0.0,
+        le=5.0,
+        description="Linear per-switch penalty for DHW on/off transitions [€ per switch].",
+    )
     dhw_T_min: float = Field(
         50.0, ge=10.0, le=70.0, description="Minimum tap (top-layer) temperature T_dhw,min [degC]"
+    )
+    dhw_T_target: float = Field(
+        55.0,
+        ge=20.0,
+        le=85.0,
+        description="Desired DHW top-layer storage target temperature used by the scheduled optimizer [degC].",
     )
     dhw_T_legionella: float = Field(
         60.0, ge=55.0, le=85.0, description="Legionella prevention temperature T_leg [degC]"
@@ -281,6 +331,46 @@ class RunRequest(BaseModel):
         ge=10.0,
         le=85.0,
         description="Optional terminal lower bound on DHW top-layer temperature at horizon end [degC].",
+    )
+    dhw_target_rho_factor: float = Field(
+        25.0,
+        ge=0.1,
+        le=10000.0,
+        description="Penalty weight for DHW shortfall relative to the scheduled target profile.",
+    )
+    dhw_schedule_enabled: bool = Field(
+        True,
+        description="Enable a daily scheduled DHW target window instead of relying on ad-hoc preheat heuristics.",
+    )
+    dhw_schedule_start_hour_local: int = Field(
+        22,
+        ge=0,
+        le=23,
+        description="Local clock hour at which the scheduled DHW target window starts.",
+    )
+    dhw_schedule_duration_hours: int = Field(
+        2,
+        ge=1,
+        le=12,
+        description="Duration of the scheduled DHW target window [h].",
+    )
+    dhw_schedule_target_c: float = Field(
+        55.0,
+        ge=20.0,
+        le=85.0,
+        description="Top-layer DHW target during the scheduled window [degC].",
+    )
+    dhw_preheat_lead_steps: int = Field(
+        0,
+        ge=0,
+        le=24,
+        description="How many MPC steps before a significant tap draw the optimizer may start preheating the tank.",
+    )
+    dhw_significant_tap_threshold_m3_per_h: float = Field(
+        0.01,
+        ge=0.0,
+        le=0.5,
+        description="Tap-flow threshold above which a draw is treated as a significant DHW event [m³/h].",
     )
     dhw_v_tap_forecast: list[float] | None = Field(
         None,
@@ -366,11 +456,14 @@ class RunRequest(BaseModel):
             r_c=self.R_c,
             q_n=self.Q_N,
             p_max_kw=self.P_max,
+            p_min_kw=self.P_min,
             delta_p_max_kw_per_step=self.delta_P_max,
             t_min_c=self.T_min,
             t_max_c=self.T_max,
             t_ref_c=self.T_ref,
             previous_power_kw=self.previous_power_kw,
+            on_off_control_enabled=self.ufh_on_off_control_enabled,
+            switch_penalty_eur=self.ufh_switch_penalty_eur,
         )
 
     @property
@@ -421,12 +514,17 @@ class RunRequest(BaseModel):
         return DhwControlConfig(
             enabled=self.dhw_enabled,
             p_max_kw=self.dhw_P_max,
+            p_min_kw=self.dhw_P_min,
             delta_p_max_kw_per_step=self.dhw_delta_P_max,
             t_min_c=self.dhw_T_min,
+            t_target_c=self.dhw_T_target,
             t_legionella_c=self.dhw_T_legionella,
             legionella_period_steps=self.dhw_legionella_period_steps,
             legionella_duration_steps=self.dhw_legionella_duration_steps,
             terminal_top_min_c=self.dhw_terminal_top_min,
+            on_off_control_enabled=self.dhw_on_off_control_enabled,
+            switch_penalty_eur=self.dhw_switch_penalty_eur,
+            target_rho_factor=self.dhw_target_rho_factor,
         )
 
     @property
@@ -439,6 +537,13 @@ class RunRequest(BaseModel):
             t_mains_c=self.dhw_t_mains_c,
             t_ambient_c=self.dhw_t_amb_c,
             t_dhw_min_c=self.dhw_T_min,
+            t_dhw_target_c=self.dhw_T_target,
+            schedule_enabled=self.dhw_schedule_enabled,
+            schedule_start_hour_local=self.dhw_schedule_start_hour_local,
+            schedule_duration_hours=self.dhw_schedule_duration_hours,
+            schedule_target_c=self.dhw_schedule_target_c,
+            preheat_lead_steps=self.dhw_preheat_lead_steps,
+            significant_tap_threshold_m3_per_h=self.dhw_significant_tap_threshold_m3_per_h,
         )
 
     @property
@@ -449,6 +554,8 @@ class RunRequest(BaseModel):
             exclusive_active_mode = None
         elif topology != "exclusive":
             raise ValueError("heat_pump_topology must be 'shared' or 'exclusive'.")
+        elif exclusive_active_mode in {"", None}:
+            exclusive_active_mode = None
         elif exclusive_active_mode not in {"ufh", "dhw"}:
             raise ValueError(
                 "exclusive_heat_pump_mode must be 'ufh' or 'dhw' when heat_pump_topology='exclusive'."

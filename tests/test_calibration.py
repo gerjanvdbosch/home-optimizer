@@ -2248,6 +2248,88 @@ def test_build_automatic_calibration_snapshot_accepts_dhw_active_fit_at_near_zer
     np.testing.assert_allclose(snapshot.effective_parameters.dhw_R_strat, 1e-3)
 
 
+def test_build_automatic_calibration_snapshot_publishes_total_dhw_capacity_when_fitted(monkeypatch) -> None:
+    """Automatic DHW calibration must publish fitted C_top/C_bot when total capacity is identified."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip ufh active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=10.0),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            tau_standby_hours=8.0,
+            suggested_r_loss_k_per_kw=70.0,
+            sample_count=20,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=3),
+            optimizer_status="ok",
+            rmse_mean_tank_temperature_c=0.10,
+            max_abs_residual_c=0.20,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=DHWParameters(
+                dt_hours=5.0 / 60.0,
+                C_top=0.09,
+                C_bot=0.05,
+                R_strat=12.0,
+                R_loss=70.0,
+            ),
+            fit_total_capacity=True,
+            fitted_c_total_scale=(0.09 + 0.05) / (0.11628 + 0.11628),
+            fit_capacity_split=False,
+            fitted_c_top_fraction=0.09 / (0.09 + 0.05),
+            fit_temperature_biases=False,
+            fitted_t_top_bias_c=0.0,
+            fitted_t_bot_bias_c=0.0,
+            sample_count=18,
+            segment_count=2,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=2),
+            optimizer_status="ok",
+            rmse_t_top_c=0.08,
+            rmse_t_bot_c=0.09,
+            max_abs_residual_c=0.20,
+        ),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip cop")),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.effective_parameters.dhw_C_top == 0.09
+    assert snapshot.effective_parameters.dhw_C_bot == 0.05
+    assert snapshot.dhw_active is not None
+    assert snapshot.dhw_active.succeeded is True
+
+
 def test_build_automatic_calibration_snapshot_rejects_dhw_active_fit_that_hits_upper_bound(monkeypatch) -> None:
     """Automatic calibration must still reject active DHW fits that converge to the upper bound."""
     start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
@@ -4207,3 +4289,82 @@ def test_calibrate_dhw_active_stratification_recovers_capacity_split_and_sensor_
     np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, atol=2e-1)
     np.testing.assert_allclose(result.fitted_t_top_bias_c, true_top_bias_c, atol=5e-2)
     np.testing.assert_allclose(result.fitted_t_bot_bias_c, true_bot_bias_c, atol=5e-2)
+
+
+def test_calibrate_dhw_active_stratification_recovers_total_capacity_scale() -> None:
+    """Active DHW calibration must recover the total tank capacity instead of relying on a fixed assumption."""
+    true_parameters = DHWParameters(
+        dt_hours=0.1,
+        C_top=0.078,
+        C_bot=0.042,
+        R_strat=8.5,
+        R_loss=45.0,
+    )
+    model = DHWModel(true_parameters)
+    state = np.array([54.0, 44.0], dtype=float)
+    start = datetime(2026, 2, 3, tzinfo=timezone.utc)
+    samples: list[DHWActiveCalibrationSample] = []
+
+    for index in range(36):
+        interval_start = start + timedelta(hours=index * true_parameters.dt_hours)
+        interval_end = interval_start + timedelta(hours=true_parameters.dt_hours)
+        p_dhw_mean_kw = 1.4 + 0.8 * max(sin(index / 4.0), 0.0)
+        t_mains_c = 10.0 + 0.5 * sin(index / 9.0)
+        t_amb_c = 19.0
+        next_state = model.step(
+            state=state,
+            control_kw=p_dhw_mean_kw,
+            v_tap_m3_per_h=0.0,
+            t_mains_c=t_mains_c,
+            t_amb_c=t_amb_c,
+        )
+        samples.append(
+            DHWActiveCalibrationSample(
+                interval_start_utc=interval_start,
+                interval_end_utc=interval_end,
+                dt_hours=true_parameters.dt_hours,
+                t_top_start_c=float(state[0]),
+                t_top_end_c=float(next_state[0]),
+                t_bot_start_c=float(state[1]),
+                t_bot_end_c=float(next_state[1]),
+                p_dhw_mean_kw=p_dhw_mean_kw,
+                t_mains_c=t_mains_c,
+                t_amb_c=t_amb_c,
+                implied_v_tap_m3_per_h=0.0,
+                segment_index=0,
+            )
+        )
+        state = next_state
+
+    result = calibrate_dhw_active_stratification(
+        DHWActiveCalibrationDataset(samples=tuple(samples)),
+        DHWActiveCalibrationSettings(
+            reference_parameters=DHWParameters(
+                dt_hours=true_parameters.dt_hours,
+                C_top=0.06,
+                C_bot=0.06,
+                R_strat=10.0,
+                R_loss=true_parameters.R_loss,
+            ),
+            min_sample_count=12,
+            min_segment_samples=6,
+            fit_total_capacity=True,
+            fit_capacity_split=True,
+            initial_c_total_scale=1.0,
+            min_c_total_scale=0.5,
+            max_c_total_scale=1.5,
+            initial_c_top_fraction=0.5,
+            min_c_top_fraction=0.2,
+            max_c_top_fraction=0.8,
+            min_r_strat_k_per_kw=2.0,
+            max_r_strat_k_per_kw=15.0,
+        ),
+    )
+
+    np.testing.assert_allclose(
+        result.fitted_parameters.C_top + result.fitted_parameters.C_bot,
+        true_parameters.C_top + true_parameters.C_bot,
+        atol=5e-3,
+    )
+    np.testing.assert_allclose(result.fitted_parameters.C_top, true_parameters.C_top, atol=5e-3)
+    np.testing.assert_allclose(result.fitted_parameters.C_bot, true_parameters.C_bot, atol=5e-3)
