@@ -1466,7 +1466,11 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     assert ufh_settings.reference_parameters.dt_hours != RunRequest.model_validate({}).dt_hours
     assert ufh_settings.fit_eta is False
     assert ufh_settings.fit_internal_gains_heat_fraction is False
+    assert ufh_settings.min_parameter_ratio == AutomaticCalibrationSettings().ufh_active_min_parameter_ratio
+    assert ufh_settings.max_parameter_ratio == AutomaticCalibrationSettings().ufh_active_max_parameter_ratio
+    assert ufh_settings.regularization_weight == AutomaticCalibrationSettings().ufh_active_regularization_weight
     assert standby_settings.dt_hours == 5.0 / 60.0
+    assert standby_settings.fit_ambient_temperature_bias is False
     assert standby_settings.initial_ambient_temperature_bias_c == RunRequest.model_validate({}).dhw_boiler_ambient_bias_c
     assert dhw_active_settings.reference_parameters.dt_hours == 5.0 / 60.0
     assert dhw_active_settings.fit_capacity_split is False
@@ -1504,9 +1508,9 @@ def test_build_automatic_calibration_snapshot_accepts_ufh_fit_with_exact_zoh_run
             fitted_parameters=ThermalParameters(
                 dt_hours=5.0 / 60.0,
                 C_r=6.0,
-                C_b=3.0,
+                C_b=10.5,
                 R_br=1.0,
-                R_ro=3.0,
+                R_ro=8.5,
                 alpha=0.25,
                 eta=0.55,
                 A_glass=7.5,
@@ -1559,9 +1563,9 @@ def test_build_automatic_calibration_snapshot_accepts_ufh_fit_with_exact_zoh_run
     assert snapshot.ufh_active is not None
     assert snapshot.ufh_active.succeeded is True
     assert snapshot.effective_parameters.C_r == 6.0
-    assert snapshot.effective_parameters.C_b == 3.0
+    assert snapshot.effective_parameters.C_b == 10.5
     assert snapshot.effective_parameters.R_br == 1.0
-    assert snapshot.effective_parameters.R_ro == 3.0
+    assert snapshot.effective_parameters.R_ro == 8.5
     assert snapshot.effective_parameters.dhw_R_loss_top == 60.0
     assert snapshot.effective_parameters.dhw_R_loss_bot == 60.0
 
@@ -1816,7 +1820,7 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_inconsistent_with_
                 C_r=6.0,
                 C_b=11.0,
                 R_br=1.1,
-                R_ro=3.0,
+                R_ro=6.0,
                 alpha=0.25,
                 eta=0.55,
                 A_glass=7.5,
@@ -1835,7 +1839,7 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_inconsistent_with_
     )
     monkeypatch.setattr(
         "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
-        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=20.0),
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=30.0),
     )
     monkeypatch.setattr(
         "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
@@ -1853,7 +1857,10 @@ def test_build_automatic_calibration_snapshot_rejects_ufh_fit_inconsistent_with_
     snapshot = build_automatic_calibration_snapshot(
         repository=cast(TelemetryRepository, cast(object, repository)),
         base_request=RunRequest.model_validate({}),
-        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+        settings=AutomaticCalibrationSettings(
+            min_history_hours=12.0,
+            dhw_standby_fit_ambient_temperature_bias=True,
+        ),
     )
 
     assert snapshot is not None

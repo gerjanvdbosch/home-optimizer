@@ -150,8 +150,12 @@ DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS: float = 24.0
 DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS: int = 2
 DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO: float = 1e-6
 DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO: float = 4.0
+DEFAULT_AUTOMATIC_UFH_MIN_PARAMETER_RATIO: float = 0.5
+DEFAULT_AUTOMATIC_UFH_MAX_PARAMETER_RATIO: float = 2.0
+DEFAULT_AUTOMATIC_UFH_REGULARIZATION_WEIGHT: float = 1.0
 DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS: int = 2
 DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO: float = 1e-6
+DEFAULT_AUTOMATIC_DHW_STANDBY_FIT_AMBIENT_TEMPERATURE_BIAS: bool = False
 DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO: float = 1e-6
 
 
@@ -901,6 +905,13 @@ class AutomaticCalibrationSettings:
             mismatch between the active-UFH fitted ``R_ro`` and the passive
             off-mode envelope-derived ``R_ro`` [-]. Larger disagreement means the
             active replay fit is not physically self-consistent across stages.
+        ufh_active_min_parameter_ratio: Lower bound for automatic active-UFH
+            parameters relative to the reference tuple [-]. Tighter than the
+            generic manual-calibration bounds to reduce under-identified drift.
+        ufh_active_max_parameter_ratio: Upper bound for automatic active-UFH
+            parameters relative to the reference tuple [-].
+        ufh_active_regularization_weight: Tikhonov weight anchoring the automatic
+            active-UFH fit to the reference tuple [-].
         dhw_active_min_selected_segments: Minimum number of selected active-DHW
             replay segments required before the fitted ``R_strat`` is trusted [-].
             One contiguous DHW charging run is often too weak to distinguish
@@ -909,6 +920,10 @@ class AutomaticCalibrationSettings:
         dhw_standby_bound_tolerance_ratio: Relative tolerance used when deciding
             whether the fitted DHW standby ``tau_standby`` / derived ``R_loss`` is
             effectively sitting on its optimizer bounds [-].
+        dhw_standby_fit_ambient_temperature_bias: Whether the automatic standby
+            stage may fit a boiler-ambient sensor bias [°C]. Disabled by default
+            because the current production telemetry makes this bias weakly
+            identifiable and prone to bound-hits without materially improving the fit.
         dhw_active_fit_capacity_split: Whether the automatic active-DHW stage is
             allowed to fit the top/bottom heat-capacity split [-]. Disabled by
             default because the current production database drives this parameter
@@ -928,8 +943,12 @@ class AutomaticCalibrationSettings:
     ufh_active_min_selected_segments: int = DEFAULT_AUTOMATIC_UFH_MIN_SELECTED_SEGMENTS
     ufh_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_UFH_BOUND_TOLERANCE_RATIO
     ufh_active_max_r_ro_mismatch_ratio: float = DEFAULT_AUTOMATIC_UFH_MAX_R_RO_MISMATCH_RATIO
+    ufh_active_min_parameter_ratio: float = DEFAULT_AUTOMATIC_UFH_MIN_PARAMETER_RATIO
+    ufh_active_max_parameter_ratio: float = DEFAULT_AUTOMATIC_UFH_MAX_PARAMETER_RATIO
+    ufh_active_regularization_weight: float = DEFAULT_AUTOMATIC_UFH_REGULARIZATION_WEIGHT
     dhw_active_min_selected_segments: int = DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS
     dhw_standby_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO
+    dhw_standby_fit_ambient_temperature_bias: bool = DEFAULT_AUTOMATIC_DHW_STANDBY_FIT_AMBIENT_TEMPERATURE_BIAS
     dhw_active_fit_capacity_split: bool = False
     dhw_active_fit_temperature_biases: bool = False
     dhw_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO
@@ -943,6 +962,12 @@ class AutomaticCalibrationSettings:
             raise ValueError("ufh_active_bound_tolerance_ratio must be non-negative.")
         if self.ufh_active_max_r_ro_mismatch_ratio < 1.0:
             raise ValueError("ufh_active_max_r_ro_mismatch_ratio must be >= 1.")
+        if self.ufh_active_min_parameter_ratio <= 0.0:
+            raise ValueError("ufh_active_min_parameter_ratio must be strictly positive.")
+        if self.ufh_active_min_parameter_ratio >= self.ufh_active_max_parameter_ratio:
+            raise ValueError("ufh_active_min_parameter_ratio must be < ufh_active_max_parameter_ratio.")
+        if self.ufh_active_regularization_weight < 0.0:
+            raise ValueError("ufh_active_regularization_weight must be non-negative.")
         if self.dhw_active_min_selected_segments <= 0:
             raise ValueError("dhw_active_min_selected_segments must be strictly positive.")
         if self.dhw_standby_bound_tolerance_ratio < 0.0:
@@ -1743,4 +1768,3 @@ class UFHActiveCalibrationResult:
             raise ValueError("max_abs_innovation_c must be non-negative.")
         if self.sample_count <= 0:
             raise ValueError("sample_count must be strictly positive.")
-

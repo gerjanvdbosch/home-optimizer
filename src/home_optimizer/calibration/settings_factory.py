@@ -33,6 +33,9 @@ from .models import (
     DEFAULT_MIN_SEGMENT_SCORE,
     DEFAULT_MIN_SEGMENT_UFH_POWER_SPAN_KW,
     DEFAULT_MIN_UFH_POWER_KW,
+    DEFAULT_MIN_PARAMETER_RATIO,
+    DEFAULT_MAX_PARAMETER_RATIO,
+    DEFAULT_REGULARIZATION_WEIGHT,
     DHWActiveCalibrationSettings,
     DHWStandbyCalibrationSettings,
     UFHActiveCalibrationSettings,
@@ -60,6 +63,9 @@ def build_ufh_active_calibration_settings(
     fit_room_temperature_bias: bool = False,
     fit_initial_floor_temperature_offset: bool = False,
     initial_floor_temperature_offset_c: float = DEFAULT_INITIAL_FLOOR_TEMPERATURE_OFFSET_C,
+    min_parameter_ratio: float | None = None,
+    max_parameter_ratio: float | None = None,
+    regularization_weight: float | None = None,
 ) -> UFHActiveCalibrationSettings:
     """Build active-UFH calibration settings with CLI-equivalent defaults.
 
@@ -85,6 +91,10 @@ def build_ufh_active_calibration_settings(
         fit_initial_floor_temperature_offset: Whether the nuisance floor-offset
             state is fitted [-].
         initial_floor_temperature_offset_c: Initial/fixed floor offset [°C].
+        min_parameter_ratio: Optional lower relative bound for fitted UFH RC parameters [-].
+        max_parameter_ratio: Optional upper relative bound for fitted UFH RC parameters [-].
+        regularization_weight: Optional Tikhonov weight anchoring the fit to the
+            reference parameter tuple [-].
 
     Returns:
         Validated active-UFH calibration settings.
@@ -111,6 +121,9 @@ def build_ufh_active_calibration_settings(
         fit_room_temperature_bias=fit_room_temperature_bias,
         fit_initial_floor_temperature_offset=fit_initial_floor_temperature_offset,
         initial_floor_temperature_offset_c=initial_floor_temperature_offset_c,
+        min_parameter_ratio=DEFAULT_MIN_PARAMETER_RATIO if min_parameter_ratio is None else min_parameter_ratio,
+        max_parameter_ratio=DEFAULT_MAX_PARAMETER_RATIO if max_parameter_ratio is None else max_parameter_ratio,
+        regularization_weight=DEFAULT_REGULARIZATION_WEIGHT if regularization_weight is None else regularization_weight,
     )
 
 

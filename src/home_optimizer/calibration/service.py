@@ -1027,6 +1027,9 @@ def build_automatic_calibration_snapshot(
                 reference_internal_gains_heat_fraction=effective_request.internal_gains_heat_fraction,
                 fit_eta=settings.ufh_active_fit_eta,
                 fit_internal_gains_heat_fraction=settings.ufh_active_fit_internal_gains_heat_fraction,
+                min_parameter_ratio=settings.ufh_active_min_parameter_ratio,
+                max_parameter_ratio=settings.ufh_active_max_parameter_ratio,
+                regularization_weight=settings.ufh_active_regularization_weight,
             )
             result = calibrate_ufh_active_from_repository(
                 repository,
@@ -1096,7 +1099,7 @@ def build_automatic_calibration_snapshot(
                 dt_hours=calibration_replay_dt_hours,
                 reference_c_top_kwh_per_k=effective_request.dhw_C_top,
                 reference_c_bot_kwh_per_k=effective_request.dhw_C_bot,
-                fit_ambient_temperature_bias=True,
+                fit_ambient_temperature_bias=settings.dhw_standby_fit_ambient_temperature_bias,
                 initial_ambient_temperature_bias_c=effective_request.dhw_boiler_ambient_bias_c,
             )
             result = calibrate_dhw_standby_from_repository(
