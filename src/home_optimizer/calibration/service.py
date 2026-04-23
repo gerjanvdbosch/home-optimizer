@@ -515,6 +515,66 @@ def _build_dhw_active_diagnostics(
     }
 
 
+def _build_cop_diagnostics(
+    result: COPCalibrationResult,
+    *,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> dict[str, Any]:
+    """Return structured COP fit diagnostics for automatic-stage observability."""
+    return {
+        "sample_count": result.sample_count,
+        "ufh_sample_count": result.ufh_sample_count,
+        "dhw_sample_count": result.dhw_sample_count,
+        "required_min_dhw_sample_count": automatic_settings.cop_min_dhw_sample_count,
+        "rmse_supply_temperature_c": result.rmse_supply_temperature_c,
+        "rmse_electric_energy_kwh": result.rmse_electric_energy_kwh,
+        "rmse_actual_cop": result.rmse_actual_cop,
+        "ufh_rmse_actual_cop": result.ufh_rmse_actual_cop,
+        "dhw_rmse_actual_cop": result.dhw_rmse_actual_cop,
+        "ufh_bias_actual_cop": result.ufh_bias_actual_cop,
+        "dhw_bias_actual_cop": result.dhw_bias_actual_cop,
+        "diagnostic_eta_carnot_ufh": result.diagnostic_eta_carnot_ufh,
+        "diagnostic_eta_carnot_dhw": result.diagnostic_eta_carnot_dhw,
+    }
+
+
+def _validate_automatic_cop_fit(
+    result: COPCalibrationResult,
+    *,
+    automatic_settings: AutomaticCalibrationSettings,
+) -> dict[str, Any]:
+    """Fail fast when automatic COP calibration lacks informative DHW data.
+
+    The offline COP fitter can technically return a complete parameter object
+    even when no DHW samples survived dataset selection by reusing the UFH η as a
+    fallback. That behaviour is acceptable for exploratory/manual reporting, but
+    the automatic calibration path must not silently publish a DHW-specific
+    ``eta_carnot_dhw`` without real DHW identification evidence.
+    """
+    if result.dhw_sample_count < automatic_settings.cop_min_dhw_sample_count:
+        raise _CalibrationValidationError(
+            "Automatic COP fit rejected: insufficient retained DHW COP samples for DHW-specific identification. "
+            f"Retained DHW samples={result.dhw_sample_count}, required >= "
+            f"{automatic_settings.cop_min_dhw_sample_count}.",
+            diagnostics=_build_cop_diagnostics(
+                result,
+                automatic_settings=automatic_settings,
+            ),
+        )
+    if result.diagnostic_eta_carnot_dhw is None:
+        raise _CalibrationValidationError(
+            "Automatic COP fit rejected: DHW eta fallback was used instead of a true DHW fit.",
+            diagnostics=_build_cop_diagnostics(
+                result,
+                automatic_settings=automatic_settings,
+            ),
+        )
+    return _build_cop_diagnostics(
+        result,
+        automatic_settings=automatic_settings,
+    )
+
+
 def _ufh_effective_envelope_capacity_kwh_per_k(parameters: ThermalParameters) -> float:
     """Return the conservative effective UFH envelope capacity proxy ``C_r + C_b`` [kWh/K].
 
@@ -1237,6 +1297,10 @@ def build_automatic_calibration_snapshot(
                 cop_max=effective_request.cop_max,
             ),
         )
+        cop_diagnostics = _validate_automatic_cop_fit(
+            result,
+            automatic_settings=settings,
+        )
         overrides = CalibrationParameterOverrides(
             eta_carnot_ufh=result.fitted_parameters.eta_carnot_ufh,
             eta_carnot_dhw=result.fitted_parameters.eta_carnot_dhw,
@@ -1257,6 +1321,13 @@ def build_automatic_calibration_snapshot(
             dataset_start_utc=result.dataset_start_utc,
             dataset_end_utc=result.dataset_end_utc,
             optimizer_status=result.eta_optimizer_status,
+            diagnostics=cop_diagnostics,
+        )
+    except _CalibrationValidationError as exc:
+        stage_results["cop"] = _stage_failure(
+            "cop",
+            str(exc),
+            diagnostics=exc.diagnostics,
         )
     except Exception as exc:  # noqa: BLE001
         stage_results["cop"] = _stage_failure("cop", str(exc))

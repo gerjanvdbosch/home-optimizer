@@ -157,6 +157,7 @@ DEFAULT_AUTOMATIC_DHW_ACTIVE_MIN_SELECTED_SEGMENTS: int = 2
 DEFAULT_AUTOMATIC_DHW_STANDBY_BOUND_TOLERANCE_RATIO: float = 1e-6
 DEFAULT_AUTOMATIC_DHW_STANDBY_FIT_AMBIENT_TEMPERATURE_BIAS: bool = False
 DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO: float = 1e-6
+DEFAULT_AUTOMATIC_COP_MIN_DHW_SAMPLE_COUNT: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -935,6 +936,10 @@ class AutomaticCalibrationSettings:
         dhw_active_bound_tolerance_ratio: Relative tolerance used when deciding
             whether the fitted active-DHW ``R_strat`` is effectively sitting on its
             optimizer bounds [-].
+        cop_min_dhw_sample_count: Minimum number of retained DHW COP samples
+            required before the automatic COP stage may publish a DHW-specific
+            Carnot efficiency factor [-]. This avoids silently reusing the UFH
+            fit when no informative DHW COP data survived dataset selection.
     """
 
     min_history_hours: float = DEFAULT_AUTOMATIC_CALIBRATION_MIN_HISTORY_HOURS
@@ -952,6 +957,7 @@ class AutomaticCalibrationSettings:
     dhw_active_fit_capacity_split: bool = False
     dhw_active_fit_temperature_biases: bool = False
     dhw_active_bound_tolerance_ratio: float = DEFAULT_AUTOMATIC_DHW_ACTIVE_BOUND_TOLERANCE_RATIO
+    cop_min_dhw_sample_count: int = DEFAULT_AUTOMATIC_COP_MIN_DHW_SAMPLE_COUNT
 
     def __post_init__(self) -> None:
         if self.min_history_hours <= 0.0:
@@ -974,6 +980,8 @@ class AutomaticCalibrationSettings:
             raise ValueError("dhw_standby_bound_tolerance_ratio must be non-negative.")
         if self.dhw_active_bound_tolerance_ratio < 0.0:
             raise ValueError("dhw_active_bound_tolerance_ratio must be non-negative.")
+        if self.cop_min_dhw_sample_count <= 0:
+            raise ValueError("cop_min_dhw_sample_count must be strictly positive.")
 
 
 @dataclass(frozen=True, slots=True)

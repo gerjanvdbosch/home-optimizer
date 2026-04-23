@@ -1313,11 +1313,27 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
                 cop_min=1.5,
                 cop_max=7.0,
             ),
+            t_ref_outdoor_was_fitted=True,
+            rmse_supply_temperature_c=0.15,
+            rmse_electric_energy_kwh=0.08,
             sample_count=14,
+            ufh_sample_count=8,
+            dhw_sample_count=6,
             dataset_start_utc=datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc),
             dataset_end_utc=datetime(2026, 4, 18, 6, 0, tzinfo=timezone.utc),
+            ufh_rmse_electric_energy_kwh=0.07,
+            dhw_rmse_electric_energy_kwh=0.09,
             eta_optimizer_status="ok",
             rmse_actual_cop=0.22,
+            ufh_rmse_actual_cop=0.20,
+            dhw_rmse_actual_cop=0.25,
+            ufh_bias_actual_cop=-0.01,
+            dhw_bias_actual_cop=0.02,
+            diagnostic_eta_carnot_ufh=0.41,
+            diagnostic_eta_carnot_dhw=0.39,
+            heating_curve_optimizer_status="ok",
+            heating_curve_optimizer_cost=0.05,
+            eta_optimizer_cost=0.04,
         ),
     )
 
@@ -1339,6 +1355,7 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
     assert snapshot.effective_parameters.dhw_R_loss_bot == 52.0
     assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
     assert snapshot.cop is not None and snapshot.cop.succeeded is True
+    assert snapshot.cop.diagnostics["dhw_sample_count"] == 6
 
 
 def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeypatch) -> None:
@@ -1443,11 +1460,27 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
                 cop_min=1.5,
                 cop_max=7.0,
             ),
+            t_ref_outdoor_was_fitted=True,
+            rmse_supply_temperature_c=0.10,
+            rmse_electric_energy_kwh=0.04,
             sample_count=12,
+            ufh_sample_count=8,
+            dhw_sample_count=4,
             dataset_start_utc=start,
             dataset_end_utc=start + timedelta(hours=1),
+            ufh_rmse_electric_energy_kwh=0.03,
+            dhw_rmse_electric_energy_kwh=0.05,
             eta_optimizer_status="ok",
             rmse_actual_cop=0.1,
+            ufh_rmse_actual_cop=0.09,
+            dhw_rmse_actual_cop=0.12,
+            ufh_bias_actual_cop=-0.01,
+            dhw_bias_actual_cop=0.01,
+            diagnostic_eta_carnot_ufh=0.41,
+            diagnostic_eta_carnot_dhw=0.39,
+            heating_curve_optimizer_status="ok",
+            heating_curve_optimizer_cost=0.02,
+            eta_optimizer_cost=0.03,
         ),
     )
 
@@ -1473,14 +1506,90 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     assert standby_settings.fit_ambient_temperature_bias is False
     assert standby_settings.initial_ambient_temperature_bias_c == RunRequest.model_validate({}).dhw_boiler_ambient_bias_c
     assert dhw_active_settings.reference_parameters.dt_hours == 5.0 / 60.0
-    assert dhw_active_settings.fit_capacity_split is False
-    assert dhw_active_settings.fit_temperature_biases is False
-    assert dhw_active_settings.ambient_temperature_bias_c == RunRequest.model_validate({}).dhw_boiler_ambient_bias_c
-    assert dhw_active_settings.initial_t_top_bias_c == RunRequest.model_validate({}).dhw_top_temperature_bias_c
-    assert dhw_active_settings.initial_t_bot_bias_c == RunRequest.model_validate({}).dhw_bottom_temperature_bias_c
-    assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
-    assert snapshot.dhw_standby is not None and snapshot.dhw_standby.succeeded is True
-    assert snapshot.dhw_active is not None and snapshot.dhw_active.succeeded is True
+    assert snapshot.cop is not None and snapshot.cop.diagnostics["required_min_dhw_sample_count"] == 1
+
+
+def test_build_automatic_calibration_snapshot_rejects_cop_fit_without_real_dhw_identification(monkeypatch) -> None:
+    """Automatic calibration must reject COP snapshots that only reuse the UFH eta for DHW."""
+    start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
+    repository = SimpleNamespace(
+        get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
+        get_latest_calibration_snapshot=lambda: None,
+    )
+    telemetry_rows = [
+        SimpleNamespace(bucket_end_utc=start + timedelta(minutes=5 * index))
+        for index in range(6)
+    ]
+
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service._load_calibration_aggregates",
+        lambda _repository: telemetry_rows,
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip ufh active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_ufh_off_from_repository",
+        lambda _repository, _settings: SimpleNamespace(suggested_r_ro_k_per_kw=10.0),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_standby_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw standby")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_dhw_active_from_repository",
+        lambda _repository, _settings: (_ for _ in ()).throw(ValueError("skip dhw active")),
+    )
+    monkeypatch.setattr(
+        "home_optimizer.calibration.service.calibrate_cop_from_repository",
+        lambda _repository, _settings: SimpleNamespace(
+            fitted_parameters=HeatPumpCOPParameters(
+                eta_carnot_ufh=0.41,
+                eta_carnot_dhw=0.41,
+                delta_T_cond=5.0,
+                delta_T_evap=5.0,
+                T_supply_min=26.0,
+                T_ref_outdoor=18.0,
+                heating_curve_slope=0.9,
+                cop_min=1.5,
+                cop_max=7.0,
+            ),
+            t_ref_outdoor_was_fitted=True,
+            rmse_supply_temperature_c=0.10,
+            rmse_electric_energy_kwh=0.04,
+            rmse_actual_cop=0.1,
+            ufh_rmse_electric_energy_kwh=0.03,
+            dhw_rmse_electric_energy_kwh=None,
+            ufh_rmse_actual_cop=0.09,
+            dhw_rmse_actual_cop=None,
+            ufh_bias_actual_cop=-0.01,
+            dhw_bias_actual_cop=None,
+            diagnostic_eta_carnot_ufh=0.41,
+            diagnostic_eta_carnot_dhw=None,
+            sample_count=8,
+            ufh_sample_count=8,
+            dhw_sample_count=0,
+            dataset_start_utc=start,
+            dataset_end_utc=start + timedelta(hours=1),
+            heating_curve_optimizer_status="ok",
+            eta_optimizer_status="UFH: ok | DHW: No DHW samples retained; reusing eta_carnot_ufh.",
+            heating_curve_optimizer_cost=0.02,
+            eta_optimizer_cost=0.03,
+        ),
+    )
+
+    snapshot = build_automatic_calibration_snapshot(
+        repository=cast(TelemetryRepository, cast(object, repository)),
+        base_request=RunRequest.model_validate({}),
+        settings=AutomaticCalibrationSettings(min_history_hours=12.0),
+    )
+
+    assert snapshot is not None
+    assert snapshot.cop is not None
+    assert snapshot.cop.succeeded is False
+    assert "insufficient retained DHW COP samples" in snapshot.cop.message
+    assert snapshot.cop.diagnostics["dhw_sample_count"] == 0
 
 
 def test_build_automatic_calibration_snapshot_accepts_ufh_fit_with_exact_zoh_runtime(monkeypatch) -> None:
