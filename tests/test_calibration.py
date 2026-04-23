@@ -523,6 +523,86 @@ def test_build_cop_calibration_dataset_keeps_best_ufh_segments_when_capped() -> 
     assert dataset.samples[-1].outdoor_temperature_mean_c == 1.5
 
 
+def test_build_cop_calibration_dataset_keeps_dhw_segments_with_high_supply_tracking_rmse() -> None:
+    """DHW COP selection must not reuse the UFH supply-tracking gate as a hard reject."""
+    start = datetime(2026, 4, 17, 2, 0, tzinfo=timezone.utc)
+    aggregates = [
+        SimpleNamespace(
+            bucket_start_utc=start,
+            bucket_end_utc=start + timedelta(minutes=5),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=7.5,
+            hp_supply_target_temperature_mean_c=35.0,
+            hp_supply_temperature_mean_c=34.6,
+            hp_thermal_power_mean_kw=2.8,
+            hp_electric_energy_delta_kwh=0.20,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=5),
+            bucket_end_utc=start + timedelta(minutes=10),
+            hp_mode_last="ufh",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=5.0,
+            hp_supply_target_temperature_mean_c=38.0,
+            hp_supply_temperature_mean_c=37.2,
+            hp_thermal_power_mean_kw=3.2,
+            hp_electric_energy_delta_kwh=0.22,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=10),
+            bucket_end_utc=start + timedelta(minutes=15),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=6.5,
+            hp_supply_target_temperature_mean_c=30.0,
+            hp_supply_temperature_mean_c=55.0,
+            hp_thermal_power_mean_kw=2.5,
+            hp_electric_energy_delta_kwh=0.20,
+        ),
+        SimpleNamespace(
+            bucket_start_utc=start + timedelta(minutes=15),
+            bucket_end_utc=start + timedelta(minutes=20),
+            hp_mode_last="dhw",
+            defrost_active_fraction=0.0,
+            booster_heater_active_fraction=0.0,
+            outdoor_temperature_mean_c=5.0,
+            hp_supply_target_temperature_mean_c=30.0,
+            hp_supply_temperature_mean_c=56.0,
+            hp_thermal_power_mean_kw=2.9,
+            hp_electric_energy_delta_kwh=0.18,
+        ),
+    ]
+
+    dataset = build_cop_calibration_dataset(
+        aggregates=cast(list, aggregates),
+        settings=COPCalibrationSettings(
+            min_sample_count=4,
+            min_ufh_curve_sample_count=2,
+            min_thermal_energy_kwh=0.1,
+            min_electric_energy_kwh=0.05,
+            reaggregate_min_electric_energy_kwh=0.0,
+            reaggregate_min_bucket_count=1,
+            min_segment_samples=2,
+            min_segment_thermal_energy_kwh=0.2,
+            min_segment_actual_cop_span=0.02,
+            max_segment_supply_tracking_rmse_c=1.0,
+            min_ufh_segment_outdoor_temperature_span_c=1.0,
+            min_ufh_segment_supply_target_span_c=1.0,
+        ),
+    )
+
+    assert dataset.ufh_sample_count == 2
+    assert dataset.dhw_sample_count == 2
+    assert dataset.selected_dhw_segment_count == 1
+    dhw_quality = [quality for quality in dataset.segment_qualities if quality.mode_name == "dhw"][0]
+    assert dhw_quality.supply_tracking_rmse_c > 20.0
+    assert dhw_quality.selected is True
+
+
 def test_build_cop_calibration_dataset_keeps_same_mode_buckets_with_small_boundary_gap() -> None:
     """Small telemetry sampling gaps between same-mode COP buckets must not split a segment."""
     start = datetime(2026, 4, 17, 2, 40, tzinfo=timezone.utc)

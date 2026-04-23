@@ -252,6 +252,37 @@ def _cop_supply_tracking_rmse_c(raw_buckets: Sequence[_COPRawBucket]) -> float:
     return float(np.sqrt(np.average(squared_errors, weights=dt_hours)))
 
 
+def _cop_segment_tracking_margin(
+    raw_buckets: Sequence[_COPRawBucket],
+    settings: COPCalibrationSettings,
+) -> float:
+    """Return the tracking-quality margin used in COP segment scoring [-].
+
+    UFH segments are scored against hydraulic supply-target tracking because the
+    retained telemetry directly exercises the heating-curve path. For DHW
+    segments that same target signal is not a reliable excitation-quality proxy
+    in persisted runtime data, so DHW segments receive a neutral tracking score
+    instead of being penalised by an unrelated UFH-oriented metric.
+    """
+    if raw_buckets[0].mode_name != settings.ufh_mode_name:
+        return 1.0
+    supply_tracking_rmse_c = _cop_supply_tracking_rmse_c(raw_buckets)
+    return max(
+        0.0,
+        1.0 - supply_tracking_rmse_c / settings.max_segment_supply_tracking_rmse_c,
+    )
+
+
+def _cop_segment_passes_tracking_requirement(
+    quality: COPCalibrationSegmentQuality,
+    settings: COPCalibrationSettings,
+) -> bool:
+    """Return whether the segment passes the mode-specific tracking gate."""
+    if quality.mode_name != settings.ufh_mode_name:
+        return True
+    return quality.supply_tracking_rmse_c <= settings.max_segment_supply_tracking_rmse_c
+
+
 def _cop_segment_score(
     raw_buckets: Sequence[_COPRawBucket],
     calibration_samples: Sequence[COPCalibrationSample],
@@ -272,11 +303,7 @@ def _cop_segment_score(
     actual_cop_span = 0.0 if actual_cops.size == 0 else float(np.ptp(actual_cops))
     outdoor_span_c = float(np.ptp(outdoor_temperatures_c))
     supply_target_span_c = float(np.ptp(supply_targets_c))
-    supply_tracking_rmse_c = _cop_supply_tracking_rmse_c(raw_buckets)
-    tracking_margin = max(
-        0.0,
-        1.0 - supply_tracking_rmse_c / settings.max_segment_supply_tracking_rmse_c,
-    )
+    tracking_margin = _cop_segment_tracking_margin(raw_buckets, settings)
 
     score = (
         settings.segment_score_weight_sample_count * sample_count / float(settings.min_segment_samples)
@@ -438,7 +465,7 @@ def _cop_segment_quality(
         quality.sample_count >= settings.min_segment_samples
         and quality.thermal_energy_kwh >= settings.min_segment_thermal_energy_kwh
         and quality.actual_cop_span >= settings.min_segment_actual_cop_span
-        and quality.supply_tracking_rmse_c <= settings.max_segment_supply_tracking_rmse_c
+        and _cop_segment_passes_tracking_requirement(quality, settings)
         and quality.score >= settings.min_segment_score
     )
     if quality.mode_name == settings.ufh_mode_name:
@@ -647,7 +674,7 @@ def _cop_segment_failure_counts(
             failure_counts["thermal_energy"] += 1
         if uncapped_quality.actual_cop_span < settings.min_segment_actual_cop_span:
             failure_counts["actual_cop_span"] += 1
-        if uncapped_quality.supply_tracking_rmse_c > settings.max_segment_supply_tracking_rmse_c:
+        if not _cop_segment_passes_tracking_requirement(uncapped_quality, settings):
             failure_counts["supply_tracking_rmse"] += 1
         if uncapped_quality.mode_name == settings.ufh_mode_name:
             if uncapped_quality.outdoor_temperature_span_c < settings.min_ufh_segment_outdoor_temperature_span_c:
@@ -1314,5 +1341,4 @@ def build_ufh_active_calibration_dataset(
         samples=tuple(selected_samples),
         segment_qualities=segment_qualities,
     )
-
 
