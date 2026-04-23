@@ -10,7 +10,10 @@ from home_optimizer.domain.state_space import (
     DiscretizationConfig,
     Discretizer,
     controllability_matrix,
+    numerical_rank,
+    observability_is_well_conditioned,
     observability_matrix,
+    observability_min_singular_value,
 )
 
 
@@ -78,3 +81,19 @@ def test_observability_and_controllability_helpers_match_linear_algebra() -> Non
         controllability_matrix(discrete),
         np.column_stack([discrete.B, discrete.A @ discrete.B]),
     )
+
+
+def test_numerical_rank_and_conditioning_helpers_use_svd() -> None:
+    """Observability diagnostics must expose SVD-based rank and conditioning helpers."""
+    continuous = ContinuousLinearModel(
+        A=np.array([[-0.2, 0.3], [0.4, -0.1]], dtype=float),
+        B=np.array([[0.0], [1.0]], dtype=float),
+        E=np.array([[0.5], [0.2]], dtype=float),
+        C=np.array([[1.0, 0.0]], dtype=float),
+    )
+    discrete = Discretizer.exact_zoh(continuous_model=continuous, dt_hours=1.0)
+    obs = observability_matrix(discrete)
+
+    assert numerical_rank(obs) == 2
+    assert observability_min_singular_value(discrete) > 0.0
+    assert observability_is_well_conditioned(discrete)

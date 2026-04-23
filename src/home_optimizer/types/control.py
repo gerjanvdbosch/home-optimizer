@@ -94,13 +94,21 @@ class CombinedMPCParameters:
     ufh: MPCParameters
     dhw: DHWMPCParameters
     P_hp_max_elec: float
-    heat_pump_topology: Literal["shared", "exclusive_ufh", "exclusive_dhw"] = "shared"
+    heat_pump_topology: Literal["shared", "exclusive"] = "shared"
+    exclusive_active_mode: Literal["ufh", "dhw"] | None = None
 
     def __post_init__(self) -> None:
         if self.P_hp_max_elec <= 0.0:
             raise ValueError("P_hp_max_elec must be strictly positive.")
-        if self.heat_pump_topology not in {"shared", "exclusive_ufh", "exclusive_dhw"}:
-            raise ValueError("heat_pump_topology must be one of 'shared', 'exclusive_ufh', 'exclusive_dhw'.")
+        if self.heat_pump_topology not in {"shared", "exclusive"}:
+            raise ValueError("heat_pump_topology must be one of 'shared' or 'exclusive'.")
+        if self.heat_pump_topology == "shared":
+            if self.exclusive_active_mode is not None:
+                raise ValueError("exclusive_active_mode must be omitted when heat_pump_topology='shared'.")
+        elif self.exclusive_active_mode not in {"ufh", "dhw"}:
+            raise ValueError(
+                "exclusive_active_mode must be 'ufh' or 'dhw' when heat_pump_topology='exclusive'."
+            )
 
 
 __all__ = ["CombinedMPCParameters", "DHWMPCParameters", "MPCParameters"]

@@ -243,7 +243,8 @@ class Optimizer:
 
         Assembles a ``HeatPumpCOPParameters`` dataclass from the request fields
         and wraps it in a ``HeatPumpCOPModel``.  Validation (e.g. cop_min > 1,
-        eta_carnot ∈ (0,1]) is handled by ``HeatPumpCOPParameters.__post_init__``.
+        ``eta_carnot_ufh`` / ``eta_carnot_dhw`` ∈ (0,1]) is handled by
+        ``HeatPumpCOPParameters.__post_init__``.
 
         Args:
             req: Validated Pydantic request containing all COP model parameters.

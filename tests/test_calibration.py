@@ -793,7 +793,8 @@ def test_diagnose_cop_calibration_dataset_reports_bucket_and_segment_dropoffs() 
 def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:
     """Offline COP calibration must recover synthetic heating-curve and eta parameters."""
     true_parameters = HeatPumpCOPParameters(
-        eta_carnot=0.47,
+        eta_carnot_ufh=0.47,
+        eta_carnot_dhw=0.49,
         delta_T_cond=5.0,
         delta_T_evap=5.0,
         T_supply_min=27.0,
@@ -867,7 +868,8 @@ def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:
 
     result = calibrate_cop_model(dataset, settings)
 
-    np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, rtol=2e-2)
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot_ufh, true_parameters.eta_carnot_ufh, rtol=2e-2)
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot_dhw, true_parameters.eta_carnot_dhw, rtol=2e-2)
     np.testing.assert_allclose(result.fitted_parameters.T_supply_min, true_parameters.T_supply_min, rtol=2e-2)
     np.testing.assert_allclose(result.fitted_parameters.T_ref_outdoor, true_parameters.T_ref_outdoor, rtol=1e-9)
     np.testing.assert_allclose(
@@ -887,15 +889,16 @@ def test_calibrate_cop_model_recovers_synthetic_parameters() -> None:
     assert result.ufh_rmse_actual_cop < 1e-6
     assert result.dhw_rmse_actual_cop is not None
     assert result.dhw_rmse_actual_cop < 1e-6
-    np.testing.assert_allclose(result.diagnostic_eta_carnot_ufh, true_parameters.eta_carnot, rtol=2e-2)
+    np.testing.assert_allclose(result.diagnostic_eta_carnot_ufh, true_parameters.eta_carnot_ufh, rtol=2e-2)
     assert result.diagnostic_eta_carnot_dhw is not None
-    np.testing.assert_allclose(result.diagnostic_eta_carnot_dhw, true_parameters.eta_carnot, rtol=2e-2)
+    np.testing.assert_allclose(result.diagnostic_eta_carnot_dhw, true_parameters.eta_carnot_dhw, rtol=2e-2)
 
 
 def test_calibrate_cop_model_recovers_t_ref_outdoor_when_ufh_data_spans_breakpoint() -> None:
     """COP calibration must fit T_ref_outdoor when UFH data excite both curve branches."""
     true_parameters = HeatPumpCOPParameters(
-        eta_carnot=0.44,
+        eta_carnot_ufh=0.44,
+        eta_carnot_dhw=0.46,
         delta_T_cond=5.0,
         delta_T_evap=5.0,
         T_supply_min=26.5,
@@ -974,7 +977,8 @@ def test_calibrate_cop_model_recovers_t_ref_outdoor_when_ufh_data_spans_breakpoi
     np.testing.assert_allclose(result.fitted_parameters.T_ref_outdoor, true_parameters.T_ref_outdoor, atol=1e-3)
     np.testing.assert_allclose(result.fitted_parameters.T_supply_min, true_parameters.T_supply_min, atol=1e-3)
     np.testing.assert_allclose(result.fitted_parameters.heating_curve_slope, true_parameters.heating_curve_slope, atol=1e-3)
-    np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, atol=1e-3)
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot_ufh, true_parameters.eta_carnot_ufh, atol=1e-3)
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot_dhw, true_parameters.eta_carnot_dhw, atol=1e-3)
     assert result.rmse_supply_temperature_c < 1e-6
     assert result.rmse_actual_cop < 1e-6
 
@@ -1005,7 +1009,8 @@ def test_calibrate_cop_model_uses_non_saturated_eta_initial_guess() -> None:
     below the full-saturation threshold so the optimisation remains identifiable.
     """
     true_parameters = HeatPumpCOPParameters(
-        eta_carnot=0.27,
+        eta_carnot_ufh=0.27,
+        eta_carnot_dhw=0.27,
         delta_T_cond=5.0,
         delta_T_evap=5.0,
         T_supply_min=25.0,
@@ -1056,16 +1061,17 @@ def test_calibrate_cop_model_uses_non_saturated_eta_initial_guess() -> None:
 
     result = calibrate_cop_model(dataset, settings)
 
-    assert result.fitted_parameters.eta_carnot < settings.initial_eta_carnot
-    np.testing.assert_allclose(result.fitted_parameters.eta_carnot, true_parameters.eta_carnot, rtol=2e-2)
-    np.testing.assert_allclose(result.diagnostic_eta_carnot_ufh, true_parameters.eta_carnot, rtol=2e-2)
+    assert result.fitted_parameters.eta_carnot_ufh < settings.initial_eta_carnot
+    np.testing.assert_allclose(result.fitted_parameters.eta_carnot_ufh, true_parameters.eta_carnot_ufh, rtol=2e-2)
+    np.testing.assert_allclose(result.diagnostic_eta_carnot_ufh, true_parameters.eta_carnot_ufh, rtol=2e-2)
     assert result.rmse_actual_cop < 1e-6
 
 
 def test_calibrate_cop_model_soft_l1_is_more_robust_to_outliers_than_linear() -> None:
     """The configured robust COP losses must reduce parameter drift under bucket outliers."""
     true_parameters = HeatPumpCOPParameters(
-        eta_carnot=0.46,
+        eta_carnot_ufh=0.46,
+        eta_carnot_dhw=0.46,
         delta_T_cond=5.0,
         delta_T_evap=5.0,
         T_supply_min=28.0,
@@ -1142,20 +1148,20 @@ def test_calibrate_cop_model_soft_l1_is_more_robust_to_outliers_than_linear() ->
         (
             abs(linear_result.fitted_parameters.T_supply_min - true_parameters.T_supply_min),
             abs(linear_result.fitted_parameters.heating_curve_slope - true_parameters.heating_curve_slope),
-            abs(linear_result.fitted_parameters.eta_carnot - true_parameters.eta_carnot),
+            abs(linear_result.fitted_parameters.eta_carnot_ufh - true_parameters.eta_carnot_ufh),
         )
     )
     robust_parameter_error = sum(
         (
             abs(robust_result.fitted_parameters.T_supply_min - true_parameters.T_supply_min),
             abs(robust_result.fitted_parameters.heating_curve_slope - true_parameters.heating_curve_slope),
-            abs(robust_result.fitted_parameters.eta_carnot - true_parameters.eta_carnot),
+            abs(robust_result.fitted_parameters.eta_carnot_ufh - true_parameters.eta_carnot_ufh),
         )
     )
 
     assert robust_parameter_error < linear_parameter_error
-    assert abs(robust_result.fitted_parameters.eta_carnot - true_parameters.eta_carnot) < abs(
-        linear_result.fitted_parameters.eta_carnot - true_parameters.eta_carnot
+    assert abs(robust_result.fitted_parameters.eta_carnot_ufh - true_parameters.eta_carnot_ufh) < abs(
+        linear_result.fitted_parameters.eta_carnot_ufh - true_parameters.eta_carnot_ufh
     )
 
 
@@ -1170,7 +1176,11 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
         ),
         get_latest_calibration_snapshot=lambda: CalibrationSnapshotPayload(
             generated_at_utc=datetime(2026, 4, 18, 5, 0, tzinfo=timezone.utc),
-            effective_parameters=CalibrationParameterOverrides(dhw_R_loss=52.0, eta_carnot=0.33),
+            effective_parameters=CalibrationParameterOverrides(
+                dhw_R_loss=52.0,
+                eta_carnot_ufh=0.33,
+                eta_carnot_dhw=0.31,
+            ),
         ),
     )
     monkeypatch.setattr(
@@ -1213,7 +1223,8 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
         "home_optimizer.calibration.service.calibrate_cop_from_repository",
         lambda _repository, _settings: SimpleNamespace(
             fitted_parameters=HeatPumpCOPParameters(
-                eta_carnot=0.41,
+                eta_carnot_ufh=0.41,
+                eta_carnot_dhw=0.39,
                 delta_T_cond=5.0,
                 delta_T_evap=5.0,
                 T_supply_min=26.2,
@@ -1239,11 +1250,13 @@ def test_build_automatic_calibration_snapshot_merges_previous_successful_overrid
     assert snapshot is not None
     assert snapshot.effective_parameters.C_r == 7.5
     assert snapshot.effective_parameters.R_ro == 8.8
-    assert snapshot.effective_parameters.eta_carnot == 0.41
+    assert snapshot.effective_parameters.eta_carnot_ufh == 0.41
+    assert snapshot.effective_parameters.eta_carnot_dhw == 0.39
     assert snapshot.effective_parameters.T_supply_min == 26.2
     assert snapshot.effective_parameters.T_ref_outdoor_curve == 18.0
     assert snapshot.effective_parameters.heating_curve_slope == 0.9
-    assert snapshot.effective_parameters.dhw_R_loss == 52.0
+    assert snapshot.effective_parameters.dhw_R_loss_top == 52.0
+    assert snapshot.effective_parameters.dhw_R_loss_bot == 52.0
     assert snapshot.ufh_active is not None and snapshot.ufh_active.succeeded is True
     assert snapshot.cop is not None and snapshot.cop.succeeded is True
 
@@ -1340,7 +1353,8 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
         "home_optimizer.calibration.service.calibrate_cop_from_repository",
         lambda _repository, _settings: SimpleNamespace(
             fitted_parameters=HeatPumpCOPParameters(
-                eta_carnot=0.41,
+                eta_carnot_ufh=0.41,
+                eta_carnot_dhw=0.39,
                 delta_T_cond=5.0,
                 delta_T_evap=5.0,
                 T_supply_min=26.0,
@@ -1468,7 +1482,8 @@ def test_build_automatic_calibration_snapshot_accepts_ufh_fit_with_exact_zoh_run
     assert snapshot.effective_parameters.C_b == 3.0
     assert snapshot.effective_parameters.R_br == 1.0
     assert snapshot.effective_parameters.R_ro == 3.0
-    assert snapshot.effective_parameters.dhw_R_loss == 60.0
+    assert snapshot.effective_parameters.dhw_R_loss_top == 60.0
+    assert snapshot.effective_parameters.dhw_R_loss_bot == 60.0
 
 
 def test_build_automatic_calibration_snapshot_rejects_ufh_fit_that_hits_bounds(monkeypatch) -> None:

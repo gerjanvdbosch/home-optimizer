@@ -124,7 +124,8 @@ def test_topology_supervisor_supports_exclusive_modes() -> None:
         ufh_parameters=_ufh_params(),
         dhw_parameters=_dhw_params(),
         shared_hp_max_elec_kw=3.0,
-        heat_pump_topology="exclusive_dhw",
+        heat_pump_topology="exclusive",
+        exclusive_active_mode="dhw",
     )
     u_ufh = cp.Variable(2)
     u_dhw = cp.Variable(2)
@@ -141,4 +142,4 @@ def test_topology_supervisor_supports_exclusive_modes() -> None:
     )
 
     rendered = "\n".join(str(constraint) for constraint in constraints)
-    assert "[0] == 0.0" in rendered
+    assert "[0] <= 0.0" in rendered

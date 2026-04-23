@@ -169,6 +169,8 @@ def test_room_can_warm_without_solar_for_realistic_ufh_house() -> None:
 def test_system_is_fully_observable_and_controllable(params: ThermalParameters) -> None:
     model = ThermalModel(params)
     assert model.observability_rank() == 2, "System must be fully observable (rank 2)"
+    assert model.observability_is_well_conditioned()
+    assert model.observability_min_singular_value() > 0.0
     assert model.controllability_rank() == 2, "System must be fully controllable (rank 2)"
 
 

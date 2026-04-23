@@ -702,13 +702,14 @@ class COPCalibrationDiagnostics:
 class COPCalibrationSettings:
     """Validated settings for offline Carnot COP calibration.
 
-    The current offline stage learns the UFH heating-curve shape plus the shared
-    Carnot efficiency factor from historical buckets:
+    The current offline stage learns the UFH heating-curve shape plus separate
+    UFH/DHW Carnot efficiency factors from historical buckets:
 
     * ``T_supply_min`` [°C] — UFH heating-curve intercept
     * ``T_ref_outdoor`` [°C] — UFH heating-curve balance-point / breakpoint
     * ``heating_curve_slope`` [K/K] — UFH heating-curve slope
-    * ``eta_carnot`` [-] — shared Carnot efficiency factor
+    * ``eta_carnot_ufh`` [-] — UFH Carnot efficiency factor
+    * ``eta_carnot_dhw`` [-] — DHW Carnot efficiency factor
 
     The approach temperatures and COP clamps stay fixed for identifiability and to
     preserve the convex MPC pre-calculation assumptions from §14.1:
@@ -1742,5 +1743,4 @@ class UFHActiveCalibrationResult:
             raise ValueError("max_abs_innovation_c must be non-negative.")
         if self.sample_count <= 0:
             raise ValueError("sample_count must be strictly positive.")
-
 

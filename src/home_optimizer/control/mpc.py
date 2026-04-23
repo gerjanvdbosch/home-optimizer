@@ -471,6 +471,11 @@ class MPCController:
                     if isinstance(self.params, CombinedMPCParameters)
                     else "shared"
                 ),
+                exclusive_active_mode=(
+                    self.params.exclusive_active_mode
+                    if isinstance(self.params, CombinedMPCParameters)
+                    else None
+                ),
             ),
             legionella_supervisor=LegionellaSupervisor(p_dhw) if p_dhw is not None else None,
             dhw_enabled=self._dhw_enabled,

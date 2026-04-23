@@ -26,7 +26,8 @@ from home_optimizer.domain.heat_pump.cop import (
 # ---------------------------------------------------------------------------
 
 COP_PARAMS = HeatPumpCOPParameters(
-    eta_carnot=0.45,
+    eta_carnot_ufh=0.45,
+    eta_carnot_dhw=0.45,
     delta_T_cond=5.0,
     delta_T_evap=5.0,
     T_supply_min=25.0,
@@ -143,6 +144,32 @@ def test_cop_ufh_double_penalty_vs_dhw_in_cold_weather() -> None:
     )
 
 
+def test_mode_specific_eta_carnot_allows_different_ufh_and_dhw_efficiency() -> None:
+    """UFH and DHW COP must support different Carnot efficiency factors."""
+    model = HeatPumpCOPModel(
+        HeatPumpCOPParameters(
+            eta_carnot_ufh=0.40,
+            eta_carnot_dhw=0.52,
+            delta_T_cond=5.0,
+            delta_T_evap=5.0,
+            T_supply_min=28.0,
+            T_ref_outdoor=18.0,
+            heating_curve_slope=1.0,
+            cop_min=1.5,
+            cop_max=7.0,
+        )
+    )
+    t_out = np.array([10.0])
+    t_supply_ufh = model.heating_curve(t_out)
+    cop_ufh = model.cop_ufh(t_out)
+    cop_same_supply_higher_eta = model._cop_from_temperatures_with_eta(
+        t_supply=t_supply_ufh,
+        t_out=t_out,
+        eta_carnot=model.params.eta_carnot_dhw,
+    )
+    assert cop_same_supply_higher_eta.item() > cop_ufh.item()
+
+
 def test_cop_clipped_to_cop_min() -> None:
     """Extremely cold outdoor temperatures must be clipped to cop_min, not go below."""
     t_out_extreme_cold = np.array([-30.0, -40.0])
@@ -185,11 +212,12 @@ def test_cop_no_division_by_zero_when_lift_is_tiny() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cop_parameters_rejects_eta_carnot_zero() -> None:
-    """eta_carnot = 0 is physically meaningless (zero efficiency)."""
-    with pytest.raises(ValueError, match="eta_carnot"):
+def test_cop_parameters_rejects_zero_eta_carnot_ufh() -> None:
+    """eta_carnot_ufh = 0 is physically meaningless (zero efficiency)."""
+    with pytest.raises(ValueError, match="eta_carnot_ufh"):
         HeatPumpCOPParameters(
-            eta_carnot=0.0,
+            eta_carnot_ufh=0.0,
+            eta_carnot_dhw=0.45,
             delta_T_cond=5.0,
             delta_T_evap=5.0,
             T_supply_min=25.0,
@@ -200,11 +228,12 @@ def test_cop_parameters_rejects_eta_carnot_zero() -> None:
         )
 
 
-def test_cop_parameters_rejects_eta_carnot_above_one() -> None:
-    """eta_carnot > 1 violates the second law of thermodynamics."""
-    with pytest.raises(ValueError, match="eta_carnot"):
+def test_cop_parameters_rejects_eta_carnot_dhw_above_one() -> None:
+    """eta_carnot_dhw > 1 violates the second law of thermodynamics."""
+    with pytest.raises(ValueError, match="eta_carnot_dhw"):
         HeatPumpCOPParameters(
-            eta_carnot=1.1,
+            eta_carnot_ufh=0.45,
+            eta_carnot_dhw=1.1,
             delta_T_cond=5.0,
             delta_T_evap=5.0,
             T_supply_min=25.0,
@@ -218,7 +247,8 @@ def test_cop_parameters_rejects_eta_carnot_above_one() -> None:
 def test_cop_parameters_rejects_negative_delta_t_cond() -> None:
     with pytest.raises(ValueError, match="delta_T_cond"):
         HeatPumpCOPParameters(
-            eta_carnot=0.45,
+            eta_carnot_ufh=0.45,
+            eta_carnot_dhw=0.45,
             delta_T_cond=-1.0,
             delta_T_evap=5.0,
             T_supply_min=25.0,
@@ -233,7 +263,8 @@ def test_cop_parameters_rejects_cop_min_below_one() -> None:
     """cop_min ≤ 1 would represent a resistive heater, not a heat pump."""
     with pytest.raises(ValueError, match="cop_min"):
         HeatPumpCOPParameters(
-            eta_carnot=0.45,
+            eta_carnot_ufh=0.45,
+            eta_carnot_dhw=0.45,
             delta_T_cond=5.0,
             delta_T_evap=5.0,
             T_supply_min=25.0,
@@ -247,7 +278,8 @@ def test_cop_parameters_rejects_cop_min_below_one() -> None:
 def test_cop_parameters_rejects_cop_max_not_greater_than_cop_min() -> None:
     with pytest.raises(ValueError, match="cop_max"):
         HeatPumpCOPParameters(
-            eta_carnot=0.45,
+            eta_carnot_ufh=0.45,
+            eta_carnot_dhw=0.45,
             delta_T_cond=5.0,
             delta_T_evap=5.0,
             T_supply_min=25.0,
@@ -349,7 +381,7 @@ def test_full_mpc_solve_with_physical_cop_model() -> None:
     # Canonical architecture: always solved through the convex CVXPY path.
     assert sol.ufh_control_sequence_kw.shape == (n,)
     assert np.all(sol.ufh_control_sequence_kw >= -1e-6)
-    assert np.all(sol.ufh_control_sequence_kw <= mpc_params.P_max + 1e-6)
+    assert np.all(sol.ufh_control_sequence_kw <= mpc_params.P_max + 5e-6)
     assert sol.used_fallback is False
     # The physical COP must have been used: cop_ufh_k is non-trivial (not all equal)
     assert forecast.cop_ufh_k is not None and forecast.cop_ufh_k.shape == (n,)

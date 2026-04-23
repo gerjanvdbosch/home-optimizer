@@ -28,13 +28,15 @@ _DHW_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
     "dhw_C_top",
     "dhw_C_bot",
     "dhw_R_strat",
-    "dhw_R_loss",
+    "dhw_R_loss_top",
+    "dhw_R_loss_bot",
     "dhw_top_temperature_bias_c",
     "dhw_bottom_temperature_bias_c",
     "dhw_boiler_ambient_bias_c",
 )
 _COP_CALIBRATION_OVERRIDE_FIELDS: tuple[str, ...] = (
-    "eta_carnot",
+    "eta_carnot_ufh",
+    "eta_carnot_dhw",
     "T_supply_min",
     "T_ref_outdoor_curve",
     "heating_curve_slope",

@@ -46,7 +46,7 @@ Derived quantity (not a state, §8.1, assumption A6):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -55,9 +55,13 @@ from ..state_space import (
     DiscreteLinearModel,
     DiscretizationConfig,
     Discretizer,
+    numerical_rank,
+    observability_condition_number,
+    observability_is_well_conditioned,
     observability_matrix,
+    observability_min_singular_value,
 )
-from ...types.constants import ABSOLUTE_ZERO_C
+from ...types.constants import ABSOLUTE_ZERO_C, DEFAULT_NUMERICAL_VALIDATION_CONFIG, NumericalValidationConfig
 from ...types.physical import DHWParameters
 
 #: Observation matrix C_obs = [1, 0] — only T_top is measured.
@@ -83,6 +87,9 @@ class DHWModel:
     """
 
     parameters: DHWParameters
+    numerical_validation_config: NumericalValidationConfig = field(
+        default_factory=lambda: DEFAULT_NUMERICAL_VALIDATION_CONFIG
+    )
 
     # ------------------------------------------------------------------
     # Constant auxiliary scalars
@@ -250,5 +257,23 @@ class DHWModel:
         return observability_matrix(self.discrete_model(v_tap_m3_per_h))
 
     def observability_rank(self, v_tap_m3_per_h: float = 0.0) -> int:
-        """rank(O) must equal 2 for full observability (requires a_strat ≠ 0)."""
-        return int(np.linalg.matrix_rank(self.observability_matrix(v_tap_m3_per_h)))
+        """Return the SVD-based numerical rank of the DHW observability matrix."""
+        return numerical_rank(
+            self.observability_matrix(v_tap_m3_per_h),
+            rtol=self.numerical_validation_config.observability_rank_tolerance,
+        )
+
+    def observability_min_singular_value(self, v_tap_m3_per_h: float = 0.0) -> float:
+        """Return the smallest singular value of the DHW observability matrix."""
+        return observability_min_singular_value(self.discrete_model(v_tap_m3_per_h))
+
+    def observability_condition_number(self, v_tap_m3_per_h: float = 0.0) -> float:
+        """Return the condition number of the DHW observability matrix."""
+        return observability_condition_number(self.discrete_model(v_tap_m3_per_h))
+
+    def observability_is_well_conditioned(self, v_tap_m3_per_h: float = 0.0) -> bool:
+        """Return whether the DHW observability matrix clears the conditioning threshold."""
+        return observability_is_well_conditioned(
+            self.discrete_model(v_tap_m3_per_h),
+            config=self.numerical_validation_config,
+        )

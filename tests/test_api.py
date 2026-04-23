@@ -133,13 +133,14 @@ def test_simulate_passes_safe_calibration_overrides_into_ml_forecast_generation(
         ]
     )
     repository.add_calibration_snapshot(
-        CalibrationSnapshotPayload(
-            generated_at_utc=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
-            effective_parameters=CalibrationParameterOverrides(
-                dhw_R_loss=92.0,
-                dhw_boiler_ambient_bias_c=4.0,
-            ),
-        )
+            CalibrationSnapshotPayload(
+                generated_at_utc=datetime(2026, 4, 18, 9, 0, tzinfo=timezone.utc),
+                effective_parameters=CalibrationParameterOverrides(
+                    dhw_R_loss_top=92.0,
+                    dhw_R_loss_bot=92.0,
+                    dhw_boiler_ambient_bias_c=4.0,
+                ),
+            )
     )
     monkeypatch.setattr(HomeOptimizerAPI, "_get_repository", staticmethod(lambda: repository))
 
@@ -164,9 +165,11 @@ def test_simulate_passes_safe_calibration_overrides_into_ml_forecast_generation(
     )
 
     assert response.status_code == 200
-    assert captured["current_overrides"]["dhw_R_loss"] == 92.0
+    assert captured["current_overrides"]["dhw_R_loss_top"] == 92.0
+    assert captured["current_overrides"]["dhw_R_loss_bot"] == 92.0
     assert captured["current_overrides"]["dhw_boiler_ambient_bias_c"] == 4.0
-    assert captured["request_data"]["dhw_R_loss"] == 92.0
+    assert captured["request_data"]["dhw_R_loss_top"] == 92.0
+    assert captured["request_data"]["dhw_R_loss_bot"] == 92.0
     assert captured["request_data"]["dhw_boiler_ambient_bias_c"] == 4.0
 
 
@@ -179,11 +182,16 @@ def test_dashboard_html_contains_dhw_and_pv_sections() -> None:
     assert 'id="dhw_enabled"' in html
     assert 'id="dhw-settings"' in html
     assert 'id="dhw-chart-card"' in html
+    assert 'id="dhw_R_loss_top"' in html
+    assert 'id="dhw_R_loss_bot"' in html
     assert 'id="pv_enabled"' in html
     assert 'id="shutter_living_room_pct"' in html
+    assert 'id="heat_pump_topology"' in html
+    assert 'id="exclusive_heat_pump_mode"' in html
     assert "UFH + DHW + PV MPC" in html
     assert "fetch(apiUrl('/api/defaults'))" in html
     assert "applyRunRequestDefaults" in html
+    assert "exclusive_heat_pump_mode: s('heat_pump_topology') === 'exclusive'" in html
 
 
 def test_dashboard_html_contains_optimizer_mpc_forecast_section() -> None:
@@ -262,13 +270,16 @@ def test_optimizer_scheduled_input_applies_latest_calibration_snapshot(tmp_path)
             effective_parameters=CalibrationParameterOverrides(
                 C_r=7.2,
                 C_b=11.3,
-                eta_carnot=0.39,
+                eta_carnot_ufh=0.39,
+                eta_carnot_dhw=0.37,
                 T_supply_min=26.5,
             ),
         )
     )
 
-    base_input = RunRequest.model_validate({"horizon_hours": 8, "C_r": 6.0, "eta_carnot": 0.45})
+    base_input = RunRequest.model_validate(
+        {"horizon_hours": 8, "C_r": 6.0, "eta_carnot_ufh": 0.45, "eta_carnot_dhw": 0.43}
+    )
     scheduled_input = Optimizer._build_scheduled_input(
         base_input=base_input,
         backend=None,
@@ -277,7 +288,8 @@ def test_optimizer_scheduled_input_applies_latest_calibration_snapshot(tmp_path)
 
     assert scheduled_input.C_r == 7.2
     assert scheduled_input.C_b == 11.3
-    assert scheduled_input.eta_carnot == 0.39
+    assert scheduled_input.eta_carnot_ufh == 0.39
+    assert scheduled_input.eta_carnot_dhw == 0.37
     assert scheduled_input.T_supply_min == 26.5
 
 
@@ -294,7 +306,8 @@ def test_optimizer_scheduled_input_ignores_invalid_ufh_calibration_tuple(tmp_pat
                 C_b=0.15625,
                 R_br=20.8625,
                 R_ro=1.7483,
-                dhw_R_loss=55.0,
+                dhw_R_loss_top=55.0,
+                dhw_R_loss_bot=55.0,
             ),
         )
     )
@@ -310,7 +323,8 @@ def test_optimizer_scheduled_input_ignores_invalid_ufh_calibration_tuple(tmp_pat
     assert scheduled_input.C_b == base_input.C_b
     assert scheduled_input.R_br == base_input.R_br
     assert scheduled_input.R_ro == base_input.R_ro
-    assert scheduled_input.dhw_R_loss == 55.0
+    assert scheduled_input.dhw_R_loss_top == 55.0
+    assert scheduled_input.dhw_R_loss_bot == 55.0
 
 
 def test_optimizer_scheduled_input_applies_live_shutter_position() -> None:
@@ -457,8 +471,10 @@ def test_calibration_latest_returns_latest_snapshot(monkeypatch, tmp_path) -> No
             generated_at_utc=datetime(2026, 4, 18, 10, 0, tzinfo=timezone.utc),
             effective_parameters=CalibrationParameterOverrides(
                 R_ro=9.1,
-                eta_carnot=0.42,
-                dhw_R_loss=55.0,
+                eta_carnot_ufh=0.42,
+                eta_carnot_dhw=0.40,
+                dhw_R_loss_top=55.0,
+                dhw_R_loss_bot=55.0,
             ),
             ufh_active=CalibrationStageResult(
                 stage_name="ufh_active",
@@ -489,8 +505,10 @@ def test_calibration_latest_returns_latest_snapshot(monkeypatch, tmp_path) -> No
     assert response.status_code == 200
     payload = response.json()
     assert payload["effective_parameters"]["R_ro"] == 9.1
-    assert payload["effective_parameters"]["eta_carnot"] == 0.42
-    assert payload["effective_parameters"]["dhw_R_loss"] == 55.0
+    assert payload["effective_parameters"]["eta_carnot_ufh"] == 0.42
+    assert payload["effective_parameters"]["eta_carnot_dhw"] == 0.40
+    assert payload["effective_parameters"]["dhw_R_loss_top"] == 55.0
+    assert payload["effective_parameters"]["dhw_R_loss_bot"] == 55.0
     assert payload["ufh_active"]["diagnostics"]["bound_violations"] == ["C_b at lower bound"]
     assert payload["dhw_active"]["diagnostics"]["required_min_selected_segments"] == 2
 
@@ -508,7 +526,8 @@ def test_defaults_returns_static_runrequest_without_calibration_snapshot(monkeyp
     payload = response.json()
     defaults = RunRequest.model_validate({})
     assert payload["C_r"] == defaults.C_r
-    assert payload["eta_carnot"] == defaults.eta_carnot
+    assert payload["eta_carnot_ufh"] == defaults.eta_carnot_ufh
+    assert payload["eta_carnot_dhw"] == defaults.eta_carnot_dhw
     assert payload["T_supply_min"] == defaults.T_supply_min
 
 
@@ -523,7 +542,8 @@ def test_defaults_returns_latest_calibration_snapshot_over_static_defaults(monke
             effective_parameters=CalibrationParameterOverrides(
                 C_r=7.4,
                 C_b=11.2,
-                eta_carnot=0.38,
+                eta_carnot_ufh=0.38,
+                eta_carnot_dhw=0.36,
                 T_supply_min=26.8,
             ),
         )
@@ -536,7 +556,8 @@ def test_defaults_returns_latest_calibration_snapshot_over_static_defaults(monke
     payload = response.json()
     assert payload["C_r"] == 7.4
     assert payload["C_b"] == 11.2
-    assert payload["eta_carnot"] == 0.38
+    assert payload["eta_carnot_ufh"] == 0.38
+    assert payload["eta_carnot_dhw"] == 0.36
     assert payload["T_supply_min"] == 26.8
 
 
@@ -551,13 +572,14 @@ def test_defaults_prefers_registered_runtime_base_request(monkeypatch, tmp_path)
     original_base_request = api_service._base_request
     try:
         runtime_base_request = RunRequest.model_validate(
-            {
-                "horizon_hours": 8,
-                "dhw_C_top": 0.11628,
-                "dhw_C_bot": 0.11628,
-                "dhw_R_loss": 80.0,
-            }
-        )
+                {
+                    "horizon_hours": 8,
+                    "dhw_C_top": 0.11628,
+                    "dhw_C_bot": 0.11628,
+                    "dhw_R_loss_top": 80.0,
+                    "dhw_R_loss_bot": 80.0,
+                }
+            )
         api_service.set_base_request(runtime_base_request)
 
         response = client.get("/api/defaults")
@@ -566,7 +588,8 @@ def test_defaults_prefers_registered_runtime_base_request(monkeypatch, tmp_path)
         payload = response.json()
         assert payload["dhw_C_top"] == runtime_base_request.dhw_C_top
         assert payload["dhw_C_bot"] == runtime_base_request.dhw_C_bot
-        assert payload["dhw_R_loss"] == runtime_base_request.dhw_R_loss
+        assert payload["dhw_R_loss_top"] == runtime_base_request.dhw_R_loss_top
+        assert payload["dhw_R_loss_bot"] == runtime_base_request.dhw_R_loss_bot
     finally:
         api_service.set_base_request(original_base_request)
 
@@ -584,7 +607,8 @@ def test_defaults_ignores_invalid_ufh_calibration_tuple_but_keeps_safe_groups(mo
                 C_b=0.15625,
                 R_br=20.8625,
                 R_ro=1.7483,
-                dhw_R_loss=55.0,
+                dhw_R_loss_top=55.0,
+                dhw_R_loss_bot=55.0,
             ),
         )
     )
@@ -599,7 +623,8 @@ def test_defaults_ignores_invalid_ufh_calibration_tuple_but_keeps_safe_groups(mo
     assert payload["C_b"] == defaults.C_b
     assert payload["R_br"] == defaults.R_br
     assert payload["R_ro"] == defaults.R_ro
-    assert payload["dhw_R_loss"] == 55.0
+    assert payload["dhw_R_loss_top"] == 55.0
+    assert payload["dhw_R_loss_bot"] == 55.0
 
 
 def test_simulate_uses_registered_runtime_base_request_for_dhw_forecast_lookup(monkeypatch, tmp_path) -> None:
@@ -640,7 +665,8 @@ def test_simulate_uses_registered_runtime_base_request_for_dhw_forecast_lookup(m
                 "dhw_enabled": True,
                 "dhw_C_top": 0.11628,
                 "dhw_C_bot": 0.11628,
-                "dhw_R_loss": 80.0,
+                "dhw_R_loss_top": 80.0,
+                "dhw_R_loss_bot": 80.0,
             }
         )
         api_service.set_base_request(runtime_base_request)
@@ -666,6 +692,8 @@ def test_simulate_uses_registered_runtime_base_request_for_dhw_forecast_lookup(m
         assert isinstance(request_data, dict)
         assert request_data["dhw_C_top"] == runtime_base_request.dhw_C_top
         assert request_data["dhw_C_bot"] == runtime_base_request.dhw_C_bot
+        assert request_data["dhw_R_loss_top"] == runtime_base_request.dhw_R_loss_top
+        assert request_data["dhw_R_loss_bot"] == runtime_base_request.dhw_R_loss_bot
     finally:
         api_service.set_base_request(original_base_request)
 
@@ -708,4 +736,3 @@ def test_latest_forecast_api_keeps_pv_trace_visible_even_for_zero_pv_gti(
         "GTI PV-panelen [W/m2]",
     ]
     assert solar_fig["data"][1]["y"] == [0.0, 0.0, 0.0]
-

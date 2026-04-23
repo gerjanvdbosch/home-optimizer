@@ -49,7 +49,8 @@ Usage example
 >>> from home_optimizer.domain.heat_pump.cop import HeatPumpCOPModel, HeatPumpCOPParameters
 >>> import numpy as np
 >>> cop_params = HeatPumpCOPParameters(
-...     eta_carnot=0.45,
+...     eta_carnot_ufh=0.45,
+...     eta_carnot_dhw=0.40,
 ...     delta_T_cond=5.0,
 ...     delta_T_evap=5.0,
 ...     T_supply_min=25.0,
@@ -96,10 +97,10 @@ class HeatPumpCOPParameters:
 
     Parameters
     ----------
-    eta_carnot:
-        Carnot efficiency factor η_carnot [dimensionless].  Relates actual COP
-        to the theoretical Carnot maximum.  Typical air-source HP: 0.35–0.55.
-        Must be in (0, 1].
+    eta_carnot_ufh:
+        UFH-specific Carnot efficiency factor η_carnot_ufh [-].
+    eta_carnot_dhw:
+        DHW-specific Carnot efficiency factor η_carnot_dhw [-].
     delta_T_cond:
         Condensing approach temperature Δ_cond [K].  The refrigerant condenses
         at T_supply + Δ_cond.  Accounts for heat-exchanger imperfection.
@@ -132,7 +133,6 @@ class HeatPumpCOPParameters:
         errors.  Must be > cop_min.
     """
 
-    eta_carnot: float
     delta_T_cond: float
     delta_T_evap: float
     T_supply_min: float
@@ -140,10 +140,14 @@ class HeatPumpCOPParameters:
     heating_curve_slope: float
     cop_min: float
     cop_max: float
+    eta_carnot_ufh: float
+    eta_carnot_dhw: float
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.eta_carnot <= 1.0:
-            raise ValueError("eta_carnot must be in (0, 1].")
+        if not 0.0 < float(self.eta_carnot_ufh) <= 1.0:
+            raise ValueError("eta_carnot_ufh must be in (0, 1].")
+        if not 0.0 < float(self.eta_carnot_dhw) <= 1.0:
+            raise ValueError("eta_carnot_dhw must be in (0, 1].")
         for field_name in ("delta_T_cond", "delta_T_evap"):
             if getattr(self, field_name) < 0.0:
                 raise ValueError(f"{field_name} must be ≥ 0.")
@@ -186,6 +190,25 @@ class HeatPumpCOPModel:
 
     def __init__(self, params: HeatPumpCOPParameters) -> None:
         self.params = params
+
+    def _cop_from_temperatures_with_eta(
+        self,
+        *,
+        t_supply: np.ndarray | float,
+        t_out: np.ndarray | float,
+        eta_carnot: float,
+    ) -> np.ndarray:
+        """Compute COP from temperatures using an explicit mode-specific eta."""
+        p = self.params
+        t_supply_arr = np.asarray(t_supply, dtype=float)
+        t_out_arr = np.asarray(t_out, dtype=float)
+
+        t_cond_k = t_supply_arr + p.delta_T_cond + T_CELSIUS_TO_KELVIN
+        t_evap_k = t_out_arr - p.delta_T_evap + T_CELSIUS_TO_KELVIN
+        lift_k = np.maximum(t_cond_k - t_evap_k, _MIN_TEMP_LIFT_K)
+        cop_carnot = t_cond_k / lift_k
+        cop_actual = eta_carnot * cop_carnot
+        return np.clip(cop_actual, p.cop_min, p.cop_max)
 
     def heating_curve(self, t_out: np.ndarray) -> np.ndarray:
         """Compute the UFH supply temperature from the outdoor temperature.
@@ -239,21 +262,11 @@ class HeatPumpCOPModel:
             COP array [dimensionless], shape = broadcast(t_supply, t_out).
             Values are clipped to ``[cop_min, cop_max]``.
         """
-        p = self.params
-        t_supply_arr = np.asarray(t_supply, dtype=float)
-        t_out_arr = np.asarray(t_out, dtype=float)
-
-        # Convert to absolute temperatures [K] — uses named constant, not 273.15
-        t_cond_k = t_supply_arr + p.delta_T_cond + T_CELSIUS_TO_KELVIN
-        t_evap_k = t_out_arr - p.delta_T_evap + T_CELSIUS_TO_KELVIN
-
-        # Temperature lift [K]; floor at _MIN_TEMP_LIFT_K to prevent division by
-        # zero when T_cond ≈ T_evap (e.g., very warm outdoor in summer).
-        lift_k = np.maximum(t_cond_k - t_evap_k, _MIN_TEMP_LIFT_K)
-
-        cop_carnot = t_cond_k / lift_k
-        cop_actual = p.eta_carnot * cop_carnot
-        return np.clip(cop_actual, p.cop_min, p.cop_max)
+        return self._cop_from_temperatures_with_eta(
+            t_supply=t_supply,
+            t_out=t_out,
+            eta_carnot=self.params.eta_carnot_ufh,
+        )
 
     def cop_ufh(self, t_out: np.ndarray) -> np.ndarray:
         """Compute UFH COP over the forecast horizon.
@@ -277,7 +290,11 @@ class HeatPumpCOPModel:
         ``P_UFH_elec[k] = P_UFH[k] / cop_ufh[k]`` in its cost function (§14.1).
         """
         t_supply = self.heating_curve(np.asarray(t_out, dtype=float))
-        return self.cop_from_temperatures(t_supply, t_out)
+        return self._cop_from_temperatures_with_eta(
+            t_supply=t_supply,
+            t_out=t_out,
+            eta_carnot=self.params.eta_carnot_ufh,
+        )
 
     def cop_dhw(self, t_out: np.ndarray, t_dhw_supply: float) -> np.ndarray:
         """Compute DHW COP over the forecast horizon.
@@ -304,7 +321,11 @@ class HeatPumpCOPModel:
         than UFH at the same outdoor temperature because the higher target
         temperature (e.g., 55 °C vs. 35 °C) increases the temperature lift.
         """
-        return self.cop_from_temperatures(t_dhw_supply, np.asarray(t_out, dtype=float))
+        return self._cop_from_temperatures_with_eta(
+            t_supply=t_dhw_supply,
+            t_out=np.asarray(t_out, dtype=float),
+            eta_carnot=self.params.eta_carnot_dhw,
+        )
 
     def cop_from_measured_refrigerant(
         self,
@@ -365,5 +386,5 @@ class HeatPumpCOPModel:
         lift_k = np.maximum(t_cond_k - t_evap_k, _MIN_TEMP_LIFT_K)
 
         cop_carnot = t_cond_k / lift_k
-        cop_actual = p.eta_carnot * cop_carnot
+        cop_actual = p.eta_carnot_dhw * cop_carnot
         return np.clip(cop_actual, p.cop_min, p.cop_max)

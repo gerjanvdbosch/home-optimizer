@@ -191,7 +191,16 @@ class AddonOptions(BaseModel):
     mpc_R_c: float = Field(0.05, ge=0.0, description="Regularisation weight R_c")
     mpc_Q_N: float = Field(12.0, ge=0.0, description="Terminal comfort weight Q_N")
     mpc_P_hp_max_elec: float = Field(2.5, gt=0.0, description="Max HP electrical power [kW]")
-    mpc_eta_carnot: float = Field(0.45, ge=0.1, le=0.99, description="Carnot efficiency η [-]")
+    mpc_heat_pump_topology: str = Field(
+        "shared",
+        description="Heat-pump topology policy for periodic MPC: shared or exclusive.",
+    )
+    mpc_exclusive_heat_pump_mode: str | None = Field(
+        None,
+        description="Active mode when mpc_heat_pump_topology=exclusive: ufh or dhw.",
+    )
+    mpc_eta_carnot_ufh: float = Field(0.45, ge=0.1, le=0.99, description="UFH Carnot efficiency η_ufh [-]")
+    mpc_eta_carnot_dhw: float = Field(0.45, ge=0.1, le=0.99, description="DHW Carnot efficiency η_dhw [-]")
     mpc_delta_T_cond: float = Field(5.0, ge=0.0, le=15.0, description="Condensing approach ΔT [K]")
     mpc_delta_T_evap: float = Field(5.0, ge=0.0, le=15.0, description="Evaporating approach ΔT [K]")
     mpc_cop_min: float = Field(1.5, ge=1.01, le=5.0, description="COP lower bound [-]")
@@ -202,7 +211,8 @@ class AddonOptions(BaseModel):
     mpc_dhw_T_min: float = Field(30.0, description="Min DHW tap temperature [°C]")
     mpc_dhw_T_legionella: float = Field(60.0, description="Legionella target temperature [°C]")
     mpc_dhw_R_strat: float = Field(10.0, gt=0.0, description="DHW stratification resistance [K/kW]")
-    mpc_dhw_R_loss: float = Field(50.0, gt=0.0, description="DHW standby-loss resistance [K/kW]")
+    mpc_dhw_R_loss_top: float = Field(50.0, gt=0.0, description="Top-node DHW standby-loss resistance [K/kW]")
+    mpc_dhw_R_loss_bot: float = Field(50.0, gt=0.0, description="Bottom-node DHW standby-loss resistance [K/kW]")
 
     # ── Electricity price model ───────────────────────────────────────────
     price_mode: str = Field(
@@ -394,7 +404,106 @@ class AddonOptions(BaseModel):
                 "flush_interval_seconds must be an integer multiple of "
                 "sampling_interval_seconds."
             )
+        if self.mpc_heat_pump_topology not in {"shared", "exclusive"}:
+            raise ValueError("mpc_heat_pump_topology must be 'shared' or 'exclusive'.")
+        if self.mpc_heat_pump_topology == "shared":
+            if self.mpc_exclusive_heat_pump_mode is not None:
+                raise ValueError(
+                    "mpc_exclusive_heat_pump_mode must be omitted when mpc_heat_pump_topology='shared'."
+                )
+        elif self.mpc_exclusive_heat_pump_mode not in {"ufh", "dhw"}:
+            raise ValueError(
+                "mpc_exclusive_heat_pump_mode must be 'ufh' or 'dhw' when "
+                "mpc_heat_pump_topology='exclusive'."
+            )
         return self
+
+
+def _build_runtime_base_request(
+    opts: AddonOptions,
+    *,
+    defaults: "RunRequest | None" = None,
+) -> "RunRequest":
+    """Build the canonical runtime base request from validated addon options.
+
+    The returned request is the single source of truth for periodic MPC,
+    calibration replay, and API defaults served by the addon runtime.
+    """
+    from .application.optimizer import RunRequest  # noqa: PLC0415
+
+    runtime_defaults = defaults or RunRequest.model_validate({})
+    price_cfg = {
+        "mode": opts.price_mode,
+        "flat_rate_eur_per_kwh": opts.price_flat_rate,
+        "high_rate_eur_per_kwh": opts.price_high_rate,
+        "low_rate_eur_per_kwh": opts.price_low_rate,
+        "feed_in_rate_eur_per_kwh": opts.price_feed_in_rate,
+        "low_tariff_hours": opts.price_low_tariff_hours,
+        "nordpool_country_code": opts.nordpool_country_code,
+        "nordpool_vat_factor": opts.nordpool_vat_factor,
+    }
+    return runtime_defaults.model_copy(
+        update={
+            "C_r": opts.mpc_C_r,
+            "C_b": opts.mpc_C_b,
+            "R_br": opts.mpc_R_br,
+            "R_ro": opts.mpc_R_ro,
+            "alpha": opts.mpc_alpha,
+            "eta": opts.mpc_eta,
+            "A_glass": opts.mpc_A_glass,
+            "T_r_init": runtime_defaults.T_r_init,
+            "T_b_init": runtime_defaults.T_b_init,
+            "previous_power_kw": runtime_defaults.previous_power_kw,
+            "horizon_hours": opts.mpc_horizon_hours,
+            "dt_hours": opts.mpc_dt_hours,
+            "Q_c": opts.mpc_Q_c,
+            "R_c": opts.mpc_R_c,
+            "Q_N": opts.mpc_Q_N,
+            "P_max": opts.mpc_P_max,
+            "delta_P_max": opts.mpc_delta_P_max,
+            "T_min": opts.mpc_T_min,
+            "T_max": opts.mpc_T_max,
+            "T_ref": opts.mpc_T_ref,
+            "outdoor_temperature_c": runtime_defaults.outdoor_temperature_c,
+            "t_out_forecast": None,
+            "gti_window_forecast": None,
+            "gti_pv_forecast": None,
+            "price_config": price_cfg,
+            "internal_gains_kw": runtime_defaults.internal_gains_kw,
+            "internal_gains_heat_fraction": opts.internal_gains_heat_fraction,
+            "pv_enabled": runtime_defaults.pv_enabled,
+            "pv_peak_kw": runtime_defaults.pv_peak_kw,
+            "dhw_enabled": opts.mpc_dhw_enabled,
+            "dhw_C_top": opts.boiler_tank_liters * M3_PER_LITER * LAMBDA_WATER_KWH_PER_M3_K / 2.0,
+            "dhw_C_bot": opts.boiler_tank_liters * M3_PER_LITER * LAMBDA_WATER_KWH_PER_M3_K / 2.0,
+            "dhw_R_strat": opts.mpc_dhw_R_strat,
+            "dhw_R_loss_top": opts.mpc_dhw_R_loss_top,
+            "dhw_R_loss_bot": opts.mpc_dhw_R_loss_bot,
+            "dhw_lambda_water_kwh_per_m3k": LAMBDA_WATER_KWH_PER_M3_K,
+            "dhw_T_top_init": runtime_defaults.dhw_T_top_init,
+            "dhw_T_bot_init": runtime_defaults.dhw_T_bot_init,
+            "dhw_P_max": opts.mpc_dhw_P_max,
+            "dhw_delta_P_max": opts.mpc_dhw_delta_P_max,
+            "dhw_T_min": opts.mpc_dhw_T_min,
+            "dhw_T_legionella": opts.mpc_dhw_T_legionella,
+            "dhw_legionella_period_steps": runtime_defaults.dhw_legionella_period_steps,
+            "dhw_legionella_duration_steps": runtime_defaults.dhw_legionella_duration_steps,
+            "dhw_t_mains_c": runtime_defaults.dhw_t_mains_c,
+            "dhw_t_amb_c": runtime_defaults.dhw_t_amb_c,
+            "P_hp_max_elec": opts.mpc_P_hp_max_elec,
+            "heat_pump_topology": opts.mpc_heat_pump_topology,
+            "exclusive_heat_pump_mode": opts.mpc_exclusive_heat_pump_mode,
+            "eta_carnot_ufh": opts.mpc_eta_carnot_ufh,
+            "eta_carnot_dhw": opts.mpc_eta_carnot_dhw,
+            "delta_T_cond": opts.mpc_delta_T_cond,
+            "delta_T_evap": opts.mpc_delta_T_evap,
+            "T_supply_min": runtime_defaults.T_supply_min,
+            "T_ref_outdoor_curve": runtime_defaults.T_ref_outdoor_curve,
+            "heating_curve_slope": runtime_defaults.heating_curve_slope,
+            "cop_min": opts.mpc_cop_min,
+            "cop_max": opts.mpc_cop_max,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -620,76 +729,7 @@ def main() -> None:
     log.info("ForecastPersister started (hourly Open-Meteo updates)")
 
     # ── 4c. Build the shared baseline MPC/calibration input ───────────────
-    from .application.optimizer import RunRequest  # noqa: PLC0415
-
-    _defaults = RunRequest.model_validate({})
-    # price_cfg was already constructed above for the telemetry collector.
-    mpc_base_input = _defaults.model_copy(
-        update={
-            # ── UFH thermal model ───────────────────────────────────────────
-            "C_r": opts.mpc_C_r,
-            "C_b": opts.mpc_C_b,
-            "R_br": opts.mpc_R_br,
-            "R_ro": opts.mpc_R_ro,
-            "alpha": opts.mpc_alpha,
-            "eta": opts.mpc_eta,
-            "A_glass": opts.mpc_A_glass,
-            # ── UFH initial conditions (overridden by backend at each step) ─
-            "T_r_init": _defaults.T_r_init,
-            "T_b_init": _defaults.T_b_init,
-            "previous_power_kw": _defaults.previous_power_kw,
-            # ── MPC settings ─────────────────────────────────────────────────
-            "horizon_hours": opts.mpc_horizon_hours,
-            "dt_hours": opts.mpc_dt_hours,
-            "Q_c": opts.mpc_Q_c,
-            "R_c": opts.mpc_R_c,
-            "Q_N": opts.mpc_Q_N,
-            "P_max": opts.mpc_P_max,
-            "delta_P_max": opts.mpc_delta_P_max,
-            "T_min": opts.mpc_T_min,
-            "T_max": opts.mpc_T_max,
-            "T_ref": opts.mpc_T_ref,
-            # ── UFH disturbance forecast ─────────────────────────────────────
-            "outdoor_temperature_c": _defaults.outdoor_temperature_c,
-            "t_out_forecast": None,
-            "gti_window_forecast": None,
-            "gti_pv_forecast": None,
-            "price_config": price_cfg,
-            "internal_gains_kw": _defaults.internal_gains_kw,
-            "internal_gains_heat_fraction": opts.internal_gains_heat_fraction,
-            # ── PV ───────────────────────────────────────────────────────────
-            "pv_enabled": _defaults.pv_enabled,
-            "pv_peak_kw": _defaults.pv_peak_kw,
-            # ── DHW ──────────────────────────────────────────────────────────
-            "dhw_enabled": opts.mpc_dhw_enabled,
-            "dhw_C_top": opts.boiler_tank_liters * M3_PER_LITER * LAMBDA_WATER_KWH_PER_M3_K / 2.0,
-            "dhw_C_bot": opts.boiler_tank_liters * M3_PER_LITER * LAMBDA_WATER_KWH_PER_M3_K / 2.0,
-            "dhw_R_strat": opts.mpc_dhw_R_strat,
-            "dhw_R_loss": opts.mpc_dhw_R_loss,
-            "dhw_lambda_water_kwh_per_m3k": LAMBDA_WATER_KWH_PER_M3_K,
-            "dhw_T_top_init": _defaults.dhw_T_top_init,
-            "dhw_T_bot_init": _defaults.dhw_T_bot_init,
-            "dhw_P_max": opts.mpc_dhw_P_max,
-            "dhw_delta_P_max": opts.mpc_dhw_delta_P_max,
-            "dhw_T_min": opts.mpc_dhw_T_min,
-            "dhw_T_legionella": opts.mpc_dhw_T_legionella,
-            "dhw_legionella_period_steps": _defaults.dhw_legionella_period_steps,
-            "dhw_legionella_duration_steps": _defaults.dhw_legionella_duration_steps,
-            "dhw_t_mains_c": _defaults.dhw_t_mains_c,
-            "dhw_t_amb_c": _defaults.dhw_t_amb_c,
-            # ── Shared WP electrical budget ──────────────────────────────────
-            "P_hp_max_elec": opts.mpc_P_hp_max_elec,
-            # ── Carnot COP model ─────────────────────────────────────────────
-            "eta_carnot": opts.mpc_eta_carnot,
-            "delta_T_cond": opts.mpc_delta_T_cond,
-            "delta_T_evap": opts.mpc_delta_T_evap,
-            "T_supply_min": _defaults.T_supply_min,
-            "T_ref_outdoor_curve": _defaults.T_ref_outdoor_curve,
-            "heating_curve_slope": _defaults.heating_curve_slope,
-            "cop_min": opts.mpc_cop_min,
-            "cop_max": opts.mpc_cop_max,
-        }
-    )
+    mpc_base_input = _build_runtime_base_request(opts)
     api_service.set_base_request(mpc_base_input)
 
     # ── 4d. Start nightly persisted ML forecast-model training (optional) ──

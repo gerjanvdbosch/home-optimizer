@@ -82,7 +82,8 @@ def _build_cop_cli_result(dataset: COPCalibrationDataset) -> COPCalibrationResul
     """Return a deterministic COP fit result for CLI assertions."""
     return COPCalibrationResult(
         fitted_parameters=HeatPumpCOPParameters(
-            eta_carnot=0.47,
+            eta_carnot_ufh=0.47,
+            eta_carnot_dhw=0.49,
             delta_T_cond=5.0,
             delta_T_evap=5.0,
             T_supply_min=27.5,
@@ -235,5 +236,4 @@ def test_calibration_cli_cop_diagnostics_json_reports_rejection_counts(
         ["actual_cop_span", 1],
         ["sample_count", 1],
     ]
-
 

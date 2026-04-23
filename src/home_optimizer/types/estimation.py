@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .constants import DEFAULT_NUMERICAL_VALIDATION_CONFIG
+
 
 @dataclass(frozen=True, slots=True)
 class KalmanNoiseParameters:
@@ -13,6 +15,7 @@ class KalmanNoiseParameters:
 
     process_covariance: np.ndarray
     measurement_variance: float
+    covariance_psd_tolerance: float = DEFAULT_NUMERICAL_VALIDATION_CONFIG.covariance_psd_tolerance
 
     def __post_init__(self) -> None:
         q = np.asarray(self.process_covariance, dtype=float)
@@ -22,7 +25,7 @@ class KalmanNoiseParameters:
             raise ValueError("process_covariance must be 2×2 or a length-2 diagonal.")
         if not np.allclose(q, q.T):
             raise ValueError("process_covariance must be symmetric.")
-        if np.min(np.linalg.eigvalsh(q)) < -1e-10:
+        if np.min(np.linalg.eigvalsh(q)) < -self.covariance_psd_tolerance:
             raise ValueError("process_covariance must be positive semi-definite.")
         if self.measurement_variance <= 0.0:
             raise ValueError("measurement_variance must be strictly positive.")
@@ -37,6 +40,7 @@ class EKFNoiseParameters:
     process_var_vtap: float
     measurement_var_t_top: float
     measurement_var_t_bot: float
+    covariance_psd_tolerance: float = DEFAULT_NUMERICAL_VALIDATION_CONFIG.covariance_psd_tolerance
 
     def __post_init__(self) -> None:
         q = np.asarray(self.process_cov_temperatures, dtype=float)
@@ -46,7 +50,7 @@ class EKFNoiseParameters:
             raise ValueError("process_cov_temperatures must be 2×2 or a length-2 diagonal.")
         if not np.allclose(q, q.T):
             raise ValueError("process_cov_temperatures must be symmetric.")
-        if np.min(np.linalg.eigvalsh(q)) < -1e-10:
+        if np.min(np.linalg.eigvalsh(q)) < -self.covariance_psd_tolerance:
             raise ValueError("process_cov_temperatures must be positive semi-definite.")
         if self.process_var_vtap <= 0.0:
             raise ValueError("process_var_vtap must be strictly positive.")
@@ -71,4 +75,3 @@ class EKFNoiseParameters:
 
 
 __all__ = ["EKFNoiseParameters", "KalmanNoiseParameters"]
-

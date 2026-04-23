@@ -754,7 +754,8 @@ def main() -> None:
         print(f"Raw segments         : {dataset.raw_segment_count}")
         print(f"Dropped segments     : {dataset.dropped_segment_count}")
         print(f"Window               : {dataset.start_utc.isoformat()} -> {dataset.end_utc.isoformat()}")
-        print(f"eta_carnot           : {result.fitted_parameters.eta_carnot:.6f} [-]")
+        print(f"eta_carnot_ufh       : {result.fitted_parameters.eta_carnot_ufh:.6f} [-]")
+        print(f"eta_carnot_dhw       : {result.fitted_parameters.eta_carnot_dhw:.6f} [-]")
         print(f"T_supply_min         : {result.fitted_parameters.T_supply_min:.6f} °C")
         print(f"T_ref_outdoor        : {result.fitted_parameters.T_ref_outdoor:.6f} °C")
         print(f"heating_curve_slope  : {result.fitted_parameters.heating_curve_slope:.6f} K/K")
@@ -829,4 +830,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

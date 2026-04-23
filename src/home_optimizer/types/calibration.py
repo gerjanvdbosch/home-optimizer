@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CalibrationParameterOverrides(BaseModel):
@@ -37,7 +37,16 @@ class CalibrationParameterOverrides(BaseModel):
     dhw_C_top: float | None = Field(default=None, gt=0.0, description="DHW top-layer thermal capacity C_top [kWh/K]")
     dhw_C_bot: float | None = Field(default=None, gt=0.0, description="DHW bottom-layer thermal capacity C_bot [kWh/K]")
     dhw_R_strat: float | None = Field(default=None, gt=0.0, description="DHW stratification resistance R_strat [K/kW]")
-    dhw_R_loss: float | None = Field(default=None, gt=0.0, description="DHW standby-loss resistance R_loss [K/kW]")
+    dhw_R_loss_top: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Top-node DHW standby-loss resistance R_loss_top [K/kW]",
+    )
+    dhw_R_loss_bot: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Bottom-node DHW standby-loss resistance R_loss_bot [K/kW]",
+    )
     dhw_top_temperature_bias_c: float | None = Field(
         default=None,
         description="Additive DHW top-temperature sensor bias correction [°C]",
@@ -50,13 +59,30 @@ class CalibrationParameterOverrides(BaseModel):
         default=None,
         description="Additive DHW boiler-ambient sensor bias correction [°C]",
     )
-    eta_carnot: float | None = Field(default=None, gt=0.0, le=1.0, description="Shared Carnot efficiency eta_carnot [-]")
+    eta_carnot_ufh: float | None = Field(default=None, gt=0.0, le=1.0, description="UFH Carnot efficiency eta_carnot_ufh [-]")
+    eta_carnot_dhw: float | None = Field(default=None, gt=0.0, le=1.0, description="DHW Carnot efficiency eta_carnot_dhw [-]")
     T_supply_min: float | None = Field(default=None, description="UFH minimum supply temperature T_supply_min [°C]")
     T_ref_outdoor_curve: float | None = Field(
         default=None,
         description="UFH heating-curve balance-point outdoor temperature T_ref_outdoor [°C]",
     )
     heating_curve_slope: float | None = Field(default=None, ge=0.0, description="UFH heating-curve slope [K/K]")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, value: Any) -> Any:
+        """Map legacy persisted shared fields onto the current split runtime schema."""
+        if not isinstance(value, dict):
+            return value
+        legacy_eta = value.pop("eta_carnot", None)
+        if legacy_eta is not None:
+            value.setdefault("eta_carnot_ufh", legacy_eta)
+            value.setdefault("eta_carnot_dhw", legacy_eta)
+        legacy_r_loss = value.pop("dhw_R_loss", None)
+        if legacy_r_loss is not None:
+            value.setdefault("dhw_R_loss_top", legacy_r_loss)
+            value.setdefault("dhw_R_loss_bot", legacy_r_loss)
+        return value
 
     def as_run_request_updates(self) -> dict[str, float]:
         """Return only the non-null fields as ``RunRequest.model_copy`` updates."""
@@ -107,4 +133,3 @@ __all__ = [
     "CalibrationSnapshotPayload",
     "CalibrationStageResult",
 ]
-

@@ -55,7 +55,8 @@ def test_optimizer_pipeline_builds_cop_model_from_request_parameters() -> None:
     """Pipeline COP construction must preserve the calibrated Carnot parameter tuple."""
     request = RunRequest.model_validate(
         {
-            "eta_carnot": 0.41,
+            "eta_carnot_ufh": 0.41,
+            "eta_carnot_dhw": 0.38,
             "delta_T_cond": 4.0,
             "delta_T_evap": 6.0,
             "T_supply_min": 29.0,
@@ -69,7 +70,8 @@ def test_optimizer_pipeline_builds_cop_model_from_request_parameters() -> None:
     model = OptimizerPipeline.build_cop_model(request)
 
     assert model.params == HeatPumpCOPParameters(
-        eta_carnot=0.41,
+        eta_carnot_ufh=0.41,
+        eta_carnot_dhw=0.38,
         delta_T_cond=4.0,
         delta_T_evap=6.0,
         T_supply_min=29.0,

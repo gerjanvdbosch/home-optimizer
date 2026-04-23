@@ -1109,7 +1109,8 @@ def build_automatic_calibration_snapshot(
                 automatic_settings=settings,
             )
             overrides = CalibrationParameterOverrides(
-                dhw_R_loss=result.suggested_r_loss_k_per_kw,
+                dhw_R_loss_top=result.suggested_r_loss_k_per_kw,
+                dhw_R_loss_bot=result.suggested_r_loss_k_per_kw,
                 dhw_boiler_ambient_bias_c=(
                     getattr(result, "fitted_ambient_temperature_bias_c")
                     if bool(getattr(result, "fit_ambient_temperature_bias", False))
@@ -1153,7 +1154,8 @@ def build_automatic_calibration_snapshot(
                 C_top=effective_request.dhw_C_top,
                 C_bot=effective_request.dhw_C_bot,
                 R_strat=effective_request.dhw_R_strat,
-                R_loss=effective_request.dhw_R_loss,
+                R_loss_top=effective_request.dhw_R_loss_top,
+                R_loss_bot=effective_request.dhw_R_loss_bot,
             )
             dhw_active_settings = build_dhw_active_calibration_settings(
                 reference_parameters=dhw_reference_parameters,
@@ -1233,7 +1235,8 @@ def build_automatic_calibration_snapshot(
             ),
         )
         overrides = CalibrationParameterOverrides(
-            eta_carnot=result.fitted_parameters.eta_carnot,
+            eta_carnot_ufh=result.fitted_parameters.eta_carnot_ufh,
+            eta_carnot_dhw=result.fitted_parameters.eta_carnot_dhw,
             T_supply_min=result.fitted_parameters.T_supply_min,
             T_ref_outdoor_curve=result.fitted_parameters.T_ref_outdoor,
             heating_curve_slope=result.fitted_parameters.heating_curve_slope,
@@ -1285,5 +1288,3 @@ def run_and_persist_automatic_calibration(
         return None
     repository.add_calibration_snapshot(payload)
     return payload
-
-

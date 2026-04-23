@@ -134,6 +134,7 @@ class SharedHeatPumpConfig:
     cop_max: float
     hp_max_electrical_power_kw: float
     topology: str = "shared"
+    exclusive_active_mode: str | None = None
 
 
 def build_combined_mpc_parameters(
@@ -150,6 +151,7 @@ def build_combined_mpc_parameters(
         dhw=dhw_control.to_mpc_parameters(cop_dhw=cop_dhw, cop_max=shared_heat_pump.cop_max),
         P_hp_max_elec=shared_heat_pump.hp_max_electrical_power_kw,
         heat_pump_topology=shared_heat_pump.topology,
+        exclusive_active_mode=shared_heat_pump.exclusive_active_mode,
     )
 
 

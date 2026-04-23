@@ -27,7 +27,8 @@ from home_optimizer.types import (
 
 #: Physical Carnot COP parameters representative of a Dutch ASHP installation.
 COP_PARAMS = HeatPumpCOPParameters(
-    eta_carnot=0.45,
+    eta_carnot_ufh=0.45,
+    eta_carnot_dhw=0.42,
     delta_T_cond=5.0,
     delta_T_evap=5.0,
     T_supply_min=28.0,

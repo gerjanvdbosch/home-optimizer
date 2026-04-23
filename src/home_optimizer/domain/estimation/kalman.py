@@ -28,6 +28,7 @@ import numpy as np
 
 from ..dhw.model import DHWModel, MEASUREMENT_MATRIX_DHW
 from ..ufh.model import MEASUREMENT_MATRIX, ThermalModel
+from ...types.constants import DEFAULT_NUMERICAL_VALIDATION_CONFIG
 from ...types.estimation import EKFNoiseParameters, KalmanNoiseParameters
 
 STATE_DIMENSION: Final[int] = 2
@@ -53,6 +54,7 @@ def _validate_square_covariance(
     covariance: np.ndarray,
     shape: tuple[int, int],
     positive_semidefinite: bool = True,
+    covariance_psd_tolerance: float = DEFAULT_NUMERICAL_VALIDATION_CONFIG.covariance_psd_tolerance,
 ) -> np.ndarray:
     """Validate a covariance matrix shape, symmetry and definiteness assumptions.
 
@@ -71,7 +73,7 @@ def _validate_square_covariance(
     if not np.allclose(covariance_arr, covariance_arr.T):
         raise ValueError(f"{name} must be symmetric.")
     covariance_arr = _symmetrise_matrix(covariance_arr)
-    if positive_semidefinite and np.min(np.linalg.eigvalsh(covariance_arr)) < -1e-10:
+    if positive_semidefinite and np.min(np.linalg.eigvalsh(covariance_arr)) < -covariance_psd_tolerance:
         raise ValueError(f"{name} must be positive semi-definite.")
     return covariance_arr
 

@@ -389,8 +389,12 @@
     <div class="panel">
       <div class="panel-title">Warmtepomp &mdash; COP model (Carnot + stooklijn)</div>
       <div class="field">
-        <label>&eta;<sub>Carnot</sub> [-] <span id="vEtaCarnot">0.45</span></label>
-        <input type="number" id="eta_carnot" value="0.45" min="0.1" max="0.99" step="0.01" oninput="upd('vEtaCarnot', this.value)" />
+        <label>&eta;<sub>Carnot,UFH</sub> [-] <span id="vEtaCarnotUfh">0.45</span></label>
+        <input type="number" id="eta_carnot_ufh" value="0.45" min="0.1" max="0.99" step="0.01" oninput="upd('vEtaCarnotUfh', this.value)" />
+      </div>
+      <div class="field">
+        <label>&eta;<sub>Carnot,DHW</sub> [-] <span id="vEtaCarnotDhw">0.45</span></label>
+        <input type="number" id="eta_carnot_dhw" value="0.45" min="0.1" max="0.99" step="0.01" oninput="upd('vEtaCarnotDhw', this.value)" />
       </div>
       <div class="field">
         <label>&Delta;T_cond [K] <span id="vDTcond">5.0</span></label>
@@ -438,8 +442,12 @@
         <input type="number" id="dhw_R_strat" value="10.0" min="1" max="100" step="1" oninput="upd('vDhwRstrat', this.value)" />
       </div>
       <div class="field">
-        <label>R_loss [K/kW] <span id="vDhwRloss">50.0</span></label>
-        <input type="number" id="dhw_R_loss" value="50.0" min="5" max="200" step="1" oninput="upd('vDhwRloss', this.value)" />
+        <label>R_loss,top [K/kW] <span id="vDhwRlossTop">50.0</span></label>
+        <input type="number" id="dhw_R_loss_top" value="50.0" min="5" max="200" step="1" oninput="upd('vDhwRlossTop', this.value)" />
+      </div>
+      <div class="field">
+        <label>R_loss,bot [K/kW] <span id="vDhwRlossBot">50.0</span></label>
+        <input type="number" id="dhw_R_loss_bot" value="50.0" min="5" max="200" step="1" oninput="upd('vDhwRlossBot', this.value)" />
       </div>
       <div class="field">
         <label>T_top init [&deg;C] <span id="vDhwTtop">55.0</span></label>
@@ -488,6 +496,20 @@
       <div class="field">
         <label>P_HP,max <strong>elektrisch</strong> [kW] <span id="vPhpMaxElec">2.5</span></label>
         <input type="number" id="P_hp_max_elec" value="2.5" min="0.5" max="30" step="0.5" oninput="upd('vPhpMaxElec', this.value)" />
+      </div>
+      <div class="field">
+        <label>Warmtepomptopologie</label>
+        <select id="heat_pump_topology" style="width:100%;padding:.38rem .5rem;border:1px solid #d8dde3;border-radius:4px;font-size:.82rem;">
+          <option value="shared">shared</option>
+          <option value="exclusive">exclusive</option>
+        </select>
+      </div>
+      <div class="field hidden" id="exclusive-mode-field">
+        <label>Actieve exclusieve modus</label>
+        <select id="exclusive_heat_pump_mode" style="width:100%;padding:.38rem .5rem;border:1px solid #d8dde3;border-radius:4px;font-size:.82rem;">
+          <option value="ufh">ufh</option>
+          <option value="dhw">dhw</option>
+        </select>
       </div>
     </div>
 
@@ -583,7 +605,8 @@
     price_feed_in_rate: 'vFeedIn',
     nordpool_vat_factor: 'vVat',
     pv_peak_kw: 'vPvPeak',
-    eta_carnot: 'vEtaCarnot',
+    eta_carnot_ufh: 'vEtaCarnotUfh',
+    eta_carnot_dhw: 'vEtaCarnotDhw',
     delta_T_cond: 'vDTcond',
     delta_T_evap: 'vDTevap',
     T_supply_min: 'vTsupMin',
@@ -594,7 +617,8 @@
     dhw_C_top: 'vDhwCtop',
     dhw_C_bot: 'vDhwCbot',
     dhw_R_strat: 'vDhwRstrat',
-    dhw_R_loss: 'vDhwRloss',
+    dhw_R_loss_top: 'vDhwRlossTop',
+    dhw_R_loss_bot: 'vDhwRlossBot',
     dhw_T_top_init: 'vDhwTtop',
     dhw_T_bot_init: 'vDhwTbot',
     dhw_P_max: 'vDhwPmax',
@@ -658,15 +682,18 @@
 
   function syncVisibility() {
     const mode = document.getElementById('price_mode').value;
+    const heatPumpTopology = document.getElementById('heat_pump_topology').value;
     setVisible('flat_rate_field',  mode === 'flat');
     setVisible('dual_fields',      mode === 'dual');
     setVisible('nordpool_fields',  mode === 'nordpool');
     setVisible('dhw-settings',     document.getElementById('dhw_enabled').checked);
     setVisible('dhw-chart-card',   document.getElementById('dhw_enabled').checked);
+    setVisible('exclusive-mode-field', heatPumpTopology === 'exclusive');
   }
 
   document.getElementById('price_mode').addEventListener('change', syncVisibility);
   document.getElementById('dhw_enabled').addEventListener('change', syncVisibility);
+  document.getElementById('heat_pump_topology').addEventListener('change', syncVisibility);
 
   function getReq() {
     const n = (id) => parseFloat(document.getElementById(id).value);
@@ -701,7 +728,9 @@
       pv_enabled: b('pv_enabled'), pv_peak_kw: n('pv_peak_kw'),
       dhw_enabled: b('dhw_enabled'),
       dhw_C_top: n('dhw_C_top'), dhw_C_bot: n('dhw_C_bot'),
-      dhw_R_strat: n('dhw_R_strat'), dhw_R_loss: n('dhw_R_loss'),
+      dhw_R_strat: n('dhw_R_strat'),
+      dhw_R_loss_top: n('dhw_R_loss_top'),
+      dhw_R_loss_bot: n('dhw_R_loss_bot'),
       dhw_T_top_init: n('dhw_T_top_init'), dhw_T_bot_init: n('dhw_T_bot_init'),
       dhw_P_max: n('dhw_P_max'), dhw_delta_P_max: n('dhw_delta_P_max'),
       dhw_T_min: n('dhw_T_min'), dhw_T_legionella: n('dhw_T_legionella'),
@@ -712,7 +741,10 @@
       dhw_v_tap_forecast: Array(i('horizon_hours')).fill(n('dhw_v_tap_sim')),
       dhw_t_mains_c: n('dhw_t_mains_c'), dhw_t_amb_c: n('dhw_t_amb_c'),
       P_hp_max_elec: n('P_hp_max_elec'),
-      eta_carnot: n('eta_carnot'),
+      heat_pump_topology: s('heat_pump_topology'),
+      exclusive_heat_pump_mode: s('heat_pump_topology') === 'exclusive' ? s('exclusive_heat_pump_mode') : null,
+      eta_carnot_ufh: n('eta_carnot_ufh'),
+      eta_carnot_dhw: n('eta_carnot_dhw'),
       delta_T_cond: n('delta_T_cond'), delta_T_evap: n('delta_T_evap'),
       T_supply_min: n('T_supply_min'),
       T_ref_outdoor_curve: n('T_ref_outdoor_curve'),
@@ -824,4 +856,3 @@
 </script>
 </body>
 </html>
-

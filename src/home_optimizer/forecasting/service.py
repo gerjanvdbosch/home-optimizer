@@ -195,7 +195,8 @@ class DHWTapForecastProvider(ForecastProvider):
 
         c_top_raw = current_overrides.get("dhw_C_top", request_data.get("dhw_C_top"))
         c_bot_raw = current_overrides.get("dhw_C_bot", request_data.get("dhw_C_bot"))
-        r_loss_raw = current_overrides.get("dhw_R_loss", request_data.get("dhw_R_loss"))
+        r_loss_top_raw = current_overrides.get("dhw_R_loss_top", request_data.get("dhw_R_loss_top"))
+        r_loss_bot_raw = current_overrides.get("dhw_R_loss_bot", request_data.get("dhw_R_loss_bot"))
         lambda_raw = current_overrides.get(
             "dhw_lambda_water_kwh_per_m3k",
             request_data.get("dhw_lambda_water_kwh_per_m3k"),
@@ -215,7 +216,8 @@ class DHWTapForecastProvider(ForecastProvider):
         for field_name, raw_value in (
             ("dhw_C_top", c_top_raw),
             ("dhw_C_bot", c_bot_raw),
-            ("dhw_R_loss", r_loss_raw),
+            ("dhw_R_loss_top", r_loss_top_raw),
+            ("dhw_R_loss_bot", r_loss_bot_raw),
             ("dhw_lambda_water_kwh_per_m3k", lambda_raw),
             ("dhw_top_temperature_bias_c", top_bias_raw),
             ("dhw_bottom_temperature_bias_c", bottom_bias_raw),
@@ -231,12 +233,15 @@ class DHWTapForecastProvider(ForecastProvider):
                 raise ValueError("weather_rows must expose datetime valid_at_utc values for DHW tap forecasting.")
             horizon_valid_at_utc.append(valid_at_utc)
 
+        r_loss_k_per_kw = 0.5 * (
+            float(cast(int | float, r_loss_top_raw)) + float(cast(int | float, r_loss_bot_raw))
+        )
         predicted = self._forecaster.predict_from_repository(
             repository=repository,
             horizon_valid_at_utc=horizon_valid_at_utc,
             c_top_kwh_per_k=float(cast(int | float, c_top_raw)),
             c_bot_kwh_per_k=float(cast(int | float, c_bot_raw)),
-            r_loss_k_per_kw=float(cast(int | float, r_loss_raw)),
+            r_loss_k_per_kw=r_loss_k_per_kw,
             lambda_water_kwh_per_m3_k=float(cast(int | float, lambda_raw)),
             top_temperature_bias_c=float(cast(int | float, top_bias_raw)),
             bottom_temperature_bias_c=float(cast(int | float, bottom_bias_raw)),
@@ -273,9 +278,14 @@ class DHWTapForecastProvider(ForecastProvider):
             calibration_value=None if effective_parameters is None else effective_parameters.dhw_C_bot,
             base_request_data=base_request_data,
         )
-        r_loss = self._resolve_numeric_field(
-            field_name="dhw_R_loss",
-            calibration_value=None if effective_parameters is None else effective_parameters.dhw_R_loss,
+        r_loss_top = self._resolve_numeric_field(
+            field_name="dhw_R_loss_top",
+            calibration_value=None if effective_parameters is None else effective_parameters.dhw_R_loss_top,
+            base_request_data=base_request_data,
+        )
+        r_loss_bot = self._resolve_numeric_field(
+            field_name="dhw_R_loss_bot",
+            calibration_value=None if effective_parameters is None else effective_parameters.dhw_R_loss_bot,
             base_request_data=base_request_data,
         )
         lambda_water = self._resolve_numeric_field(
@@ -301,7 +311,8 @@ class DHWTapForecastProvider(ForecastProvider):
         if (
             c_top is None
             or c_bot is None
-            or r_loss is None
+            or r_loss_top is None
+            or r_loss_bot is None
             or lambda_water is None
             or top_bias is None
             or bottom_bias is None
@@ -309,7 +320,8 @@ class DHWTapForecastProvider(ForecastProvider):
         ):
             log.info(
                 "Skipping DHW tap-profile training: the effective DHW runtime tuple is incomplete. "
-                "Provide base_request_data and/or calibration overrides for dhw_C_top, dhw_C_bot, dhw_R_loss, "
+                "Provide base_request_data and/or calibration overrides for dhw_C_top, dhw_C_bot, "
+                "dhw_R_loss_top, dhw_R_loss_bot, "
                 "dhw_lambda_water_kwh_per_m3k, dhw_top_temperature_bias_c, dhw_bottom_temperature_bias_c, "
                 "and dhw_boiler_ambient_bias_c."
             )
@@ -319,7 +331,7 @@ class DHWTapForecastProvider(ForecastProvider):
             repository=repository,
             c_top_kwh_per_k=float(c_top),
             c_bot_kwh_per_k=float(c_bot),
-            r_loss_k_per_kw=float(r_loss),
+            r_loss_k_per_kw=0.5 * (float(r_loss_top) + float(r_loss_bot)),
             lambda_water_kwh_per_m3_k=float(lambda_water),
             top_temperature_bias_c=float(top_bias),
             bottom_temperature_bias_c=float(bottom_bias),
@@ -395,4 +407,3 @@ class ForecastService:
             field_name: provider.train_and_persist(repository=repository, base_request_data=base_request_data)
             for field_name, provider in self._providers
         }
-

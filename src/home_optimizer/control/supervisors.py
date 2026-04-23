@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from ..types.control import DHWMPCParameters, MPCParameters
 
@@ -27,6 +28,27 @@ class HeatPumpTopologySupervisor:
     dhw_parameters: DHWMPCParameters | None
     shared_hp_max_elec_kw: float
     heat_pump_topology: str = "shared"
+    exclusive_active_mode: Literal["ufh", "dhw"] | None = None
+
+    def _ufh_available_power_kw(self) -> float:
+        if self.heat_pump_topology == "shared":
+            return self.ufh_parameters.P_max
+        if self.heat_pump_topology != "exclusive":
+            raise ValueError(f"Unsupported heat-pump topology: {self.heat_pump_topology}.")
+        if self.exclusive_active_mode == "ufh":
+            return self.ufh_parameters.P_max
+        return 0.0
+
+    def _dhw_available_power_kw(self) -> float:
+        if self.dhw_parameters is None:
+            return 0.0
+        if self.heat_pump_topology == "shared":
+            return self.dhw_parameters.P_dhw_max
+        if self.heat_pump_topology != "exclusive":
+            raise ValueError(f"Unsupported heat-pump topology: {self.heat_pump_topology}.")
+        if self.exclusive_active_mode == "dhw":
+            return self.dhw_parameters.P_dhw_max
+        return 0.0
 
     def apply_step_constraints(
         self,
@@ -41,13 +63,14 @@ class HeatPumpTopologySupervisor:
     ) -> None:
         """Append per-step actuator and shared electrical constraints."""
         topology = self.heat_pump_topology
+        ufh_available_power_kw = self._ufh_available_power_kw()
         constraints.extend(
             [
                 u_ufh[step_index] >= 0.0,
-                u_ufh[step_index] <= self.ufh_parameters.P_max,
+                u_ufh[step_index] <= ufh_available_power_kw,
             ]
         )
-        if not (topology == "exclusive_dhw" and step_index == 0):
+        if not (topology == "exclusive" and ufh_available_power_kw == 0.0 and step_index == 0):
             constraints.append(
                 cp.abs(u_ufh[step_index] - previous_u_ufh) <= self.ufh_parameters.delta_P_max
             )
@@ -60,20 +83,16 @@ class HeatPumpTopologySupervisor:
         constraints.extend(
             [
                 u_dhw[step_index] >= 0.0,
-                u_dhw[step_index] <= self.dhw_parameters.P_dhw_max,
+                u_dhw[step_index] <= self._dhw_available_power_kw(),
             ]
         )
-        if not (topology == "exclusive_ufh" and step_index == 0):
+        if not (topology == "exclusive" and self._dhw_available_power_kw() == 0.0 and step_index == 0):
             constraints.append(
                 cp.abs(u_dhw[step_index] - previous_u_dhw) <= self.dhw_parameters.delta_P_dhw_max
             )
         if topology == "shared":
             constraints.append(total_electrical_power_kw <= self.shared_hp_max_elec_kw)
-        elif topology == "exclusive_ufh":
-            constraints.append(u_dhw[step_index] == 0.0)
-        elif topology == "exclusive_dhw":
-            constraints.append(u_ufh[step_index] == 0.0)
-        else:
+        elif topology != "exclusive":
             raise ValueError(f"Unsupported heat-pump topology: {topology}.")
 
 

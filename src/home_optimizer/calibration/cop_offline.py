@@ -6,7 +6,8 @@ identifiable from the currently persisted telemetry:
 * ``T_supply_min`` [°C] — UFH heating-curve intercept
 * ``T_ref_outdoor`` [°C] — UFH heating-curve balance-point / breakpoint
 * ``heating_curve_slope`` [K/K] — UFH heating-curve slope
-* ``eta_carnot`` [-] — shared Carnot efficiency factor
+* ``eta_carnot_ufh`` [-] — UFH Carnot efficiency factor
+* ``eta_carnot_dhw`` [-] — DHW Carnot efficiency factor
 
 The remaining COP-model parameters stay fixed in this stage:
 
@@ -26,7 +27,7 @@ The current telemetry can reliably tell us:
 * the commanded/target hydraulic supply temperature [°C]
 
 That is sufficient to fit the UFH heating-curve shape against target-supply
-telemetry and then fit one shared Carnot efficiency factor against measured
+telemetry and then fit separate UFH/DHW Carnot efficiency factors against measured
 energy use.  It is *not* sufficient to robustly identify all approach
 temperatures and per-mode efficiencies simultaneously without strong collinearity.
 
@@ -370,14 +371,16 @@ def _predicted_supply_temperature_c(
 def _build_cop_parameters(
     settings: COPCalibrationSettings,
     *,
-    eta_carnot: float,
+    eta_carnot_ufh: float,
+    eta_carnot_dhw: float,
     t_supply_min_c: float,
     t_ref_outdoor_c: float,
     heating_curve_slope: float,
 ) -> HeatPumpCOPParameters:
     """Construct the calibrated COP-parameter object with fixed approach terms."""
     return HeatPumpCOPParameters(
-        eta_carnot=eta_carnot,
+        eta_carnot_ufh=eta_carnot_ufh,
+        eta_carnot_dhw=eta_carnot_dhw,
         delta_T_cond=settings.delta_t_cond_k,
         delta_T_evap=settings.delta_t_evap_k,
         T_supply_min=t_supply_min_c,
@@ -388,15 +391,17 @@ def _build_cop_parameters(
     )
 
 
-def _fit_eta_carnot(
+def _fit_eta_carnot_for_mask(
     arrays: _CalibrationArrays,
     settings: COPCalibrationSettings,
     *,
+    mode_mask: np.ndarray,
+    eta_label: str,
     t_supply_min_c: float,
     t_ref_outdoor_c: float,
     heating_curve_slope: float,
 ) -> _EtaFit:
-    """Fit the shared Carnot efficiency factor against measured electrical energy."""
+    """Fit one mode-specific Carnot efficiency factor against measured electrical energy."""
     predicted_supply_c = _predicted_supply_temperature_c(
         arrays,
         settings,
@@ -404,11 +409,15 @@ def _fit_eta_carnot(
         t_ref_outdoor_c=t_ref_outdoor_c,
         heating_curve_slope=heating_curve_slope,
     )
-    weights = _normalised_energy_weights(arrays.thermal_energy_kwh)
-    actual_cop = arrays.thermal_energy_kwh / arrays.electric_energy_kwh
+    predicted_supply_mode_c = predicted_supply_c[mode_mask]
+    outdoor_mode_c = arrays.outdoor_temperature_mean_c[mode_mask]
+    thermal_mode_kwh = arrays.thermal_energy_kwh[mode_mask]
+    electric_mode_kwh = arrays.electric_energy_kwh[mode_mask]
+    weights = _normalised_energy_weights(thermal_mode_kwh)
+    actual_cop = thermal_mode_kwh / electric_mode_kwh
     ideal_carnot_cop = _ideal_carnot_cop(
-        t_supply_c=predicted_supply_c,
-        t_out_c=arrays.outdoor_temperature_mean_c,
+        t_supply_c=predicted_supply_mode_c,
+        t_out_c=outdoor_mode_c,
         settings=settings,
     )
     initial_eta_carnot = _initial_eta_carnot_guess(
@@ -420,21 +429,24 @@ def _fit_eta_carnot(
 
     def residuals(theta: np.ndarray) -> np.ndarray:
         eta_carnot = float(theta[0])
-        params = _build_cop_parameters(
-            settings,
+        model = HeatPumpCOPModel(
+            _build_cop_parameters(
+                settings,
+                eta_carnot_ufh=eta_carnot,
+                eta_carnot_dhw=eta_carnot,
+                t_supply_min_c=t_supply_min_c,
+                t_ref_outdoor_c=t_ref_outdoor_c,
+                heating_curve_slope=heating_curve_slope,
+            )
+        )
+        predicted_cop = model._cop_from_temperatures_with_eta(
+            t_supply=predicted_supply_mode_c,
+            t_out=outdoor_mode_c,
             eta_carnot=eta_carnot,
-            t_supply_min_c=t_supply_min_c,
-            t_ref_outdoor_c=t_ref_outdoor_c,
-            heating_curve_slope=heating_curve_slope,
         )
-        model = HeatPumpCOPModel(params)
-        predicted_cop = model.cop_from_temperatures(
-            t_supply=predicted_supply_c,
-            t_out=arrays.outdoor_temperature_mean_c,
-        )
-        predicted_electric_energy_kwh = arrays.thermal_energy_kwh / predicted_cop
+        predicted_electric_energy_kwh = thermal_mode_kwh / predicted_cop
         return _weighted_residuals(
-            predicted_electric_energy_kwh - arrays.electric_energy_kwh,
+            predicted_electric_energy_kwh - electric_mode_kwh,
             weights=weights,
         )
 
@@ -450,7 +462,7 @@ def _fit_eta_carnot(
         f_scale=settings.eta_loss_scale_kwh,
     )
     if not result.success:
-        raise RuntimeError(f"COP eta_carnot calibration failed: {result.message}")
+        raise RuntimeError(f"COP {eta_label} calibration failed: {result.message}")
     return _EtaFit(
         eta_carnot=float(result.x[0]),
         optimizer_status=str(result.message),
@@ -485,16 +497,38 @@ def calibrate_cop_model(
 
     arrays = _as_arrays(dataset)
     heating_curve_fit = _fit_heating_curve(arrays, settings)
-    eta_fit = _fit_eta_carnot(
+    ufh_mask = arrays.mode_name == settings.ufh_mode_name
+    dhw_mask = arrays.mode_name == settings.dhw_mode_name
+
+    eta_fit_ufh = _fit_eta_carnot_for_mask(
         arrays,
         settings,
+        mode_mask=ufh_mask,
+        eta_label="eta_carnot_ufh",
         t_supply_min_c=heating_curve_fit.t_supply_min_c,
         t_ref_outdoor_c=heating_curve_fit.t_ref_outdoor_c,
         heating_curve_slope=heating_curve_fit.heating_curve_slope,
     )
+    if np.any(dhw_mask):
+        eta_fit_dhw = _fit_eta_carnot_for_mask(
+            arrays,
+            settings,
+            mode_mask=dhw_mask,
+            eta_label="eta_carnot_dhw",
+            t_supply_min_c=heating_curve_fit.t_supply_min_c,
+            t_ref_outdoor_c=heating_curve_fit.t_ref_outdoor_c,
+            heating_curve_slope=heating_curve_fit.heating_curve_slope,
+        )
+    else:
+        eta_fit_dhw = _EtaFit(
+            eta_carnot=eta_fit_ufh.eta_carnot,
+            optimizer_status="No DHW samples retained; reusing eta_carnot_ufh.",
+            optimizer_cost=0.0,
+        )
     fitted_parameters = _build_cop_parameters(
         settings,
-        eta_carnot=eta_fit.eta_carnot,
+        eta_carnot_ufh=eta_fit_ufh.eta_carnot,
+        eta_carnot_dhw=eta_fit_dhw.eta_carnot,
         t_supply_min_c=heating_curve_fit.t_supply_min_c,
         t_ref_outdoor_c=heating_curve_fit.t_ref_outdoor_c,
         heating_curve_slope=heating_curve_fit.heating_curve_slope,
@@ -507,20 +541,21 @@ def calibrate_cop_model(
         t_ref_outdoor_c=fitted_parameters.T_ref_outdoor,
         heating_curve_slope=fitted_parameters.heating_curve_slope,
     )
-    predicted_cop = model.cop_from_temperatures(
-        t_supply=predicted_supply_c,
-        t_out=arrays.outdoor_temperature_mean_c,
+    predicted_cop = np.empty_like(arrays.outdoor_temperature_mean_c, dtype=float)
+    predicted_cop[ufh_mask] = model._cop_from_temperatures_with_eta(
+        t_supply=predicted_supply_c[ufh_mask],
+        t_out=arrays.outdoor_temperature_mean_c[ufh_mask],
+        eta_carnot=fitted_parameters.eta_carnot_ufh,
     )
+    if np.any(dhw_mask):
+        predicted_cop[dhw_mask] = model._cop_from_temperatures_with_eta(
+            t_supply=predicted_supply_c[dhw_mask],
+            t_out=arrays.outdoor_temperature_mean_c[dhw_mask],
+            eta_carnot=fitted_parameters.eta_carnot_dhw,
+        )
     predicted_electric_energy_kwh = arrays.thermal_energy_kwh / predicted_cop
     actual_cop = arrays.thermal_energy_kwh / arrays.electric_energy_kwh
-    ideal_carnot_cop = _ideal_carnot_cop(
-        t_supply_c=predicted_supply_c,
-        t_out_c=arrays.outdoor_temperature_mean_c,
-        settings=settings,
-    )
     weights = _normalised_energy_weights(arrays.thermal_energy_kwh)
-    ufh_mask = arrays.mode_name == settings.ufh_mode_name
-    dhw_mask = arrays.mode_name == settings.dhw_mode_name
 
     ufh_electric_residuals = predicted_electric_energy_kwh[ufh_mask] - arrays.electric_energy_kwh[ufh_mask]
     ufh_cop_residuals = predicted_cop[ufh_mask] - actual_cop[ufh_mask]
@@ -535,11 +570,7 @@ def calibrate_cop_model(
         dhw_rmse_electric_energy_kwh = _rmse(dhw_electric_residuals)
         dhw_rmse_actual_cop = _rmse(dhw_cop_residuals)
         dhw_bias_actual_cop = float(np.mean(dhw_cop_residuals))
-        diagnostic_eta_carnot_dhw = _diagnostic_eta_carnot(
-            actual_cop[dhw_mask],
-            ideal_carnot_cop[dhw_mask],
-            weights=weights[dhw_mask],
-        )
+        diagnostic_eta_carnot_dhw = eta_fit_dhw.eta_carnot
 
     return COPCalibrationResult(
         fitted_parameters=fitted_parameters,
@@ -553,11 +584,7 @@ def calibrate_cop_model(
         dhw_rmse_actual_cop=dhw_rmse_actual_cop,
         ufh_bias_actual_cop=float(np.mean(ufh_cop_residuals)),
         dhw_bias_actual_cop=dhw_bias_actual_cop,
-        diagnostic_eta_carnot_ufh=_diagnostic_eta_carnot(
-            actual_cop[ufh_mask],
-            ideal_carnot_cop[ufh_mask],
-            weights=weights[ufh_mask],
-        ),
+        diagnostic_eta_carnot_ufh=eta_fit_ufh.eta_carnot,
         diagnostic_eta_carnot_dhw=diagnostic_eta_carnot_dhw,
         sample_count=dataset.sample_count,
         ufh_sample_count=dataset.ufh_sample_count,
@@ -565,8 +592,7 @@ def calibrate_cop_model(
         dataset_start_utc=dataset.start_utc,
         dataset_end_utc=dataset.end_utc,
         heating_curve_optimizer_status=heating_curve_fit.optimizer_status,
-        eta_optimizer_status=eta_fit.optimizer_status,
+        eta_optimizer_status=f"UFH: {eta_fit_ufh.optimizer_status} | DHW: {eta_fit_dhw.optimizer_status}",
         heating_curve_optimizer_cost=heating_curve_fit.optimizer_cost,
-        eta_optimizer_cost=eta_fit.optimizer_cost,
+        eta_optimizer_cost=eta_fit_ufh.optimizer_cost + eta_fit_dhw.optimizer_cost,
     )
-

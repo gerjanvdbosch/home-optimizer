@@ -270,6 +270,8 @@ def test_tap_cools_top_layer(model: DHWModel) -> None:
 def test_system_is_fully_observable(model: DHWModel) -> None:
     """rank(O) must equal 2 as long as R_strat > 0 and C_top > 0."""
     assert model.observability_rank() == 2
+    assert model.observability_is_well_conditioned()
+    assert model.observability_min_singular_value() > 0.0
 
 
 def test_measurement_matrix_is_correct() -> None:

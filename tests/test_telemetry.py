@@ -18,6 +18,7 @@ from home_optimizer.telemetry import (
     TelemetryRepository,
     aggregate_readings,
 )
+from home_optimizer.telemetry.models import CalibrationSnapshot
 from home_optimizer.types import CalibrationParameterOverrides, CalibrationSnapshotPayload, CalibrationStageResult
 
 
@@ -486,7 +487,8 @@ def test_repository_round_trips_latest_calibration_snapshot(tmp_path: Path) -> N
         effective_parameters=CalibrationParameterOverrides(
             C_r=7.1,
             R_ro=8.4,
-            eta_carnot=0.41,
+            eta_carnot_ufh=0.41,
+            eta_carnot_dhw=0.39,
             T_supply_min=26.0,
         ),
         ufh_active=CalibrationStageResult(
@@ -504,8 +506,38 @@ def test_repository_round_trips_latest_calibration_snapshot(tmp_path: Path) -> N
     assert round_tripped.generated_at_utc == payload.generated_at_utc
     assert round_tripped.effective_parameters.C_r == pytest.approx(7.1)
     assert round_tripped.effective_parameters.R_ro == pytest.approx(8.4)
-    assert round_tripped.effective_parameters.eta_carnot == pytest.approx(0.41)
+    assert round_tripped.effective_parameters.eta_carnot_ufh == pytest.approx(0.41)
+    assert round_tripped.effective_parameters.eta_carnot_dhw == pytest.approx(0.39)
     assert round_tripped.effective_parameters.T_supply_min == pytest.approx(26.0)
     assert round_tripped.ufh_active is not None
     assert round_tripped.ufh_active.diagnostics["required_min_selected_segments"] == 2
 
+
+def test_repository_migrates_legacy_shared_eta_in_calibration_snapshot(tmp_path: Path) -> None:
+    """Reading an old snapshot with shared eta_carnot must map it to both mode-specific eta fields."""
+    database_url = f"sqlite:///{tmp_path / 'legacy-calibration.sqlite3'}"
+    repository = TelemetryRepository(database_url=database_url)
+    repository.create_schema()
+
+    legacy_payload = {
+        "generated_at_utc": "2026-04-18T08:00:00+00:00",
+        "effective_parameters": {
+            "C_r": 7.1,
+            "eta_carnot": 0.41,
+            "T_supply_min": 26.0,
+        },
+    }
+    with repository._session_factory() as session:
+        session.add(
+            CalibrationSnapshot(
+                generated_at_utc=datetime(2026, 4, 18, 8, 0, tzinfo=timezone.utc),
+                payload_json=json.dumps(legacy_payload),
+            )
+        )
+        session.commit()
+
+    round_tripped = repository.get_latest_calibration_snapshot()
+
+    assert round_tripped is not None
+    assert round_tripped.effective_parameters.eta_carnot_ufh == pytest.approx(0.41)
+    assert round_tripped.effective_parameters.eta_carnot_dhw == pytest.approx(0.41)

@@ -193,19 +193,11 @@ class RunRequest(BaseModel):
             "close to zero are physically admissible and represent near-perfect mixing during charging."
         ),
     )
-    dhw_R_loss: float = Field(
-        50.0,
-        ge=5.0,
-        description=(
-            "Standby-loss resistance R_loss [K/kW]. High-efficiency tanks can exceed "
-            "older heuristic ceilings, so only a physical lower bound is enforced."
-        ),
-    )
     dhw_R_loss_top: float | None = Field(
-        None, gt=0.0, description="Top-node DHW standby-loss resistance R_loss_top [K/kW]."
+        50.0, gt=0.0, description="Top-node DHW standby-loss resistance R_loss_top [K/kW]."
     )
     dhw_R_loss_bot: float | None = Field(
-        None, gt=0.0, description="Bottom-node DHW standby-loss resistance R_loss_bot [K/kW]."
+        50.0, gt=0.0, description="Bottom-node DHW standby-loss resistance R_loss_bot [K/kW]."
     )
     dhw_heater_split_top: float = Field(
         0.0, ge=0.0, le=1.0, description="Fraction of DHW heating power injected into the top node [-]."
@@ -302,10 +294,15 @@ class RunRequest(BaseModel):
     )
     heat_pump_topology: str = Field(
         "shared",
-        description="Heat-pump topology policy: shared, exclusive_ufh, or exclusive_dhw.",
+        description="Heat-pump topology policy: shared or exclusive.",
+    )
+    exclusive_heat_pump_mode: str | None = Field(
+        None,
+        description="Active mode when heat_pump_topology=exclusive: ufh or dhw.",
     )
 
-    eta_carnot: float = Field(0.45, ge=0.1, le=0.99, description="Carnot efficiency factor eta [-]")
+    eta_carnot_ufh: float = Field(0.45, ge=0.1, le=0.99, description="UFH Carnot efficiency factor eta_ufh [-]")
+    eta_carnot_dhw: float = Field(0.45, ge=0.1, le=0.99, description="DHW Carnot efficiency factor eta_dhw [-]")
     delta_T_cond: float = Field(
         5.0, ge=0.0, le=15.0, description="Condensing approach temperature delta_cond [K]"
     )
@@ -390,8 +387,8 @@ class RunRequest(BaseModel):
                 C_top=self.dhw_C_top,
                 C_bot=self.dhw_C_bot,
                 R_strat=self.dhw_R_strat,
-                R_loss_top=self.dhw_R_loss_top if self.dhw_R_loss_top is not None else self.dhw_R_loss,
-                R_loss_bot=self.dhw_R_loss_bot if self.dhw_R_loss_bot is not None else self.dhw_R_loss,
+                R_loss_top=self.dhw_R_loss_top,
+                R_loss_bot=self.dhw_R_loss_bot,
                 heater_split_top=self.dhw_heater_split_top,
                 heater_split_bottom=self.dhw_heater_split_bottom,
                 lambda_water=self.dhw_lambda_water_kwh_per_m3k,
@@ -429,9 +426,20 @@ class RunRequest(BaseModel):
 
     @property
     def shared_heat_pump_config(self) -> SharedHeatPumpConfig:
+        topology = self.heat_pump_topology
+        exclusive_active_mode = self.exclusive_heat_pump_mode
+        if topology == "shared":
+            exclusive_active_mode = None
+        elif topology != "exclusive":
+            raise ValueError("heat_pump_topology must be 'shared' or 'exclusive'.")
+        elif exclusive_active_mode not in {"ufh", "dhw"}:
+            raise ValueError(
+                "exclusive_heat_pump_mode must be 'ufh' or 'dhw' when heat_pump_topology='exclusive'."
+            )
         return SharedHeatPumpConfig(
             cop_parameters=HeatPumpCOPParameters(
-                eta_carnot=self.eta_carnot,
+                eta_carnot_ufh=self.eta_carnot_ufh,
+                eta_carnot_dhw=self.eta_carnot_dhw,
                 delta_T_cond=self.delta_T_cond,
                 delta_T_evap=self.delta_T_evap,
                 T_supply_min=self.T_supply_min,
@@ -442,7 +450,8 @@ class RunRequest(BaseModel):
             ),
             cop_max=self.cop_max,
             hp_max_electrical_power_kw=self.P_hp_max_elec,
-            topology=self.heat_pump_topology,
+            topology=topology,
+            exclusive_active_mode=exclusive_active_mode,
         )
 
 

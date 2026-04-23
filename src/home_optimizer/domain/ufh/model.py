@@ -27,7 +27,7 @@ Measurement:  y = C x,  C = [1, 0]  (only T_r is sensed)
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -37,9 +37,13 @@ from ..state_space import (
     DiscretizationConfig,
     Discretizer,
     controllability_matrix,
+    numerical_rank,
+    observability_condition_number,
+    observability_is_well_conditioned,
     observability_matrix,
+    observability_min_singular_value,
 )
-from ...types.constants import W_PER_KW
+from ...types.constants import DEFAULT_NUMERICAL_VALIDATION_CONFIG, NumericalValidationConfig, W_PER_KW
 from ...types.physical import ThermalParameters
 
 # Measurement matrix C = [1, 0]  (T_r is observable, T_b is hidden)
@@ -77,6 +81,9 @@ class ThermalModel:
     """
 
     parameters: ThermalParameters
+    numerical_validation_config: NumericalValidationConfig = field(
+        default_factory=lambda: DEFAULT_NUMERICAL_VALIDATION_CONFIG
+    )
 
     # ------------------------------------------------------------------
     # Continuous-time system matrices (for reference / ZOH conversion)
@@ -214,7 +221,25 @@ class ThermalModel:
         return observability_matrix(self.discrete_model())
 
     def observability_rank(self) -> int:
-        return int(np.linalg.matrix_rank(self.observability_matrix()))
+        return numerical_rank(
+            self.observability_matrix(),
+            rtol=self.numerical_validation_config.observability_rank_tolerance,
+        )
+
+    def observability_min_singular_value(self) -> float:
+        """Return the smallest singular value of the UFH observability matrix."""
+        return observability_min_singular_value(self.discrete_model())
+
+    def observability_condition_number(self) -> float:
+        """Return the condition number of the UFH observability matrix."""
+        return observability_condition_number(self.discrete_model())
+
+    def observability_is_well_conditioned(self) -> bool:
+        """Return whether the UFH observability matrix clears the conditioning threshold."""
+        return observability_is_well_conditioned(
+            self.discrete_model(),
+            config=self.numerical_validation_config,
+        )
 
     def controllability_matrix(self) -> np.ndarray:
         """Mc = [B, A·B]  (2×2)."""

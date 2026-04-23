@@ -854,7 +854,8 @@ def test_optimizer_maps_baseload_forecast_with_derived_reference() -> None:
     )
     cop_model = HeatPumpCOPModel(
         HeatPumpCOPParameters(
-            eta_carnot=run_request.eta_carnot,
+            eta_carnot_ufh=run_request.eta_carnot_ufh,
+            eta_carnot_dhw=run_request.eta_carnot_dhw,
             delta_T_cond=run_request.delta_T_cond,
             delta_T_evap=run_request.delta_T_evap,
             T_supply_min=run_request.T_supply_min,
@@ -889,7 +890,8 @@ def test_optimizer_does_not_add_heat_when_baseload_heat_stays_below_baseline() -
     )
     cop_model = HeatPumpCOPModel(
         HeatPumpCOPParameters(
-            eta_carnot=run_request.eta_carnot,
+            eta_carnot_ufh=run_request.eta_carnot_ufh,
+            eta_carnot_dhw=run_request.eta_carnot_dhw,
             delta_T_cond=run_request.delta_T_cond,
             delta_T_evap=run_request.delta_T_evap,
             T_supply_min=run_request.T_supply_min,
@@ -924,7 +926,8 @@ def test_optimizer_keeps_baseline_internal_gains_when_heat_fraction_is_zero() ->
     )
     cop_model = HeatPumpCOPModel(
         HeatPumpCOPParameters(
-            eta_carnot=run_request.eta_carnot,
+            eta_carnot_ufh=run_request.eta_carnot_ufh,
+            eta_carnot_dhw=run_request.eta_carnot_dhw,
             delta_T_cond=run_request.delta_T_cond,
             delta_T_evap=run_request.delta_T_evap,
             T_supply_min=run_request.T_supply_min,
@@ -960,7 +963,8 @@ def test_optimizer_prefers_explicit_internal_gains_forecast_over_baseload_mappin
     )
     cop_model = HeatPumpCOPModel(
         HeatPumpCOPParameters(
-            eta_carnot=run_request.eta_carnot,
+            eta_carnot_ufh=run_request.eta_carnot_ufh,
+            eta_carnot_dhw=run_request.eta_carnot_dhw,
             delta_T_cond=run_request.delta_T_cond,
             delta_T_evap=run_request.delta_T_evap,
             T_supply_min=run_request.T_supply_min,
@@ -995,7 +999,8 @@ def test_optimizer_rejects_negative_baseload_forecast_for_internal_gains_mapping
     )
     cop_model = HeatPumpCOPModel(
         HeatPumpCOPParameters(
-            eta_carnot=run_request.eta_carnot,
+            eta_carnot_ufh=run_request.eta_carnot_ufh,
+            eta_carnot_dhw=run_request.eta_carnot_dhw,
             delta_T_cond=run_request.delta_T_cond,
             delta_T_evap=run_request.delta_T_evap,
             T_supply_min=run_request.T_supply_min,
@@ -1111,4 +1116,3 @@ def test_shutter_forecaster_refreshes_cached_model_after_retraining(tmp_path, mo
     assert load_calls == 1
     assert first_prediction is not None and second_prediction is not None
     assert refreshed_cached_sample_count > first_cached_sample_count
-

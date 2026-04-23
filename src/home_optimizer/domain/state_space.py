@@ -28,6 +28,8 @@ from typing import Literal
 import numpy as np
 from scipy.linalg import expm
 
+from ..types.constants import DEFAULT_NUMERICAL_VALIDATION_CONFIG, NumericalValidationConfig
+
 DiscretizationMethod = Literal["exact_zoh", "forward_euler"]
 
 
@@ -188,6 +190,49 @@ def observability_matrix(discrete_model: DiscreteLinearModel) -> np.ndarray:
     return np.vstack([discrete_model.C, discrete_model.C @ discrete_model.A])
 
 
+def numerical_rank(
+    matrix: np.ndarray,
+    *,
+    rtol: float = DEFAULT_NUMERICAL_VALIDATION_CONFIG.observability_rank_tolerance,
+) -> int:
+    """Return the SVD-based numerical rank of a matrix.
+
+    The cutoff follows the standard relative rule ``s_i > rtol * s_max``.
+    """
+    matrix_arr = _as_float_matrix(name="matrix", matrix=matrix)
+    singular_values = np.linalg.svd(matrix_arr, compute_uv=False)
+    if singular_values.size == 0:
+        return 0
+    threshold = rtol * singular_values[0]
+    return int(np.sum(singular_values > threshold))
+
+
+def observability_min_singular_value(discrete_model: DiscreteLinearModel) -> float:
+    """Return the smallest singular value of the observability matrix."""
+    singular_values = np.linalg.svd(observability_matrix(discrete_model), compute_uv=False)
+    return float(singular_values[-1])
+
+
+def observability_condition_number(discrete_model: DiscreteLinearModel) -> float:
+    """Return the singular-value condition number of the observability matrix."""
+    singular_values = np.linalg.svd(observability_matrix(discrete_model), compute_uv=False)
+    sigma_min = float(singular_values[-1])
+    if sigma_min == 0.0:
+        return float("inf")
+    return float(singular_values[0] / sigma_min)
+
+
+def observability_is_well_conditioned(
+    discrete_model: DiscreteLinearModel,
+    *,
+    config: NumericalValidationConfig = DEFAULT_NUMERICAL_VALIDATION_CONFIG,
+) -> bool:
+    """Return whether the observability matrix clears the configured conditioning policy."""
+    if config.observability_condition_policy == "min_singular_value":
+        return observability_min_singular_value(discrete_model) >= config.observability_condition_min_sv
+    return observability_condition_number(discrete_model) <= config.observability_condition_max
+
+
 def controllability_matrix(discrete_model: DiscreteLinearModel) -> np.ndarray:
     """Return the 2-block controllability matrix ``[B, A_d B]`` for a discrete model."""
     return np.column_stack([discrete_model.B, discrete_model.A @ discrete_model.B])
@@ -200,5 +245,9 @@ __all__ = [
     "DiscretizationMethod",
     "Discretizer",
     "controllability_matrix",
+    "numerical_rank",
+    "observability_condition_number",
+    "observability_is_well_conditioned",
     "observability_matrix",
+    "observability_min_singular_value",
 ]
