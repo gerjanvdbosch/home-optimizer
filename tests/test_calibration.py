@@ -1385,8 +1385,8 @@ def test_build_automatic_calibration_snapshot_matches_cli_stage_settings(monkeyp
     assert snapshot.dhw_active is not None and snapshot.dhw_active.succeeded is True
 
 
-def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(monkeypatch) -> None:
-    """Automatic calibration must not persist a UFH tuple that is invalid at runtime dt."""
+def test_build_automatic_calibration_snapshot_accepts_ufh_fit_with_exact_zoh_runtime(monkeypatch) -> None:
+    """Automatic calibration may persist a UFH tuple when runtime exact-ZOH remains valid."""
     start = datetime(2026, 4, 17, 0, 0, tzinfo=timezone.utc)
     repository = SimpleNamespace(
         get_aggregate_time_bounds=lambda: (start, start + timedelta(hours=30)),
@@ -1463,12 +1463,11 @@ def test_build_automatic_calibration_snapshot_rejects_runtime_invalid_ufh_fit(mo
 
     assert snapshot is not None
     assert snapshot.ufh_active is not None
-    assert snapshot.ufh_active.succeeded is False
-    assert "Forward-Euler time step" in snapshot.ufh_active.message or "greater than or equal" in snapshot.ufh_active.message
-    assert snapshot.effective_parameters.C_r is None
-    assert snapshot.effective_parameters.C_b is None
-    assert snapshot.effective_parameters.R_br is None
-    assert snapshot.effective_parameters.R_ro is None
+    assert snapshot.ufh_active.succeeded is True
+    assert snapshot.effective_parameters.C_r == 6.0
+    assert snapshot.effective_parameters.C_b == 3.0
+    assert snapshot.effective_parameters.R_br == 1.0
+    assert snapshot.effective_parameters.R_ro == 3.0
     assert snapshot.effective_parameters.dhw_R_loss == 60.0
 
 
@@ -3997,5 +3996,3 @@ def test_calibrate_dhw_active_stratification_recovers_capacity_split_and_sensor_
     np.testing.assert_allclose(result.fitted_parameters.R_strat, true_parameters.R_strat, atol=2e-1)
     np.testing.assert_allclose(result.fitted_t_top_bias_c, true_top_bias_c, atol=5e-2)
     np.testing.assert_allclose(result.fitted_t_bot_bias_c, true_bot_bias_c, atol=5e-2)
-
-

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.linalg import expm
 
 from home_optimizer.domain.ufh.model import ThermalModel, solar_gain_kw
 from home_optimizer.types import ForecastHorizon, ThermalParameters
@@ -64,32 +65,61 @@ def test_forecast_solar_gain_scales_with_shutter_position(params: ThermalParamet
 def test_state_matrix_A_matches_specification(params: ThermalParameters) -> None:
     model = ThermalModel(params)
     A, _, _ = model.state_matrices()
-    dt = params.dt_hours
-    a_br = dt / (params.C_r * params.R_br)
-    a_ro = dt / (params.C_r * params.R_ro)
-    b_br = dt / (params.C_b * params.R_br)
-    expected = np.array([[1 - a_br - a_ro, a_br], [b_br, 1 - b_br]])
+    inv_CrRbr = 1.0 / (params.C_r * params.R_br)
+    inv_CrRro = 1.0 / (params.C_r * params.R_ro)
+    inv_CbRbr = 1.0 / (params.C_b * params.R_br)
+    a_cont = np.array(
+        [
+            [-(inv_CrRbr + inv_CrRro), inv_CrRbr],
+            [inv_CbRbr, -inv_CbRbr],
+        ]
+    )
+    expected = expm(a_cont * params.dt_hours)
     np.testing.assert_allclose(A, expected)
 
 
 def test_state_matrix_B_matches_specification(params: ThermalParameters) -> None:
     model = ThermalModel(params)
     _, B, _ = model.state_matrices()
-    expected = np.array([[0.0], [params.dt_hours / params.C_b]])
+    inv_CrRbr = 1.0 / (params.C_r * params.R_br)
+    inv_CrRro = 1.0 / (params.C_r * params.R_ro)
+    inv_CbRbr = 1.0 / (params.C_b * params.R_br)
+    a_cont = np.array(
+        [
+            [-(inv_CrRbr + inv_CrRro), inv_CrRbr],
+            [inv_CbRbr, -inv_CbRbr],
+        ]
+    )
+    b_cont = np.array([[0.0], [1.0 / params.C_b]])
+    augmented = np.zeros((3, 3), dtype=float)
+    augmented[:2, :2] = a_cont
+    augmented[:2, 2:3] = b_cont
+    expected = expm(augmented * params.dt_hours)[:2, 2:3]
     np.testing.assert_allclose(B, expected)
 
 
 def test_state_matrix_E_matches_specification(params: ThermalParameters) -> None:
     model = ThermalModel(params)
     _, _, E = model.state_matrices()
-    dt = params.dt_hours
-    a_ro = dt / (params.C_r * params.R_ro)
-    expected = np.array(
+    inv_CrRbr = 1.0 / (params.C_r * params.R_br)
+    inv_CrRro = 1.0 / (params.C_r * params.R_ro)
+    inv_CbRbr = 1.0 / (params.C_b * params.R_br)
+    a_cont = np.array(
         [
-            [a_ro, params.alpha * dt / params.C_r, dt / params.C_r],
-            [0.0, (1 - params.alpha) * dt / params.C_b, 0.0],
+            [-(inv_CrRbr + inv_CrRro), inv_CrRbr],
+            [inv_CbRbr, -inv_CbRbr],
         ]
     )
+    e_cont = np.array(
+        [
+            [inv_CrRro, params.alpha / params.C_r, 1.0 / params.C_r],
+            [0.0, (1 - params.alpha) / params.C_b, 0.0],
+        ]
+    )
+    augmented = np.zeros((5, 5), dtype=float)
+    augmented[:2, :2] = a_cont
+    augmented[:2, 2:] = e_cont
+    expected = expm(augmented * params.dt_hours)[:2, 2:]
     np.testing.assert_allclose(E, expected)
 
 
@@ -146,12 +176,7 @@ def test_system_is_fully_observable_and_controllable(params: ThermalParameters) 
 
 
 def test_ufh_energy_balance(params: ThermalParameters) -> None:
-    """UFH total stored energy change equals net power input over 10 steps.
-
-    Verifies: Δ(C_r·T_r + C_b·T_b)/Δt = P_UFH − (T_r−T_out)/R_ro + Q_solar + Q_int
-    Implements the required test from §16.3 of the project specification.
-    Tolerance: rtol=1e-6.
-    """
+    """UFH continuous energy balance must match the normatieve stored-energy derivative."""
     model = ThermalModel(params)
     p = params
 
@@ -162,7 +187,24 @@ def test_ufh_energy_balance(params: ThermalParameters) -> None:
     q_int = 0.3
 
     for _ in range(10):
-        x_next = model.step(
+        dxdt = model.continuous_derivative(
+            state=x,
+            control_kw=control_kw,
+            outdoor_temperature_c=t_out,
+            solar_gain_kw_value=q_solar,
+            internal_gain_kw=q_int,
+        )
+        lhs = p.C_r * dxdt[0] + p.C_b * dxdt[1]
+        expected_power = control_kw - (x[0] - t_out) / p.R_ro + q_solar + q_int
+
+        np.testing.assert_allclose(
+            lhs,
+            expected_power,
+            rtol=1e-10,
+            atol=1e-10,
+            err_msg="UFH continuous energy balance violated.",
+        )
+        x = model.step(
             state=x,
             control_kw=control_kw,
             outdoor_temperature_c=t_out,
@@ -170,20 +212,17 @@ def test_ufh_energy_balance(params: ThermalParameters) -> None:
             internal_gain_kw=q_int,
         )
 
-        # Measured energy change Δ(C_r T_r + C_b T_b) per time step
-        delta_energy = (p.C_r * x_next[0] + p.C_b * x_next[1]) - (p.C_r * x[0] + p.C_b * x[1])
 
-        # Expected net power [kW] × Δt [h] = energy [kWh]
-        T_r = x[0]
-        expected_energy = p.dt_hours * (control_kw - (T_r - t_out) / p.R_ro + q_solar + q_int)
-
-        np.testing.assert_allclose(
-            delta_energy,
-            expected_energy,
-            rtol=1e-6,
-            err_msg="UFH energy balance violated at one or more time steps.",
-        )
-        x = x_next
+def test_forward_euler_reference_path_remains_available(params: ThermalParameters) -> None:
+    """UFH should keep an explicit Euler reference path, but not as runtime default."""
+    model = ThermalModel(params)
+    discrete = model.forward_euler_discrete_model()
+    dt = params.dt_hours
+    a_br = dt / (params.C_r * params.R_br)
+    a_ro = dt / (params.C_r * params.R_ro)
+    b_br = dt / (params.C_b * params.R_br)
+    expected = np.array([[1 - a_br - a_ro, a_br], [b_br, 1 - b_br]])
+    np.testing.assert_allclose(discrete.A, expected)
 
 
 # ── lambda constant (§8.4 / §16.3 required test) ──────────────────────────────

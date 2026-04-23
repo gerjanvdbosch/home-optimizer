@@ -4,8 +4,8 @@ State vector   x = [T_r, T_b]ᵀ
 Control input  u = P_UFH  [kW]
 Disturbances   d = [T_out, Q_solar, Q_int]ᵀ
 
-Discrete state-space (forward Euler, step Δt [h])
-──────────────────────────────────────────────────
+Discrete state-space (exact ZOH default, step Δt [h])
+──────────────────────────────────────────────────────
 x[k+1] = A x[k] + B u[k] + E d[k]
 
 Auxiliary scalars:
@@ -70,13 +70,13 @@ def solar_gain_kw(
 class ThermalModel:
     """Discrete grey-box thermal model of a house with UFH.
 
-    Validates Euler stability on construction.
+    The runtime model derives discrete matrices from the continuous physics
+    through the shared discretiser. Per the bindende specification, exact ZOH
+    is the default production discretisation. Forward Euler remains available
+    only as an explicit reference/fallback path.
     """
 
     parameters: ThermalParameters
-
-    def __post_init__(self) -> None:
-        self.parameters.assert_euler_stable()
 
     # ------------------------------------------------------------------
     # Continuous-time system matrices (for reference / ZOH conversion)
@@ -118,11 +118,22 @@ class ThermalModel:
         return model.A, model.B, model.E
 
     # ------------------------------------------------------------------
-    # Discrete-time state-space matrices (forward Euler)
+    # Discrete-time state-space matrices
     # ------------------------------------------------------------------
 
     def discrete_model(self) -> DiscreteLinearModel:
-        """Return the UFH discrete model assembled through the shared discretizer."""
+        """Return the default UFH discrete model assembled through exact ZOH."""
+        return Discretizer.discretize(
+            continuous_model=self.continuous_model(),
+            config=DiscretizationConfig(
+                method="exact_zoh",
+                dt_hours=self.parameters.dt_hours,
+            ),
+        )
+
+    def forward_euler_discrete_model(self) -> DiscreteLinearModel:
+        """Return the explicit forward-Euler UFH discretisation reference."""
+        self.parameters.assert_euler_stable()
         return Discretizer.discretize(
             continuous_model=self.continuous_model(),
             config=DiscretizationConfig(
@@ -132,21 +143,7 @@ class ThermalModel:
         )
 
     def state_matrices(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return (A, B, E) of the forward-Euler discrete state-space model.
-
-        Derived directly from Section 5 of the specification:
-
-          a_br = Δt/(C_r·R_br),  a_ro = Δt/(C_r·R_ro),  b_br = Δt/(C_b·R_br)
-
-          A = [[1-a_br-a_ro, a_br ],
-               [b_br,        1-b_br]]
-
-          B = [[0      ],
-               [Δt/C_b ]]
-
-          E = [[a_ro,  α·Δt/C_r,    Δt/C_r ],
-               [0,     (1-α)·Δt/C_b, 0    ]]
-        """
+        """Return the default exact-ZOH discrete UFH matrices ``(A, B, E)``."""
         discrete_model = self.discrete_model()
         return discrete_model.A, discrete_model.B, discrete_model.E
 
@@ -188,11 +185,12 @@ class ThermalModel:
         solar_gain_kw_value: float,
         internal_gain_kw: float,
     ) -> np.ndarray:
-        """Forward-Euler step: x[k+1] = x[k] + Δt · f(x[k], u[k], d[k])."""
-        deriv = self.continuous_derivative(
-            state, control_kw, outdoor_temperature_c, solar_gain_kw_value, internal_gain_kw
+        """Discrete UFH step using the default exact-ZOH matrices."""
+        disturbance = np.array(
+            [outdoor_temperature_c, solar_gain_kw_value, internal_gain_kw],
+            dtype=float,
         )
-        return np.asarray(state, dtype=float) + self.parameters.dt_hours * deriv
+        return self.step_with_disturbance_vector(state, control_kw, disturbance)
 
     def step_with_disturbance_vector(
         self,
