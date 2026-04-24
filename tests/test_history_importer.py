@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from home_optimizer.features.history_import.repository import HistoryImportRepository
 from home_optimizer.features.history_import.service import HistoryImportService
-from home_optimizer.shared.db.orm_models import Sample1m
+from home_optimizer.shared.db.orm_models import ImportChunk, Sample1m
 from home_optimizer.shared.db.session import Database
 from home_optimizer.shared.sensors.definitions import SensorSpec
 
@@ -239,3 +239,28 @@ def test_time_weighted_mean_carries_value_across_chunks(tmp_path) -> None:
     ]
     assert [row.mean_real for row in rows] == [10.0, 10.0, 10.0, 20.0, 20.0]
     assert [row.sample_count for row in rows] == [1, 1, 1, 1, 1]
+
+
+def test_import_chunk_timestamps_are_stored_without_microseconds(tmp_path) -> None:
+    db = Database(str(tmp_path / "history.db"))
+    db.init_schema()
+    repository = HistoryImportRepository(db)
+    spec = SensorSpec(
+        name="power",
+        entity_id="sensor.power",
+        category="energy",
+        unit="kW",
+        method="mean",
+    )
+    start = datetime(2026, 4, 14, 0, 0, 0, 123456, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 14, 1, 2, 3, 654321, tzinfo=timezone.utc)
+
+    repository.mark_chunk_imported(spec, start, end, row_count=7)
+
+    with db.session() as session:
+        chunk = session.query(ImportChunk).one()
+
+    assert chunk.start_time_utc == "2026-04-14T00:00:00+00:00"
+    assert chunk.end_time_utc == "2026-04-14T01:02:03+00:00"
+    assert chunk.imported_at_utc.endswith("+00:00")
+    assert "." not in chunk.imported_at_utc

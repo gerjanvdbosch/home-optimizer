@@ -9,6 +9,7 @@ from home_optimizer.shared.db.orm_models import ImportChunk, Sample1m
 from home_optimizer.shared.db.session import Database
 from home_optimizer.shared.sensors.definitions import SensorSpec
 from home_optimizer.shared.time.clock import utc_now
+from home_optimizer.shared.time.parse import normalize_utc_timestamp
 
 
 class HistoryImportRepository:
@@ -26,17 +27,20 @@ class HistoryImportRepository:
         start_time: datetime,
         end_time: datetime,
     ) -> bool:
+        normalized_start = normalize_utc_timestamp(start_time)
+        normalized_end = normalize_utc_timestamp(end_time)
+
         with self.database.session() as session:
             existing = session.get(
                 ImportChunk,
                 {
                     "source": self.source,
                     "name": spec.name,
-                    "start_time_utc": start_time.isoformat(),
+                    "start_time_utc": normalized_start,
                 },
             )
 
-        return existing is not None and existing.end_time_utc == end_time.isoformat()
+        return existing is not None and existing.end_time_utc == normalized_end
 
     def mark_chunk_imported(
         self,
@@ -48,10 +52,10 @@ class HistoryImportRepository:
         marker = ImportChunk(
             source=self.source,
             name=spec.name,
-            start_time_utc=start_time.isoformat(),
-            end_time_utc=end_time.isoformat(),
+            start_time_utc=normalize_utc_timestamp(start_time),
+            end_time_utc=normalize_utc_timestamp(end_time),
             row_count=row_count,
-            imported_at_utc=utc_now().isoformat(),
+            imported_at_utc=normalize_utc_timestamp(utc_now()),
         )
 
         with self.database.session() as session:
@@ -78,7 +82,7 @@ class HistoryImportRepository:
                 .where(
                     Sample1m.name == spec.name,
                     Sample1m.source == self.source,
-                    Sample1m.timestamp_minute_utc < before_time.isoformat(),
+                    Sample1m.timestamp_minute_utc < normalize_utc_timestamp(before_time),
                 )
                 .order_by(Sample1m.timestamp_minute_utc.desc())
                 .limit(1)

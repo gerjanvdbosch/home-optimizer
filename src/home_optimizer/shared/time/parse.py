@@ -15,3 +15,11 @@ def ensure_utc(value: datetime | str) -> datetime:
     if dt.tzinfo is None:
         raise ValueError("datetime must be timezone-aware")
     return dt.astimezone(timezone.utc)
+
+
+def normalize_utc_timestamp(
+    value: datetime | str,
+    *,
+    timespec: str = "seconds",
+) -> str:
+    return ensure_utc(value).isoformat(timespec=timespec)
