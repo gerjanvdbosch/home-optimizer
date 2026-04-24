@@ -2,34 +2,55 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Protocol
 
-from sqlalchemy import select
-
-from client.homeassistant import HomeAssistantClient
-from config.sensor_definitions import SensorSpec
-from database.models import ImportChunk, Sample1m
-from database.session import Database
+from home_optimizer.features.history_import.repository import HistoryImportRepository
+from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
+from home_optimizer.shared.db.orm_models import Sample1m
+from home_optimizer.shared.sensors.definitions import SensorSpec
+from home_optimizer.shared.sensors.parsing import parse_sensor_value
+from home_optimizer.shared.time.parse import ensure_utc
 
 LOGGER = logging.getLogger(__name__)
 
 
-class HomeAssistantHistoryImporter:
+class HistorySourceGateway(Protocol):
+    def get_history(
+        self,
+        *,
+        entity_id: str,
+        start_time: datetime,
+        end_time: datetime | None = None,
+        minimal_response: bool = True,
+    ) -> list[dict[str, Any]]: ...
+
+
+class HistoryImportService:
     def __init__(
         self,
-        ha_client: HomeAssistantClient,
-        database: Database,
+        gateway: HistorySourceGateway,
+        repository: HistoryImportRepository,
         chunk_days: int = 3,
-        source: str = "home_assistant_history",
     ) -> None:
         if chunk_days <= 0:
             raise ValueError("chunk_days must be greater than zero")
 
-        self.ha = ha_client
-        self.database = database
+        self.gateway = gateway
+        self.repository = repository
         self.chunk_days = chunk_days
-        self.source = source
+
+    def import_many(self, request: HistoryImportRequest) -> HistoryImportResult:
+        results: dict[str, int] = {}
+
+        for spec in request.specs:
+            results[spec.name] = self.import_sensor(
+                spec=spec,
+                start_time=request.start_time,
+                end_time=request.end_time,
+            )
+
+        return HistoryImportResult(imported_rows=results)
 
     def import_sensor(
         self,
@@ -37,41 +58,33 @@ class HomeAssistantHistoryImporter:
         start_time: datetime,
         end_time: datetime | None = None,
     ) -> int:
-        start = self._to_utc(start_time)
-        end = self._to_utc(end_time or datetime.now(timezone.utc))
+        start = ensure_utc(start_time)
+        end = ensure_utc(end_time or datetime.now(start.tzinfo))
 
         total_written = 0
         cursor = start
-        carry_value = self._last_stored_value_before(spec, start)
+        carry_value = self.repository.last_stored_value_before(spec, start)
 
         while cursor < end:
-            chunk_end = min(
-                cursor + timedelta(days=self.chunk_days),
-                end,
-            )
+            chunk_end = min(cursor + timedelta(days=self.chunk_days), end)
 
-            if self._chunk_already_imported(
-                spec=spec,
-                start_time=cursor,
-                end_time=chunk_end,
-            ):
+            if self.repository.chunk_already_imported(spec, cursor, chunk_end):
                 LOGGER.info(
                     "Skip %s: %s to %s already imported",
                     spec.name,
                     cursor.isoformat(),
                     chunk_end.isoformat(),
                 )
-                carry_value = self._last_stored_value_before(spec, chunk_end)
+                carry_value = self.repository.last_stored_value_before(spec, chunk_end)
                 cursor = chunk_end
                 continue
 
-            history = self.ha.get_history(
+            history = self.gateway.get_history(
                 entity_id=spec.entity_id,
                 start_time=cursor,
                 end_time=chunk_end,
                 minimal_response=True,
             )
-
             rows, carry_value = self._aggregate_history_to_minutes(
                 history=history,
                 spec=spec,
@@ -80,36 +93,12 @@ class HomeAssistantHistoryImporter:
                 initial_value=carry_value,
             )
 
-            self._write_rows(rows)
-            self._mark_chunk_imported(
-                spec=spec,
-                start_time=cursor,
-                end_time=chunk_end,
-                row_count=len(rows),
-            )
+            self.repository.write_rows(rows)
+            self.repository.mark_chunk_imported(spec, cursor, chunk_end, len(rows))
             total_written += len(rows)
-
             cursor = chunk_end
 
         return total_written
-
-    def import_many(
-        self,
-        specs: list[SensorSpec],
-        start_time: datetime,
-        end_time: datetime | None = None,
-    ) -> dict[str, int]:
-        results: dict[str, int] = {}
-
-        for spec in specs:
-            written = self.import_sensor(
-                spec=spec,
-                start_time=start_time,
-                end_time=end_time,
-            )
-            results[spec.name] = written
-
-        return results
 
     def _aggregate_history_to_minutes(
         self,
@@ -127,22 +116,14 @@ class HomeAssistantHistoryImporter:
                 self._forward_fill_rows(points, spec, start_time, end_time, initial_value),
                 carry_value,
             )
-
         if spec.method == "interpolate":
             return (
                 self._interpolated_rows(points, spec, start_time, end_time),
                 carry_value,
             )
-
         if spec.method == "time_weighted_mean":
             return (
-                self._time_weighted_mean_rows(
-                    points,
-                    spec,
-                    start_time,
-                    end_time,
-                    initial_value,
-                ),
+                self._time_weighted_mean_rows(points, spec, start_time, end_time, initial_value),
                 carry_value,
             )
 
@@ -156,8 +137,7 @@ class HomeAssistantHistoryImporter:
         points: list[tuple[datetime, Any]] = []
 
         for item in history:
-            parsed = self._parse_value(item.get("state"), spec)
-
+            parsed = parse_sensor_value(item.get("state"), spec.unit)
             if parsed is None:
                 continue
 
@@ -165,11 +145,10 @@ class HomeAssistantHistoryImporter:
                 parsed *= spec.conversion_factor
 
             ts_raw = item.get("last_changed") or item.get("last_updated")
-
             if not ts_raw:
                 continue
 
-            points.append((self._to_utc(ts_raw), parsed))
+            points.append((ensure_utc(ts_raw), parsed))
 
         return sorted(points, key=lambda point: point[0])
 
@@ -179,23 +158,14 @@ class HomeAssistantHistoryImporter:
         spec: SensorSpec,
     ) -> list[Sample1m]:
         grouped: dict[datetime, list[Any]] = defaultdict(list)
-
         for ts, value in points:
-            minute = self._floor_minute(ts)
-            grouped[minute].append(value)
+            grouped[self._floor_minute(ts)].append(value)
 
         rows: list[Sample1m] = []
-
         for minute, values in sorted(grouped.items()):
-            row = self._build_row(
-                minute=minute,
-                values=values,
-                spec=spec,
-            )
-
+            row = self._build_row(minute, values, spec)
             if row:
                 rows.append(row)
-
         return rows
 
     def _forward_fill_rows(
@@ -255,11 +225,9 @@ class HomeAssistantHistoryImporter:
                 point_index += 1
 
             value: float | None = None
-
             if point_index + 1 < len(numeric_points):
                 left_ts, left_value = numeric_points[point_index]
                 right_ts, right_value = numeric_points[point_index + 1]
-
                 if left_ts <= minute <= right_ts:
                     span = (right_ts - left_ts).total_seconds()
                     fraction = 0.0 if span <= 0 else (minute - left_ts).total_seconds() / span
@@ -289,7 +257,6 @@ class HomeAssistantHistoryImporter:
             for ts, value in points
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         ]
-
         if not numeric_points:
             return []
 
@@ -303,10 +270,7 @@ class HomeAssistantHistoryImporter:
         while minute < end_time:
             next_minute = min(minute + timedelta(minutes=1), end_time)
 
-            while (
-                point_index < len(numeric_points)
-                and numeric_points[point_index][0] <= minute
-            ):
+            while point_index < len(numeric_points) and numeric_points[point_index][0] <= minute:
                 current_value = numeric_points[point_index][1]
                 point_index += 1
 
@@ -319,7 +283,6 @@ class HomeAssistantHistoryImporter:
 
             while cursor < next_minute:
                 segment_end = next_minute
-
                 if (
                     local_index < len(numeric_points)
                     and numeric_points[local_index][0] < next_minute
@@ -361,44 +324,6 @@ class HomeAssistantHistoryImporter:
 
         return rows
 
-    def _chunk_already_imported(
-        self,
-        spec: SensorSpec,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> bool:
-        with self.database.session() as session:
-            existing = session.get(
-                ImportChunk,
-                {
-                    "source": self.source,
-                    "name": spec.name,
-                    "start_time_utc": start_time.isoformat(),
-                },
-            )
-
-        return existing is not None and existing.end_time_utc == end_time.isoformat()
-
-    def _mark_chunk_imported(
-        self,
-        spec: SensorSpec,
-        start_time: datetime,
-        end_time: datetime,
-        row_count: int,
-    ) -> None:
-        marker = ImportChunk(
-            source=self.source,
-            name=spec.name,
-            start_time_utc=start_time.isoformat(),
-            end_time_utc=end_time.isoformat(),
-            row_count=row_count,
-            imported_at_utc=datetime.now(timezone.utc).isoformat(),
-        )
-
-        with self.database.session() as session:
-            session.merge(marker)
-            session.commit()
-
     def _build_row(
         self,
         minute: datetime,
@@ -409,10 +334,10 @@ class HomeAssistantHistoryImporter:
             return None
 
         numeric_values = [
-            v for v in values
-            if isinstance(v, (int, float)) and not isinstance(v, bool)
+            value
+            for value in values
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
         ]
-
         last_value = values[-1]
 
         mean_real = None
@@ -429,17 +354,15 @@ class HomeAssistantHistoryImporter:
 
         if isinstance(last_value, bool):
             last_bool = int(last_value)
-
         elif isinstance(last_value, (int, float)):
             last_real = float(last_value)
-
         else:
             last_text = str(last_value)
 
         return Sample1m(
             timestamp_minute_utc=minute.isoformat(),
             name=spec.name,
-            source=self.source,
+            source=self.repository.source,
             entity_id=spec.entity_id,
             category=spec.category,
             unit=spec.unit,
@@ -465,7 +388,7 @@ class HomeAssistantHistoryImporter:
         return Sample1m(
             timestamp_minute_utc=minute.isoformat(),
             name=spec.name,
-            source=self.source,
+            source=self.repository.source,
             entity_id=spec.entity_id,
             category=spec.category,
             unit=spec.unit,
@@ -477,95 +400,6 @@ class HomeAssistantHistoryImporter:
             last_bool=None,
             sample_count=sample_count,
         )
-
-    def _write_rows(
-        self,
-        rows: list[Sample1m],
-    ) -> None:
-        if not rows:
-            return
-
-        with self.database.session() as session:
-            for row in rows:
-                session.merge(row)
-
-            session.commit()
-
-    @staticmethod
-    def _parse_value(value: Any, spec: SensorSpec) -> Any:
-        if isinstance(value, str):
-            value = value.strip()
-
-        if value in (
-            None,
-            "",
-            "unknown",
-            "unavailable",
-            "none",
-        ):
-            return None
-
-        if spec.unit == "bool":
-            if value == "on":
-                return True
-
-            if value == "off":
-                return False
-
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return str(value)
-
-    def _last_stored_value_before(
-        self,
-        spec: SensorSpec,
-        before_time: datetime,
-    ) -> Any | None:
-        with self.database.session() as session:
-            stmt = (
-                select(Sample1m)
-                .where(
-                    Sample1m.name == spec.name,
-                    Sample1m.source == self.source,
-                    Sample1m.timestamp_minute_utc < before_time.isoformat(),
-                )
-                .order_by(Sample1m.timestamp_minute_utc.desc())
-                .limit(1)
-            )
-            row = session.execute(stmt).scalar_one_or_none()
-
-        if row is None:
-            return None
-
-        if row.last_bool is not None:
-            return bool(row.last_bool)
-
-        if row.last_real is not None:
-            return row.last_real
-
-        if row.last_text is not None:
-            return row.last_text
-
-        return None
-
-    @staticmethod
-    def _to_utc(
-        value: datetime | str,
-    ) -> datetime:
-        if isinstance(value, str):
-            dt = datetime.fromisoformat(
-                value.replace("Z", "+00:00")
-            )
-        else:
-            dt = value
-
-        if dt.tzinfo is None:
-            raise ValueError(
-                "datetime must be timezone-aware"
-            )
-
-        return dt.astimezone(timezone.utc)
 
     @staticmethod
     def _floor_minute(value: datetime) -> datetime:

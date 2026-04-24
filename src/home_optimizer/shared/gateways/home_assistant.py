@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 
-class HomeAssistantClient:
+class HomeAssistantGateway:
     def __init__(
         self,
         base_url: str = "http://supervisor/core",
@@ -16,7 +16,6 @@ class HomeAssistantClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token or os.getenv("SUPERVISOR_TOKEN")
-
         if not self.token:
             raise ValueError("SUPERVISOR_TOKEN not found.")
 
@@ -36,9 +35,7 @@ class HomeAssistantClient:
         path: str,
         params: dict[str, Any] | None = None,
     ) -> Any:
-        url = f"{self.base_url}{path}"
-
-        response = self.client.get(url, params=params)
+        response = self.client.get(f"{self.base_url}{path}", params=params)
         response.raise_for_status()
         return response.json()
 
@@ -55,21 +52,13 @@ class HomeAssistantClient:
         end_time: datetime | None = None,
         minimal_response: bool = True,
     ) -> list[dict[str, Any]]:
-        path = f"/api/history/period/{start_time.isoformat()}"
-
-        params: dict[str, Any] = {
-            "filter_entity_id": entity_id,
-        }
-
+        params: dict[str, Any] = {"filter_entity_id": entity_id}
         if end_time:
             params["end_time"] = end_time.isoformat()
-
         if minimal_response:
             params["minimal_response"] = ""
 
-        result = self._get(path, params=params)
-
+        result = self._get(f"/api/history/period/{start_time.isoformat()}", params=params)
         if not result:
             return []
-
         return result[0]

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from config.sensor_definitions import SensorSpec
-from database.models import Sample1m
-from database.session import Database
-from importer.history_importer import HomeAssistantHistoryImporter
+from home_optimizer.features.history_import.repository import HistoryImportRepository
+from home_optimizer.features.history_import.service import HistoryImportService
+from home_optimizer.shared.db.orm_models import Sample1m
+from home_optimizer.shared.db.session import Database
+from home_optimizer.shared.sensors.definitions import SensorSpec
 
 
 class FakeHomeAssistantClient:
@@ -64,7 +65,7 @@ def test_mean_import_converts_values_and_skips_imported_chunk(tmp_path) -> None:
         method="mean",
         conversion_factor=0.001,
     )
-    importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
+    importer = HistoryImportService(ha, HistoryImportRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, tzinfo=timezone.utc)
     end = datetime(2026, 4, 15, tzinfo=timezone.utc)
 
@@ -105,7 +106,7 @@ def test_forward_fill_creates_one_row_per_minute(tmp_path) -> None:
         unit="bool",
         method="ffill",
     )
-    importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
+    importer = HistoryImportService(ha, HistoryImportRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
 
@@ -140,7 +141,7 @@ def test_forward_fill_text_mode_keeps_off_as_text(tmp_path) -> None:
         unit=None,
         method="ffill",
     )
-    importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
+    importer = HistoryImportService(ha, HistoryImportRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
 
@@ -176,7 +177,7 @@ def test_time_weighted_mean_creates_one_row_per_minute(tmp_path) -> None:
         unit="Lmin",
         method="time_weighted_mean",
     )
-    importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
+    importer = HistoryImportService(ha, HistoryImportRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
 
@@ -218,7 +219,7 @@ def test_time_weighted_mean_carries_value_across_chunks(tmp_path) -> None:
         unit="Lmin",
         method="time_weighted_mean",
     )
-    importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
+    importer = HistoryImportService(ha, HistoryImportRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     split = datetime(2026, 4, 14, 0, 2, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 5, tzinfo=timezone.utc)

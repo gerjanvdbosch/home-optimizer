@@ -34,12 +34,11 @@ dev = [
 ]
 
 [project.scripts]
-home-optimizer-addon = "addon:main"
-home-optimizer-local = "local:main"
+home-optimizer-addon = "home_optimizer.entrypoints.addon:main"
+home-optimizer-local = "home_optimizer.entrypoints.local:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["addon", "local"]
 
 [tool.setuptools.package-data]
 home_optimizer = ["templates/*.html"]
@@ -65,6 +64,8 @@ target-version = ["py311"]
 include = ["src", "tests"]
 exclude = ["**/__pycache__"]
 extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
