@@ -81,7 +81,7 @@ def main() -> None:
     #
     # Database
     #
-    db = Database(str(options.get("database_path", "/data/home_optimizer.db")))
+    db = Database(str(options.get("database_path", "/config/home_optimizer.db")))
     db.init_schema()
 
     #
