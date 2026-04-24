@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from client.homeassistant import HomeAssistantClient
-from config.sensors import SensorSpec
+from config.sensor_definitions import SensorSpec
 from database.models import Sample1m
 from database.session import Database
 
@@ -105,8 +105,8 @@ class HomeAssistantHistoryImporter:
                 continue
 
             ts_raw = (
-                    item.get("last_changed")
-                    or item.get("last_updated")
+                item.get("last_changed")
+                or item.get("last_updated")
             )
 
             if not ts_raw:
