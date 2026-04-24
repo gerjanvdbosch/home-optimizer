@@ -14,13 +14,11 @@ class InfluxStore:
         url: str,
         token: str,
         org: str,
-        bucket: str,
         measurement: str,
     ) -> None:
         self.url = url
         self.token = token
         self.org = org
-        self.bucket = bucket
         self.measurement = measurement
 
         self.client = InfluxDBClient(
@@ -42,14 +40,15 @@ class InfluxStore:
 
     def ensure_bucket(
         self,
+        bucket: str,
         retention_days: int = 730,
     ) -> None:
         existing = self.buckets_api.find_bucket_by_name(
-            self.bucket
+            bucket
         )
 
         if existing:
-            print(f"Bucket already exists: {self.bucket}")
+            print(f"Bucket already exists: {bucket}")
             return
 
         org = self.orgs_api.find_organizations(
@@ -62,13 +61,13 @@ class InfluxStore:
         )
 
         self.buckets_api.create_bucket(
-            bucket_name=self.bucket,
+            bucket_name=bucket,
             org_id=org.id,
             retention_rules=retention,
         )
 
         print(
-            f"Created bucket: {self.bucket} "
+            f"Created bucket: {bucket} "
             f"(retention={retention_days}d)"
         )
 
@@ -104,6 +103,7 @@ class InfluxStore:
 
     def write_sensor(
         self,
+        bucket: str,
         name: str,
         entity_id: str,
         value: Any,
@@ -134,18 +134,19 @@ class InfluxStore:
             point = point.field("value_str", str(value))
 
         self.write_api.write(
-            bucket=self.bucket,
+            bucket=bucket,
             org=self.org,
             record=point,
         )
 
     def query_last_value(
         self,
+        bucket: str,
         sensor_name: str,
         hours: int = 24,
     ) -> list[dict[str, Any]]:
         flux = f"""
-        from(bucket: "{self.bucket}")
+        from(bucket: "{bucket}")
           |> range(start: -{hours}h)
           |> filter(fn: (r) => r["_measurement"] == "{self.measurement}")
           |> filter(fn: (r) => r["name"] == "{sensor_name}")
