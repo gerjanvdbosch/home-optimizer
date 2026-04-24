@@ -12,5 +12,5 @@ set -euo pipefail
 bashio::log.info "Starting Home Optimizer addon..."
 bashio::log.info "Options: $(bashio::config)"
 
-exec python -m home_optimizer.addon
+exec python -m addon
 

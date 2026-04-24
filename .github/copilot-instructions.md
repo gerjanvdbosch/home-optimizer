@@ -1,1 +1,0 @@
-Zie [AGENTS.md](./../AGENTS.md) voor de algemene richtlijnen en verwachtingen bij wijzigingen in dit project.
