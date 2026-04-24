@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from client.homeassistant import HomeAssistantClient
 from config.sensor_definitions import SensorSpec
-from database.models import Sample1m
+from database.models import ImportChunk, Sample1m
 from database.session import Database
+
+LOGGER = logging.getLogger(__name__)
 
 
 class HomeAssistantHistoryImporter:
@@ -18,6 +21,9 @@ class HomeAssistantHistoryImporter:
         chunk_days: int = 3,
         source: str = "home_assistant_history",
     ) -> None:
+        if chunk_days <= 0:
+            raise ValueError("chunk_days must be greater than zero")
+
         self.ha = ha_client
         self.database = database
         self.chunk_days = chunk_days
@@ -46,9 +52,11 @@ class HomeAssistantHistoryImporter:
                 start_time=cursor,
                 end_time=chunk_end,
             ):
-                print(
-                    f"Skip {spec.name}: "
-                    f"{cursor.isoformat()} → {chunk_end.isoformat()} already imported"
+                LOGGER.info(
+                    "Skip %s: %s to %s already imported",
+                    spec.name,
+                    cursor.isoformat(),
+                    chunk_end.isoformat(),
                 )
                 cursor = chunk_end
                 continue
@@ -63,9 +71,17 @@ class HomeAssistantHistoryImporter:
             rows = self._aggregate_history_to_minutes(
                 history=history,
                 spec=spec,
+                start_time=cursor,
+                end_time=chunk_end,
             )
 
             self._write_rows(rows)
+            self._mark_chunk_imported(
+                spec=spec,
+                start_time=cursor,
+                end_time=chunk_end,
+                row_count=len(rows),
+            )
             total_written += len(rows)
 
             cursor = chunk_end
@@ -94,36 +110,58 @@ class HomeAssistantHistoryImporter:
         self,
         history: list[dict[str, Any]],
         spec: SensorSpec,
+        start_time: datetime,
+        end_time: datetime,
     ) -> list[Sample1m]:
-        grouped: dict[datetime, list[Any]] = defaultdict(list)
+        points = self._history_points(history, spec)
+
+        if spec.method == "ffill":
+            return self._forward_fill_rows(points, spec, start_time, end_time)
+
+        if spec.method == "interpolate":
+            return self._interpolated_rows(points, spec, start_time, end_time)
+
+        return self._mean_rows(points, spec)
+
+    def _history_points(
+        self,
+        history: list[dict[str, Any]],
+        spec: SensorSpec,
+    ) -> list[tuple[datetime, Any]]:
+        points: list[tuple[datetime, Any]] = []
 
         for item in history:
-            raw_value = item.get("state")
-            parsed = self._parse_value(raw_value)
+            parsed = self._parse_value(item.get("state"))
 
             if parsed is None:
                 continue
 
-            ts_raw = (
-                item.get("last_changed")
-                or item.get("last_updated")
-            )
+            if isinstance(parsed, (int, float)) and not isinstance(parsed, bool):
+                parsed *= spec.conversion_factor
+
+            ts_raw = item.get("last_changed") or item.get("last_updated")
 
             if not ts_raw:
                 continue
 
-            ts = self._to_utc(ts_raw)
+            points.append((self._to_utc(ts_raw), parsed))
 
-            minute = ts.replace(
-                second=0,
-                microsecond=0,
-            )
+        return sorted(points, key=lambda point: point[0])
 
-            grouped[minute].append(parsed)
+    def _mean_rows(
+        self,
+        points: list[tuple[datetime, Any]],
+        spec: SensorSpec,
+    ) -> list[Sample1m]:
+        grouped: dict[datetime, list[Any]] = defaultdict(list)
+
+        for ts, value in points:
+            minute = self._floor_minute(ts)
+            grouped[minute].append(value)
 
         rows: list[Sample1m] = []
 
-        for minute, values in grouped.items():
+        for minute, values in sorted(grouped.items()):
             row = self._build_row(
                 minute=minute,
                 values=values,
@@ -135,6 +173,83 @@ class HomeAssistantHistoryImporter:
 
         return rows
 
+    def _forward_fill_rows(
+        self,
+        points: list[tuple[datetime, Any]],
+        spec: SensorSpec,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[Sample1m]:
+        rows: list[Sample1m] = []
+        point_index = 0
+        last_value: Any | None = None
+        minute = self._floor_minute(start_time)
+
+        while minute < end_time:
+            next_minute = minute + timedelta(minutes=1)
+
+            while point_index < len(points) and points[point_index][0] < next_minute:
+                last_value = points[point_index][1]
+                point_index += 1
+
+            if last_value is not None and minute >= start_time:
+                row = self._build_row(minute, [last_value], spec)
+                if row:
+                    rows.append(row)
+
+            minute = next_minute
+
+        return rows
+
+    def _interpolated_rows(
+        self,
+        points: list[tuple[datetime, Any]],
+        spec: SensorSpec,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[Sample1m]:
+        numeric_points = [
+            (ts, float(value))
+            for ts, value in points
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+
+        if len(numeric_points) < 2:
+            return self._forward_fill_rows(points, spec, start_time, end_time)
+
+        rows: list[Sample1m] = []
+        point_index = 0
+        minute = self._floor_minute(start_time)
+
+        while minute < end_time:
+            while (
+                point_index + 1 < len(numeric_points)
+                and numeric_points[point_index + 1][0] <= minute
+            ):
+                point_index += 1
+
+            value: float | None = None
+
+            if point_index + 1 < len(numeric_points):
+                left_ts, left_value = numeric_points[point_index]
+                right_ts, right_value = numeric_points[point_index + 1]
+
+                if left_ts <= minute <= right_ts:
+                    span = (right_ts - left_ts).total_seconds()
+                    fraction = 0.0 if span <= 0 else (minute - left_ts).total_seconds() / span
+                    value = left_value + ((right_value - left_value) * fraction)
+            elif numeric_points[point_index][0] <= minute:
+                value = numeric_points[point_index][1]
+
+            if value is not None and minute >= start_time:
+                row = self._build_row(minute, [value], spec)
+                if row:
+                    rows.append(row)
+
+            minute += timedelta(minutes=1)
+
+        return rows
+
     def _chunk_already_imported(
         self,
         spec: SensorSpec,
@@ -142,18 +257,36 @@ class HomeAssistantHistoryImporter:
         end_time: datetime,
     ) -> bool:
         with self.database.session() as session:
-            existing_count = (
-                session.query(Sample1m)
-                .filter(Sample1m.name == spec.name)
-                .filter(Sample1m.source == self.source)
-                .filter(Sample1m.timestamp_minute_utc >= start_time.isoformat())
-                .filter(Sample1m.timestamp_minute_utc < end_time.isoformat())
-                .count()
+            existing = session.get(
+                ImportChunk,
+                {
+                    "source": self.source,
+                    "name": spec.name,
+                    "start_time_utc": start_time.isoformat(),
+                },
             )
 
-        expected_minutes = int((end_time - start_time).total_seconds() // 60)
+        return existing is not None and existing.end_time_utc == end_time.isoformat()
 
-        return existing_count >= expected_minutes
+    def _mark_chunk_imported(
+        self,
+        spec: SensorSpec,
+        start_time: datetime,
+        end_time: datetime,
+        row_count: int,
+    ) -> None:
+        marker = ImportChunk(
+            source=self.source,
+            name=spec.name,
+            start_time_utc=start_time.isoformat(),
+            end_time_utc=end_time.isoformat(),
+            row_count=row_count,
+            imported_at_utc=datetime.now(timezone.utc).isoformat(),
+        )
+
+        with self.database.session() as session:
+            session.merge(marker)
+            session.commit()
 
     def _build_row(
         self,
@@ -166,7 +299,7 @@ class HomeAssistantHistoryImporter:
 
         numeric_values = [
             v for v in values
-            if isinstance(v, (int, float))
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
         ]
 
         last_value = values[-1]
@@ -223,6 +356,9 @@ class HomeAssistantHistoryImporter:
 
     @staticmethod
     def _parse_value(value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+
         if value in (
             None,
             "",
@@ -260,3 +396,7 @@ class HomeAssistantHistoryImporter:
             )
 
         return dt.astimezone(timezone.utc)
+
+    @staticmethod
+    def _floor_minute(value: datetime) -> datetime:
+        return value.replace(second=0, microsecond=0)

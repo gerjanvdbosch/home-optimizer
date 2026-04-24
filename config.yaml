@@ -33,6 +33,10 @@ map:
 
 options:
   database_path: "/config/database.sqlite"
+  history_import_enabled: true
+  history_import_start: "2026-04-14T00:00:00+02:00"
+  history_import_end: ""
+  history_import_chunk_days: 3
 
   sensor_room_temperature: "sensor.danfoss_15_temperature"
   sensor_thermostat_setpoint: "sensor.danfoss_15_setpoint"
@@ -78,6 +82,10 @@ options:
 
 schema:
   database_path: str
+  history_import_enabled: bool
+  history_import_start: str
+  history_import_end: str
+  history_import_chunk_days: int
 
   sensor_room_temperature: str
   sensor_thermostat_setpoint: str
@@ -105,7 +113,7 @@ schema:
 
   sensor_hp_electric_power: str
   sensor_p1_net_power: str
-  sensor_pv_output: str
+  sensor_pv_output_power: str
 
   sensor_shutter_living_room: str
 

@@ -39,6 +39,7 @@ home-optimizer-local = "local:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+py-modules = ["addon", "local"]
 
 [tool.setuptools.package-data]
 home_optimizer = ["templates/*.html"]

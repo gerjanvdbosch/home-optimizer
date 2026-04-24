@@ -1,5 +1,6 @@
+.DS_Store
 /.idea
-/database.sqlite3
+/database.sqlite
 /models/
 .pyright/
 .pyrightcache/

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 ResampleMethod = Literal[
     "interpolate",
     "ffill",
@@ -29,6 +28,7 @@ class SensorSpec:
     category: str
     unit: str | None
     method: ResampleMethod
+    conversion_factor: float = 1.0
 
 
 SENSOR_DEFINITIONS = [
@@ -232,6 +232,7 @@ def build_sensor_specs(
                 category=definition.category,
                 unit=definition.unit,
                 method=definition.method,
+                conversion_factor=definition.conversion_factor,
             )
         )
 

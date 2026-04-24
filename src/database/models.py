@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from sqlalchemy import Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -27,6 +28,17 @@ class Sample1m(Base):
     last_bool: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ImportChunk(Base):
+    __tablename__ = "import_chunks"
+
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    start_time_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    end_time_utc: Mapped[str] = mapped_column(String, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    imported_at_utc: Mapped[str] = mapped_column(String, nullable=False)
 
 
 Index(
