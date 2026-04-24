@@ -7,6 +7,7 @@ ResampleMethod = Literal[
     "interpolate",
     "ffill",
     "mean",
+    "time_weighted_mean",
 ]
 
 
@@ -86,7 +87,7 @@ SENSOR_DEFINITIONS = [
         name="hp_flow",
         category="heatpump",
         unit="L/min",
-        method="mean",
+        method="time_weighted_mean",
     ),
     SensorDefinition(
         config_key="sensor_hp_mode",
@@ -100,7 +101,7 @@ SENSOR_DEFINITIONS = [
         name="compressor_frequency",
         category="heatpump",
         unit="Hz",
-        method="mean",
+        method="time_weighted_mean",
     ),
     SensorDefinition(
         config_key="sensor_defrost_active",
@@ -163,7 +164,7 @@ SENSOR_DEFINITIONS = [
         name="hp_electric_power",
         category="energy",
         unit="kW",
-        method="mean",
+        method="time_weighted_mean",
         conversion_factor=0.001,  # W → kW
     ),
     SensorDefinition(
@@ -171,7 +172,7 @@ SENSOR_DEFINITIONS = [
         name="p1_net_power",
         category="energy",
         unit="kW",
-        method="mean",
+        method="time_weighted_mean",
         conversion_factor=0.001,  # W → kW
     ),
     SensorDefinition(
@@ -179,7 +180,7 @@ SENSOR_DEFINITIONS = [
         name="pv_output_power",
         category="energy",
         unit="kW",
-        method="mean",
+        method="time_weighted_mean",
         conversion_factor=0.001,  # W → kW
     ),
     SensorDefinition(
