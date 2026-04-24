@@ -12,6 +12,15 @@ authors = [
   { name = "gerjanvdbosch" },
 ]
 dependencies = [
+  "plotly>=5.20",
+  "httpx>=0.27",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "influxdb-client>=1.43",
+  "pydantic>=2.7",
+  "APScheduler>=3.10",
 ]
 
 [project.optional-dependencies]

@@ -26,12 +26,14 @@ ports:
   8099/tcp: 8099
 
 ports_description:
-  8099/tcp: "Home Optimizer dashboard & REST API"
+  8099/tcp: "Home Optimizer"
 
 map:
   - addon_config:rw
 
 options:
+  database_path: ""
+
   api_port: 8099
 
   sensor_room_temperature: "sensor.danfoss_15_temperature"
