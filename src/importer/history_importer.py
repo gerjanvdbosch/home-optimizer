@@ -1,25 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any
 
 from client.homeassistant import HomeAssistantClient
+from config.sensors import SensorSpec
 from database.models import Sample1m
 from database.session import Database
-
-
-ResampleMethod = Literal["interpolate", "ffill", "mean"]
-
-
-@dataclass(frozen=True)
-class SensorSpec:
-    name: str
-    entity_id: str
-    category: str
-    unit: str | None = None
-    method: ResampleMethod = "ffill"
 
 
 class HomeAssistantHistoryImporter:
