@@ -131,7 +131,7 @@ class HomeAssistantHistoryImporter:
         points: list[tuple[datetime, Any]] = []
 
         for item in history:
-            parsed = self._parse_value(item.get("state"))
+            parsed = self._parse_value(item.get("state"), spec)
 
             if parsed is None:
                 continue
@@ -355,7 +355,7 @@ class HomeAssistantHistoryImporter:
             session.commit()
 
     @staticmethod
-    def _parse_value(value: Any) -> Any:
+    def _parse_value(value: Any, spec: SensorSpec) -> Any:
         if isinstance(value, str):
             value = value.strip()
 
@@ -368,11 +368,12 @@ class HomeAssistantHistoryImporter:
         ):
             return None
 
-        if value == "on":
-            return True
+        if spec.unit == "bool":
+            if value == "on":
+                return True
 
-        if value == "off":
-            return False
+            if value == "off":
+                return False
 
         try:
             return float(value)

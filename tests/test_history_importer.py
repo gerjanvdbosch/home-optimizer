@@ -96,3 +96,38 @@ def test_forward_fill_creates_one_row_per_minute(tmp_path) -> None:
         rows = session.query(Sample1m).order_by(Sample1m.timestamp_minute_utc).all()
 
     assert [row.last_bool for row in rows] == [0, 0, 1, 1]
+
+
+def test_forward_fill_text_mode_keeps_off_as_text(tmp_path) -> None:
+    db = Database(str(tmp_path / "history.db"))
+    db.init_schema()
+    ha = FakeHomeAssistantClient(
+        [
+            {
+                "state": "off",
+                "last_changed": "2026-04-14T00:00:00+00:00",
+            },
+            {
+                "state": "heat",
+                "last_changed": "2026-04-14T00:02:00+00:00",
+            },
+        ]
+    )
+    spec = SensorSpec(
+        name="hp_mode",
+        entity_id="sensor.warmtepomp_mode",
+        category="heatpump",
+        unit=None,
+        method="ffill",
+    )
+    importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
+    start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
+
+    assert importer.import_sensor(spec, start, end) == 4
+
+    with db.session() as session:
+        rows = session.query(Sample1m).order_by(Sample1m.timestamp_minute_utc).all()
+
+    assert [row.last_text for row in rows] == ["off", "off", "heat", "heat"]
+    assert [row.last_bool for row in rows] == [None, None, None, None]
