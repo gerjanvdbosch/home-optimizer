@@ -41,6 +41,18 @@ class HomeAssistantHistoryImporter:
                 end,
             )
 
+            if self._chunk_already_imported(
+                spec=spec,
+                start_time=cursor,
+                end_time=chunk_end,
+            ):
+                print(
+                    f"Skip {spec.name}: "
+                    f"{cursor.isoformat()} → {chunk_end.isoformat()} already imported"
+                )
+                cursor = chunk_end
+                continue
+
             history = self.ha.get_history(
                 entity_id=spec.entity_id,
                 start_time=cursor,
@@ -93,8 +105,8 @@ class HomeAssistantHistoryImporter:
                 continue
 
             ts_raw = (
-                item.get("last_changed")
-                or item.get("last_updated")
+                    item.get("last_changed")
+                    or item.get("last_updated")
             )
 
             if not ts_raw:
@@ -122,6 +134,26 @@ class HomeAssistantHistoryImporter:
                 rows.append(row)
 
         return rows
+
+    def _chunk_already_imported(
+        self,
+        spec: SensorSpec,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> bool:
+        with self.database.session() as session:
+            existing_count = (
+                session.query(Sample1m)
+                .filter(Sample1m.name == spec.name)
+                .filter(Sample1m.source == self.source)
+                .filter(Sample1m.timestamp_minute_utc >= start_time.isoformat())
+                .filter(Sample1m.timestamp_minute_utc < end_time.isoformat())
+                .count()
+            )
+
+        expected_minutes = int((end_time - start_time).total_seconds() // 60)
+
+        return existing_count >= expected_minutes
 
     def _build_row(
         self,

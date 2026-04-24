@@ -37,11 +37,12 @@ options:
   api_port: 8099
 
   sensor_room_temperature: "sensor.danfoss_15_temperature"
+  sensor_thermostat_setpoint: "sensor.danfoss_15_setpoint"
+
   sensor_outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
   sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
   sensor_hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
   sensor_hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
-  sensor_thermostat_setpoint: "sensor.danfoss_15_setpoint"
   sensor_dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
   sensor_dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
   sensor_boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
@@ -81,11 +82,12 @@ schema:
   api_port: int
 
   sensor_room_temperature: str
+  sensor_thermostat_setpoint: str
+
   sensor_outdoor_temperature: str
   sensor_hp_supply_temperature: str
   sensor_hp_supply_target_temperature: str
   sensor_hp_return_temperature: str
-  sensor_thermostat_setpoint: str
   sensor_dhw_top_temperature: str
   sensor_dhw_bottom_temperature: str
   sensor_boiler_ambient_temperature: str
