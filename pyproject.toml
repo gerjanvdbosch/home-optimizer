@@ -18,8 +18,8 @@ dependencies = [
   "numpy>=1.26",
   "fastapi>=0.110",
   "uvicorn>=0.29",
-  "influxdb-client>=1.43",
   "pydantic>=2.7",
+  "SQLAlchemy>=2.0",
   "APScheduler>=3.10",
 ]
 

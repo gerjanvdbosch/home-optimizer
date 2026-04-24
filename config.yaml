@@ -32,7 +32,7 @@ map:
   - addon_config:rw
 
 options:
-  database_path: ""
+  database_path: "/config/database.sqlite"
 
   api_port: 8099
 
@@ -48,7 +48,7 @@ options:
   sensor_refrigerant_condensation_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_condensatie_temp"
   sensor_refrigerant_liquid_line_temperature: "sensor.ecodan_heatpump_ca09ec_buitenunit_vloeistofleiding_1"
   sensor_discharge_temperature: "sensor.ecodan_heatpump_ca09ec_ontladingstemperatuur"
-  sensor_hp_flow_lpm: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
+  sensor_hp_flow: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
   sensor_hp_mode: "sensor.warmtepomp_mode"
   sensor_compressor_frequency: "sensor.ecodan_heatpump_compressor_frequentie"
 
