@@ -5,6 +5,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import select
+
 from client.homeassistant import HomeAssistantClient
 from config.sensor_definitions import SensorSpec
 from database.models import ImportChunk, Sample1m
@@ -40,6 +42,7 @@ class HomeAssistantHistoryImporter:
 
         total_written = 0
         cursor = start
+        carry_value = self._last_stored_value_before(spec, start)
 
         while cursor < end:
             chunk_end = min(
@@ -58,6 +61,7 @@ class HomeAssistantHistoryImporter:
                     cursor.isoformat(),
                     chunk_end.isoformat(),
                 )
+                carry_value = self._last_stored_value_before(spec, chunk_end)
                 cursor = chunk_end
                 continue
 
@@ -68,11 +72,12 @@ class HomeAssistantHistoryImporter:
                 minimal_response=True,
             )
 
-            rows = self._aggregate_history_to_minutes(
+            rows, carry_value = self._aggregate_history_to_minutes(
                 history=history,
                 spec=spec,
                 start_time=cursor,
                 end_time=chunk_end,
+                initial_value=carry_value,
             )
 
             self._write_rows(rows)
@@ -112,19 +117,36 @@ class HomeAssistantHistoryImporter:
         spec: SensorSpec,
         start_time: datetime,
         end_time: datetime,
-    ) -> list[Sample1m]:
+        initial_value: Any | None = None,
+    ) -> tuple[list[Sample1m], Any | None]:
         points = self._history_points(history, spec)
+        carry_value = points[-1][1] if points else initial_value
 
         if spec.method == "ffill":
-            return self._forward_fill_rows(points, spec, start_time, end_time)
+            return (
+                self._forward_fill_rows(points, spec, start_time, end_time, initial_value),
+                carry_value,
+            )
 
         if spec.method == "interpolate":
-            return self._interpolated_rows(points, spec, start_time, end_time)
+            return (
+                self._interpolated_rows(points, spec, start_time, end_time),
+                carry_value,
+            )
 
         if spec.method == "time_weighted_mean":
-            return self._time_weighted_mean_rows(points, spec, start_time, end_time)
+            return (
+                self._time_weighted_mean_rows(
+                    points,
+                    spec,
+                    start_time,
+                    end_time,
+                    initial_value,
+                ),
+                carry_value,
+            )
 
-        return self._mean_rows(points, spec)
+        return self._mean_rows(points, spec), carry_value
 
     def _history_points(
         self,
@@ -182,10 +204,11 @@ class HomeAssistantHistoryImporter:
         spec: SensorSpec,
         start_time: datetime,
         end_time: datetime,
+        initial_value: Any | None = None,
     ) -> list[Sample1m]:
         rows: list[Sample1m] = []
         point_index = 0
-        last_value: Any | None = None
+        last_value: Any | None = initial_value
         minute = self._floor_minute(start_time)
 
         while minute < end_time:
@@ -259,6 +282,7 @@ class HomeAssistantHistoryImporter:
         spec: SensorSpec,
         start_time: datetime,
         end_time: datetime,
+        initial_value: Any | None = None,
     ) -> list[Sample1m]:
         numeric_points = [
             (ts, float(value))
@@ -271,7 +295,9 @@ class HomeAssistantHistoryImporter:
 
         rows: list[Sample1m] = []
         point_index = 0
-        current_value: float | None = None
+        current_value: float | None = (
+            float(initial_value) if isinstance(initial_value, (int, float)) else None
+        )
         minute = self._floor_minute(start_time)
 
         while minute < end_time:
@@ -326,7 +352,7 @@ class HomeAssistantHistoryImporter:
                         min_value=min(segment_values),
                         max_value=max(segment_values),
                         last_value=segment_values[-1],
-                        sample_count=len(segment_values),
+                        sample_count=1,
                         spec=spec,
                     )
                 )
@@ -490,6 +516,38 @@ class HomeAssistantHistoryImporter:
             return float(value)
         except (ValueError, TypeError):
             return str(value)
+
+    def _last_stored_value_before(
+        self,
+        spec: SensorSpec,
+        before_time: datetime,
+    ) -> Any | None:
+        with self.database.session() as session:
+            stmt = (
+                select(Sample1m)
+                .where(
+                    Sample1m.name == spec.name,
+                    Sample1m.source == self.source,
+                    Sample1m.timestamp_minute_utc < before_time.isoformat(),
+                )
+                .order_by(Sample1m.timestamp_minute_utc.desc())
+                .limit(1)
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+
+        if row is None:
+            return None
+
+        if row.last_bool is not None:
+            return bool(row.last_bool)
+
+        if row.last_real is not None:
+            return row.last_real
+
+        if row.last_text is not None:
+            return row.last_text
+
+        return None
 
     @staticmethod
     def _to_utc(
