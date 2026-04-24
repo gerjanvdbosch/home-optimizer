@@ -18,6 +18,7 @@ class SensorDefinition:
     category: str
     unit: str | None
     method: ResampleMethod
+    conversion_factor: float = 1.0
     poll_interval_seconds: int = 5
 
 
@@ -161,22 +162,25 @@ SENSOR_DEFINITIONS = [
         config_key="sensor_hp_electric_power",
         name="hp_electric_power",
         category="energy",
-        unit="W",
+        unit="kW",
         method="mean",
+        conversion_factor=0.001,  # W → kW
     ),
     SensorDefinition(
         config_key="sensor_p1_net_power",
         name="p1_net_power",
         category="energy",
-        unit="W",
+        unit="kW",
         method="mean",
+        conversion_factor=0.001,  # W → kW
     ),
     SensorDefinition(
         config_key="sensor_pv_output_power",
         name="pv_output_power",
         category="energy",
-        unit="W",
+        unit="kW",
         method="mean",
+        conversion_factor=0.001,  # W → kW
     ),
     SensorDefinition(
         config_key="sensor_pv_total_kwh",
