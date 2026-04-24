@@ -86,7 +86,7 @@ SENSOR_DEFINITIONS = [
         config_key="sensor_hp_flow",
         name="hp_flow",
         category="heatpump",
-        unit="L/min",
+        unit="Lmin",
         method="time_weighted_mean",
     ),
     SensorDefinition(

@@ -173,7 +173,7 @@ def test_time_weighted_mean_creates_one_row_per_minute(tmp_path) -> None:
         name="hp_flow",
         entity_id="sensor.flow",
         category="heatpump",
-        unit="L/min",
+        unit="Lmin",
         method="time_weighted_mean",
     )
     importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
@@ -215,7 +215,7 @@ def test_time_weighted_mean_carries_value_across_chunks(tmp_path) -> None:
         name="hp_flow",
         entity_id="sensor.flow",
         category="heatpump",
-        unit="L/min",
+        unit="Lmin",
         method="time_weighted_mean",
     )
     importer = HomeAssistantHistoryImporter(ha, db, chunk_days=1)
