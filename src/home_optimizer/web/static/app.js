@@ -1,6 +1,37 @@
 const button = document.getElementById("import-button");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
+const selectedDateLabel = document.getElementById("selected-date");
+const previousDayButton = document.getElementById("previous-day");
+const nextDayButton = document.getElementById("next-day");
+const roomSummary = document.getElementById("room-summary");
+const dhwSummary = document.getElementById("dhw-summary");
+const roomChart = document.getElementById("room-chart");
+const dhwChart = document.getElementById("dhw-chart");
+const baseUrl = new URL(".", window.location.href);
+
+let selectedDate = new Date();
+
+function apiUrl(path) {
+  return new URL(path, baseUrl).toString();
+}
+
+function formatDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDisplayDate(date) {
+  return new Intl.DateTimeFormat("nl-NL", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
+function shiftDate(days) {
+  selectedDate = new Date(selectedDate.getTime() + days * 24 * 60 * 60 * 1000);
+  loadCharts();
+}
 
 async function runImport() {
   if (!button) {
@@ -12,7 +43,7 @@ async function runImport() {
   status.textContent = "Import wordt gestart...";
 
   try {
-    const response = await fetch("/api/history-import", {
+    const response = await fetch(apiUrl("api/history-import"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
@@ -25,6 +56,7 @@ async function runImport() {
 
     status.textContent = "Import draait...";
     await pollImportJob(payload.job_id);
+    await loadCharts();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Import mislukt.";
     status.className = "status error";
@@ -37,7 +69,7 @@ async function runImport() {
 
 async function pollImportJob(jobId) {
   while (true) {
-    const response = await fetch(`/api/history-import/jobs/${jobId}`);
+    const response = await fetch(apiUrl(`api/history-import/jobs/${jobId}`));
     const payload = await response.json();
 
     if (!response.ok) {
@@ -64,4 +96,131 @@ async function pollImportJob(jobId) {
   }
 }
 
+async function loadCharts() {
+  if (!roomChart || !dhwChart || !selectedDateLabel) {
+    return;
+  }
+
+  selectedDateLabel.textContent = formatDisplayDate(selectedDate);
+  const response = await fetch(apiUrl(`api/dashboard/charts?date=${formatDate(selectedDate)}`));
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.detail || "Grafiekdata ophalen mislukt.");
+  }
+
+  renderPlot(roomChart, [payload.room_temperature], {
+    colors: ["#03a9f4"],
+    emptyText: "Geen kamertemperatuur voor deze dag",
+    yTitle: payload.room_temperature.unit || "",
+  });
+  renderPlot(dhwChart, payload.dhw_temperatures, {
+    colors: ["#ff9800", "#7e57c2"],
+    emptyText: "Geen boilerdata voor deze dag",
+    yTitle: payload.dhw_temperatures[0]?.unit || "",
+  });
+
+  roomSummary.textContent = summarizeSeries(payload.room_temperature);
+  dhwSummary.textContent = summarizeSeries(payload.dhw_temperatures[0]);
+}
+
+function summarizeSeries(series) {
+  const values = series.points.map((point) => point.value);
+  if (values.length === 0) {
+    return "-";
+  }
+  const latest = values[values.length - 1];
+  const unit = series.unit || "";
+  return `${latest.toFixed(1)} ${unit}`.trim();
+}
+
+function renderPlot(element, seriesList, options) {
+  const traces = seriesList.map((series, index) => ({
+    x: series.points.map((point) => point.timestamp),
+    y: series.points.map((point) => point.value),
+    name: series.name,
+    type: "scatter",
+    mode: "lines",
+    line: {
+      color: options.colors[index % options.colors.length],
+      width: 2,
+    },
+    hovertemplate: `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}<extra>${series.name}</extra>`,
+  }));
+  const hasPoints = seriesList.some((series) => series.points.length > 0);
+
+  Plotly.react(element, traces, plotLayout(options, hasPoints), {
+    displayModeBar: false,
+    responsive: true,
+  });
+}
+
+function plotLayout(options, hasPoints) {
+  const annotations = hasPoints
+    ? []
+    : [
+        {
+          text: options.emptyText,
+          xref: "paper",
+          yref: "paper",
+          x: 0.5,
+          y: 0.5,
+          showarrow: false,
+          font: { color: "#727272", size: 14 },
+        },
+      ];
+
+  return {
+    autosize: true,
+    margin: { t: 10, r: 12, b: 36, l: 46 },
+    paper_bgcolor: "#ffffff",
+    plot_bgcolor: "#ffffff",
+    annotations,
+    xaxis: {
+      type: "date",
+      tickformat: "%H:%M",
+      showgrid: true,
+      gridcolor: "#eceff1",
+      zeroline: false,
+      fixedrange: true,
+    },
+    yaxis: {
+      title: { text: options.yTitle },
+      showgrid: true,
+      gridcolor: "#eceff1",
+      zeroline: false,
+      fixedrange: true,
+    },
+    legend: {
+      orientation: "h",
+      x: 0,
+      y: -0.18,
+      font: { size: 12 },
+    },
+    font: {
+      family: 'Roboto, "Noto Sans", "Segoe UI", Arial, sans-serif',
+      color: "#212121",
+    },
+  };
+}
+
 button?.addEventListener("click", runImport);
+previousDayButton?.addEventListener("click", () => shiftDate(-1));
+nextDayButton?.addEventListener("click", () => shiftDate(1));
+window.addEventListener("resize", () => {
+  if (roomChart) {
+    Plotly.Plots.resize(roomChart);
+  }
+  if (dhwChart) {
+    Plotly.Plots.resize(dhwChart);
+  }
+});
+loadCharts().catch((error) => {
+  if (roomSummary) {
+    roomSummary.textContent = "Fout";
+  }
+  if (dhwSummary) {
+    dhwSummary.textContent = "Fout";
+  }
+  console.error(error);
+});

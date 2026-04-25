@@ -30,3 +30,20 @@ class DashboardViewModel(BaseModel):
     sensor_count: int
     database_path: str
     api_port: int
+
+
+class ChartPointResponse(BaseModel):
+    timestamp: str
+    value: float
+
+
+class ChartSeriesResponse(BaseModel):
+    name: str
+    unit: str | None
+    points: list[ChartPointResponse]
+
+
+class DashboardChartsResponse(BaseModel):
+    date: str
+    room_temperature: ChartSeriesResponse
+    dhw_temperatures: list[ChartSeriesResponse]

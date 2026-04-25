@@ -4,56 +4,81 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>$title</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="static/app.css" />
   </head>
   <body>
-    <main>
-      <section class="hero">
-        <div>
-          <p>Beheeromgeving</p>
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-group">
           <h1>$title</h1>
+          <span>Home Assistant add-on</span>
         </div>
+        <div class="date-nav">
+          <button class="icon-button" id="previous-day" type="button" aria-label="Vorige dag">
+            ‹
+          </button>
+          <time id="selected-date"></time>
+          <button class="icon-button" id="next-day" type="button" aria-label="Volgende dag">
+            ›
+          </button>
+        </div>
+      </header>
 
-        <p>
-          Start handmatig een historische import vanuit Home Assistant. De import gebruikt de
-          bestaande configuratie en schrijft rechtstreeks naar de SQLite-database.
-        </p>
-
-        <div class="grid">
+      <section class="overview">
+        <div class="stats">
           <article class="stat">
             <strong>$sensor_count</strong>
-            <span>Geconfigureerde sensoren</span>
+            <span>Sensoren</span>
           </article>
           <article class="stat">
             <strong>$import_window_days</strong>
-            <span>Dagen terugkijken</span>
+            <span>Dagen import</span>
           </article>
           <article class="stat">
             <strong>$chunk_days</strong>
-            <span>Dagen per importblok</span>
+            <span>Chunkdagen</span>
           </article>
           <article class="stat">
             <strong>$api_port</strong>
-            <span>API-poort</span>
+            <span>Poort</span>
           </article>
         </div>
+      </section>
 
-        <p><strong>Database:</strong> $database_path</p>
+      <section class="charts" aria-label="Dag grafieken">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Kamertemperatuur</h2>
+            <span id="room-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="room-chart"></div>
+        </article>
 
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Boilertemperatuur</h2>
+            <span id="dhw-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="dhw-chart"></div>
+        </article>
+      </section>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Historie import</h2>
+          <p>$database_path</p>
+        </div>
         <div class="actions">
-          <button
-            id="import-button"
-            type="button"
-          >
+          <button id="import-button" type="button">
             Importeer geschiedenis
           </button>
           <div id="status" class="status" aria-live="polite"></div>
         </div>
-
         <pre id="result">Nog geen import uitgevoerd.</pre>
       </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="plotly.js"></script>
+    <script src="static/app.js"></script>
   </body>
 </html>

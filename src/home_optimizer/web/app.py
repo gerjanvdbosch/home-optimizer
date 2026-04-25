@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Annotated, Callable, Protocol
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+import plotly
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from home_optimizer.app.container_factories import build_home_assistant_container
 from home_optimizer.app.history_import_jobs import HistoryImportJob, HistoryImportJobRunner
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
+from home_optimizer.domain.charts import ChartSeries
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.web.pages import render_dashboard
 from home_optimizer.web.schemas import (
+    ChartPointResponse,
+    ChartSeriesResponse,
+    DashboardChartsResponse,
     DashboardViewModel,
     HistoryImportJobResponse,
     HistoryImportRunResponse,
@@ -23,6 +29,8 @@ from home_optimizer.web.schemas import (
 
 LOGGER = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+PLOTLY_JS_PATH = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
+ChartDateQuery = Annotated[date, Query(alias="date")]
 
 
 class ClosableGateway(Protocol):
@@ -31,6 +39,15 @@ class ClosableGateway(Protocol):
 
 class HistoryImportRunner(Protocol):
     def import_many(self, request: HistoryImportRequest) -> HistoryImportResult: ...
+
+
+class DashboardDataReader(Protocol):
+    def read_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[ChartSeries]: ...
 
 
 class TelemetrySchedulerRunner(Protocol):
@@ -45,6 +62,9 @@ class WebAppContainer(Protocol):
 
     @property
     def history_import_service(self) -> HistoryImportRunner: ...
+
+    @property
+    def dashboard_repository(self) -> DashboardDataReader: ...
 
     @property
     def telemetry_scheduler(self) -> TelemetrySchedulerRunner: ...
@@ -73,6 +93,17 @@ def _job_response(job: HistoryImportJob) -> HistoryImportJobResponse:
         total_rows=job.total_rows,
         sensor_count=job.sensor_count,
         error=job.error,
+    )
+
+
+def _series_response(series: ChartSeries) -> ChartSeriesResponse:
+    return ChartSeriesResponse(
+        name=series.name,
+        unit=series.unit,
+        points=[
+            ChartPointResponse(timestamp=point.timestamp, value=point.value)
+            for point in series.points
+        ],
     )
 
 
@@ -127,6 +158,36 @@ def create_app(
             api_port=settings.api_port,
         )
         return HTMLResponse(render_dashboard(view_model))
+
+    @app.get("/plotly.js", response_class=FileResponse)
+    def plotly_js() -> FileResponse:
+        return FileResponse(PLOTLY_JS_PATH, media_type="application/javascript")
+
+    @app.get("/api/dashboard/charts", response_model=DashboardChartsResponse)
+    def get_dashboard_charts(
+        chart_date: ChartDateQuery,
+    ) -> DashboardChartsResponse:
+        start_time = datetime.combine(chart_date, time.min, tzinfo=timezone.utc)
+        end_time = start_time + timedelta(days=1)
+        series = get_container().dashboard_repository.read_series(
+            names=[
+                "room_temperature",
+                "dhw_top_temperature",
+                "dhw_bottom_temperature",
+            ],
+            start_time=start_time,
+            end_time=end_time,
+        )
+        series_by_name = {item.name: item for item in series}
+
+        return DashboardChartsResponse(
+            date=chart_date.isoformat(),
+            room_temperature=_series_response(series_by_name["room_temperature"]),
+            dhw_temperatures=[
+                _series_response(series_by_name["dhw_top_temperature"]),
+                _series_response(series_by_name["dhw_bottom_temperature"]),
+            ],
+        )
 
     @app.post("/api/history-import", response_model=HistoryImportRunResponse)
     def run_history_import() -> HistoryImportRunResponse:

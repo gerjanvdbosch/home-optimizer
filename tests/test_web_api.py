@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from home_optimizer.app.settings import AppSettings
+from home_optimizer.domain.charts import ChartPoint, ChartSeries
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.features.history_import.schemas import HistoryImportResult
 from home_optimizer.web.app import create_app
@@ -42,6 +43,31 @@ class FakeTelemetryScheduler:
         self.stopped = True
 
 
+class FakeDashboardRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str, str]] = []
+
+    def read_series(self, names, start_time, end_time) -> list[ChartSeries]:
+        self.calls.append((names, start_time.isoformat(), end_time.isoformat()))
+        return [
+            ChartSeries(
+                name="room_temperature",
+                unit="degC",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
+            ),
+            ChartSeries(
+                name="dhw_top_temperature",
+                unit="degC",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
+            ),
+            ChartSeries(
+                name="dhw_bottom_temperature",
+                unit="degC",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=42.0)],
+            ),
+        ]
+
+
 class FakeContainer:
     def __init__(
         self,
@@ -50,6 +76,7 @@ class FakeContainer:
     ) -> None:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
+        self.dashboard_repository = FakeDashboardRepository()
         self.telemetry_scheduler = FakeTelemetryScheduler()
         self.forecast_scheduler = FakeTelemetryScheduler()
 
@@ -93,6 +120,10 @@ def test_dashboard_shows_import_button() -> None:
 
     assert response.status_code == 200
     assert "Importeer geschiedenis" in response.text
+    assert 'href="static/app.css"' in response.text
+    assert 'src="plotly.js"' in response.text
+    assert 'src="static/app.js"' in response.text
+    assert 'href="/static/app.css"' not in response.text
     assert "sensor.room_temperature" not in response.text
     assert app.state.container.telemetry_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
@@ -214,3 +245,65 @@ def test_history_import_job_endpoint_returns_result() -> None:
     assert payload["sensor_count"] == 2
     assert payload["error"] is None
 
+
+def test_dashboard_charts_endpoint_returns_day_series() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/charts?date=2026-04-25")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["date"] == "2026-04-25"
+    assert payload["room_temperature"]["points"] == [
+        {"timestamp": "2026-04-25T12:00:00+00:00", "value": 20.5}
+    ]
+    assert [series["name"] for series in payload["dhw_temperatures"]] == [
+        "dhw_top_temperature",
+        "dhw_bottom_temperature",
+    ]
+    assert app.state.container.dashboard_repository.calls == [
+        (
+            ["room_temperature", "dhw_top_temperature", "dhw_bottom_temperature"],
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-26T00:00:00+00:00",
+        )
+    ]
+
+
+def test_plotly_script_is_served_locally() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/plotly.js")
+
+    assert response.status_code == 200
+    assert "Plotly" in response.text[:5000]
