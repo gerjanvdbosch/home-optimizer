@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from home_optimizer.app.container import build_container
+from home_optimizer.app.container_factories import build_home_assistant_container
 from home_optimizer.app.history_import_jobs import HistoryImportJob, HistoryImportJobRunner
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
@@ -73,7 +73,7 @@ def _job_response(job: HistoryImportJob) -> HistoryImportJobResponse:
 
 def create_app(
     settings: AppSettings,
-    container_factory: Callable[[AppSettings], WebAppContainer] = build_container,
+    container_factory: Callable[[AppSettings], WebAppContainer] = build_home_assistant_container,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):

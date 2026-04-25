@@ -1,3 +1,5 @@
 {
-  "room_temperature": 19.8
+  "sensors": {
+    "room_temperature": 19.8
+  }
 }
