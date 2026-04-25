@@ -86,7 +86,32 @@ schema:
 
   boiler_tank_liters: int
 
-  sensors: dict
+  sensors:
+    room_temperature: str
+    thermostat_setpoint: str
+    outdoor_temperature: str
+    hp_supply_temperature: str
+    hp_supply_target_temperature: str
+    hp_return_temperature: str
+    dhw_top_temperature: str
+    dhw_bottom_temperature: str
+    boiler_ambient_temperature: str
+    refrigerant_condensation_temperature: str
+    refrigerant_liquid_line_temperature: str
+    discharge_temperature: str
+    compressor_frequency: str
+    defrost_active: str
+    booster_heater_active: str
+    hp_flow: str
+    hp_mode: str
+    pv_total_kwh: str
+    hp_electric_total_kwh: str
+    p1_import_total_kwh: str
+    p1_export_total_kwh: str
+    hp_electric_power: str
+    p1_net_power: str
+    pv_output_power: str
+    shutter_living_room: str
 
   database_path: str
   api_port: int
