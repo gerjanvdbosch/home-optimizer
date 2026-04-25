@@ -1,0 +1,130 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f7f2;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-border: rgba(20, 62, 43, 0.1);
+  --text: #163224;
+  --muted: #587164;
+  --accent: #1f7a55;
+  --accent-strong: #15573c;
+  --accent-soft: #e6f3ec;
+  --danger: #9f2d2d;
+  --shadow: 0 20px 60px rgba(18, 40, 29, 0.12);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(112, 191, 145, 0.28), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(65, 133, 96, 0.18), transparent 32%),
+    linear-gradient(180deg, #eef5ee 0%, var(--bg) 100%);
+}
+
+main {
+  width: min(900px, calc(100% - 32px));
+  margin: 48px auto;
+}
+
+.hero {
+  display: grid;
+  gap: 20px;
+  padding: 32px;
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.stat {
+  padding: 18px;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(31, 122, 85, 0.12);
+}
+
+.stat strong {
+  display: block;
+  font-size: 1.4rem;
+  margin-bottom: 6px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 14px 22px;
+  font: inherit;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  box-shadow: 0 10px 24px rgba(31, 122, 85, 0.24);
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+button:hover:enabled {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(31, 122, 85, 0.28);
+}
+
+button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.status {
+  min-height: 28px;
+  font-weight: 600;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.status.success {
+  color: var(--accent-strong);
+}
+
+pre {
+  margin: 0;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(20, 62, 43, 0.08);
+  background: #fbfdfb;
+  color: var(--text);
+  overflow: auto;
+}

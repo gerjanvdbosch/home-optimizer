@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>$title</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div>
+          <p>Beheeromgeving</p>
+          <h1>$title</h1>
+        </div>
+
+        <p>
+          Start handmatig een historische import vanuit Home Assistant. De import gebruikt de
+          bestaande configuratie en schrijft rechtstreeks naar de SQLite-database.
+        </p>
+
+        <div class="grid">
+          <article class="stat">
+            <strong>$sensor_count</strong>
+            <span>Geconfigureerde sensoren</span>
+          </article>
+          <article class="stat">
+            <strong>$import_window_days</strong>
+            <span>Dagen terugkijken</span>
+          </article>
+          <article class="stat">
+            <strong>$chunk_days</strong>
+            <span>Dagen per importblok</span>
+          </article>
+          <article class="stat">
+            <strong>$api_port</strong>
+            <span>API-poort</span>
+          </article>
+        </div>
+
+        <p><strong>Database:</strong> $database_path</p>
+
+        <div class="actions">
+          <button
+            id="import-button"
+            type="button"
+            data-import-enabled="$import_enabled"
+            $button_disabled
+          >
+            $button_label
+          </button>
+          <div id="status" class="status" aria-live="polite"></div>
+        </div>
+
+        <pre id="result">Nog geen import uitgevoerd.</pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

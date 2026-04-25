@@ -42,6 +42,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 home_optimizer = ["templates/*.html"]
+"home_optimizer.web" = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

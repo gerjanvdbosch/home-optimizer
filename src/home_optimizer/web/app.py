@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Callable
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from home_optimizer.bootstrap.dependencies import AppContainer, build_container
 from home_optimizer.bootstrap.settings import AppSettings
@@ -15,6 +17,7 @@ from home_optimizer.web.pages import render_dashboard
 from home_optimizer.web.schemas import DashboardViewModel, HistoryImportRunResponse
 
 LOGGER = logging.getLogger(__name__)
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _build_history_request(
@@ -43,6 +46,7 @@ def create_app(
         version="0.10",
         lifespan=lifespan,
     )
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def get_container() -> AppContainer:
         return app.state.container
