@@ -289,6 +289,23 @@ def test_import_chunk_timestamps_are_stored_without_microseconds(tmp_path) -> No
     assert "." not in chunk.imported_at_utc
 
 
+def test_history_import_stable_window_detection() -> None:
+    assert HistoryImportService._is_stable_window(
+        datetime(2026, 4, 24, 0, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc),
+    ) is True
+
+    assert HistoryImportService._is_stable_window(
+        datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc),
+    ) is True
+
+    assert HistoryImportService._is_stable_window(
+        datetime(2026, 4, 26, 0, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc),
+    ) is False
+
+
 def test_history_import_request_uses_max_days_back_when_configured() -> None:
     settings = AppSettings(
         database_path="/tmp/home-optimizer-test.db",

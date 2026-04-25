@@ -78,13 +78,19 @@ class HistoryImportService:
             carry_value = points[-1].value if points else carry_value
 
             self.repository.write_samples(samples)
-            self.repository.mark_chunk_imported(
-                spec,
-                window.start_time,
-                window.end_time,
-                len(samples),
-            )
+            if self._is_stable_window(window.end_time):
+                self.repository.mark_chunk_imported(
+                    spec,
+                    window.start_time,
+                    window.end_time,
+                    len(samples),
+                )
             total_written += len(samples)
 
         return total_written
 
+    @staticmethod
+    def _is_stable_window(end_time: datetime, now: datetime | None = None) -> bool:
+        current_time = ensure_utc(now or datetime.now(end_time.tzinfo))
+        today_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        return end_time <= today_start
