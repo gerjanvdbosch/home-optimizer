@@ -10,4 +10,5 @@ class ForecastEntry:
     forecast_time_utc: datetime
     name: str
     value: float
+    unit: str | None
     source: str

@@ -21,11 +21,8 @@ class AppSettings(DomainModel):
     history_import_max_days_back: int = Field(default=10, gt=0)
     open_meteo_enabled: bool = True
     open_meteo_poll_interval_seconds: int = Field(default=3600, gt=0)
-    open_meteo_latitude: float | None = Field(default=None, ge=-90, le=90)
-    open_meteo_longitude: float | None = Field(default=None, ge=-180, le=180)
     pv_tilt: float | None = Field(default=None, ge=0, le=90)
     pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
-    living_room_window_tilt: float | None = Field(default=90.0, ge=0, le=90)
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)

@@ -38,6 +38,7 @@ class ForecastValue(Base):
     forecast_time_utc: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, primary_key=True)
     source: Mapped[str] = mapped_column(String, primary_key=True)
+    unit: Mapped[str | None] = mapped_column(String, nullable=True)
     value: Mapped[float] = mapped_column(Float, nullable=False)
 
 

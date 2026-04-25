@@ -9,7 +9,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ForecastRunner(Protocol):
-    enabled: bool
+    @property
+    def enabled(self) -> bool: ...
 
     def refresh_forecast(self) -> int: ...
 

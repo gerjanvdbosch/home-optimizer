@@ -43,8 +43,6 @@ options:
   # pv_tilt:    0=horizontal, 90=vertical wall
   pv_tilt: 50.0
   pv_azimuth: 148.0
-  # Living room window orientation for a second GTI forecast series
-  living_room_window_tilt: 90.0
   living_room_window_azimuth: 148.0
 
   boiler_tank_liters: 200
@@ -88,12 +86,9 @@ schema:
   history_import_chunk_days: int
   open_meteo_enabled: bool
   open_meteo_poll_interval_seconds: int
-  open_meteo_latitude: float?
-  open_meteo_longitude: float?
 
   pv_tilt: float
   pv_azimuth: float
-  living_room_window_tilt: float?
   living_room_window_azimuth: float?
 
   boiler_tank_liters: int

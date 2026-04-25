@@ -30,5 +30,6 @@ class ForecastRepository:
             forecast_time_utc=normalize_utc_timestamp(entry.forecast_time_utc),
             name=entry.name,
             value=entry.value,
+            unit=entry.unit,
             source=entry.source,
         )

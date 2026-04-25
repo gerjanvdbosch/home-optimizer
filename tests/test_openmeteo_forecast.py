@@ -13,6 +13,17 @@ from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
 
 
+class FakeHomeLocationGateway:
+    def __init__(self, latitude: object = 52.09, longitude: object = 5.12) -> None:
+        self.latitude = latitude
+        self.longitude = longitude
+        self.requested_entity_ids: list[str] = []
+
+    def get_state(self, entity_id: str) -> dict:
+        self.requested_entity_ids.append(entity_id)
+        return {"attributes": {"latitude": self.latitude, "longitude": self.longitude}}
+
+
 def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     responses = [
         {
@@ -49,11 +60,8 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     settings = AppSettings.from_options(
         {
             "database_path": str(tmp_path / "forecast.sqlite"),
-            "open_meteo_latitude": 52.09,
-            "open_meteo_longitude": 5.12,
             "pv_tilt": 50.0,
             "pv_azimuth": 148.0,
-            "living_room_window_tilt": 90.0,
             "living_room_window_azimuth": 225.0,
         }
     )
@@ -61,15 +69,14 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     database.init_schema()
     gateway = OpenMeteoGateway(client=client)
     repository = ForecastRepository(database)
+    home_location_gateway = FakeHomeLocationGateway()
     service = OpenMeteoForecastService(
         gateway,
+        home_location_gateway,
         repository,
         enabled=settings.open_meteo_enabled,
-        latitude=settings.open_meteo_latitude,
-        longitude=settings.open_meteo_longitude,
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
-        living_room_window_tilt=settings.living_room_window_tilt,
         living_room_window_azimuth=settings.living_room_window_azimuth,
         forecast_steps=2,
     )
@@ -78,12 +85,16 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
 
     assert written == 16
     assert len(seen_queries) == 3
+    assert home_location_gateway.requested_entity_ids == ["zone.home"]
+    assert "latitude=52.09" in seen_queries[0]
+    assert "longitude=5.12" in seen_queries[0]
     assert (
         "minutely_15=temperature_2m%2Crelative_humidity_2m%2Cwind_speed_10m"
         "%2Cdew_point_2m%2Cdirect_radiation%2Cdiffuse_radiation"
         in seen_queries[0]
     )
     assert "azimuth=-32.0" in seen_queries[1]
+    assert "tilt=90.0" in seen_queries[2]
     assert "azimuth=45.0" in seen_queries[2]
 
     with database.session() as session:
@@ -111,26 +122,29 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     ]
     assert rows[0].created_at_utc == "2026-04-25T11:45:00+00:00"
     assert rows[0].forecast_time_utc == "2026-04-25T12:00:00+00:00"
+    assert rows[0].unit == "degC"
     assert rows[0].source == "openmeteo"
 
 
-def test_openmeteo_forecast_service_is_disabled_without_coordinates(tmp_path) -> None:
+def test_openmeteo_forecast_service_skips_without_home_coordinates(tmp_path) -> None:
     settings = AppSettings.from_options({"database_path": str(tmp_path / "forecast.sqlite")})
     database = Database(settings.database_path)
     database.init_schema()
     repository = ForecastRepository(database)
-    gateway = OpenMeteoGateway(client=httpx.Client(transport=httpx.MockTransport(lambda _: None)))
+    gateway = OpenMeteoGateway(
+        client=httpx.Client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+        )
+    )
     service = OpenMeteoForecastService(
         gateway,
+        FakeHomeLocationGateway(latitude=None, longitude=None),
         repository,
         enabled=settings.open_meteo_enabled,
-        latitude=settings.open_meteo_latitude,
-        longitude=settings.open_meteo_longitude,
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
-        living_room_window_tilt=settings.living_room_window_tilt,
         living_room_window_azimuth=settings.living_room_window_azimuth,
     )
 
-    assert service.enabled is False
+    assert service.enabled is True
     assert service.refresh_forecast() == 0

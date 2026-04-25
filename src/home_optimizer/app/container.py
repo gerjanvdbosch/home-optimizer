@@ -69,13 +69,11 @@ def build_container(
     telemetry_scheduler = TelemetryScheduler(telemetry_service)
     forecast_service = OpenMeteoForecastService(
         gateway=open_meteo,
+        home_location_gateway=gateway,
         repository=forecast_repository,
         enabled=settings.open_meteo_enabled,
-        latitude=settings.open_meteo_latitude,
-        longitude=settings.open_meteo_longitude,
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
-        living_room_window_tilt=settings.living_room_window_tilt,
         living_room_window_azimuth=settings.living_room_window_azimuth,
     )
     forecast_scheduler = ForecastScheduler(
