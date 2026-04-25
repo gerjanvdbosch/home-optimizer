@@ -65,6 +65,20 @@ def test_dashboard_shows_import_button() -> None:
     assert gateway.closed is True
 
 
+def test_settings_expose_typed_sensor_fields_without_options_bag() -> None:
+    settings = AppSettings.from_options(
+        {
+            "database_path": "/tmp/home-optimizer-test.db",
+            "sensor_room_temperature": " sensor.room_temperature ",
+            "sensor_outdoor_temperature": "",
+        }
+    )
+
+    assert settings.sensor_room_temperature == "sensor.room_temperature"
+    assert settings.sensor_outdoor_temperature is None
+    assert not hasattr(settings, "options")
+
+
 def test_history_import_endpoint_returns_summary() -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(

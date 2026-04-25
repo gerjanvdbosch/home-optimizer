@@ -216,3 +216,5 @@ SENSOR_DEFINITIONS = [
         "ffill",
     ),
 ]
+
+SENSOR_CONFIG_KEYS = tuple(definition.config_key for definition in SENSOR_DEFINITIONS)

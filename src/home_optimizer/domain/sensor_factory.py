@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
-
 from home_optimizer.domain.sensors import SENSOR_DEFINITIONS, SensorSpec
 
 
-def build_sensor_specs(options: dict[str, Any]) -> list[SensorSpec]:
+def build_sensor_specs(settings: object) -> list[SensorSpec]:
     specs: list[SensorSpec] = []
 
     for definition in SENSOR_DEFINITIONS:
-        entity_id = options.get(definition.config_key)
+        entity_id = getattr(settings, definition.config_key, None)
         if not entity_id:
             continue
 

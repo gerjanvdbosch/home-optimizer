@@ -8,6 +8,7 @@ import yaml
 from pydantic import Field, field_validator
 
 from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.sensors import SENSOR_CONFIG_KEYS
 from home_optimizer.domain.types import JsonDict
 
 DEFAULT_DATABASE_PATH = "/config/home_optimizer.db"
@@ -43,12 +44,47 @@ class AppSettings(DomainModel):
     history_import_enabled: bool = True
     history_import_chunk_days: int = Field(default=3, gt=0)
     history_import_max_days_back: int = Field(default=10, gt=0)
-    options: JsonDict = Field(default_factory=dict)
+    pv_tilt: float | None = Field(default=None, ge=0, le=90)
+    pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
+    boiler_tank_liters: int | None = Field(default=None, gt=0)
+
+    sensor_room_temperature: str | None = None
+    sensor_outdoor_temperature: str | None = None
+    sensor_thermostat_setpoint: str | None = None
+    sensor_shutter_living_room: str | None = None
+    sensor_hp_supply_temperature: str | None = None
+    sensor_hp_supply_target_temperature: str | None = None
+    sensor_hp_return_temperature: str | None = None
+    sensor_hp_flow: str | None = None
+    sensor_hp_mode: str | None = None
+    sensor_compressor_frequency: str | None = None
+    sensor_defrost_active: str | None = None
+    sensor_booster_heater_active: str | None = None
+    sensor_refrigerant_condensation_temperature: str | None = None
+    sensor_refrigerant_liquid_line_temperature: str | None = None
+    sensor_discharge_temperature: str | None = None
+    sensor_dhw_top_temperature: str | None = None
+    sensor_dhw_bottom_temperature: str | None = None
+    sensor_boiler_ambient_temperature: str | None = None
+    sensor_hp_electric_power: str | None = None
+    sensor_p1_net_power: str | None = None
+    sensor_pv_output_power: str | None = None
+    sensor_pv_total_kwh: str | None = None
+    sensor_hp_electric_total_kwh: str | None = None
+    sensor_p1_import_total_kwh: str | None = None
+    sensor_p1_export_total_kwh: str | None = None
 
     @field_validator("history_import_max_days_back", mode="before")
     @classmethod
     def _default_empty_history_window(cls, value: Any) -> Any:
         return 10 if value in (None, "") else value
+
+    @field_validator(*SENSOR_CONFIG_KEYS, mode="before")
+    @classmethod
+    def _normalize_optional_sensor(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+        return None if value in (None, "") else value
 
     @classmethod
     def from_addon_file(cls, path: str = "/data/options.json") -> "AppSettings":
@@ -68,11 +104,4 @@ class AppSettings(DomainModel):
 
     @classmethod
     def from_options(cls, options: JsonDict) -> "AppSettings":
-        return cls(
-            database_path=options.get("database_path", DEFAULT_DATABASE_PATH),
-            api_port=options.get("api_port", 8099),
-            history_import_enabled=options.get("history_import_enabled", True),
-            history_import_chunk_days=options.get("history_import_chunk_days", 3),
-            history_import_max_days_back=options.get("history_import_max_days_back", 10),
-            options=dict(options),
-        )
+        return cls.model_validate(options)

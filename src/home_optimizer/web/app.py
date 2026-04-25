@@ -39,7 +39,7 @@ class WebAppContainer(Protocol):
 def _build_history_request(
     settings: AppSettings,
 ) -> tuple[HistoryImportRequest, int]:
-    specs = build_sensor_specs(settings.options or {})
+    specs = build_sensor_specs(settings)
     request = HistoryImportRequest.from_settings(settings=settings, specs=specs)
     return request, len(specs)
 
