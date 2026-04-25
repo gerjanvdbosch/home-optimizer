@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol
 
 from home_optimizer.domain.forecast import ForecastEntry
@@ -7,6 +8,8 @@ from home_optimizer.domain.forecast import ForecastEntry
 
 class ForecastRepositoryPort(Protocol):
     source: str
+
+    def latest_created_at(self) -> datetime | None: ...
 
     def write_entries(self, entries: list[ForecastEntry]) -> None: ...
 

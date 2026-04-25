@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.forecast import ForecastEntry
@@ -47,8 +47,12 @@ class OpenMeteoForecastService:
         pv_tilt: float | None,
         pv_azimuth: float | None,
         living_room_window_azimuth: float | None,
+        poll_interval_seconds: int,
         forecast_steps: int = 192,
     ) -> None:
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be greater than zero")
+
         self.gateway = gateway
         self.location = location
         self.repository = repository
@@ -56,6 +60,7 @@ class OpenMeteoForecastService:
         self.pv_tilt = pv_tilt
         self.pv_azimuth = pv_azimuth
         self.living_room_window_azimuth = living_room_window_azimuth
+        self.poll_interval = timedelta(seconds=poll_interval_seconds)
         self.forecast_steps = forecast_steps
 
     @property
@@ -68,6 +73,13 @@ class OpenMeteoForecastService:
             return 0
 
         fetched_at = ensure_utc(created_at or utc_now())
+        latest_created_at = self.repository.latest_created_at()
+        if latest_created_at is not None and fetched_at - latest_created_at < self.poll_interval:
+            LOGGER.info(
+                "Open-Meteo forecast refresh skipped: latest forecast is still fresh",
+            )
+            return 0
+
         if self.location is None:
             LOGGER.info("Open-Meteo forecast refresh skipped: home coordinates unavailable")
             return 0

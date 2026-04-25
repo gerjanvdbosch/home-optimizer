@@ -76,6 +76,7 @@ def build_container(
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
         living_room_window_azimuth=settings.living_room_window_azimuth,
+        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
     )
     forecast_scheduler = ForecastScheduler(
         forecast_service,

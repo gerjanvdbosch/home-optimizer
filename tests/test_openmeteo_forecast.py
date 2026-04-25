@@ -67,6 +67,7 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
         living_room_window_azimuth=settings.living_room_window_azimuth,
+        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
         forecast_steps=2,
     )
 
@@ -114,6 +115,64 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     assert rows[0].source == "openmeteo"
 
 
+def test_openmeteo_forecast_service_skips_when_database_forecast_is_fresh(tmp_path) -> None:
+    responses = [
+        {
+            "minutely_15": {
+                "time": ["2026-04-25T12:00"],
+                "temperature_2m": [12.5],
+                "relative_humidity_2m": [65],
+                "wind_speed_10m": [4.1],
+                "dew_point_2m": [6.0],
+                "direct_radiation": [300],
+                "diffuse_radiation": [120],
+            }
+        },
+    ]
+    seen_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_queries.append(str(request.url))
+        return httpx.Response(200, json=responses.pop(0))
+
+    settings = AppSettings.from_options(
+        {
+            "database_path": str(tmp_path / "forecast.sqlite"),
+            "open_meteo_poll_interval_seconds": 3600,
+        }
+    )
+    database = Database(settings.database_path)
+    database.init_schema()
+    gateway = OpenMeteoGateway(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    repository = ForecastRepository(database)
+    service = OpenMeteoForecastService(
+        gateway,
+        Location(latitude=52.09, longitude=5.12),
+        repository,
+        enabled=settings.open_meteo_enabled,
+        pv_tilt=None,
+        pv_azimuth=None,
+        living_room_window_azimuth=None,
+        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
+        forecast_steps=1,
+    )
+
+    first_written = service.refresh_forecast(
+        datetime(2026, 4, 25, 11, 45, tzinfo=timezone.utc)
+    )
+    second_written = service.refresh_forecast(
+        datetime(2026, 4, 25, 12, 44, 59, tzinfo=timezone.utc)
+    )
+
+    with database.session() as session:
+        rows = session.execute(select(ForecastValue)).scalars().all()
+
+    assert first_written == 6
+    assert second_written == 0
+    assert len(seen_queries) == 1
+    assert len(rows) == 6
+
+
 def test_openmeteo_forecast_service_skips_without_home_coordinates(tmp_path) -> None:
     settings = AppSettings.from_options({"database_path": str(tmp_path / "forecast.sqlite")})
     database = Database(settings.database_path)
@@ -132,6 +191,7 @@ def test_openmeteo_forecast_service_skips_without_home_coordinates(tmp_path) -> 
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
         living_room_window_azimuth=settings.living_room_window_azimuth,
+        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
     )
 
     assert service.enabled is True

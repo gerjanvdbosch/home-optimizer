@@ -121,5 +121,5 @@ schema:
     shutter_living_room: str
 
   database_path: str
-  log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)?
+  log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
   api_port: int
