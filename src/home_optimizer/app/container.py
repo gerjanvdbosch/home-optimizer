@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable, Protocol
+from typing import Callable
 
 from home_optimizer.app.live_collection_scheduler import LiveCollectionScheduler
+from home_optimizer.app.ports import SensorGateway
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
@@ -14,31 +14,14 @@ from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
 from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
 
-
-class AppGateway(Protocol):
-    def close(self) -> None: ...
-
-    def get_state(self, entity_id: str) -> dict[str, Any]: ...
-
-    def get_states(self) -> list[dict[str, Any]]: ...
-
-    def get_history(
-        self,
-        entity_id: str,
-        start_time: datetime,
-        end_time: datetime | None = None,
-        minimal_response: bool = True,
-    ) -> list[dict[str, Any]]: ...
-
-
-GatewayFactory = Callable[[list[SensorSpec]], AppGateway]
+GatewayFactory = Callable[[list[SensorSpec]], SensorGateway]
 
 
 @dataclass
 class AppContainer:
     settings: AppSettings
     database: Database
-    home_assistant: AppGateway
+    home_assistant: SensorGateway
     history_import_repository: TimeSeriesRepository
     history_import_service: HistoryImportService
     live_collection_repository: TimeSeriesRepository
