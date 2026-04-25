@@ -44,9 +44,6 @@ options:
 
   boiler_tank_liters: 200
 
-  database_path: "/config/database.sqlite"
-  api_port: 8099
-
   sensors:
     room_temperature: "sensor.danfoss_15_temperature"
     thermostat_setpoint: "sensor.danfoss_15_setpoint"
@@ -76,6 +73,8 @@ options:
     # Shutter position (0-100% closed)
     shutter_living_room: "sensor.woonkamer_rolluik"
 
+  database_path: "/config/database.sqlite"
+  api_port: 8099
 
 schema:
   history_import_enabled: bool
@@ -87,7 +86,7 @@ schema:
 
   boiler_tank_liters: int
 
+  sensors: dict
+
   database_path: str
   api_port: int
-
-  sensors: dict
