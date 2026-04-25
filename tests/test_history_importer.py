@@ -291,6 +291,7 @@ def test_import_chunk_timestamps_are_stored_without_microseconds(tmp_path) -> No
 
 def test_history_import_request_uses_max_days_back_when_configured() -> None:
     settings = AppSettings(
+        database_path="/tmp/home-optimizer-test.db",
         history_import_max_days_back=10,
     )
 

@@ -7,13 +7,11 @@ from pydantic import ConfigDict, Field, field_validator
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.domain.types import JsonDict
 
-DEFAULT_DATABASE_PATH = "/config/home_optimizer.db"
-
 
 class AppSettings(DomainModel):
     model_config = ConfigDict(extra="forbid")
 
-    database_path: str = DEFAULT_DATABASE_PATH
+    database_path: str
     api_port: int = Field(default=8099, ge=1, le=65535)
     history_import_enabled: bool = True
     history_import_chunk_days: int = Field(default=3, gt=0)
@@ -22,6 +20,15 @@ class AppSettings(DomainModel):
     pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("database_path", mode="before")
+    @classmethod
+    def _normalize_database_path(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+        if value in (None, ""):
+            raise ValueError("database_path is required")
+        return value
 
     @field_validator("sensors", mode="before")
     @classmethod

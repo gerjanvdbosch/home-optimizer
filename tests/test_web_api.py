@@ -105,6 +105,11 @@ def test_settings_reject_legacy_sensor_fields() -> None:
         )
 
 
+def test_settings_require_database_path() -> None:
+    with pytest.raises(ValidationError):
+        AppSettings.from_options({"sensors": {"room_temperature": "sensor.room_temperature"}})
+
+
 def test_sensor_bindings_can_be_configured_as_mapping() -> None:
     settings = AppSettings.from_options(
         {
