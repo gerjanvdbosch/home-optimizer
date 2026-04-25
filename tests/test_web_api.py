@@ -30,6 +30,18 @@ class FakeHistoryImportService:
         return self.result
 
 
+class FakeLiveCollectionService:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 class FakeContainer:
     def __init__(
         self,
@@ -38,6 +50,7 @@ class FakeContainer:
     ) -> None:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
+        self.live_collection_service = FakeLiveCollectionService()
 
 
 def wait_for_job(client: TestClient, job_id: str) -> dict:

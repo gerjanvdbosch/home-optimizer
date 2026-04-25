@@ -4,8 +4,8 @@ from typing import Any
 
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import ensure_utc
+from home_optimizer.domain.timeseries import SensorPoint
 from home_optimizer.domain.units import parse_sensor_value
-from home_optimizer.features.history_import.models import SensorPoint
 
 
 def map_history_points(
@@ -29,4 +29,3 @@ def map_history_points(
         points.append(SensorPoint(timestamp=ensure_utc(ts_raw), value=parsed))
 
     return sorted(points, key=lambda point: point.timestamp)
-

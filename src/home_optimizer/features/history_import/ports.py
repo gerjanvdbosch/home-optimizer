@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from home_optimizer.domain.sensors import SensorSpec
-from home_optimizer.features.history_import.models import MinuteSample
+from home_optimizer.domain.timeseries import MinuteSample
 
 
 class HistorySourceGateway(Protocol):
@@ -44,4 +44,3 @@ class HistoryRepository(Protocol):
         spec: SensorSpec,
         before_time: datetime,
     ) -> Any | None: ...
-

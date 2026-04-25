@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from home_optimizer.domain.sensors import SensorSpec
-from home_optimizer.features.history_import.models import MinuteSample, SensorPoint
+from home_optimizer.domain.timeseries import MinuteSample, SensorPoint
 
 
 class MinuteResampler:

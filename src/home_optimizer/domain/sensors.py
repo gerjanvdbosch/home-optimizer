@@ -25,6 +25,7 @@ class SensorSpec(DomainModel):
     unit: str | None
     method: ResampleMethod
     conversion_factor: float = 1.0
+    poll_interval_seconds: int = Field(default=5, gt=0)
 
 
 def _sensor_definition(
