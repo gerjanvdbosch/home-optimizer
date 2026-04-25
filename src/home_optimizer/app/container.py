@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from home_optimizer.app.live_collection_scheduler import LiveCollectionScheduler
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.features.history_import.service import HistoryImportService
@@ -20,6 +21,7 @@ class AppContainer:
     history_import_service: HistoryImportService
     live_collection_repository: TimeSeriesRepository
     live_collection_service: LiveCollectionService
+    live_collection_scheduler: LiveCollectionScheduler
 
 
 def build_container(settings: AppSettings) -> AppContainer:
@@ -40,6 +42,7 @@ def build_container(settings: AppSettings) -> AppContainer:
         repository=live_collection_repository,
         specs=sensor_specs,
     )
+    live_collection_scheduler = LiveCollectionScheduler(live_collection_service)
 
     return AppContainer(
         settings=settings,
@@ -49,4 +52,5 @@ def build_container(settings: AppSettings) -> AppContainer:
         history_import_service=history_import_service,
         live_collection_repository=live_collection_repository,
         live_collection_service=live_collection_service,
+        live_collection_scheduler=live_collection_scheduler,
     )

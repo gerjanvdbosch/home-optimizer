@@ -33,7 +33,7 @@ class HistoryImportRunner(Protocol):
     def import_many(self, request: HistoryImportRequest) -> HistoryImportResult: ...
 
 
-class LiveCollector(Protocol):
+class LiveCollectionSchedulerRunner(Protocol):
     def start(self) -> None: ...
 
     def stop(self) -> None: ...
@@ -47,7 +47,7 @@ class WebAppContainer(Protocol):
     def history_import_service(self) -> HistoryImportRunner: ...
 
     @property
-    def live_collection_service(self) -> LiveCollector: ...
+    def live_collection_scheduler(self) -> LiveCollectionSchedulerRunner: ...
 
 
 def _build_history_request(
@@ -83,11 +83,11 @@ def create_app(
             settings=settings,
             importer=container.history_import_service,
         )
-        container.live_collection_service.start()
+        container.live_collection_scheduler.start()
         try:
             yield
         finally:
-            container.live_collection_service.stop()
+            container.live_collection_scheduler.stop()
             app.state.history_import_jobs.shutdown()
             container.home_assistant.close()
 
