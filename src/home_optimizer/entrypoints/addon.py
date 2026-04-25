@@ -2,38 +2,23 @@ from __future__ import annotations
 
 import logging
 
+import uvicorn
+
 from home_optimizer.bootstrap.dependencies import build_container
 from home_optimizer.bootstrap.logging import configure_logging
 from home_optimizer.bootstrap.settings import AppSettings
-from home_optimizer.features.history_import.schemas import HistoryImportRequest
-from home_optimizer.shared.sensors.factory import build_sensor_specs
+from home_optimizer.web import create_app
 
 LOGGER = logging.getLogger(__name__)
 
 
 def main() -> None:
     configure_logging()
-    LOGGER.info("Starting Home Optimizer Add-on")
+    LOGGER.info("Starting Home Optimizer Add-on web API")
 
     settings = AppSettings.from_addon_file("/data/options.json")
-    container = build_container(settings)
-
-    try:
-        if settings.history_import_enabled:
-            request = HistoryImportRequest.from_settings(
-                settings=settings,
-                specs=build_sensor_specs(settings.options or {}),
-            )
-            result = container.history_import_service.import_many(request)
-
-            for name, count in result.imported_rows.items():
-                LOGGER.info("%s: imported %s rows", name, count)
-        else:
-            LOGGER.info("Historical import disabled")
-
-        LOGGER.info("Starting live collectors...")
-    finally:
-        container.home_assistant.close()
+    app = create_app(settings, container_factory=build_container)
+    uvicorn.run(app, host="0.0.0.0", port=settings.api_port)
 
 
 if __name__ == "__main__":

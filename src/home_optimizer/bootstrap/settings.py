@@ -37,6 +37,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 @dataclass(frozen=True)
 class AppSettings:
     database_path: str = DEFAULT_DATABASE_PATH
+    api_port: int = 8099
     history_import_enabled: bool = True
     history_import_chunk_days: int = 3
     history_import_max_days_back: int = 10
@@ -64,6 +65,7 @@ class AppSettings:
 
         return cls(
             database_path=str(options.get("database_path", DEFAULT_DATABASE_PATH)),
+            api_port=int(options.get("api_port", 8099)),
             history_import_enabled=bool(options.get("history_import_enabled", True)),
             history_import_chunk_days=int(options.get("history_import_chunk_days", 3)),
             history_import_max_days_back=int(
