@@ -3,9 +3,10 @@
 .import_linter_cache/
 .pyright/
 .pyrightcache/
-
-database.sqlite
-models/
-
 __pycache__/
 .venv/
+
+/database.sqlite
+/database.sqlite-shm
+/database.sqlite-wal
+/models/
