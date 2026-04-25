@@ -49,6 +49,11 @@ class WebAppContainer(Protocol):
     @property
     def telemetry_scheduler(self) -> TelemetrySchedulerRunner: ...
 
+    @property
+    def forecast_scheduler(self) -> TelemetrySchedulerRunner: ...
+
+    def close(self) -> None: ...
+
 
 def _build_history_request(
     settings: AppSettings,
@@ -84,12 +89,14 @@ def create_app(
             importer=container.history_import_service,
         )
         container.telemetry_scheduler.start()
+        container.forecast_scheduler.start()
         try:
             yield
         finally:
+            container.forecast_scheduler.stop()
             container.telemetry_scheduler.stop()
             app.state.history_import_jobs.shutdown()
-            container.home_assistant.close()
+            container.close()
 
     app = FastAPI(
         title="Home Optimizer API",

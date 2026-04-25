@@ -35,12 +35,17 @@ options:
   history_import_enabled: true
   history_import_max_days_back: 10
   history_import_chunk_days: 3
+  open_meteo_enabled: true
+  open_meteo_poll_interval_seconds: 3600
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
   # pv_tilt:    0=horizontal, 90=vertical wall
   pv_tilt: 50.0
   pv_azimuth: 148.0
+  # Living room window orientation for a second GTI forecast series
+  living_room_window_tilt: 90.0
+  living_room_window_azimuth: 148.0
 
   boiler_tank_liters: 200
 
@@ -81,9 +86,15 @@ schema:
   history_import_enabled: bool
   history_import_max_days_back: int
   history_import_chunk_days: int
+  open_meteo_enabled: bool
+  open_meteo_poll_interval_seconds: int
+  open_meteo_latitude: float?
+  open_meteo_longitude: float?
 
   pv_tilt: float
   pv_azimuth: float
+  living_room_window_tilt: float?
+  living_room_window_azimuth: float?
 
   boiler_tank_liters: int
 
@@ -115,5 +126,5 @@ schema:
     shutter_living_room: str
 
   database_path: str
-  log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
+  log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)?
   api_port: int

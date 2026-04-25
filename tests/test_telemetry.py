@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from home_optimizer.app.forecast_scheduler import ForecastScheduler
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.sensors import SensorDefinition, SensorSpec
 from home_optimizer.domain.timeseries import MinuteSample
@@ -27,6 +28,16 @@ class FakeTelemetryRepository:
 
     def write_samples(self, samples: list[MinuteSample]) -> None:
         self.writes.append(samples)
+
+
+class FakeForecastRunner:
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.calls = 0
+
+    def refresh_forecast(self) -> int:
+        self.calls += 1
+        return 1
 
 
 def telemetry_spec(name: str = "room_temperature", poll_interval_seconds: int = 5) -> SensorSpec:
@@ -143,3 +154,27 @@ def test_telemetry_scheduler_flushes_buffer_on_stop() -> None:
     scheduler.stop()
 
     assert repository.writes[-1][0].timestamp_minute == dt(0, 0)
+
+
+def test_forecast_scheduler_runs_once_on_start_and_registers_interval_job() -> None:
+    runner = FakeForecastRunner()
+    scheduler = ForecastScheduler(runner, interval_seconds=1800)
+
+    scheduler.start()
+    try:
+        jobs = {job.id: job for job in scheduler.scheduler.get_jobs()}
+        assert runner.calls == 1
+        assert set(jobs) == {"forecast:refresh"}
+        assert jobs["forecast:refresh"].trigger.interval.total_seconds() == 1800
+    finally:
+        scheduler.stop()
+
+
+def test_forecast_scheduler_skips_start_when_disabled() -> None:
+    runner = FakeForecastRunner(enabled=False)
+    scheduler = ForecastScheduler(runner)
+
+    scheduler.start()
+
+    assert runner.calls == 0
+    assert scheduler.scheduler.running is False

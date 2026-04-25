@@ -51,6 +51,10 @@ class FakeContainer:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
         self.telemetry_scheduler = FakeTelemetryScheduler()
+        self.forecast_scheduler = FakeTelemetryScheduler()
+
+    def close(self) -> None:
+        self.home_assistant.close()
 
 
 def wait_for_job(client: TestClient, job_id: str) -> dict:
@@ -92,6 +96,8 @@ def test_dashboard_shows_import_button() -> None:
     assert response.status_code == 200
     assert "Importeer geschiedenis" in response.text
     assert "sensor.room_temperature" not in response.text
+    assert app.state.container.telemetry_scheduler.started is True
+    assert app.state.container.forecast_scheduler.started is True
     assert gateway.closed is True
 
 

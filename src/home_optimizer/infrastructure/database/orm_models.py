@@ -29,3 +29,17 @@ class Sample1m(Base):
 Index("idx_samples_1m_name_time", Sample1m.name, Sample1m.timestamp_minute_utc)
 Index("idx_samples_1m_category_time", Sample1m.category, Sample1m.timestamp_minute_utc)
 Index("idx_samples_1m_time", Sample1m.timestamp_minute_utc)
+
+
+class ForecastValue(Base):
+    __tablename__ = "forecast_values"
+
+    created_at_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    forecast_time_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+Index("idx_forecast_values_name_time", ForecastValue.name, ForecastValue.forecast_time_utc)
+Index("idx_forecast_values_created", ForecastValue.created_at_utc)
