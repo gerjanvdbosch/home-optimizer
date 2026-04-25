@@ -9,7 +9,7 @@ from home_optimizer.domain.time import ensure_utc
 from home_optimizer.domain.timeseries import MinuteSample
 
 
-class LiveMinuteBuffer:
+class TelemetryMinuteBuffer:
     def __init__(self, source: str) -> None:
         self.source = source
         self._values: dict[tuple[str, datetime], list[Any]] = defaultdict(list)

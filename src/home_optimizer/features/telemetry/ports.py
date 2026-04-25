@@ -5,11 +5,11 @@ from typing import Any, Protocol
 from home_optimizer.domain.timeseries import MinuteSample
 
 
-class LiveStateGateway(Protocol):
+class TelemetryStateGateway(Protocol):
     def get_state(self, entity_id: str) -> dict[str, Any]: ...
 
 
-class LiveSampleRepository(Protocol):
+class TelemetrySampleRepository(Protocol):
     @property
     def source(self) -> str: ...
 

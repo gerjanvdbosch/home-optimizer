@@ -8,30 +8,30 @@ from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.domain.units import parse_sensor_value
-from home_optimizer.features.live_collection.buffer import LiveMinuteBuffer
-from home_optimizer.features.live_collection.ports import LiveSampleRepository, LiveStateGateway
+from home_optimizer.features.telemetry.buffer import TelemetryMinuteBuffer
+from home_optimizer.features.telemetry.ports import TelemetrySampleRepository, TelemetryStateGateway
 
 LOGGER = logging.getLogger(__name__)
 
 
-class LiveCollectionService:
+class TelemetryService:
     def __init__(
         self,
-        gateway: LiveStateGateway,
-        repository: LiveSampleRepository,
+        gateway: TelemetryStateGateway,
+        repository: TelemetrySampleRepository,
         specs: list[SensorSpec],
     ) -> None:
         self.gateway = gateway
         self.repository = repository
         self.specs = specs
-        self.buffer = LiveMinuteBuffer(repository.source)
+        self.buffer = TelemetryMinuteBuffer(repository.source)
         self._lock = Lock()
 
     def collect_sensor(self, spec: SensorSpec, now: datetime | None = None) -> bool:
         try:
             state = self.gateway.get_state(spec.entity_id)
         except Exception:
-            LOGGER.exception("Live collection failed for %s", spec.name)
+            LOGGER.exception("Telemetry failed for %s", spec.name)
             return False
 
         value = parse_sensor_value(state.get("state"), spec.unit)
@@ -61,7 +61,7 @@ class LiveCollectionService:
         self.repository.write_samples(samples)
 
         if samples:
-            LOGGER.info("Live collection flushed %s minute samples", len(samples))
+            LOGGER.info("Telemetry flushed %s minute samples", len(samples))
         return len(samples)
 
     @staticmethod

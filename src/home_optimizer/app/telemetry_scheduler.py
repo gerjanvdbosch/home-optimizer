@@ -10,7 +10,7 @@ from home_optimizer.domain.sensors import SensorSpec
 LOGGER = logging.getLogger(__name__)
 
 
-class LiveCollectionRunner(Protocol):
+class TelemetryRunner(Protocol):
     specs: list[SensorSpec]
 
     def collect_sensor(self, spec: SensorSpec) -> bool: ...
@@ -20,10 +20,10 @@ class LiveCollectionRunner(Protocol):
     def flush_all(self) -> int: ...
 
 
-class LiveCollectionScheduler:
+class TelemetryScheduler:
     def __init__(
         self,
-        collector: LiveCollectionRunner,
+        collector: TelemetryRunner,
         flush_interval_seconds: int = 300,
     ) -> None:
         if flush_interval_seconds <= 0:
@@ -35,7 +35,7 @@ class LiveCollectionScheduler:
 
     def start(self) -> None:
         if not self.collector.specs:
-            LOGGER.info("Live collection scheduler not started: no sensors configured")
+            LOGGER.info("Telemetry scheduler not started: no sensors configured")
             return
 
         if self.scheduler.running:
@@ -47,7 +47,7 @@ class LiveCollectionScheduler:
                 "interval",
                 seconds=spec.poll_interval_seconds,
                 args=[spec],
-                id=f"live:collect:{spec.name}",
+                id=f"telemetry:collect:{spec.name}",
                 max_instances=1,
                 coalesce=True,
                 replace_existing=True,
@@ -57,14 +57,14 @@ class LiveCollectionScheduler:
             self.collector.flush_complete_minutes,
             "interval",
             seconds=self.flush_interval_seconds,
-            id="live:flush",
+            id="telemetry:flush",
             max_instances=1,
             coalesce=True,
             replace_existing=True,
         )
         self.scheduler.start()
         LOGGER.info(
-            "Live collection scheduler started for %s sensors",
+            "Telemetry scheduler started for %s sensors",
             len(self.collector.specs),
         )
 
@@ -73,5 +73,5 @@ class LiveCollectionScheduler:
             self.scheduler.shutdown(wait=False)
 
         self.collector.flush_all()
-        LOGGER.info("Live collection scheduler stopped")
+        LOGGER.info("Telemetry scheduler stopped")
 

@@ -21,6 +21,5 @@ def build_local_container(
         settings,
         gateway_factory=gateway_factory,
         history_source="local_history",
-        live_source="local_live",
+        telemetry_source="local_telemetry",
     )
-

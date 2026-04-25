@@ -30,7 +30,7 @@ class FakeHistoryImportService:
         return self.result
 
 
-class FakeLiveCollectionScheduler:
+class FakeTelemetryScheduler:
     def __init__(self) -> None:
         self.started = False
         self.stopped = False
@@ -50,7 +50,7 @@ class FakeContainer:
     ) -> None:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
-        self.live_collection_scheduler = FakeLiveCollectionScheduler()
+        self.telemetry_scheduler = FakeTelemetryScheduler()
 
 
 def wait_for_job(client: TestClient, job_id: str) -> dict:
