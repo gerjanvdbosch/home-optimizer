@@ -32,10 +32,8 @@ map:
   - addon_config:rw
 
 options:
-  history_import_enabled: true
   history_import_max_days_back: 10
-  history_import_chunk_days: 3
-  open_meteo_enabled: true
+
   open_meteo_poll_interval_seconds: 3600
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
@@ -81,10 +79,8 @@ options:
   api_port: 8099
 
 schema:
-  history_import_enabled: bool
   history_import_max_days_back: int
-  history_import_chunk_days: int
-  open_meteo_enabled: bool
+
   open_meteo_poll_interval_seconds: int
 
   pv_tilt: float

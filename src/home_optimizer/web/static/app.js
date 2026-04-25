@@ -31,7 +31,7 @@ async function runImport() {
     status.textContent = message;
     result.textContent = "De import kon niet worden uitgevoerd.";
   } finally {
-    button.disabled = button.dataset.importEnabled !== "true";
+    button.disabled = false;
   }
 }
 

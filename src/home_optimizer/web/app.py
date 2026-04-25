@@ -120,7 +120,6 @@ def create_app(
         _, sensor_count = _build_history_request(settings)
         view_model = DashboardViewModel(
             title="Home Optimizer",
-            import_enabled=settings.history_import_enabled,
             import_window_days=settings.history_import_max_days_back,
             chunk_days=settings.history_import_chunk_days,
             sensor_count=sensor_count,
@@ -131,9 +130,6 @@ def create_app(
 
     @app.post("/api/history-import", response_model=HistoryImportRunResponse)
     def run_history_import() -> HistoryImportRunResponse:
-        if not settings.history_import_enabled:
-            raise HTTPException(status_code=409, detail="History import is uitgeschakeld.")
-
         _, sensor_count = _build_history_request(settings)
         if sensor_count == 0:
             raise HTTPException(status_code=400, detail="Geen sensoren geconfigureerd voor import.")

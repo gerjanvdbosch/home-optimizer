@@ -25,7 +25,6 @@ class HistoryImportJobResponse(BaseModel):
 
 class DashboardViewModel(BaseModel):
     title: str
-    import_enabled: bool
     import_window_days: int
     chunk_days: int
     sensor_count: int

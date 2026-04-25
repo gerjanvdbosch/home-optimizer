@@ -76,9 +76,7 @@ def test_dashboard_shows_import_button() -> None:
         {
             "api_port": 8099,
             "database_path": "/tmp/home-optimizer-test.db",
-            "history_import_enabled": True,
             "history_import_max_days_back": 14,
-            "history_import_chunk_days": 2,
             "sensors": {"room_temperature": "sensor.room_temperature"},
         }
     )
@@ -149,9 +147,7 @@ def test_history_import_endpoint_returns_summary() -> None:
         {
             "api_port": 8099,
             "database_path": "/tmp/home-optimizer-test.db",
-            "history_import_enabled": True,
             "history_import_max_days_back": 10,
-            "history_import_chunk_days": 3,
             "sensors": {
                 "room_temperature": "sensor.room_temperature",
                 "outdoor_temperature": "sensor.outdoor_temperature",
@@ -189,9 +185,7 @@ def test_history_import_job_endpoint_returns_result() -> None:
         {
             "api_port": 8099,
             "database_path": "/tmp/home-optimizer-test.db",
-            "history_import_enabled": True,
             "history_import_max_days_back": 10,
-            "history_import_chunk_days": 3,
             "sensors": {
                 "room_temperature": "sensor.room_temperature",
                 "outdoor_temperature": "sensor.outdoor_temperature",
@@ -220,29 +214,3 @@ def test_history_import_job_endpoint_returns_result() -> None:
     assert payload["sensor_count"] == 2
     assert payload["error"] is None
 
-
-def test_history_import_endpoint_rejects_disabled_import() -> None:
-    gateway = FakeHomeAssistantGateway()
-    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
-    settings = AppSettings.from_options(
-        {
-            "api_port": 8099,
-            "database_path": "/tmp/home-optimizer-test.db",
-            "history_import_enabled": False,
-            "sensors": {"room_temperature": "sensor.room_temperature"},
-        }
-    )
-    app = create_app(
-        settings,
-        container_factory=lambda _: FakeContainer(
-            history_import_service=service,
-            home_assistant=gateway,
-        ),
-    )
-
-    with TestClient(app) as client:
-        response = client.post("/api/history-import")
-
-    assert response.status_code == 409
-    assert response.json() == {"detail": "History import is uitgeschakeld."}
-    assert service.calls == 0

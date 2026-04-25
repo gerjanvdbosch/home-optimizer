@@ -43,7 +43,6 @@ class OpenMeteoForecastService:
         location: Location | None,
         repository: ForecastRepositoryPort,
         *,
-        enabled: bool,
         pv_tilt: float | None,
         pv_azimuth: float | None,
         living_room_window_azimuth: float | None,
@@ -56,7 +55,6 @@ class OpenMeteoForecastService:
         self.gateway = gateway
         self.location = location
         self.repository = repository
-        self._enabled = enabled
         self.pv_tilt = pv_tilt
         self.pv_azimuth = pv_azimuth
         self.living_room_window_azimuth = living_room_window_azimuth
@@ -65,13 +63,9 @@ class OpenMeteoForecastService:
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        return True
 
     def refresh_forecast(self, created_at: datetime | None = None) -> int:
-        if not self.enabled:
-            LOGGER.info("Open-Meteo forecast refresh skipped: disabled")
-            return 0
-
         fetched_at = ensure_utc(created_at or utc_now())
         latest_created_at = self.repository.latest_created_at()
         if latest_created_at is not None and fetched_at - latest_created_at < self.poll_interval:
