@@ -61,6 +61,7 @@ async function runImport() {
     const message = error instanceof Error ? error.message : "Import mislukt.";
     status.className = "status error";
     status.textContent = message;
+    result.hidden = false;
     result.textContent = "De import kon niet worden uitgevoerd.";
   } finally {
     button.disabled = false;
@@ -77,6 +78,7 @@ async function pollImportJob(jobId) {
     }
 
     result.textContent = JSON.stringify(payload, null, 2);
+    result.hidden = false;
 
     if (payload.status === "succeeded") {
       status.className = "status success";
