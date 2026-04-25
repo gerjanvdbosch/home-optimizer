@@ -32,43 +32,9 @@ map:
   - addon_config:rw
 
 options:
-  database_path: "/config/database.sqlite"
-
   history_import_enabled: true
   history_import_max_days_back: 10
   history_import_chunk_days: 3
-
-  sensor_room_temperature: "sensor.danfoss_15_temperature"
-  sensor_thermostat_setpoint: "sensor.danfoss_15_setpoint"
-
-  sensor_outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
-  sensor_hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
-  sensor_hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
-  sensor_hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
-  sensor_dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
-  sensor_dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
-  sensor_boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
-  sensor_refrigerant_condensation_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_condensatie_temp"
-  sensor_refrigerant_liquid_line_temperature: "sensor.ecodan_heatpump_ca09ec_buitenunit_vloeistofleiding_1"
-  sensor_discharge_temperature: "sensor.ecodan_heatpump_ca09ec_ontladingstemperatuur"
-  sensor_compressor_frequency: "sensor.ecodan_heatpump_compressor_frequentie"
-  sensor_defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
-  sensor_booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
-  sensor_hp_flow: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
-  sensor_hp_mode: "sensor.warmtepomp_mode"
-
-  sensor_pv_total_kwh: "sensor.pv_energie_totaal"
-  sensor_hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
-  sensor_p1_import_total_kwh: "sensor.p1_meter_energy_import"
-  sensor_p1_export_total_kwh: "sensor.p1_meter_energy_export"
-
-  # Power in Watts
-  sensor_hp_electric_power: "sensor.warmtepomp_geschat_vermogen"
-  sensor_p1_net_power: "sensor.p1_meter_power"
-  sensor_pv_output_power: "sensor.pv_output"
-
-  # Shutter position (0–100% closed)
-  sensor_shutter_living_room: "sensor.woonkamer_rolluik"
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
@@ -78,48 +44,50 @@ options:
 
   boiler_tank_liters: 200
 
+  database_path: "/config/database.sqlite"
   api_port: 8099
 
-schema:
-  database_path: str
+  sensors:
+    room_temperature: "sensor.danfoss_15_temperature"
+    thermostat_setpoint: "sensor.danfoss_15_setpoint"
+    outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
+    hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
+    hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
+    hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
+    dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
+    dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+    boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
+    refrigerant_condensation_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_condensatie_temp"
+    refrigerant_liquid_line_temperature: "sensor.ecodan_heatpump_ca09ec_buitenunit_vloeistofleiding_1"
+    discharge_temperature: "sensor.ecodan_heatpump_ca09ec_ontladingstemperatuur"
+    compressor_frequency: "sensor.ecodan_heatpump_compressor_frequentie"
+    defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
+    booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
+    hp_flow: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
+    hp_mode: "sensor.warmtepomp_mode"
+    pv_total_kwh: "sensor.pv_energie_totaal"
+    hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
+    p1_import_total_kwh: "sensor.p1_meter_energy_import"
+    p1_export_total_kwh: "sensor.p1_meter_energy_export"
+    # Power in Watts
+    hp_electric_power: "sensor.warmtepomp_geschat_vermogen"
+    p1_net_power: "sensor.p1_meter_power"
+    pv_output_power: "sensor.pv_output"
+    # Shutter position (0-100% closed)
+    shutter_living_room: "sensor.woonkamer_rolluik"
 
+
+schema:
   history_import_enabled: bool
   history_import_max_days_back: int
   history_import_chunk_days: int
-
-  sensor_room_temperature: str
-  sensor_thermostat_setpoint: str
-
-  sensor_outdoor_temperature: str
-  sensor_hp_supply_temperature: str
-  sensor_hp_supply_target_temperature: str
-  sensor_hp_return_temperature: str
-  sensor_dhw_top_temperature: str
-  sensor_dhw_bottom_temperature: str
-  sensor_boiler_ambient_temperature: str
-  sensor_refrigerant_condensation_temperature: str
-  sensor_refrigerant_liquid_line_temperature: str
-  sensor_discharge_temperature: str
-  sensor_compressor_frequency: str
-  sensor_defrost_active: str
-  sensor_booster_heater_active: str
-  sensor_hp_flow: str
-  sensor_hp_mode: str
-
-  sensor_pv_total_kwh: str
-  sensor_hp_electric_total_kwh: str
-  sensor_p1_import_total_kwh: str
-  sensor_p1_export_total_kwh: str
-
-  sensor_hp_electric_power: str
-  sensor_p1_net_power: str
-  sensor_pv_output_power: str
-
-  sensor_shutter_living_room: str
 
   pv_tilt: float
   pv_azimuth: float
 
   boiler_tank_liters: int
 
+  database_path: str
   api_port: int
+
+  sensors: dict

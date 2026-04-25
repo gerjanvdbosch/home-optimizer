@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from time import sleep
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensor_factory import build_sensor_specs
@@ -60,7 +62,7 @@ def test_dashboard_shows_import_button() -> None:
             "history_import_enabled": True,
             "history_import_max_days_back": 14,
             "history_import_chunk_days": 2,
-            "sensor_room_temperature": "sensor.room_temperature",
+            "sensors": {"room_temperature": "sensor.room_temperature"},
         }
     )
     app = create_app(
@@ -80,27 +82,21 @@ def test_dashboard_shows_import_button() -> None:
     assert gateway.closed is True
 
 
-def test_settings_expose_typed_sensor_fields_without_options_bag() -> None:
-    settings = AppSettings.from_options(
-        {
-            "database_path": "/tmp/home-optimizer-test.db",
-            "sensor_room_temperature": " sensor.room_temperature ",
-            "sensor_outdoor_temperature": "",
-        }
-    )
-
-    assert settings.sensor_room_temperature == "sensor.room_temperature"
-    assert settings.sensor_outdoor_temperature is None
-    assert not hasattr(settings, "options")
+def test_settings_reject_legacy_sensor_fields() -> None:
+    with pytest.raises(ValidationError):
+        AppSettings.from_options(
+            {
+                "database_path": "/tmp/home-optimizer-test.db",
+                "sensor_room_temperature": "sensor.room_temperature",
+            }
+        )
 
 
 def test_sensor_bindings_can_be_configured_as_mapping() -> None:
     settings = AppSettings.from_options(
         {
             "database_path": "/tmp/home-optimizer-test.db",
-            "sensors": {
-                "room_temperature": {"entity_id": " sensor.room_temperature "},
-            },
+            "sensors": {"room_temperature": " sensor.room_temperature "},
         }
     )
 
@@ -108,6 +104,16 @@ def test_sensor_bindings_can_be_configured_as_mapping() -> None:
 
     assert [spec.name for spec in specs] == ["room_temperature"]
     assert specs[0].entity_id == "sensor.room_temperature"
+
+
+def test_sensor_bindings_reject_object_form() -> None:
+    with pytest.raises(ValidationError):
+        AppSettings.from_options(
+            {
+                "database_path": "/tmp/home-optimizer-test.db",
+                "sensors": {"room_temperature": {"entity_id": "sensor.room_temperature"}},
+            }
+        )
 
 
 def test_history_import_endpoint_returns_summary() -> None:
@@ -122,8 +128,10 @@ def test_history_import_endpoint_returns_summary() -> None:
             "history_import_enabled": True,
             "history_import_max_days_back": 10,
             "history_import_chunk_days": 3,
-            "sensor_room_temperature": "sensor.room_temperature",
-            "sensor_outdoor_temperature": "sensor.outdoor_temperature",
+            "sensors": {
+                "room_temperature": "sensor.room_temperature",
+                "outdoor_temperature": "sensor.outdoor_temperature",
+            },
         }
     )
     app = create_app(
@@ -160,8 +168,10 @@ def test_history_import_job_endpoint_returns_result() -> None:
             "history_import_enabled": True,
             "history_import_max_days_back": 10,
             "history_import_chunk_days": 3,
-            "sensor_room_temperature": "sensor.room_temperature",
-            "sensor_outdoor_temperature": "sensor.outdoor_temperature",
+            "sensors": {
+                "room_temperature": "sensor.room_temperature",
+                "outdoor_temperature": "sensor.outdoor_temperature",
+            },
         }
     )
     app = create_app(
@@ -195,7 +205,7 @@ def test_history_import_endpoint_rejects_disabled_import() -> None:
             "api_port": 8099,
             "database_path": "/tmp/home-optimizer-test.db",
             "history_import_enabled": False,
-            "sensor_room_temperature": "sensor.room_temperature",
+            "sensors": {"room_temperature": "sensor.room_temperature"},
         }
     )
     app = create_app(
