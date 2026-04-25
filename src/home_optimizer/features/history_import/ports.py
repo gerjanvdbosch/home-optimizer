@@ -22,21 +22,6 @@ class HistoryRepository(Protocol):
     @property
     def source(self) -> str: ...
 
-    def chunk_already_imported(
-        self,
-        spec: SensorSpec,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> bool: ...
-
-    def mark_chunk_imported(
-        self,
-        spec: SensorSpec,
-        start_time: datetime,
-        end_time: datetime,
-        row_count: int,
-    ) -> None: ...
-
     def write_new_samples(self, samples: list[MinuteSample]) -> int: ...
 
     def last_stored_value_before(

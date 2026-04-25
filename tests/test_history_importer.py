@@ -6,7 +6,7 @@ from home_optimizer.app.history_import_requests import build_history_import_requ
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensors import ResampleMethod, SensorDefinition, SensorSpec
 from home_optimizer.features.history_import.service import HistoryImportService
-from home_optimizer.infrastructure.database.orm_models import ImportChunk, Sample1m
+from home_optimizer.infrastructure.database.orm_models import Sample1m
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
 
@@ -61,7 +61,7 @@ def sensor_spec(
     )
 
 
-def test_mean_import_converts_values_and_skips_imported_chunk(tmp_path) -> None:
+def test_mean_import_converts_values_and_skips_existing_samples(tmp_path) -> None:
     db = Database(str(tmp_path / "history.db"))
     db.init_schema()
     ha = FakeHomeAssistantClient(
@@ -94,7 +94,7 @@ def test_mean_import_converts_values_and_skips_imported_chunk(tmp_path) -> None:
 
     assert importer.import_sensor(spec, start, end) == 1
     assert importer.import_sensor(spec, start, end) == 0
-    assert ha.calls == 1
+    assert ha.calls == 2
 
     with db.session() as session:
         row = session.query(Sample1m).one()
@@ -157,7 +157,6 @@ def test_history_import_does_not_overwrite_existing_samples(tmp_path) -> None:
 
     with db.session() as session:
         rows = session.query(Sample1m).order_by(Sample1m.timestamp_minute_utc).all()
-        chunk = session.query(ImportChunk).one()
 
     assert [row.timestamp_minute_utc for row in rows] == [
         "2026-04-14T00:00:00+00:00",
@@ -167,7 +166,6 @@ def test_history_import_does_not_overwrite_existing_samples(tmp_path) -> None:
     assert rows[0].last_real == 99.0
     assert rows[1].mean_real == 20.0
     assert rows[1].last_real == 20.0
-    assert chunk.row_count == 1
 
 
 def test_forward_fill_creates_one_row_per_minute(tmp_path) -> None:
@@ -325,48 +323,6 @@ def test_time_weighted_mean_carries_value_across_chunks(tmp_path) -> None:
     ]
     assert [row.mean_real for row in rows] == [10.0, 10.0, 10.0, 20.0, 20.0]
     assert [row.sample_count for row in rows] == [1, 1, 1, 1, 1]
-
-
-def test_import_chunk_timestamps_are_stored_without_microseconds(tmp_path) -> None:
-    db = Database(str(tmp_path / "history.db"))
-    db.init_schema()
-    repository = TimeSeriesRepository(db)
-    spec = sensor_spec(
-        name="power",
-        entity_id="sensor.power",
-        category="energy",
-        unit="kW",
-        method="mean",
-    )
-    start = datetime(2026, 4, 14, 0, 0, 0, 123456, tzinfo=timezone.utc)
-    end = datetime(2026, 4, 14, 1, 2, 3, 654321, tzinfo=timezone.utc)
-
-    repository.mark_chunk_imported(spec, start, end, row_count=7)
-
-    with db.session() as session:
-        chunk = session.query(ImportChunk).one()
-
-    assert chunk.start_time_utc == "2026-04-14T00:00:00+00:00"
-    assert chunk.end_time_utc == "2026-04-14T01:02:03+00:00"
-    assert chunk.imported_at_utc.endswith("+00:00")
-    assert "." not in chunk.imported_at_utc
-
-
-def test_history_import_stable_window_detection() -> None:
-    assert HistoryImportService._is_stable_window(
-        datetime(2026, 4, 24, 0, 0, tzinfo=timezone.utc),
-        now=datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc),
-    ) is True
-
-    assert HistoryImportService._is_stable_window(
-        datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
-        now=datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc),
-    ) is True
-
-    assert HistoryImportService._is_stable_window(
-        datetime(2026, 4, 26, 0, 0, tzinfo=timezone.utc),
-        now=datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc),
-    ) is False
 
 
 def test_history_import_request_uses_max_days_back_when_configured() -> None:
