@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from home_optimizer.app.live_collection_scheduler import LiveCollectionScheduler
-from home_optimizer.domain.sensors import SensorSpec
+from home_optimizer.domain.sensors import SensorDefinition, SensorSpec
 from home_optimizer.domain.timeseries import MinuteSample
 from home_optimizer.features.live_collection.service import LiveCollectionService
 
@@ -31,12 +31,14 @@ class FakeLiveRepository:
 
 def live_spec(name: str = "room_temperature", poll_interval_seconds: int = 5) -> SensorSpec:
     return SensorSpec(
-        name=name,
+        definition=SensorDefinition(
+            name=name,
+            category="building",
+            unit="degC",
+            method="mean",
+            poll_interval_seconds=poll_interval_seconds,
+        ),
         entity_id=f"sensor.{name}",
-        category="building",
-        unit="degC",
-        method="mean",
-        poll_interval_seconds=poll_interval_seconds,
     )
 
 

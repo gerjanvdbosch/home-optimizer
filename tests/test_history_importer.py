@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
-from home_optimizer.domain.sensors import SensorSpec
+from home_optimizer.domain.sensors import ResampleMethod, SensorDefinition, SensorSpec
 from home_optimizer.features.history_import.service import HistoryImportService
 from home_optimizer.infrastructure.database.orm_models import ImportChunk, Sample1m
 from home_optimizer.infrastructure.database.session import Database
@@ -40,6 +40,27 @@ class FakeHomeAssistantClient:
         return rows
 
 
+def sensor_spec(
+    *,
+    name: str,
+    entity_id: str,
+    category: str,
+    unit: str | None,
+    method: ResampleMethod,
+    conversion_factor: float = 1.0,
+) -> SensorSpec:
+    return SensorSpec(
+        definition=SensorDefinition(
+            name=name,
+            category=category,
+            unit=unit,
+            method=method,
+            conversion_factor=conversion_factor,
+        ),
+        entity_id=entity_id,
+    )
+
+
 def test_mean_import_converts_values_and_skips_imported_chunk(tmp_path) -> None:
     db = Database(str(tmp_path / "history.db"))
     db.init_schema()
@@ -59,7 +80,7 @@ def test_mean_import_converts_values_and_skips_imported_chunk(tmp_path) -> None:
             },
         ]
     )
-    spec = SensorSpec(
+    spec = sensor_spec(
         name="power",
         entity_id="sensor.power",
         category="energy",
@@ -101,7 +122,7 @@ def test_forward_fill_creates_one_row_per_minute(tmp_path) -> None:
             },
         ]
     )
-    spec = SensorSpec(
+    spec = sensor_spec(
         name="switch",
         entity_id="binary_sensor.switch",
         category="heatpump",
@@ -136,7 +157,7 @@ def test_forward_fill_text_mode_keeps_off_as_text(tmp_path) -> None:
             },
         ]
     )
-    spec = SensorSpec(
+    spec = sensor_spec(
         name="hp_mode",
         entity_id="sensor.warmtepomp_mode",
         category="heatpump",
@@ -172,7 +193,7 @@ def test_time_weighted_mean_creates_one_row_per_minute(tmp_path) -> None:
             },
         ]
     )
-    spec = SensorSpec(
+    spec = sensor_spec(
         name="hp_flow",
         entity_id="sensor.flow",
         category="heatpump",
@@ -214,7 +235,7 @@ def test_time_weighted_mean_carries_value_across_chunks(tmp_path) -> None:
             },
         ]
     )
-    spec = SensorSpec(
+    spec = sensor_spec(
         name="hp_flow",
         entity_id="sensor.flow",
         category="heatpump",
@@ -247,7 +268,7 @@ def test_import_chunk_timestamps_are_stored_without_microseconds(tmp_path) -> No
     db = Database(str(tmp_path / "history.db"))
     db.init_schema()
     repository = TimeSeriesRepository(db)
-    spec = SensorSpec(
+    spec = sensor_spec(
         name="power",
         entity_id="sensor.power",
         category="energy",

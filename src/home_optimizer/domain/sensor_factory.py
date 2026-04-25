@@ -14,13 +14,8 @@ def build_sensor_specs(settings: object) -> list[SensorSpec]:
 
         specs.append(
             SensorSpec(
-                name=definition.name,
+                definition=definition,
                 entity_id=str(entity_id),
-                category=definition.category,
-                unit=definition.unit,
-                method=definition.method,
-                conversion_factor=definition.conversion_factor,
-                poll_interval_seconds=definition.poll_interval_seconds,
             )
         )
 

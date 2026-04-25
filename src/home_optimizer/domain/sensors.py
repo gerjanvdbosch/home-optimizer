@@ -19,13 +19,32 @@ class SensorDefinition(DomainModel):
 
 
 class SensorSpec(DomainModel):
-    name: str
+    definition: SensorDefinition
     entity_id: str
-    category: str
-    unit: str | None
-    method: ResampleMethod
-    conversion_factor: float = 1.0
-    poll_interval_seconds: int = Field(default=5, gt=0)
+
+    @property
+    def name(self) -> str:
+        return self.definition.name
+
+    @property
+    def category(self) -> str:
+        return self.definition.category
+
+    @property
+    def unit(self) -> str | None:
+        return self.definition.unit
+
+    @property
+    def method(self) -> ResampleMethod:
+        return self.definition.method
+
+    @property
+    def conversion_factor(self) -> float:
+        return self.definition.conversion_factor
+
+    @property
+    def poll_interval_seconds(self) -> int:
+        return self.definition.poll_interval_seconds
 
 
 def _sensor_definition(
