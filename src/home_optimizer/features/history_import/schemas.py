@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from home_optimizer.bootstrap.settings import AppSettings
 from home_optimizer.shared.sensors.definitions import SensorSpec
 from home_optimizer.shared.time.clock import utc_now
-from home_optimizer.shared.time.parse import parse_datetime
 
 
 @dataclass(frozen=True)
@@ -21,14 +20,11 @@ class HistoryImportRequest:
         settings: AppSettings,
         specs: list[SensorSpec],
     ) -> "HistoryImportRequest":
-        end_time = (
-            parse_datetime(settings.history_import_end)
-            if settings.history_import_end
-            else utc_now()
-        )
+        end_time = utc_now()
+        start_time = end_time - timedelta(days=settings.history_import_max_days_back)
         return cls(
             specs=specs,
-            start_time=parse_datetime(settings.history_import_start),
+            start_time=start_time,
             end_time=end_time,
         )
 

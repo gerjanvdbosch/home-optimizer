@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from home_optimizer.bootstrap.settings import AppSettings
 from home_optimizer.features.history_import.repository import HistoryImportRepository
+from home_optimizer.features.history_import.schemas import HistoryImportRequest
 from home_optimizer.features.history_import.service import HistoryImportService
 from home_optimizer.shared.db.orm_models import ImportChunk, Sample1m
 from home_optimizer.shared.db.session import Database
@@ -264,3 +266,15 @@ def test_import_chunk_timestamps_are_stored_without_microseconds(tmp_path) -> No
     assert chunk.end_time_utc == "2026-04-14T01:02:03+00:00"
     assert chunk.imported_at_utc.endswith("+00:00")
     assert "." not in chunk.imported_at_utc
+
+
+def test_history_import_request_uses_max_days_back_when_configured() -> None:
+    settings = AppSettings(
+        history_import_max_days_back=10,
+    )
+
+    request = HistoryImportRequest.from_settings(settings, specs=[])
+
+    assert request.end_time.tzinfo == timezone.utc
+    assert request.start_time.tzinfo == timezone.utc
+    assert request.end_time - request.start_time == timedelta(days=10)

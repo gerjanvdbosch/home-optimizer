@@ -7,7 +7,6 @@ from typing import Any
 
 import yaml
 
-DEFAULT_HISTORY_START = "2026-04-14T00:00:00+02:00"
 DEFAULT_DATABASE_PATH = "/config/home_optimizer.db"
 
 
@@ -40,8 +39,7 @@ class AppSettings:
     database_path: str = DEFAULT_DATABASE_PATH
     history_import_enabled: bool = True
     history_import_chunk_days: int = 3
-    history_import_start: str = DEFAULT_HISTORY_START
-    history_import_end: str | None = None
+    history_import_max_days_back: int = 10
     options: dict[str, Any] | None = None
 
     @classmethod
@@ -62,15 +60,16 @@ class AppSettings:
 
     @classmethod
     def from_options(cls, options: dict[str, Any]) -> "AppSettings":
+        history_import_max_days_back = options.get("history_import_max_days_back")
+
         return cls(
             database_path=str(options.get("database_path", DEFAULT_DATABASE_PATH)),
             history_import_enabled=bool(options.get("history_import_enabled", True)),
             history_import_chunk_days=int(options.get("history_import_chunk_days", 3)),
-            history_import_start=str(options.get("history_import_start", DEFAULT_HISTORY_START)),
-            history_import_end=(
-                str(options["history_import_end"])
-                if options.get("history_import_end") is not None
-                else None
+            history_import_max_days_back=int(
+                history_import_max_days_back
+                if history_import_max_days_back not in (None, "")
+                else 10
             ),
             options=options,
         )

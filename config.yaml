@@ -33,9 +33,9 @@ map:
 
 options:
   database_path: "/config/database.sqlite"
+
   history_import_enabled: true
-  history_import_start: "2026-04-14T00:00:00+02:00"
-  history_import_end: ""
+  history_import_max_days_back: 10
   history_import_chunk_days: 3
 
   sensor_room_temperature: "sensor.danfoss_15_temperature"
@@ -82,9 +82,9 @@ options:
 
 schema:
   database_path: str
+
   history_import_enabled: bool
-  history_import_start: str
-  history_import_end: str
+  history_import_max_days_back: int
   history_import_chunk_days: int
 
   sensor_room_temperature: str
