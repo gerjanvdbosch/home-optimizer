@@ -21,10 +21,13 @@ def test_configure_logging_quiets_scheduler_at_info() -> None:
     configure_logging("INFO")
 
     assert logging.getLogger("apscheduler.executors.default").level == logging.WARNING
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING
 
 
 def test_configure_logging_keeps_scheduler_verbose_at_debug() -> None:
     configure_logging("DEBUG")
 
     assert logging.getLogger("apscheduler.executors.default").level == logging.DEBUG
-
+    assert logging.getLogger("httpx").level == logging.DEBUG
+    assert logging.getLogger("httpcore").level == logging.DEBUG

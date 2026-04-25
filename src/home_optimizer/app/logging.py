@@ -25,5 +25,8 @@ def _resolve_log_level(level: int | str) -> int:
 
 def _configure_third_party_loggers(level: int) -> None:
     scheduler_level = logging.DEBUG if level <= logging.DEBUG else logging.WARNING
+    network_level = logging.DEBUG if level <= logging.DEBUG else logging.WARNING
     logging.getLogger("apscheduler").setLevel(scheduler_level)
     logging.getLogger("apscheduler.executors.default").setLevel(scheduler_level)
+    logging.getLogger("httpx").setLevel(network_level)
+    logging.getLogger("httpcore").setLevel(network_level)
