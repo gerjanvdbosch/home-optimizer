@@ -13,10 +13,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def main() -> None:
-    configure_logging()
+    settings = load_settings("/data/options.json")
+    configure_logging(settings.log_level)
     LOGGER.info("Starting Home Optimizer Add-on web API")
 
-    settings = load_settings("/data/options.json")
     app = create_app(settings, container_factory=build_home_assistant_container)
     uvicorn.run(app, host="0.0.0.0", port=settings.api_port)
 

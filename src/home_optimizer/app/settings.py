@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, field_validator
 
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.domain.types import JsonDict
 
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
 
 class AppSettings(DomainModel):
     model_config = ConfigDict(extra="forbid")
 
     database_path: str
+    log_level: LogLevel = "INFO"
     api_port: int = Field(default=8099, ge=1, le=65535)
     history_import_enabled: bool = True
     history_import_chunk_days: int = Field(default=3, gt=0)
@@ -29,6 +32,11 @@ class AppSettings(DomainModel):
         if value in (None, ""):
             raise ValueError("database_path is required")
         return value
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: Any) -> Any:
+        return value.upper() if isinstance(value, str) else value
 
     @field_validator("sensors", mode="before")
     @classmethod

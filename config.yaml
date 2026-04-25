@@ -74,6 +74,7 @@ options:
     shutter_living_room: "sensor.woonkamer_rolluik"
 
   database_path: "/config/database.sqlite"
+  log_level: "INFO"
   api_port: 8099
 
 schema:
@@ -114,4 +115,5 @@ schema:
     shutter_living_room: str
 
   database_path: str
+  log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
   api_port: int

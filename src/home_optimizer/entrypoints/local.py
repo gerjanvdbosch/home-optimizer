@@ -35,11 +35,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    configure_logging()
     args = parse_args()
+    settings = load_settings(args.config, overrides=[*LOCAL_DEFAULT_OVERRIDES, *args.set])
+    configure_logging(settings.log_level)
     LOGGER.info("Starting Home Optimizer web API locally")
 
-    settings = load_settings(args.config, overrides=[*LOCAL_DEFAULT_OVERRIDES, *args.set])
     app = create_app(
         settings,
         container_factory=lambda app_settings: build_local_container(
