@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import Field, field_validator
+
+from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.types import JsonDict
 
 DEFAULT_DATABASE_PATH = "/config/home_optimizer.db"
 
 
-def _load_json(path: Path) -> dict[str, Any]:
+def _load_json(path: Path) -> JsonDict:
     with path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
 
@@ -20,7 +23,7 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
+def _load_yaml(path: Path) -> JsonDict:
     with path.open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
 
@@ -34,14 +37,18 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return options
 
 
-@dataclass(frozen=True)
-class AppSettings:
+class AppSettings(DomainModel):
     database_path: str = DEFAULT_DATABASE_PATH
-    api_port: int = 8099
+    api_port: int = Field(default=8099, ge=1, le=65535)
     history_import_enabled: bool = True
-    history_import_chunk_days: int = 3
-    history_import_max_days_back: int = 10
-    options: dict[str, Any] | None = None
+    history_import_chunk_days: int = Field(default=3, gt=0)
+    history_import_max_days_back: int = Field(default=10, gt=0)
+    options: JsonDict = Field(default_factory=dict)
+
+    @field_validator("history_import_max_days_back", mode="before")
+    @classmethod
+    def _default_empty_history_window(cls, value: Any) -> Any:
+        return 10 if value in (None, "") else value
 
     @classmethod
     def from_addon_file(cls, path: str = "/data/options.json") -> "AppSettings":
@@ -60,18 +67,12 @@ class AppSettings:
         return cls.from_options(_load_yaml(config_path))
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> "AppSettings":
-        history_import_max_days_back = options.get("history_import_max_days_back")
-
+    def from_options(cls, options: JsonDict) -> "AppSettings":
         return cls(
-            database_path=str(options.get("database_path", DEFAULT_DATABASE_PATH)),
-            api_port=int(options.get("api_port", 8099)),
-            history_import_enabled=bool(options.get("history_import_enabled", True)),
-            history_import_chunk_days=int(options.get("history_import_chunk_days", 3)),
-            history_import_max_days_back=int(
-                history_import_max_days_back
-                if history_import_max_days_back not in (None, "")
-                else 10
-            ),
-            options=options,
+            database_path=options.get("database_path", DEFAULT_DATABASE_PATH),
+            api_port=options.get("api_port", 8099),
+            history_import_enabled=options.get("history_import_enabled", True),
+            history_import_chunk_days=options.get("history_import_chunk_days", 3),
+            history_import_max_days_back=options.get("history_import_max_days_back", 10),
+            options=dict(options),
         )

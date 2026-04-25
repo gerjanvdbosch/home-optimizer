@@ -5,14 +5,14 @@ from typing import Any
 
 from sqlalchemy import select
 
-from home_optimizer.shared.db.orm_models import ImportChunk, Sample1m
-from home_optimizer.shared.db.session import Database
-from home_optimizer.shared.sensors.definitions import SensorSpec
-from home_optimizer.shared.time.clock import utc_now
-from home_optimizer.shared.time.parse import normalize_utc_timestamp
+from home_optimizer.domain.clock import utc_now
+from home_optimizer.domain.sensors import SensorSpec
+from home_optimizer.domain.time import normalize_utc_timestamp
+from home_optimizer.infrastructure.database.orm_models import ImportChunk, Sample1m
+from home_optimizer.infrastructure.database.session import Database
 
 
-class HistoryImportRepository:
+class TimeSeriesRepository:
     def __init__(
         self,
         database: Database,

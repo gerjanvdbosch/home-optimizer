@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from home_optimizer.bootstrap.settings import AppSettings
-from home_optimizer.shared.sensors.definitions import SensorSpec
-from home_optimizer.shared.time.clock import utc_now
+from home_optimizer.app.settings import AppSettings
+from home_optimizer.domain.clock import utc_now
+from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.sensors import SensorSpec
 
 
-@dataclass(frozen=True)
-class HistoryImportRequest:
+class HistoryImportRequest(DomainModel):
     specs: list[SensorSpec]
     start_time: datetime
     end_time: datetime
@@ -29,6 +28,5 @@ class HistoryImportRequest:
         )
 
 
-@dataclass(frozen=True)
-class HistoryImportResult:
+class HistoryImportResult(DomainModel):
     imported_rows: dict[str, int]

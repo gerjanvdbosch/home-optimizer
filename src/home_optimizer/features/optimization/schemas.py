@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 
+from home_optimizer.domain.models import DomainModel
 
-@dataclass(frozen=True)
-class OptimizationWindow:
+
+class OptimizationWindow(DomainModel):
     start_time: datetime
     end_time: datetime

@@ -4,9 +4,9 @@ import logging
 
 import uvicorn
 
-from home_optimizer.bootstrap.dependencies import build_container
-from home_optimizer.bootstrap.logging import configure_logging
-from home_optimizer.bootstrap.settings import AppSettings
+from home_optimizer.app.container import build_container
+from home_optimizer.app.logging import configure_logging
+from home_optimizer.app.settings import AppSettings
 from home_optimizer.web import create_app
 
 LOGGER = logging.getLogger(__name__)

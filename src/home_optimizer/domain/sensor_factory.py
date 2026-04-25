@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from home_optimizer.shared.sensors.definitions import SENSOR_DEFINITIONS, SensorSpec
+from home_optimizer.domain.sensors import SENSOR_DEFINITIONS, SensorSpec
 
 
 def build_sensor_specs(options: dict[str, Any]) -> list[SensorSpec]:

@@ -5,12 +5,12 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
-from home_optimizer.features.history_import.repository import HistoryImportRepository
+from home_optimizer.domain.sensors import SensorSpec
+from home_optimizer.domain.time import ensure_utc
+from home_optimizer.domain.units import parse_sensor_value
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
-from home_optimizer.shared.db.orm_models import Sample1m
-from home_optimizer.shared.sensors.definitions import SensorSpec
-from home_optimizer.shared.sensors.parsing import parse_sensor_value
-from home_optimizer.shared.time.parse import ensure_utc
+from home_optimizer.infrastructure.database.orm_models import Sample1m
+from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class HistoryImportService:
     def __init__(
         self,
         gateway: HistorySourceGateway,
-        repository: HistoryImportRepository,
+        repository: TimeSeriesRepository,
         chunk_days: int = 3,
     ) -> None:
         if chunk_days <= 0:

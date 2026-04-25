@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from home_optimizer.shared.db.orm_models import Base
+from home_optimizer.infrastructure.database.orm_models import Base
 
 
 class Database:

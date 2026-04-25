@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from home_optimizer.domain.models import DomainModel
 
-@dataclass(frozen=True)
-class LiveMeasurement:
+
+class LiveMeasurement(DomainModel):
     name: str
     timestamp: datetime
     value: Any

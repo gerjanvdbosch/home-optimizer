@@ -3,21 +3,37 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from home_optimizer.bootstrap.dependencies import AppContainer, build_container
-from home_optimizer.bootstrap.settings import AppSettings
-from home_optimizer.features.history_import.schemas import HistoryImportRequest
-from home_optimizer.shared.sensors.factory import build_sensor_specs
+from home_optimizer.app.container import build_container
+from home_optimizer.app.settings import AppSettings
+from home_optimizer.domain.sensor_factory import build_sensor_specs
+from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.web.pages import render_dashboard
 from home_optimizer.web.schemas import DashboardViewModel, HistoryImportRunResponse
 
 LOGGER = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class ClosableGateway(Protocol):
+    def close(self) -> None: ...
+
+
+class HistoryImportRunner(Protocol):
+    def import_many(self, request: HistoryImportRequest) -> HistoryImportResult: ...
+
+
+class WebAppContainer(Protocol):
+    @property
+    def home_assistant(self) -> ClosableGateway: ...
+
+    @property
+    def history_import_service(self) -> HistoryImportRunner: ...
 
 
 def _build_history_request(
@@ -30,7 +46,7 @@ def _build_history_request(
 
 def create_app(
     settings: AppSettings,
-    container_factory: Callable[[AppSettings], AppContainer] = build_container,
+    container_factory: Callable[[AppSettings], WebAppContainer] = build_container,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -48,7 +64,7 @@ def create_app(
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    def get_container() -> AppContainer:
+    def get_container() -> WebAppContainer:
         return app.state.container
 
     @app.get("/health")

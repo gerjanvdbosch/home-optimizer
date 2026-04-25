@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from fastapi.testclient import TestClient
 
-from home_optimizer.bootstrap.settings import AppSettings
+from home_optimizer.app.settings import AppSettings
 from home_optimizer.features.history_import.schemas import HistoryImportResult
 from home_optimizer.web.app import create_app
 
@@ -27,6 +25,16 @@ class FakeHistoryImportService:
         return self.result
 
 
+class FakeContainer:
+    def __init__(
+        self,
+        history_import_service: FakeHistoryImportService,
+        home_assistant: FakeHomeAssistantGateway,
+    ) -> None:
+        self.history_import_service = history_import_service
+        self.home_assistant = home_assistant
+
+
 def test_dashboard_shows_import_button() -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(HistoryImportResult(imported_rows={"room_temperature": 3}))
@@ -42,7 +50,7 @@ def test_dashboard_shows_import_button() -> None:
     )
     app = create_app(
         settings,
-        container_factory=lambda _: SimpleNamespace(
+        container_factory=lambda _: FakeContainer(
             history_import_service=service,
             home_assistant=gateway,
         ),
@@ -75,7 +83,7 @@ def test_history_import_endpoint_returns_summary() -> None:
     )
     app = create_app(
         settings,
-        container_factory=lambda _: SimpleNamespace(
+        container_factory=lambda _: FakeContainer(
             history_import_service=service,
             home_assistant=gateway,
         ),
@@ -111,7 +119,7 @@ def test_history_import_endpoint_rejects_disabled_import() -> None:
     )
     app = create_app(
         settings,
-        container_factory=lambda _: SimpleNamespace(
+        container_factory=lambda _: FakeContainer(
             history_import_service=service,
             home_assistant=gateway,
         ),

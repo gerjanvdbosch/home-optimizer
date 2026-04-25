@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from home_optimizer.bootstrap.settings import AppSettings
-from home_optimizer.features.history_import.repository import HistoryImportRepository
+from home_optimizer.app.settings import AppSettings
 from home_optimizer.features.history_import.service import HistoryImportService
-from home_optimizer.shared.db.session import Database
-from home_optimizer.shared.gateways.home_assistant import HomeAssistantGateway
+from home_optimizer.infrastructure.database.session import Database
+from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
+from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
 
 
 @dataclass
@@ -14,7 +14,7 @@ class AppContainer:
     settings: AppSettings
     database: Database
     home_assistant: HomeAssistantGateway
-    history_import_repository: HistoryImportRepository
+    history_import_repository: TimeSeriesRepository
     history_import_service: HistoryImportService
 
 
@@ -23,7 +23,7 @@ def build_container(settings: AppSettings) -> AppContainer:
     database.init_schema()
 
     home_assistant = HomeAssistantGateway()
-    history_import_repository = HistoryImportRepository(database)
+    history_import_repository = TimeSeriesRepository(database)
     history_import_service = HistoryImportService(
         gateway=home_assistant,
         repository=history_import_repository,
