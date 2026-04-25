@@ -107,6 +107,69 @@ def test_mean_import_converts_values_and_skips_imported_chunk(tmp_path) -> None:
     assert row.sample_count == 2
 
 
+def test_history_import_does_not_overwrite_existing_samples(tmp_path) -> None:
+    db = Database(str(tmp_path / "history.db"))
+    db.init_schema()
+    repository = TimeSeriesRepository(db)
+    ha = FakeHomeAssistantClient(
+        [
+            {
+                "state": "10",
+                "last_changed": "2026-04-14T00:00:10+00:00",
+            },
+            {
+                "state": "20",
+                "last_changed": "2026-04-14T00:01:10+00:00",
+            },
+        ]
+    )
+    spec = sensor_spec(
+        name="power",
+        entity_id="sensor.power",
+        category="energy",
+        unit="W",
+        method="mean",
+    )
+
+    with db.session() as session:
+        session.add(
+            Sample1m(
+                timestamp_minute_utc="2026-04-14T00:00:00+00:00",
+                name="power",
+                source=repository.source,
+                entity_id="sensor.power",
+                category="energy",
+                unit="W",
+                mean_real=99.0,
+                min_real=99.0,
+                max_real=99.0,
+                last_real=99.0,
+                sample_count=1,
+            )
+        )
+        session.commit()
+
+    importer = HistoryImportService(ha, repository, chunk_days=1)
+    start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 15, tzinfo=timezone.utc)
+
+    assert importer.import_sensor(spec, start, end) == 1
+
+    with db.session() as session:
+        rows = session.query(Sample1m).order_by(Sample1m.timestamp_minute_utc).all()
+        chunk = session.query(ImportChunk).one()
+
+    assert [row.timestamp_minute_utc for row in rows] == [
+        "2026-04-14T00:00:00+00:00",
+        "2026-04-14T00:01:00+00:00",
+    ]
+    assert rows[0].mean_real == 99.0
+    assert rows[0].last_real == 99.0
+    assert rows[1].mean_real == 20.0
+    assert rows[1].last_real == 20.0
+    assert chunk.row_count == 1
+
+
 def test_forward_fill_creates_one_row_per_minute(tmp_path) -> None:
     db = Database(str(tmp_path / "history.db"))
     db.init_schema()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.sensors import SensorSpec
@@ -74,6 +74,44 @@ class TimeSeriesRepository:
 
     def write_samples(self, samples: list[MinuteSample]) -> None:
         self.write_rows([self._to_orm_sample(sample) for sample in samples])
+
+    def write_new_samples(self, samples: list[MinuteSample]) -> int:
+        rows = [self._to_orm_sample(sample) for sample in samples]
+        new_rows = self._filter_new_rows(rows)
+        self.write_rows(new_rows)
+        return len(new_rows)
+
+    def _filter_new_rows(self, rows: list[Sample1m]) -> list[Sample1m]:
+        if not rows:
+            return []
+
+        row_keys = {
+            (row.timestamp_minute_utc, row.name, row.source)
+            for row in rows
+        }
+
+        with self.database.session() as session:
+            existing_keys = set(
+                session.execute(
+                    select(
+                        Sample1m.timestamp_minute_utc,
+                        Sample1m.name,
+                        Sample1m.source,
+                    ).where(
+                        tuple_(
+                            Sample1m.timestamp_minute_utc,
+                            Sample1m.name,
+                            Sample1m.source,
+                        ).in_(row_keys)
+                    )
+                ).all()
+            )
+
+        return [
+            row
+            for row in rows
+            if (row.timestamp_minute_utc, row.name, row.source) not in existing_keys
+        ]
 
     def last_stored_value_before(
         self,

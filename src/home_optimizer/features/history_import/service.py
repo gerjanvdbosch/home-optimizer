@@ -77,15 +77,15 @@ class HistoryImportService:
             )
             carry_value = points[-1].value if points else carry_value
 
-            self.repository.write_samples(samples)
+            written = self.repository.write_new_samples(samples)
             if self._is_stable_window(window.end_time):
                 self.repository.mark_chunk_imported(
                     spec,
                     window.start_time,
                     window.end_time,
-                    len(samples),
+                    written,
                 )
-            total_written += len(samples)
+            total_written += written
 
         return total_written
 
