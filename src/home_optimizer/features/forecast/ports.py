@@ -11,8 +11,8 @@ class ForecastRepositoryPort(Protocol):
     def write_entries(self, entries: list[ForecastEntry]) -> None: ...
 
 
-class HomeLocationGatewayPort(Protocol):
-    def get_state(self, entity_id: str) -> dict[str, Any]: ...
+class HomeLocationProviderPort(Protocol):
+    def get_home_coordinates(self) -> tuple[float, float] | None: ...
 
 
 class OpenMeteoGatewayPort(Protocol):

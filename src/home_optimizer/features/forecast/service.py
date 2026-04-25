@@ -7,7 +7,7 @@ from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.time import ensure_utc
 
-from .ports import ForecastRepositoryPort, HomeLocationGatewayPort, OpenMeteoGatewayPort
+from .ports import ForecastRepositoryPort, HomeLocationProviderPort, OpenMeteoGatewayPort
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ FORECAST_UNITS = {
     PV_GTI_NAME: "Wm2",
     LIVING_ROOM_GTI_NAME: "Wm2",
 }
-HOME_ZONE_ENTITY_ID = "zone.home"
 LIVING_ROOM_WINDOW_TILT = 90.0
 
 
@@ -40,7 +39,7 @@ class OpenMeteoForecastService:
     def __init__(
         self,
         gateway: OpenMeteoGatewayPort,
-        home_location_gateway: HomeLocationGatewayPort,
+        home_location_provider: HomeLocationProviderPort,
         repository: ForecastRepositoryPort,
         *,
         enabled: bool,
@@ -50,7 +49,7 @@ class OpenMeteoForecastService:
         forecast_steps: int = 192,
     ) -> None:
         self.gateway = gateway
-        self.home_location_gateway = home_location_gateway
+        self.home_location_provider = home_location_provider
         self.repository = repository
         self._enabled = enabled
         self.pv_tilt = pv_tilt
@@ -68,9 +67,9 @@ class OpenMeteoForecastService:
             return 0
 
         fetched_at = ensure_utc(created_at or utc_now())
-        coordinates = self._get_home_coordinates()
+        coordinates = self.home_location_provider.get_home_coordinates()
         if coordinates is None:
-            LOGGER.info("Open-Meteo forecast refresh skipped: zone.home coordinates unavailable")
+            LOGGER.info("Open-Meteo forecast refresh skipped: home coordinates unavailable")
             return 0
 
         latitude, longitude = coordinates
@@ -184,20 +183,6 @@ class OpenMeteoForecastService:
 
         return entries
 
-    def _get_home_coordinates(self) -> tuple[float, float] | None:
-        state = self.home_location_gateway.get_state(HOME_ZONE_ENTITY_ID)
-        attributes = state.get("attributes")
-        if not isinstance(attributes, dict):
-            return None
-
-        latitude = _parse_coordinate(attributes.get("latitude"))
-        longitude = _parse_coordinate(attributes.get("longitude"))
-        if latitude is None or longitude is None:
-            return None
-
-        return latitude, longitude
-
-
 def _parse_open_meteo_timestamp(value: object) -> datetime:
     if not isinstance(value, str):
         raise ValueError("Open-Meteo timestamp must be a string")
@@ -211,14 +196,3 @@ def _compass_to_open_meteo_azimuth(compass_degrees: float) -> float:
     if converted <= -180.0:
         converted += 360.0
     return converted
-
-
-def _parse_coordinate(value: object) -> float | None:
-    if isinstance(value, bool) or value in (None, ""):
-        return None
-    if not isinstance(value, str | int | float):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
