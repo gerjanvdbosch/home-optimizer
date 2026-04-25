@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensors import SensorSpec
-from home_optimizer.features.history_import.schemas import HistoryImportRequest
 from home_optimizer.features.history_import.service import HistoryImportService
 from home_optimizer.infrastructure.database.orm_models import ImportChunk, Sample1m
 from home_optimizer.infrastructure.database.session import Database
@@ -273,7 +273,7 @@ def test_history_import_request_uses_max_days_back_when_configured() -> None:
         history_import_max_days_back=10,
     )
 
-    request = HistoryImportRequest.from_settings(settings, specs=[])
+    request = build_history_import_request(settings)
 
     assert request.end_time.tzinfo == timezone.utc
     assert request.start_time.tzinfo == timezone.utc

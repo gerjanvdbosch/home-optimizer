@@ -10,11 +10,16 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from home_optimizer.app.container import build_container
+from home_optimizer.app.history_import_jobs import HistoryImportJob, HistoryImportJobRunner
+from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
-from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.web.pages import render_dashboard
-from home_optimizer.web.schemas import DashboardViewModel, HistoryImportRunResponse
+from home_optimizer.web.schemas import (
+    DashboardViewModel,
+    HistoryImportJobResponse,
+    HistoryImportRunResponse,
+)
 
 LOGGER = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -39,9 +44,22 @@ class WebAppContainer(Protocol):
 def _build_history_request(
     settings: AppSettings,
 ) -> tuple[HistoryImportRequest, int]:
-    specs = build_sensor_specs(settings)
-    request = HistoryImportRequest.from_settings(settings=settings, specs=specs)
-    return request, len(specs)
+    request = build_history_import_request(settings)
+    return request, len(request.specs)
+
+
+def _job_response(job: HistoryImportJob) -> HistoryImportJobResponse:
+    return HistoryImportJobResponse(
+        job_id=job.job_id,
+        status=job.status,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        imported_rows=job.imported_rows,
+        total_rows=job.total_rows,
+        sensor_count=job.sensor_count,
+        error=job.error,
+    )
 
 
 def create_app(
@@ -52,9 +70,14 @@ def create_app(
     async def lifespan(app: FastAPI):
         container = container_factory(settings)
         app.state.container = container
+        app.state.history_import_jobs = HistoryImportJobRunner(
+            settings=settings,
+            importer=container.history_import_service,
+        )
         try:
             yield
         finally:
+            app.state.history_import_jobs.shutdown()
             container.home_assistant.close()
 
     app = FastAPI(
@@ -66,6 +89,9 @@ def create_app(
 
     def get_container() -> WebAppContainer:
         return app.state.container
+
+    def get_history_import_jobs() -> HistoryImportJobRunner:
+        return app.state.history_import_jobs
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -90,24 +116,25 @@ def create_app(
         if not settings.history_import_enabled:
             raise HTTPException(status_code=409, detail="History import is uitgeschakeld.")
 
-        request, sensor_count = _build_history_request(settings)
+        _, sensor_count = _build_history_request(settings)
         if sensor_count == 0:
             raise HTTPException(status_code=400, detail="Geen sensoren geconfigureerd voor import.")
 
-        container = get_container()
-        result = container.history_import_service.import_many(request)
-        total_rows = sum(result.imported_rows.values())
-
-        LOGGER.info(
-            "History import completed: %s rows across %s sensors",
-            total_rows,
-            sensor_count,
-        )
+        job = get_history_import_jobs().start()
+        LOGGER.info("History import job started: %s", job.job_id)
 
         return HistoryImportRunResponse(
-            imported_rows=result.imported_rows,
-            total_rows=total_rows,
+            job_id=job.job_id,
+            status=job.status,
             sensor_count=sensor_count,
         )
+
+    @app.get("/api/history-import/jobs/{job_id}", response_model=HistoryImportJobResponse)
+    def get_history_import_job(job_id: str) -> HistoryImportJobResponse:
+        job = get_history_import_jobs().get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Import job niet gevonden.")
+
+        return _job_response(job)
 
     return app

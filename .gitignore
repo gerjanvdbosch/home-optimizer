@@ -1,6 +1,11 @@
 .DS_Store
-/.idea
-/database.sqlite
-/models/
+.idea/
+.import_linter_cache/
 .pyright/
 .pyrightcache/
+
+database.sqlite
+models/
+
+__pycache__/
+.venv/

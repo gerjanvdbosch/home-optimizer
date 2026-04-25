@@ -5,9 +5,12 @@ from home_optimizer.domain.sensors import SENSOR_DEFINITIONS, SensorSpec
 
 def build_sensor_specs(settings: object) -> list[SensorSpec]:
     specs: list[SensorSpec] = []
+    sensor_bindings = getattr(settings, "sensors", {}) or {}
 
     for definition in SENSOR_DEFINITIONS:
-        entity_id = getattr(settings, definition.config_key, None)
+        binding = sensor_bindings.get(definition.name)
+        entity_id = getattr(binding, "entity_id", None) if binding else None
+        entity_id = entity_id or getattr(settings, definition.config_key, None)
         if not entity_id:
             continue
 

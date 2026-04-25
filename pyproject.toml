@@ -31,6 +31,7 @@ dev = [
   "pyright>=1.1,<2.0",
   "pytest>=8.0",
   "ruff>=0.4",
+  "import-linter>=2.0",
 ]
 
 [project.scripts]
@@ -74,3 +75,18 @@ reportMissingTypeStubs = false
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.importlinter]
+root_package = "home_optimizer"
+
+[[tool.importlinter.contracts]]
+name = "Clean architecture layers"
+type = "layers"
+layers = [
+  "home_optimizer.entrypoints",
+  "home_optimizer.web",
+  "home_optimizer.app",
+  "home_optimizer.infrastructure",
+  "home_optimizer.features",
+  "home_optimizer.domain",
+]

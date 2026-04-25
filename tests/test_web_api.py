@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from time import sleep
+
 from fastapi.testclient import TestClient
 
 from home_optimizer.app.settings import AppSettings
+from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.features.history_import.schemas import HistoryImportResult
 from home_optimizer.web.app import create_app
 
@@ -33,6 +36,18 @@ class FakeContainer:
     ) -> None:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
+
+
+def wait_for_job(client: TestClient, job_id: str) -> dict:
+    for _ in range(20):
+        response = client.get(f"/api/history-import/jobs/{job_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] in {"succeeded", "failed"}:
+            return payload
+        sleep(0.05)
+
+    raise AssertionError("history import job did not finish")
 
 
 def test_dashboard_shows_import_button() -> None:
@@ -79,6 +94,22 @@ def test_settings_expose_typed_sensor_fields_without_options_bag() -> None:
     assert not hasattr(settings, "options")
 
 
+def test_sensor_bindings_can_be_configured_as_mapping() -> None:
+    settings = AppSettings.from_options(
+        {
+            "database_path": "/tmp/home-optimizer-test.db",
+            "sensors": {
+                "room_temperature": {"entity_id": " sensor.room_temperature "},
+            },
+        }
+    )
+
+    specs = build_sensor_specs(settings)
+
+    assert [spec.name for spec in specs] == ["room_temperature"]
+    assert specs[0].entity_id == "sensor.room_temperature"
+
+
 def test_history_import_endpoint_returns_summary() -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(
@@ -105,19 +136,55 @@ def test_history_import_endpoint_returns_summary() -> None:
 
     with TestClient(app) as client:
         response = client.post("/api/history-import")
+        job = wait_for_job(client, response.json()["job_id"])
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "imported_rows": {
-            "room_temperature": 3,
-            "outdoor_temperature": 7,
-        },
-        "total_rows": 10,
-        "sensor_count": 2,
-    }
+    payload = response.json()
+    assert payload["status"] in {"pending", "running"}
+    assert payload["sensor_count"] == 2
+    assert payload["job_id"]
+    assert job["status"] == "succeeded"
     assert service.calls == 1
     assert gateway.closed is True
+
+
+def test_history_import_job_endpoint_returns_result() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(
+        HistoryImportResult(imported_rows={"room_temperature": 3, "outdoor_temperature": 7})
+    )
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+            "history_import_enabled": True,
+            "history_import_max_days_back": 10,
+            "history_import_chunk_days": 3,
+            "sensor_room_temperature": "sensor.room_temperature",
+            "sensor_outdoor_temperature": "sensor.outdoor_temperature",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/history-import")
+        assert response.status_code == 200
+        payload = wait_for_job(client, response.json()["job_id"])
+
+    assert payload["status"] == "succeeded"
+    assert payload["imported_rows"] == {
+        "room_temperature": 3,
+        "outdoor_temperature": 7,
+    }
+    assert payload["total_rows"] == 10
+    assert payload["sensor_count"] == 2
+    assert payload["error"] is None
 
 
 def test_history_import_endpoint_rejects_disabled_import() -> None:

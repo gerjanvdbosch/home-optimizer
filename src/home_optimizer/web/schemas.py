@@ -1,13 +1,26 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
 class HistoryImportRunResponse(BaseModel):
-    status: str = Field(default="ok")
+    job_id: str
+    status: str = Field(default="pending")
+    sensor_count: int
+
+
+class HistoryImportJobResponse(BaseModel):
+    job_id: str
+    status: str
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
     imported_rows: dict[str, int]
     total_rows: int
     sensor_count: int
+    error: str | None
 
 
 class DashboardViewModel(BaseModel):

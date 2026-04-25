@@ -38,6 +38,19 @@ def _load_yaml(path: Path) -> JsonDict:
     return options
 
 
+class SensorBinding(DomainModel):
+    entity_id: str
+
+    @field_validator("entity_id", mode="before")
+    @classmethod
+    def _normalize_entity_id(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+        if value in (None, ""):
+            raise ValueError("entity_id is required")
+        return value
+
+
 class AppSettings(DomainModel):
     database_path: str = DEFAULT_DATABASE_PATH
     api_port: int = Field(default=8099, ge=1, le=65535)
@@ -47,6 +60,7 @@ class AppSettings(DomainModel):
     pv_tilt: float | None = Field(default=None, ge=0, le=90)
     pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
+    sensors: dict[str, SensorBinding] = Field(default_factory=dict)
 
     sensor_room_temperature: str | None = None
     sensor_outdoor_temperature: str | None = None

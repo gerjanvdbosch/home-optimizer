@@ -8,6 +8,7 @@ from sqlalchemy import select
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import normalize_utc_timestamp
+from home_optimizer.features.history_import.models import MinuteSample
 from home_optimizer.infrastructure.database.orm_models import ImportChunk, Sample1m
 from home_optimizer.infrastructure.database.session import Database
 
@@ -71,6 +72,9 @@ class TimeSeriesRepository:
                 session.merge(row)
             session.commit()
 
+    def write_samples(self, samples: list[MinuteSample]) -> None:
+        self.write_rows([self._to_orm_sample(sample) for sample in samples])
+
     def last_stored_value_before(
         self,
         spec: SensorSpec,
@@ -98,3 +102,21 @@ class TimeSeriesRepository:
         if row.last_text is not None:
             return row.last_text
         return None
+
+    @staticmethod
+    def _to_orm_sample(sample: MinuteSample) -> Sample1m:
+        return Sample1m(
+            timestamp_minute_utc=sample.timestamp_minute.isoformat(),
+            name=sample.name,
+            source=sample.source,
+            entity_id=sample.entity_id,
+            category=sample.category,
+            unit=sample.unit,
+            mean_real=sample.mean_real,
+            min_real=sample.min_real,
+            max_real=sample.max_real,
+            last_real=sample.last_real,
+            last_text=sample.last_text,
+            last_bool=sample.last_bool,
+            sample_count=sample.sample_count,
+        )
