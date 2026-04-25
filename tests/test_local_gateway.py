@@ -46,3 +46,21 @@ def test_local_json_gateway_treats_missing_sensor_as_unavailable(tmp_path) -> No
 
     assert gateway.get_state("sensor.local_room")["state"] == "unavailable"
 
+
+def test_local_json_gateway_reads_location(tmp_path) -> None:
+    state_path = tmp_path / "local.json"
+    state_path.write_text(
+        json.dumps({"location": {"latitude": "52.09", "longitude": 5.12}, "sensors": {}}),
+        encoding="utf-8",
+    )
+    gateway = LocalJsonGateway(str(state_path), specs=[])
+
+    assert gateway.get_location() == (52.09, 5.12)
+
+
+def test_local_json_gateway_returns_none_for_missing_location(tmp_path) -> None:
+    state_path = tmp_path / "local.json"
+    state_path.write_text(json.dumps({"sensors": {}}), encoding="utf-8")
+    gateway = LocalJsonGateway(str(state_path), specs=[])
+
+    assert gateway.get_location() is None

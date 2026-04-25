@@ -67,7 +67,7 @@ class OpenMeteoForecastService:
             return 0
 
         fetched_at = ensure_utc(created_at or utc_now())
-        coordinates = self.home_location_provider.get_home_coordinates()
+        coordinates = self.home_location_provider.get_location()
         if coordinates is None:
             LOGGER.info("Open-Meteo forecast refresh skipped: home coordinates unavailable")
             return 0

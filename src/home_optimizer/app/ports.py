@@ -11,6 +11,8 @@ class SensorGateway(Protocol):
 
     def get_states(self) -> list[dict[str, Any]]: ...
 
+    def get_location(self) -> tuple[float, float] | None: ...
+
     def get_history(
         self,
         entity_id: str,
@@ -18,4 +20,3 @@ class SensorGateway(Protocol):
         end_time: datetime | None = None,
         minimal_response: bool = True,
     ) -> list[dict[str, Any]]: ...
-

@@ -1,4 +1,8 @@
 {
+  "location": {
+    "latitude": 52.0907374,
+    "longitude": 5.1214201
+  },
   "sensors": {
     "room_temperature": 19.8
   }

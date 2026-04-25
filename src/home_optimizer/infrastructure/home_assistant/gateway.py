@@ -13,13 +13,14 @@ class HomeAssistantGateway:
         base_url: str = "http://supervisor/core",
         token: str | None = None,
         timeout: float = 30.0,
+        client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token or os.getenv("SUPERVISOR_TOKEN")
         if not self.token:
             raise ValueError("SUPERVISOR_TOKEN not found.")
 
-        self.client = httpx.Client(
+        self.client = client or httpx.Client(
             timeout=httpx.Timeout(timeout),
             headers={
                 "Authorization": f"Bearer {self.token}",
@@ -45,6 +46,19 @@ class HomeAssistantGateway:
     def get_states(self) -> list[dict[str, Any]]:
         return self._get("/api/states")
 
+    def get_location(self) -> tuple[float, float] | None:
+        state = self.get_state("zone.home")
+        attributes = state.get("attributes")
+        if not isinstance(attributes, dict):
+            return None
+
+        latitude = _parse_coordinate(attributes.get("latitude"))
+        longitude = _parse_coordinate(attributes.get("longitude"))
+        if latitude is None or longitude is None:
+            return None
+
+        return latitude, longitude
+
     def get_history(
         self,
         entity_id: str,
@@ -62,3 +76,14 @@ class HomeAssistantGateway:
         if not result:
             return []
         return result[0]
+
+
+def _parse_coordinate(value: object) -> float | None:
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    if not isinstance(value, str | int | float):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

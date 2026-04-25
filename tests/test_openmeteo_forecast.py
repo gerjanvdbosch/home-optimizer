@@ -19,7 +19,7 @@ class FakeHomeLocationProvider:
         self.longitude = longitude
         self.calls = 0
 
-    def get_home_coordinates(self) -> tuple[float, float] | None:
+    def get_location(self) -> tuple[float, float] | None:
         self.calls += 1
         latitude = self.latitude
         longitude = self.longitude

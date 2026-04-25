@@ -12,7 +12,7 @@ class ForecastRepositoryPort(Protocol):
 
 
 class HomeLocationProviderPort(Protocol):
-    def get_home_coordinates(self) -> tuple[float, float] | None: ...
+    def get_location(self) -> tuple[float, float] | None: ...
 
 
 class OpenMeteoGatewayPort(Protocol):

@@ -16,7 +16,6 @@ from home_optimizer.infrastructure.database.forecast_repository import ForecastR
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
 from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
-from home_optimizer.infrastructure.home_assistant.location import HomeAssistantHomeLocationProvider
 from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
 
 GatewayFactory = Callable[[list[SensorSpec]], SensorGateway]
@@ -53,7 +52,6 @@ def build_container(
 
     sensor_specs = build_sensor_specs(settings)
     gateway = gateway_factory(sensor_specs) if gateway_factory else HomeAssistantGateway()
-    home_location_provider = HomeAssistantHomeLocationProvider(gateway)
     open_meteo = OpenMeteoGateway()
     history_import_repository = TimeSeriesRepository(database, source=history_source)
     telemetry_repository = TimeSeriesRepository(database, source=telemetry_source)
@@ -71,7 +69,7 @@ def build_container(
     telemetry_scheduler = TelemetryScheduler(telemetry_service)
     forecast_service = OpenMeteoForecastService(
         gateway=open_meteo,
-        home_location_provider=home_location_provider,
+        home_location_provider=gateway,
         repository=forecast_repository,
         enabled=settings.open_meteo_enabled,
         pv_tilt=settings.pv_tilt,

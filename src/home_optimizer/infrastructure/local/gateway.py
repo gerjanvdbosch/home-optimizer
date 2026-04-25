@@ -39,6 +39,19 @@ class LocalJsonGateway:
     def get_states(self) -> list[dict[str, Any]]:
         return [self.get_state(entity_id) for entity_id in self.name_to_entity.values()]
 
+    def get_location(self) -> tuple[float, float] | None:
+        data = self._load_state_file()
+        location = data.get("location")
+        if not isinstance(location, dict):
+            return None
+
+        latitude = _parse_coordinate(location.get("latitude"))
+        longitude = _parse_coordinate(location.get("longitude"))
+        if latitude is None or longitude is None:
+            return None
+
+        return latitude, longitude
+
     def get_history(
         self,
         entity_id: str,
@@ -49,6 +62,14 @@ class LocalJsonGateway:
         return []
 
     def _load_sensor_state(self) -> JsonDict:
+        data = self._load_state_file()
+        sensors = data.get("sensors", data)
+        if not isinstance(sensors, dict):
+            raise ValueError(f"Invalid sensors section in: {self.state_path}")
+
+        return sensors
+
+    def _load_state_file(self) -> JsonDict:
         if not self.state_path.exists():
             return {}
 
@@ -58,9 +79,15 @@ class LocalJsonGateway:
         if not isinstance(data, dict):
             raise ValueError(f"Invalid local state file: {self.state_path}")
 
-        sensors = data.get("sensors", data)
-        if not isinstance(sensors, dict):
-            raise ValueError(f"Invalid sensors section in: {self.state_path}")
+        return data
 
-        return sensors
 
+def _parse_coordinate(value: object) -> float | None:
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    if not isinstance(value, str | int | float):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
