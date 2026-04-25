@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from home_optimizer.domain.clock import utc_now
+from home_optimizer.domain.location import Location, parse_location
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.types import JsonDict
 
@@ -39,18 +40,13 @@ class LocalJsonGateway:
     def get_states(self) -> list[dict[str, Any]]:
         return [self.get_state(entity_id) for entity_id in self.name_to_entity.values()]
 
-    def get_location(self) -> tuple[float, float] | None:
+    def get_location(self) -> Location | None:
         data = self._load_state_file()
         location = data.get("location")
         if not isinstance(location, dict):
             return None
 
-        latitude = _parse_coordinate(location.get("latitude"))
-        longitude = _parse_coordinate(location.get("longitude"))
-        if latitude is None or longitude is None:
-            return None
-
-        return latitude, longitude
+        return parse_location(location)
 
     def get_history(
         self,
@@ -80,14 +76,3 @@ class LocalJsonGateway:
             raise ValueError(f"Invalid local state file: {self.state_path}")
 
         return data
-
-
-def _parse_coordinate(value: object) -> float | None:
-    if isinstance(value, bool) or value in (None, ""):
-        return None
-    if not isinstance(value, str | int | float):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 
+from home_optimizer.domain.location import Location
 from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
 
 
@@ -21,7 +22,7 @@ def test_home_assistant_gateway_reads_location_from_zone_home() -> None:
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    assert gateway.get_location() == (52.09, 5.12)
+    assert gateway.get_location() == Location(latitude=52.09, longitude=5.12)
     assert requested_urls == ["http://homeassistant.local/api/states/zone.home"]
 
 

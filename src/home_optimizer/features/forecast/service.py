@@ -5,9 +5,10 @@ from datetime import datetime
 
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.forecast import ForecastEntry
+from home_optimizer.domain.location import Location
 from home_optimizer.domain.time import ensure_utc
 
-from .ports import ForecastRepositoryPort, HomeLocationProviderPort, OpenMeteoGatewayPort
+from .ports import ForecastRepositoryPort, OpenMeteoGatewayPort
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class OpenMeteoForecastService:
     def __init__(
         self,
         gateway: OpenMeteoGatewayPort,
-        home_location_provider: HomeLocationProviderPort,
+        location: Location | None,
         repository: ForecastRepositoryPort,
         *,
         enabled: bool,
@@ -49,7 +50,7 @@ class OpenMeteoForecastService:
         forecast_steps: int = 192,
     ) -> None:
         self.gateway = gateway
-        self.home_location_provider = home_location_provider
+        self.location = location
         self.repository = repository
         self._enabled = enabled
         self.pv_tilt = pv_tilt
@@ -67,15 +68,22 @@ class OpenMeteoForecastService:
             return 0
 
         fetched_at = ensure_utc(created_at or utc_now())
-        coordinates = self.home_location_provider.get_location()
-        if coordinates is None:
+        if self.location is None:
             LOGGER.info("Open-Meteo forecast refresh skipped: home coordinates unavailable")
             return 0
 
-        latitude, longitude = coordinates
-
-        entries = self._build_base_entries(fetched_at, latitude, longitude)
-        entries.extend(self._build_gti_entries(fetched_at, latitude, longitude))
+        entries = self._build_base_entries(
+            fetched_at,
+            self.location.latitude,
+            self.location.longitude,
+        )
+        entries.extend(
+            self._build_gti_entries(
+                fetched_at,
+                self.location.latitude,
+                self.location.longitude,
+            )
+        )
         self.repository.write_entries(entries)
         LOGGER.info("Stored %s Open-Meteo forecast values", len(entries))
         return len(entries)

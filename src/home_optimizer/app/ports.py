@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
+from home_optimizer.domain.location import Location
+
 
 class SensorGateway(Protocol):
     def close(self) -> None: ...
@@ -11,7 +13,7 @@ class SensorGateway(Protocol):
 
     def get_states(self) -> list[dict[str, Any]]: ...
 
-    def get_location(self) -> tuple[float, float] | None: ...
+    def get_location(self) -> Location | None: ...
 
     def get_history(
         self,

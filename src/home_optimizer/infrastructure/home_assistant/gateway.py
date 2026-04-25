@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from home_optimizer.domain.location import Location, parse_location
+
 
 class HomeAssistantGateway:
     def __init__(
@@ -46,18 +48,13 @@ class HomeAssistantGateway:
     def get_states(self) -> list[dict[str, Any]]:
         return self._get("/api/states")
 
-    def get_location(self) -> tuple[float, float] | None:
+    def get_location(self) -> Location | None:
         state = self.get_state("zone.home")
         attributes = state.get("attributes")
         if not isinstance(attributes, dict):
             return None
 
-        latitude = _parse_coordinate(attributes.get("latitude"))
-        longitude = _parse_coordinate(attributes.get("longitude"))
-        if latitude is None or longitude is None:
-            return None
-
-        return latitude, longitude
+        return parse_location(attributes)
 
     def get_history(
         self,
@@ -76,14 +73,3 @@ class HomeAssistantGateway:
         if not result:
             return []
         return result[0]
-
-
-def _parse_coordinate(value: object) -> float | None:
-    if isinstance(value, bool) or value in (None, ""):
-        return None
-    if not isinstance(value, str | int | float):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None

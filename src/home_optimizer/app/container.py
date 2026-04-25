@@ -52,6 +52,7 @@ def build_container(
 
     sensor_specs = build_sensor_specs(settings)
     gateway = gateway_factory(sensor_specs) if gateway_factory else HomeAssistantGateway()
+    location = gateway.get_location()
     open_meteo = OpenMeteoGateway()
     history_import_repository = TimeSeriesRepository(database, source=history_source)
     telemetry_repository = TimeSeriesRepository(database, source=telemetry_source)
@@ -69,7 +70,7 @@ def build_container(
     telemetry_scheduler = TelemetryScheduler(telemetry_service)
     forecast_service = OpenMeteoForecastService(
         gateway=open_meteo,
-        home_location_provider=gateway,
+        location=location,
         repository=forecast_repository,
         enabled=settings.open_meteo_enabled,
         pv_tilt=settings.pv_tilt,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from home_optimizer.domain.location import Location
 from home_optimizer.domain.sensors import SensorDefinition, SensorSpec
 from home_optimizer.infrastructure.local.gateway import LocalJsonGateway
 
@@ -55,7 +56,7 @@ def test_local_json_gateway_reads_location(tmp_path) -> None:
     )
     gateway = LocalJsonGateway(str(state_path), specs=[])
 
-    assert gateway.get_location() == (52.09, 5.12)
+    assert gateway.get_location() == Location(latitude=52.09, longitude=5.12)
 
 
 def test_local_json_gateway_returns_none_for_missing_location(tmp_path) -> None:

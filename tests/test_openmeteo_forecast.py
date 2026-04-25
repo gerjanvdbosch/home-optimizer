@@ -6,26 +6,12 @@ import httpx
 from sqlalchemy import select
 
 from home_optimizer.app.settings import AppSettings
+from home_optimizer.domain.location import Location
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.orm_models import ForecastValue
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
-
-
-class FakeHomeLocationProvider:
-    def __init__(self, latitude: object = 52.09, longitude: object = 5.12) -> None:
-        self.latitude = latitude
-        self.longitude = longitude
-        self.calls = 0
-
-    def get_location(self) -> tuple[float, float] | None:
-        self.calls += 1
-        latitude = self.latitude
-        longitude = self.longitude
-        if not isinstance(latitude, int | float) or not isinstance(longitude, int | float):
-            return None
-        return float(latitude), float(longitude)
 
 
 def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
@@ -73,10 +59,9 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     database.init_schema()
     gateway = OpenMeteoGateway(client=client)
     repository = ForecastRepository(database)
-    home_location_provider = FakeHomeLocationProvider()
     service = OpenMeteoForecastService(
         gateway,
-        home_location_provider,
+        Location(latitude=52.09, longitude=5.12),
         repository,
         enabled=settings.open_meteo_enabled,
         pv_tilt=settings.pv_tilt,
@@ -89,7 +74,6 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
 
     assert written == 16
     assert len(seen_queries) == 3
-    assert home_location_provider.calls == 1
     assert "latitude=52.09" in seen_queries[0]
     assert "longitude=5.12" in seen_queries[0]
     assert (
@@ -142,7 +126,7 @@ def test_openmeteo_forecast_service_skips_without_home_coordinates(tmp_path) -> 
     )
     service = OpenMeteoForecastService(
         gateway,
-        FakeHomeLocationProvider(latitude=None, longitude=None),
+        None,
         repository,
         enabled=settings.open_meteo_enabled,
         pv_tilt=settings.pv_tilt,

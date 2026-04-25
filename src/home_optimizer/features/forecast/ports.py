@@ -11,10 +11,6 @@ class ForecastRepositoryPort(Protocol):
     def write_entries(self, entries: list[ForecastEntry]) -> None: ...
 
 
-class HomeLocationProviderPort(Protocol):
-    def get_location(self) -> tuple[float, float] | None: ...
-
-
 class OpenMeteoGatewayPort(Protocol):
     def fetch_minutely_forecast(
         self,
