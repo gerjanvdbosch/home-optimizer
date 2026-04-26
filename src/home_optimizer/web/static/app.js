@@ -213,7 +213,7 @@ async function loadCharts() {
     yTitle: payload.hp_supply_temperature.unit || "",
     traceOptions: [
       { label: "Aanvoer" },
-      { label: "Doel temperatuur", dash: "dot" },
+      { label: "Doel temperatuur" },
       { label: "Retour" },
       { label: "Delta T", shape: "hv" },
     ],
