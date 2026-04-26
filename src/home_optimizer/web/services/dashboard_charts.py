@@ -109,7 +109,9 @@ def build_thermal_and_cop_series(
         thermal_points.append(ChartPoint(timestamp=fp.timestamp, value=q_kw))
 
         elec = latest_value_at(hp_power.points, fp.timestamp) if hp_power else None
-        if elec is None or elec == 0:
+        if elec is None:
+            continue
+        if q_kw <= 0 or elec <= 0:
             continue
         cop_points.append(ChartPoint(timestamp=fp.timestamp, value=q_kw / elec))
 
