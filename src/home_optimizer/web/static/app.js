@@ -14,6 +14,7 @@ const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const forecastChart = document.getElementById("forecast-chart");
 const shutterChart = document.getElementById("shutter-chart");
+const supplyChart = document.getElementById("supply-chart");
 const baseUrl = new URL(".", window.location.href);
 const heatpumpModeColors = {
   ufh: "#43a047",
@@ -205,6 +206,20 @@ async function loadCharts() {
     { xRange: [startIso, endIso] },
   );
 
+  // supply / return / target / delta-T chart
+  renderPlot(supplyChart, [payload.hp_supply_temperature, payload.hp_supply_target_temperature, payload.hp_return_temperature, payload.hp_delta_t], {
+    colors: ["#d32f2f", "#ffb74d", "#1976d2", "#616161"],
+    emptyText: "Geen aanvoer/retour data voor deze dag",
+    yTitle: payload.hp_supply_temperature.unit || "",
+    traceOptions: [
+      { label: "Aanvoer" },
+      { label: "Doel temperatuur", dash: "dot" },
+      { label: "Retour" },
+      { label: "Delta T", shape: "hv" },
+    ],
+    xRange: [startIso, endIso],
+  });
+
   renderPlot(shutterChart, [payload.shutter_position], {
     colors: ["#607d8b"],
     emptyText: "Geen shutterdata voor deze dag",
@@ -227,6 +242,7 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
+  
 }
 
 function summarizeSeries(series) {

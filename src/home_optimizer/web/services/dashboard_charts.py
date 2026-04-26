@@ -65,6 +65,9 @@ class DashboardChartsService:
             names=[
                 "room_temperature",
                 "thermostat_setpoint",
+                "hp_supply_temperature",
+                "hp_supply_target_temperature",
+                "hp_return_temperature",
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
@@ -93,6 +96,17 @@ class DashboardChartsService:
             shutter_by_name["shutter_living_room"],
         )
 
+        # Build delta-T series (supply - return) aligned to supply timestamps
+        supply_series = series_by_name.get("hp_supply_temperature")
+        return_series = series_by_name.get("hp_return_temperature")
+        delta_series = ChartSeries(name="hp_delta_t", unit=supply_series.unit if supply_series else "degC", points=[])
+        if supply_series and return_series:
+            for sp in supply_series.points:
+                rt = latest_value_at(return_series.points, sp.timestamp)
+                if rt is None:
+                    continue
+                delta_series.points.append(ChartPoint(timestamp=sp.timestamp, value=sp.value - rt))
+
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
             room_temperature=series_response(series_by_name["room_temperature"]),
@@ -114,4 +128,8 @@ class DashboardChartsService:
                 series_response(forecast_series_by_name["gti_living_room_windows"]),
                 series_response(adjusted_living_room_gti),
             ],
+            hp_supply_temperature=series_response(series_by_name["hp_supply_temperature"]),
+            hp_supply_target_temperature=series_response(series_by_name["hp_supply_target_temperature"]),
+            hp_return_temperature=series_response(series_by_name["hp_return_temperature"]),
+            hp_delta_t=series_response(delta_series),
         )
