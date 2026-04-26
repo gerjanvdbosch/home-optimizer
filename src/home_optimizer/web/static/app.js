@@ -46,7 +46,7 @@ const forecastSeriesStyles = {
     color: "#6d4c41",
   },
   gti_living_room_windows_adjusted: {
-    label: "GTI ramen met rolluik",
+    label: "Instraling",
     color: "#6d4c41",
     dash: "dot",
   },
