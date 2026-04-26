@@ -99,11 +99,24 @@ class DashboardRepository:
             return []
 
         with self.database.session() as session:
-            latest_created_at = session.execute(
-                select(func.max(ForecastValue.created_at_utc))
-            ).scalar_one()
-            if latest_created_at is None:
-                return [ChartSeries(name=name, unit=None, points=[]) for name in names]
+            latest_subquery = (
+                select(
+                    ForecastValue.name.label("name"),
+                    ForecastValue.forecast_time_utc.label("forecast_time_utc"),
+                    func.max(ForecastValue.created_at_utc).label("latest_created_at"),
+                )
+                .where(
+                    ForecastValue.name.in_(names),
+                    ForecastValue.forecast_time_utc >= normalize_utc_timestamp(start_time),
+                    ForecastValue.forecast_time_utc < normalize_utc_timestamp(end_time),
+                    ForecastValue.created_at_utc <= ForecastValue.forecast_time_utc,
+                )
+                .group_by(
+                    ForecastValue.name,
+                    ForecastValue.forecast_time_utc,
+                )
+                .subquery()
+            )
 
             rows = session.execute(
                 select(
@@ -112,23 +125,45 @@ class DashboardRepository:
                     ForecastValue.unit,
                     ForecastValue.value,
                 )
-                .where(
-                    ForecastValue.created_at_utc == latest_created_at,
-                    ForecastValue.name.in_(names),
-                    ForecastValue.forecast_time_utc >= normalize_utc_timestamp(start_time),
-                    ForecastValue.forecast_time_utc < normalize_utc_timestamp(end_time),
+                .join(
+                    latest_subquery,
+                    (
+                        (ForecastValue.name == latest_subquery.c.name)
+                        & (
+                            ForecastValue.forecast_time_utc
+                            == latest_subquery.c.forecast_time_utc
+                        )
+                        & (
+                            ForecastValue.created_at_utc
+                            == latest_subquery.c.latest_created_at
+                        )
+                    ),
                 )
-                .order_by(ForecastValue.name, ForecastValue.forecast_time_utc, ForecastValue.source)
+                .order_by(
+                    ForecastValue.name,
+                    ForecastValue.forecast_time_utc,
+                )
             ).all()
 
         points_by_name = {name: [] for name in names}
-        units_by_name: dict[str, str | None] = {name: None for name in names}
+        units_by_name: dict[str, str | None] = {
+            name: None for name in names
+        }
+
         for name, timestamp, unit, value in rows:
-            points_by_name[name].append(ChartPoint(timestamp=timestamp, value=float(value)))
+            points_by_name[name].append(
+                ChartPoint(
+                    timestamp=timestamp,
+                    value=float(value),
+                )
+            )
             units_by_name[name] = units_by_name[name] or unit
 
         return [
-            ChartSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
+            ChartSeries(
+                name=name,
+                unit=units_by_name[name],
+                points=points_by_name[name],
+            )
             for name in names
         ]
-
