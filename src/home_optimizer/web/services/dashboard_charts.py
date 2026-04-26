@@ -97,6 +97,7 @@ class DashboardChartsService:
             date=chart_date.isoformat(),
             room_temperature=series_response(series_by_name["room_temperature"]),
             thermostat_setpoint=series_response(series_by_name["thermostat_setpoint"]),
+            shutter_position=series_response(shutter_by_name["shutter_living_room"]),
             dhw_temperatures=[
                 series_response(series_by_name["dhw_top_temperature"]),
                 series_response(series_by_name["dhw_bottom_temperature"]),

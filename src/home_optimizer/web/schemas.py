@@ -57,6 +57,7 @@ class DashboardChartsResponse(BaseModel):
     date: str
     room_temperature: ChartSeriesResponse
     thermostat_setpoint: ChartSeriesResponse
+    shutter_position: ChartSeriesResponse
     dhw_temperatures: list[ChartSeriesResponse]
     heatpump_power: ChartSeriesResponse
     heatpump_mode: ChartTextSeriesResponse

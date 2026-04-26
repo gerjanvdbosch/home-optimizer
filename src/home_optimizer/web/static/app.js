@@ -8,10 +8,12 @@ const roomSummary = document.getElementById("room-summary");
 const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
 const forecastSummary = document.getElementById("forecast-summary");
+const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
 const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const forecastChart = document.getElementById("forecast-chart");
+const shutterChart = document.getElementById("shutter-chart");
 const baseUrl = new URL(".", window.location.href);
 const heatpumpModeColors = {
   ufh: "#43a047",
@@ -145,7 +147,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !shutterChart || !selectedDateLabel) {
     return;
   }
 
@@ -185,6 +187,16 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
+
+  renderPlot(shutterChart, [payload.shutter_position], {
+    colors: ["#607d8b"],
+    emptyText: "Geen shutterdata voor deze dag",
+    yTitle: payload.shutter_position.unit || "%",
+  });
+
+  if (shutterSummary) {
+    shutterSummary.textContent = summarizeSeries(payload.shutter_position);
+  }
 
   roomSummary.textContent = summarizeSeries(payload.room_temperature);
   dhwSummary.textContent = summarizeSeries(payload.dhw_temperatures[0]);
