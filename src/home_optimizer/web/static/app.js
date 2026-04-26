@@ -30,6 +30,7 @@ const heatpumpStatusStyles = {
     fill: "rgba(198, 40, 40, 0.13)",
   },
 };
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 let selectedDate = new Date();
 
@@ -38,7 +39,10 @@ function apiUrl(path) {
 }
 
 function formatDate(date) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDisplayDate(date) {
@@ -50,7 +54,8 @@ function formatDisplayDate(date) {
 }
 
 function shiftDate(days) {
-  selectedDate = new Date(selectedDate.getTime() + days * 24 * 60 * 60 * 1000);
+  selectedDate = new Date(selectedDate);
+  selectedDate.setDate(selectedDate.getDate() + days);
   loadCharts();
 }
 
@@ -125,7 +130,11 @@ async function loadCharts() {
   }
 
   selectedDateLabel.textContent = formatDisplayDate(selectedDate);
-  const response = await fetch(apiUrl(`api/dashboard/charts?date=${formatDate(selectedDate)}`));
+  const params = new URLSearchParams({
+    date: formatDate(selectedDate),
+    timezone: browserTimeZone,
+  });
+  const response = await fetch(apiUrl(`api/dashboard/charts?${params.toString()}`));
   const payload = await response.json();
 
   if (!response.ok) {
@@ -170,7 +179,7 @@ function summarizeSeries(series) {
 
 function renderPlot(element, seriesList, options) {
   const traces = seriesList.map((series, index) => ({
-    x: series.points.map((point) => point.timestamp),
+    x: series.points.map((point) => chartTimestamp(point.timestamp)),
     y: series.points.map((point) => point.value),
     name: series.name,
     type: "scatter",
@@ -197,7 +206,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
   const modes = orderedModes(points.map((point) => point.mode));
   const statusIntervalsByName = heatpumpStatusIntervals(statusSeriesList);
   const traces = modes.map((mode) => ({
-    x: points.map((point) => point.timestamp),
+    x: points.map((point) => chartTimestamp(point.timestamp)),
     y: points.map((point) => (point.mode === mode ? point.value : null)),
     customdata: points.map((point) => point.mode),
     name: displayMode(mode),
@@ -277,6 +286,12 @@ function addMinutes(timestamp, minutes) {
   return new Date(Date.parse(timestamp) + minutes * 60 * 1000).toISOString();
 }
 
+function chartTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  const localTimestamp = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return localTimestamp.toISOString().slice(0, 19);
+}
+
 function heatpumpStatusShapes(statusIntervalsByName) {
   return statusIntervalsByName.flatMap((series) => {
     const style = heatpumpStatusStyles[series.name];
@@ -288,8 +303,8 @@ function heatpumpStatusShapes(statusIntervalsByName) {
       type: "rect",
       xref: "x",
       yref: "paper",
-      x0: interval.x0,
-      x1: interval.x1,
+      x0: chartTimestamp(interval.x0),
+      x1: chartTimestamp(interval.x1),
       y0: 0,
       y1: 1,
       fillcolor: style.fill,

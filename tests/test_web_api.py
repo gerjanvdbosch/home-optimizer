@@ -344,6 +344,33 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     ]
 
 
+def test_dashboard_charts_endpoint_uses_requested_timezone() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/charts?date=2026-04-25&timezone=Europe/Amsterdam")
+
+    assert response.status_code == 200
+    assert app.state.container.dashboard_repository.calls[0][2:] == (
+        "2026-04-25T00:00:00+02:00",
+        "2026-04-26T00:00:00+02:00",
+    )
+
+
 def test_plotly_script_is_served_locally() -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
