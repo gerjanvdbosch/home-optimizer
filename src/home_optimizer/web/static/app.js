@@ -18,6 +18,18 @@ const heatpumpModeColors = {
   cool: "#03a9f4",
   off: "#9e9e9e",
 };
+const heatpumpStatusStyles = {
+  defrost_active: {
+    label: "Defrost",
+    color: "#1976d2",
+    fill: "rgba(25, 118, 210, 0.14)",
+  },
+  booster_heater_active: {
+    label: "Booster heater",
+    color: "#c62828",
+    fill: "rgba(198, 40, 40, 0.13)",
+  },
+};
 
 let selectedDate = new Date();
 
@@ -130,11 +142,20 @@ async function loadCharts() {
     emptyText: "Geen boilerdata voor deze dag",
     yTitle: payload.dhw_temperatures[0]?.unit || "",
   });
-  renderHeatpumpPowerPlot(heatpumpChart, payload.heatpump_power, payload.heatpump_mode);
+  renderHeatpumpPowerPlot(
+    heatpumpChart,
+    payload.heatpump_power,
+    payload.heatpump_mode,
+    payload.heatpump_statuses,
+  );
 
   roomSummary.textContent = summarizeSeries(payload.room_temperature);
   dhwSummary.textContent = summarizeSeries(payload.dhw_temperatures[0]);
-  heatpumpSummary.textContent = summarizeHeatpump(payload.heatpump_power, payload.heatpump_mode);
+  heatpumpSummary.textContent = summarizeHeatpump(
+    payload.heatpump_power,
+    payload.heatpump_mode,
+    payload.heatpump_statuses,
+  );
 }
 
 function summarizeSeries(series) {
@@ -168,12 +189,13 @@ function renderPlot(element, seriesList, options) {
   });
 }
 
-function renderHeatpumpPowerPlot(element, powerSeries, modeSeries) {
+function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesList) {
   const points = powerSeries.points.map((point) => ({
     ...point,
     mode: modeAtTimestamp(modeSeries.points, point.timestamp),
   }));
   const modes = orderedModes(points.map((point) => point.mode));
+  const statusIntervalsByName = heatpumpStatusIntervals(statusSeriesList);
   const traces = modes.map((mode) => ({
     x: points.map((point) => point.timestamp),
     y: points.map((point) => (point.mode === mode ? point.value : null)),
@@ -190,6 +212,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries) {
       `%{x|%H:%M}<br>%{y:.1f} ${powerSeries.unit || ""}` +
       "<br>Mode: %{customdata}<extra></extra>",
   }));
+  traces.push(...heatpumpStatusLegendTraces(statusIntervalsByName));
   const hasPoints = powerSeries.points.length > 0;
 
   Plotly.react(
@@ -199,6 +222,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries) {
       {
         emptyText: "Geen warmtepompvermogen voor deze dag",
         yTitle: powerSeries.unit || "",
+        shapes: heatpumpStatusShapes(statusIntervalsByName),
       },
       hasPoints,
     ),
@@ -207,6 +231,92 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries) {
       responsive: true,
     },
   );
+}
+
+function heatpumpStatusIntervals(statusSeriesList) {
+  return statusSeriesList.map((series) => ({
+    name: series.name,
+    intervals: activeIntervals(series.points),
+  }));
+}
+
+function activeIntervals(points) {
+  const intervals = [];
+  let start = null;
+  let previousTimestamp = null;
+
+  for (const point of points) {
+    if (isActiveStatusValue(point.value)) {
+      start = start || point.timestamp;
+      previousTimestamp = point.timestamp;
+      continue;
+    }
+
+    if (start) {
+      intervals.push({ x0: start, x1: point.timestamp });
+      start = null;
+      previousTimestamp = null;
+    }
+  }
+
+  if (start && previousTimestamp) {
+    intervals.push({ x0: start, x1: addMinutes(previousTimestamp, 1) });
+  }
+
+  return intervals;
+}
+
+function isActiveStatusValue(value) {
+  if (typeof value === "number") {
+    return value >= 0.5;
+  }
+  return ["1", "true", "on", "active"].includes(String(value).trim().toLowerCase());
+}
+
+function addMinutes(timestamp, minutes) {
+  return new Date(Date.parse(timestamp) + minutes * 60 * 1000).toISOString();
+}
+
+function heatpumpStatusShapes(statusIntervalsByName) {
+  return statusIntervalsByName.flatMap((series) => {
+    const style = heatpumpStatusStyles[series.name];
+    if (!style) {
+      return [];
+    }
+
+    return series.intervals.map((interval) => ({
+      type: "rect",
+      xref: "x",
+      yref: "paper",
+      x0: interval.x0,
+      x1: interval.x1,
+      y0: 0,
+      y1: 1,
+      fillcolor: style.fill,
+      line: { width: 0 },
+      layer: "below",
+    }));
+  });
+}
+
+function heatpumpStatusLegendTraces(statusIntervalsByName) {
+  return statusIntervalsByName
+    .filter((series) => series.intervals.length > 0)
+    .map((series) => {
+      const style = heatpumpStatusStyles[series.name] || {
+        label: series.name,
+        color: "#5c6bc0",
+      };
+      return {
+        x: [null],
+        y: [null],
+        name: style.label,
+        type: "scatter",
+        mode: "lines",
+        line: { color: style.color, width: 8 },
+        hoverinfo: "skip",
+      };
+    });
 }
 
 function modeAtTimestamp(modePoints, timestamp) {
@@ -244,14 +354,37 @@ function modeSortIndex(index) {
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 }
 
-function summarizeHeatpump(powerSeries, modeSeries) {
+function summarizeHeatpump(powerSeries, modeSeries, statusSeriesList) {
   if (powerSeries.points.length === 0) {
     return "-";
   }
   const latest = powerSeries.points[powerSeries.points.length - 1];
   const mode = modeAtTimestamp(modeSeries.points, latest.timestamp);
   const unit = powerSeries.unit || "";
-  return `${latest.value.toFixed(1)} ${unit} · ${displayMode(mode)}`.trim();
+  const statusLabels = activeStatusLabels(statusSeriesList, latest.timestamp);
+  return [`${latest.value.toFixed(1)} ${unit}`, displayMode(mode), ...statusLabels]
+    .join(" · ")
+    .trim();
+}
+
+function activeStatusLabels(statusSeriesList, timestamp) {
+  return statusSeriesList
+    .filter((series) => isActiveStatusValue(statusAtTimestamp(series.points, timestamp)))
+    .map((series) => heatpumpStatusStyles[series.name]?.label || series.name);
+}
+
+function statusAtTimestamp(points, timestamp) {
+  let currentValue = 0;
+  const timestampMs = Date.parse(timestamp);
+
+  for (const point of points) {
+    if (Date.parse(point.timestamp) > timestampMs) {
+      break;
+    }
+    currentValue = point.value;
+  }
+
+  return currentValue;
 }
 
 function plotLayout(options, hasPoints) {
@@ -275,6 +408,7 @@ function plotLayout(options, hasPoints) {
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
     annotations,
+    shapes: options.shapes || [],
     xaxis: {
       type: "date",
       tickformat: "%H:%M",

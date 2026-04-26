@@ -70,6 +70,16 @@ class FakeDashboardRepository:
                 unit="W",
                 points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1500.0)],
             ),
+            ChartSeries(
+                name="defrost_active",
+                unit="bool",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0)],
+            ),
+            ChartSeries(
+                name="booster_heater_active",
+                unit="bool",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1.0)],
+            ),
         ]
 
     def read_text_series(self, names, start_time, end_time) -> list[ChartTextSeries]:
@@ -299,6 +309,18 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "name": "hp_mode",
         "points": [{"timestamp": "2026-04-25T11:50:00+00:00", "value": "ufh"}],
     }
+    assert payload["heatpump_statuses"] == [
+        {
+            "name": "defrost_active",
+            "unit": "bool",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 0.0}],
+        },
+        {
+            "name": "booster_heater_active",
+            "unit": "bool",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 1.0}],
+        },
+    ]
     assert app.state.container.dashboard_repository.calls == [
         (
             "numeric",
@@ -307,6 +329,8 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
+                "defrost_active",
+                "booster_heater_active",
             ],
             "2026-04-25T00:00:00+00:00",
             "2026-04-26T00:00:00+00:00",

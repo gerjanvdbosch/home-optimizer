@@ -24,6 +24,10 @@ body {
   background: var(--ha-bg);
 }
 
+.plotly-notifier {
+  display: none;
+}
+
 .shell {
   width: min(1180px, calc(100% - 24px));
   margin: 0 auto;

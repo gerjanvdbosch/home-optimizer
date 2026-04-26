@@ -28,6 +28,7 @@ class DashboardRepository:
             Sample1m.last_real,
             Sample1m.max_real,
             Sample1m.min_real,
+            Sample1m.last_bool,
         )
         with self.database.session() as session:
             rows = session.execute(

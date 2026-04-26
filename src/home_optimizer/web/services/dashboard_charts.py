@@ -20,6 +20,8 @@ class DashboardChartsService:
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
+                "defrost_active",
+                "booster_heater_active",
             ],
             start_time=start_time,
             end_time=end_time,
@@ -41,4 +43,8 @@ class DashboardChartsService:
             ],
             heatpump_power=series_response(series_by_name["hp_electric_power"]),
             heatpump_mode=text_series_response(text_series_by_name["hp_mode"]),
+            heatpump_statuses=[
+                series_response(series_by_name["defrost_active"]),
+                series_response(series_by_name["booster_heater_active"]),
+            ],
         )

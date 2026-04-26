@@ -59,3 +59,4 @@ class DashboardChartsResponse(BaseModel):
     dhw_temperatures: list[ChartSeriesResponse]
     heatpump_power: ChartSeriesResponse
     heatpump_mode: ChartTextSeriesResponse
+    heatpump_statuses: list[ChartSeriesResponse]
