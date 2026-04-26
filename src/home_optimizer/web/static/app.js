@@ -190,6 +190,10 @@ async function loadCharts() {
     colors: ["#ff9800", "#7e57c2"],
     emptyText: "Geen boilerdata voor deze dag",
     yTitle: payload.dhw_temperatures[0]?.unit || "",
+    traceOptions: [
+      { label: "Boiler (boven)" },
+      { label: "Boiler (onder)" },
+    ],
     xRange: [startIso, endIso],
   });
   renderHeatpumpPowerPlot(
@@ -207,13 +211,13 @@ async function loadCharts() {
   );
 
   // supply / return / target / delta-T chart
-  renderPlot(supplyChart, [payload.hp_supply_temperature, payload.hp_supply_target_temperature, payload.hp_return_temperature, payload.hp_delta_t], {
-    colors: ["#d32f2f", "#ffb74d", "#1976d2", "#616161"],
+  renderPlot(supplyChart, [payload.hp_supply_target_temperature, payload.hp_supply_temperature, payload.hp_return_temperature, payload.hp_delta_t], {
+    colors: ["#ffb74d", "#d32f2f", "#1976d2", "#616161"],
     emptyText: "Geen aanvoer/retour data voor deze dag",
     yTitle: payload.hp_supply_temperature.unit || "",
     traceOptions: [
+      { label: "Doel" },
       { label: "Aanvoer" },
-      { label: "Doel temperatuur" },
       { label: "Retour" },
       { label: "Delta T", shape: "hv" },
     ],
