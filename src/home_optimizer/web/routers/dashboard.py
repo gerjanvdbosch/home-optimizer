@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
+from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import DashboardChartsResponse, DashboardViewModel
@@ -53,7 +54,11 @@ def create_dashboard_router(settings: AppSettings) -> APIRouter:
 
     @router.get("/plotly.js", response_class=FileResponse)
     def plotly_js() -> FileResponse:
-        return FileResponse(PLOTLY_JS_PATH, media_type="application/javascript")
+        return FileResponse(
+            PLOTLY_JS_PATH,
+            media_type="application/javascript",
+            headers=NO_CACHE_HEADERS,
+        )
 
     @router.get("/api/dashboard/charts", response_model=DashboardChartsResponse)
     def get_dashboard_charts(

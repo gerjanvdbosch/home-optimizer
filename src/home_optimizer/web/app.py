@@ -5,16 +5,26 @@ from pathlib import Path
 from typing import Callable
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.staticfiles import StaticFiles
 
 from home_optimizer.app.container_factories import build_home_assistant_container
 from home_optimizer.app.history_import_jobs import HistoryImportJobRunner
 from home_optimizer.app.settings import AppSettings
+from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.routers.dashboard import create_dashboard_router
 from home_optimizer.web.routers.history_import import create_history_import_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: dict) -> Response:
+        response = await super().get_response(path, scope)
+        if path.endswith((".css", ".js")):
+            response.headers.update(NO_CACHE_HEADERS)
+        return response
 
 
 def create_app(
@@ -44,7 +54,7 @@ def create_app(
         version="0.10",
         lifespan=lifespan,
     )
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/health")
     def health() -> dict[str, str]:

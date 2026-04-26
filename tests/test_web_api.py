@@ -366,3 +366,34 @@ def test_plotly_script_is_served_locally() -> None:
 
     assert response.status_code == 200
     assert "Plotly" in response.text[:5000]
+
+
+def test_javascript_and_css_are_not_cached() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        responses = [
+            client.get("/static/app.js"),
+            client.get("/static/app.css"),
+            client.get("/plotly.js"),
+        ]
+
+    for response in responses:
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
+        assert response.headers["pragma"] == "no-cache"
+        assert response.headers["expires"] == "0"
