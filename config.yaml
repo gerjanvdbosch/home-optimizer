@@ -34,8 +34,6 @@ map:
 options:
   history_import_max_days_back: 10
 
-  open_meteo_poll_interval_seconds: 3600
-
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
   # pv_tilt: 0=horizontal, 90=vertical wall
@@ -80,8 +78,6 @@ options:
 
 schema:
   history_import_max_days_back: int
-
-  open_meteo_poll_interval_seconds: int
 
   pv_tilt: float
   pv_azimuth: float
