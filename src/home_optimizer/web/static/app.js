@@ -196,11 +196,13 @@ async function loadCharts() {
     payload.heatpump_power,
     payload.heatpump_mode,
     payload.heatpump_statuses,
+    { xRange: [startIso, endIso] },
   );
   renderForecastPlot(
     forecastChart,
     payload.forecast_temperature,
     payload.forecast_gti,
+    { xRange: [startIso, endIso] },
   );
 
   renderPlot(shutterChart, [payload.shutter_position], {
@@ -262,7 +264,7 @@ function renderPlot(element, seriesList, options) {
   });
 }
 
-function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesList) {
+function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesList, options = {}) {
   const points = powerSeries.points.map((point) => ({
     ...point,
     mode: modeAtTimestamp(modeSeries.points, point.timestamp),
@@ -288,17 +290,18 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
   traces.push(...heatpumpStatusLegendTraces(statusIntervalsByName));
   const hasPoints = powerSeries.points.length > 0;
 
+  const defaultOptions = {
+    emptyText: "Geen warmtepompvermogen voor deze dag",
+    yTitle: powerSeries.unit || "",
+    shapes: heatpumpStatusShapes(statusIntervalsByName),
+  };
+
+  const mergedOptions = { ...defaultOptions, ...options };
+
   Plotly.react(
     element,
     traces,
-    plotLayout(
-      {
-        emptyText: "Geen warmtepompvermogen voor deze dag",
-        yTitle: powerSeries.unit || "",
-        shapes: heatpumpStatusShapes(statusIntervalsByName),
-      },
-      hasPoints,
-    ),
+    plotLayout(mergedOptions, hasPoints),
     {
       displayModeBar: false,
       responsive: true,
@@ -306,7 +309,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
   );
 }
 
-function renderForecastPlot(element, temperatureSeries, gtiSeriesList) {
+function renderForecastPlot(element, temperatureSeries, gtiSeriesList, options = {}) {
   const useSecondaryAxis = Boolean(temperatureSeries.unit);
   const gtiTraces = gtiSeriesList.map((series) => {
     const style = forecastSeriesStyles[series.name] || {
@@ -348,17 +351,18 @@ function renderForecastPlot(element, temperatureSeries, gtiSeriesList) {
   const traces = [...gtiTraces, temperatureTrace];
   const hasPoints = traces.some((trace) => trace.x.length > 0);
 
+  const defaultOptions = {
+    emptyText: "Geen forecastdata voor deze dag",
+    yTitle: gtiSeriesList[0]?.unit || "",
+    ...(useSecondaryAxis ? { y2Title: temperatureSeries.unit || "" } : {}),
+  };
+
+  const mergedOptions = { ...defaultOptions, ...options };
+
   Plotly.react(
     element,
     traces,
-    plotLayout(
-      {
-        emptyText: "Geen forecastdata voor deze dag",
-        yTitle: gtiSeriesList[0]?.unit || "",
-        ...(useSecondaryAxis ? { y2Title: temperatureSeries.unit || "" } : {}),
-      },
-      hasPoints,
-    ),
+    plotLayout(mergedOptions, hasPoints),
     {
       displayModeBar: false,
       responsive: true,
