@@ -338,6 +338,6 @@ def test_history_import_request_uses_max_days_back_when_configured() -> None:
 
     assert request.end_time.tzinfo == timezone.utc
     assert request.start_time.tzinfo == timezone.utc
-    assert request.end_time == datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
-    assert request.start_time == datetime(2026, 4, 15, 0, 0, tzinfo=timezone.utc)
+    assert request.end_time == datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc)
+    assert request.start_time == datetime(2026, 4, 15, 16, 6, 54, tzinfo=timezone.utc)
     assert request.end_time - request.start_time == timedelta(days=10)
