@@ -52,6 +52,14 @@ class FakeDashboardRepository:
 
     def read_series(self, names, start_time, end_time) -> list[ChartSeries]:
         self.calls.append(("numeric", names, start_time.isoformat(), end_time.isoformat()))
+        if names == ["shutter_living_room"]:
+            return [
+                ChartSeries(
+                    name="shutter_living_room",
+                    unit="percent",
+                    points=[ChartPoint(timestamp="2026-04-25T11:55:00+00:00", value=50.0)],
+                )
+            ]
         return [
             ChartSeries(
                 name="room_temperature",
@@ -371,11 +379,22 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "unit": "Wm2",
             "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 220.0}],
         },
+        {
+            "name": "gti_living_room_windows_adjusted",
+            "unit": "Wm2",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 110.0}],
+        },
     ]
     local_timezone = dashboard_charts_module.current_timezone()
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
     assert app.state.container.dashboard_repository.calls == [
+        (
+            "numeric",
+            ["shutter_living_room"],
+            (start_time - timedelta(days=1)).isoformat(),
+            end_time.isoformat(),
+        ),
         (
             "numeric",
             [
@@ -431,7 +450,7 @@ def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.Mon
         response = client.get("/api/dashboard/charts?date=2026-04-25")
 
     assert response.status_code == 200
-    assert app.state.container.dashboard_repository.calls[0][2:] == (
+    assert app.state.container.dashboard_repository.calls[1][2:] == (
         "2026-04-25T00:00:00+02:00",
         "2026-04-26T00:00:00+02:00",
     )

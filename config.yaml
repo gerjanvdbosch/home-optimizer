@@ -38,7 +38,7 @@ options:
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
-  # pv_tilt:    0=horizontal, 90=vertical wall
+  # pv_tilt: 0=horizontal, 90=vertical wall
   pv_tilt: 50.0
   pv_azimuth: 148.0
   living_room_window_azimuth: 148.0
@@ -71,7 +71,7 @@ options:
     hp_electric_power: "sensor.warmtepomp_geschat_vermogen"
     p1_net_power: "sensor.p1_meter_power"
     pv_output_power: "sensor.pv_output"
-    # Shutter position (0-100% closed)
+    # Shutter position (100%=open, 0%=closed)
     shutter_living_room: "sensor.woonkamer_rolluik"
 
   database_path: "/config/database.sqlite"

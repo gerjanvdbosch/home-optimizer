@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
+from home_optimizer.domain.charts import ChartPoint, ChartSeries
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
@@ -9,6 +10,39 @@ from home_optimizer.web.schemas import DashboardChartsResponse
 
 def current_timezone() -> tzinfo:
     return datetime.now().astimezone().tzinfo or timezone.utc
+
+
+def adjusted_gti_with_shutter(
+    window_gti: ChartSeries,
+    shutter_position: ChartSeries,
+) -> ChartSeries:
+    return ChartSeries(
+        name="gti_living_room_windows_adjusted",
+        unit=window_gti.unit,
+        points=[
+            ChartPoint(
+                timestamp=point.timestamp,
+                value=point.value * shutter_open_fraction_at(shutter_position.points, point.timestamp),
+            )
+            for point in window_gti.points
+        ],
+    )
+
+
+def shutter_open_fraction_at(points: list[ChartPoint], timestamp: str) -> float:
+    position = latest_value_at(points, timestamp)
+    if position is None:
+        return 1.0
+    return max(0.0, min(position, 100.0)) / 100.0
+
+
+def latest_value_at(points: list[ChartPoint], timestamp: str) -> float | None:
+    latest: float | None = None
+    for point in points:
+        if point.timestamp > timestamp:
+            break
+        latest = point.value
+    return latest
 
 
 class DashboardChartsService:
@@ -22,6 +56,11 @@ class DashboardChartsService:
         local_timezone = current_timezone()
         start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
         end_time = start_time + timedelta(days=1)
+        shutter_series = self.reader.read_series(
+            names=["shutter_living_room"],
+            start_time=start_time - timedelta(days=1),
+            end_time=end_time,
+        )
         series = self.reader.read_series(
             names=[
                 "room_temperature",
@@ -46,8 +85,13 @@ class DashboardChartsService:
             end_time=end_time,
         )
         series_by_name = {item.name: item for item in series}
+        shutter_by_name = {item.name: item for item in shutter_series}
         text_series_by_name = {item.name: item for item in text_series}
         forecast_series_by_name = {item.name: item for item in forecast_series}
+        adjusted_living_room_gti = adjusted_gti_with_shutter(
+            forecast_series_by_name["gti_living_room_windows"],
+            shutter_by_name["shutter_living_room"],
+        )
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
@@ -67,5 +111,6 @@ class DashboardChartsService:
             forecast_gti=[
                 series_response(forecast_series_by_name["gti_pv"]),
                 series_response(forecast_series_by_name["gti_living_room_windows"]),
+                series_response(adjusted_living_room_gti),
             ],
         )

@@ -41,6 +41,11 @@ const forecastSeriesStyles = {
     label: "GTI ramen",
     color: "#6d4c41",
   },
+  gti_living_room_windows_adjusted: {
+    label: "GTI ramen met rolluik",
+    color: "#6d4c41",
+    dash: "dot",
+  },
   temperature: {
     label: "Buitentemperatuur",
     color: "#1e88e5",
@@ -289,6 +294,7 @@ function renderForecastPlot(element, temperatureSeries, gtiSeriesList) {
       line: {
         color: style.color,
         width: 2,
+        ...(style.dash ? { dash: style.dash } : {}),
       },
       hovertemplate:
         `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}<extra>${style.label}</extra>`,
