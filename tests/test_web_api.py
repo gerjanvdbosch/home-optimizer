@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from home_optimizer.app.settings import AppSettings
-from home_optimizer.domain.charts import ChartPoint, ChartSeries
+from home_optimizer.domain.charts import ChartPoint, ChartSeries, ChartTextPoint, ChartTextSeries
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.features.history_import.schemas import HistoryImportResult
 from home_optimizer.web.app import create_app
@@ -45,10 +45,10 @@ class FakeTelemetryScheduler:
 
 class FakeDashboardRepository:
     def __init__(self) -> None:
-        self.calls: list[tuple[list[str], str, str]] = []
+        self.calls: list[tuple[str, list[str], str, str]] = []
 
     def read_series(self, names, start_time, end_time) -> list[ChartSeries]:
-        self.calls.append((names, start_time.isoformat(), end_time.isoformat()))
+        self.calls.append(("numeric", names, start_time.isoformat(), end_time.isoformat()))
         return [
             ChartSeries(
                 name="room_temperature",
@@ -64,6 +64,20 @@ class FakeDashboardRepository:
                 name="dhw_bottom_temperature",
                 unit="degC",
                 points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=42.0)],
+            ),
+            ChartSeries(
+                name="hp_electric_power",
+                unit="W",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1500.0)],
+            ),
+        ]
+
+    def read_text_series(self, names, start_time, end_time) -> list[ChartTextSeries]:
+        self.calls.append(("text", names, start_time.isoformat(), end_time.isoformat()))
+        return [
+            ChartTextSeries(
+                name="hp_mode",
+                points=[ChartTextPoint(timestamp="2026-04-25T11:50:00+00:00", value="ufh")],
             ),
         ]
 
@@ -276,12 +290,33 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "dhw_top_temperature",
         "dhw_bottom_temperature",
     ]
+    assert payload["heatpump_power"] == {
+        "name": "hp_electric_power",
+        "unit": "W",
+        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 1500.0}],
+    }
+    assert payload["heatpump_mode"] == {
+        "name": "hp_mode",
+        "points": [{"timestamp": "2026-04-25T11:50:00+00:00", "value": "ufh"}],
+    }
     assert app.state.container.dashboard_repository.calls == [
         (
-            ["room_temperature", "dhw_top_temperature", "dhw_bottom_temperature"],
+            "numeric",
+            [
+                "room_temperature",
+                "dhw_top_temperature",
+                "dhw_bottom_temperature",
+                "hp_electric_power",
+            ],
             "2026-04-25T00:00:00+00:00",
             "2026-04-26T00:00:00+00:00",
-        )
+        ),
+        (
+            "text",
+            ["hp_mode"],
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-26T00:00:00+00:00",
+        ),
     ]
 
 

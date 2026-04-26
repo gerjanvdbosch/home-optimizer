@@ -6,9 +6,18 @@ const previousDayButton = document.getElementById("previous-day");
 const nextDayButton = document.getElementById("next-day");
 const roomSummary = document.getElementById("room-summary");
 const dhwSummary = document.getElementById("dhw-summary");
+const heatpumpSummary = document.getElementById("heatpump-summary");
 const roomChart = document.getElementById("room-chart");
 const dhwChart = document.getElementById("dhw-chart");
+const heatpumpChart = document.getElementById("heatpump-chart");
 const baseUrl = new URL(".", window.location.href);
+const heatpumpModeColors = {
+  ufh: "#43a047",
+  dhw: "#ff9800",
+  legionella: "#d81b60",
+  cool: "#03a9f4",
+  off: "#9e9e9e",
+};
 
 let selectedDate = new Date();
 
@@ -99,7 +108,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !selectedDateLabel) {
     return;
   }
 
@@ -121,9 +130,11 @@ async function loadCharts() {
     emptyText: "Geen boilerdata voor deze dag",
     yTitle: payload.dhw_temperatures[0]?.unit || "",
   });
+  renderHeatpumpPowerPlot(heatpumpChart, payload.heatpump_power, payload.heatpump_mode);
 
   roomSummary.textContent = summarizeSeries(payload.room_temperature);
   dhwSummary.textContent = summarizeSeries(payload.dhw_temperatures[0]);
+  heatpumpSummary.textContent = summarizeHeatpump(payload.heatpump_power, payload.heatpump_mode);
 }
 
 function summarizeSeries(series) {
@@ -155,6 +166,103 @@ function renderPlot(element, seriesList, options) {
     displayModeBar: false,
     responsive: true,
   });
+}
+
+function renderHeatpumpPowerPlot(element, powerSeries, modeSeries) {
+  const points = powerSeries.points.map((point) => ({
+    ...point,
+    mode: modeAtTimestamp(modeSeries.points, point.timestamp),
+  }));
+  const modes = orderedModes(points.map((point) => point.mode));
+  const traces = modes.map((mode) => ({
+    x: points.map((point) => point.timestamp),
+    y: points.map((point) => (point.mode === mode ? point.value : null)),
+    customdata: points.map((point) => point.mode),
+    name: displayMode(mode),
+    type: "scatter",
+    mode: "lines",
+    connectgaps: false,
+    line: {
+      color: heatpumpModeColors[mode] || "#5c6bc0",
+      width: 2,
+    },
+    hovertemplate:
+      `%{x|%H:%M}<br>%{y:.1f} ${powerSeries.unit || ""}` +
+      "<br>Mode: %{customdata}<extra></extra>",
+  }));
+  const hasPoints = powerSeries.points.length > 0;
+
+  Plotly.react(
+    element,
+    traces,
+    plotLayout(
+      {
+        emptyText: "Geen warmtepompvermogen voor deze dag",
+        yTitle: powerSeries.unit || "",
+      },
+      hasPoints,
+    ),
+    {
+      displayModeBar: false,
+      responsive: true,
+    },
+  );
+}
+
+function modeAtTimestamp(modePoints, timestamp) {
+  let currentMode = "onbekend";
+  const timestampMs = Date.parse(timestamp);
+
+  for (const point of modePoints) {
+    if (Date.parse(point.timestamp) > timestampMs) {
+      break;
+    }
+    currentMode = normalizeMode(point.value);
+  }
+
+  return currentMode;
+}
+
+function normalizeMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "heat" || mode === "heating") {
+    return "ufh";
+  }
+  if (mode === "domestic_hot_water") {
+    return "dhw";
+  }
+  return mode || "onbekend";
+}
+
+function displayMode(mode) {
+  if (mode === "onbekend") {
+    return "Onbekend";
+  }
+  return mode.toUpperCase();
+}
+
+function orderedModes(modes) {
+  const preferredOrder = ["ufh", "dhw", "legionella", "cool", "off", "onbekend"];
+  const uniqueModes = Array.from(new Set(modes));
+  return uniqueModes.sort((left, right) => {
+    const leftIndex = preferredOrder.indexOf(left);
+    const rightIndex = preferredOrder.indexOf(right);
+    return modeSortIndex(leftIndex) - modeSortIndex(rightIndex) || left.localeCompare(right);
+  });
+}
+
+function modeSortIndex(index) {
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+function summarizeHeatpump(powerSeries, modeSeries) {
+  if (powerSeries.points.length === 0) {
+    return "-";
+  }
+  const latest = powerSeries.points[powerSeries.points.length - 1];
+  const mode = modeAtTimestamp(modeSeries.points, latest.timestamp);
+  const unit = powerSeries.unit || "";
+  return `${latest.value.toFixed(1)} ${unit} · ${displayMode(mode)}`.trim();
 }
 
 function plotLayout(options, hasPoints) {
@@ -216,6 +324,9 @@ window.addEventListener("resize", () => {
   if (dhwChart) {
     Plotly.Plots.resize(dhwChart);
   }
+  if (heatpumpChart) {
+    Plotly.Plots.resize(heatpumpChart);
+  }
 });
 loadCharts().catch((error) => {
   if (roomSummary) {
@@ -223,6 +334,9 @@ loadCharts().catch((error) => {
   }
   if (dhwSummary) {
     dhwSummary.textContent = "Fout";
+  }
+  if (heatpumpSummary) {
+    heatpumpSummary.textContent = "Fout";
   }
   console.error(error);
 });

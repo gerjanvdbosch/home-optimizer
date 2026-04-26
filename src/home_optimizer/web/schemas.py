@@ -43,7 +43,19 @@ class ChartSeriesResponse(BaseModel):
     points: list[ChartPointResponse]
 
 
+class ChartTextPointResponse(BaseModel):
+    timestamp: str
+    value: str
+
+
+class ChartTextSeriesResponse(BaseModel):
+    name: str
+    points: list[ChartTextPointResponse]
+
+
 class DashboardChartsResponse(BaseModel):
     date: str
     room_temperature: ChartSeriesResponse
     dhw_temperatures: list[ChartSeriesResponse]
+    heatpump_power: ChartSeriesResponse
+    heatpump_mode: ChartTextSeriesResponse

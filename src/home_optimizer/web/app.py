@@ -15,12 +15,14 @@ from home_optimizer.app.container_factories import build_home_assistant_containe
 from home_optimizer.app.history_import_jobs import HistoryImportJob, HistoryImportJobRunner
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
-from home_optimizer.domain.charts import ChartSeries
+from home_optimizer.domain.charts import ChartSeries, ChartTextSeries
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.web.pages import render_dashboard
 from home_optimizer.web.schemas import (
     ChartPointResponse,
     ChartSeriesResponse,
+    ChartTextPointResponse,
+    ChartTextSeriesResponse,
     DashboardChartsResponse,
     DashboardViewModel,
     HistoryImportJobResponse,
@@ -48,6 +50,13 @@ class DashboardDataReader(Protocol):
         start_time: datetime,
         end_time: datetime,
     ) -> list[ChartSeries]: ...
+
+    def read_text_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[ChartTextSeries]: ...
 
 
 class TelemetrySchedulerRunner(Protocol):
@@ -102,6 +111,16 @@ def _series_response(series: ChartSeries) -> ChartSeriesResponse:
         unit=series.unit,
         points=[
             ChartPointResponse(timestamp=point.timestamp, value=point.value)
+            for point in series.points
+        ],
+    )
+
+
+def _text_series_response(series: ChartTextSeries) -> ChartTextSeriesResponse:
+    return ChartTextSeriesResponse(
+        name=series.name,
+        points=[
+            ChartTextPointResponse(timestamp=point.timestamp, value=point.value)
             for point in series.points
         ],
     )
@@ -174,11 +193,18 @@ def create_app(
                 "room_temperature",
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
+                "hp_electric_power",
             ],
             start_time=start_time,
             end_time=end_time,
         )
+        text_series = get_container().dashboard_repository.read_text_series(
+            names=["hp_mode"],
+            start_time=start_time,
+            end_time=end_time,
+        )
         series_by_name = {item.name: item for item in series}
+        text_series_by_name = {item.name: item for item in text_series}
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
@@ -187,6 +213,8 @@ def create_app(
                 _series_response(series_by_name["dhw_top_temperature"]),
                 _series_response(series_by_name["dhw_bottom_temperature"]),
             ],
+            heatpump_power=_series_response(series_by_name["hp_electric_power"]),
+            heatpump_mode=_text_series_response(text_series_by_name["hp_mode"]),
         )
 
     @app.post("/api/history-import", response_model=HistoryImportRunResponse)
