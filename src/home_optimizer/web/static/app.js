@@ -162,7 +162,7 @@ async function loadCharts() {
     throw new Error(payload.detail || "Grafiekdata ophalen mislukt.");
   }
 
-  // Ensure x-axis covers full day from 00:00 to 23:45 local time so axes are stable
+  // Ensure x-axis covers full day from 00:00 to 23:59 local time so axes are stable
   const start = new Date(selectedDate);
   start.setHours(0, 0, 0, 0);
   const end = new Date(selectedDate);

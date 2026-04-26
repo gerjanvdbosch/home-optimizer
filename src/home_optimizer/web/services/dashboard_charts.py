@@ -82,7 +82,7 @@ class DashboardChartsService:
         forecast_series = self.reader.read_forecast_series(
             names=["temperature", "gti_pv", "gti_living_room_windows"],
             start_time=start_time,
-            end_time=end_time,
+            end_time=end_time + timedelta(minutes=15),
         )
         series_by_name = {item.name: item for item in series}
         shutter_by_name = {item.name: item for item in shutter_series}
