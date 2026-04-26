@@ -45,6 +45,21 @@ def latest_value_at(points: list[ChartPoint], timestamp: str) -> float | None:
     return latest
 
 
+def build_delta_series(supply: ChartSeries | None, return_s: ChartSeries | None, name: str) -> ChartSeries:
+    unit = supply.unit if supply else "degC"
+    delta = ChartSeries(name=name, unit=unit, points=[])
+    if not supply or not return_s:
+        return delta
+
+    for sp in supply.points:
+        rt = latest_value_at(return_s.points, sp.timestamp)
+        if rt is None:
+            continue
+        delta.points.append(ChartPoint(timestamp=sp.timestamp, value=sp.value - rt))
+
+    return delta
+
+
 class DashboardChartsService:
     def __init__(self, reader: DashboardDataReader) -> None:
         self.reader = reader
@@ -96,16 +111,9 @@ class DashboardChartsService:
             shutter_by_name["shutter_living_room"],
         )
 
-        # Build delta-T series (supply - return) aligned to supply timestamps
         supply_series = series_by_name.get("hp_supply_temperature")
         return_series = series_by_name.get("hp_return_temperature")
-        delta_series = ChartSeries(name="hp_delta_t", unit=supply_series.unit if supply_series else "degC", points=[])
-        if supply_series and return_series:
-            for sp in supply_series.points:
-                rt = latest_value_at(return_series.points, sp.timestamp)
-                if rt is None:
-                    continue
-                delta_series.points.append(ChartPoint(timestamp=sp.timestamp, value=sp.value - rt))
+        delta_series = build_delta_series(supply_series, return_series, name="hp_delta_t")
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
