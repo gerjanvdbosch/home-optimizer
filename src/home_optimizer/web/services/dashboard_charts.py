@@ -25,6 +25,7 @@ class DashboardChartsService:
         series = self.reader.read_series(
             names=[
                 "room_temperature",
+                "thermostat_setpoint",
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
@@ -51,6 +52,7 @@ class DashboardChartsService:
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
             room_temperature=series_response(series_by_name["room_temperature"]),
+            thermostat_setpoint=series_response(series_by_name["thermostat_setpoint"]),
             dhw_temperatures=[
                 series_response(series_by_name["dhw_top_temperature"]),
                 series_response(series_by_name["dhw_bottom_temperature"]),

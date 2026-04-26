@@ -155,10 +155,14 @@ async function loadCharts() {
     throw new Error(payload.detail || "Grafiekdata ophalen mislukt.");
   }
 
-  renderPlot(roomChart, [payload.room_temperature], {
-    colors: ["#03a9f4"],
+  renderPlot(roomChart, [payload.room_temperature, payload.thermostat_setpoint], {
+    colors: ["#03a9f4", "#8e24aa"],
     emptyText: "Geen kamertemperatuur voor deze dag",
     yTitle: payload.room_temperature.unit || "",
+    traceOptions: [
+      { label: "Woonkamer" },
+      { label: "Setpoint" },
+    ],
   });
   renderPlot(dhwChart, payload.dhw_temperatures, {
     colors: ["#ff9800", "#7e57c2"],
@@ -204,14 +208,18 @@ function renderPlot(element, seriesList, options) {
   const traces = seriesList.map((series, index) => ({
     x: series.points.map((point) => chartTimestamp(point.timestamp)),
     y: series.points.map((point) => point.value),
-    name: series.name,
+    name: options.traceOptions?.[index]?.label || series.name,
     type: "scatter",
     mode: "lines",
     line: {
       color: options.colors[index % options.colors.length],
       width: 2,
+      ...(options.traceOptions?.[index]?.dash ? { dash: options.traceOptions[index].dash } : {}),
+      ...(options.traceOptions?.[index]?.shape ? { shape: options.traceOptions[index].shape } : {}),
     },
-    hovertemplate: `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}<extra>${series.name}</extra>`,
+    hovertemplate:
+      `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}` +
+      `<extra>${options.traceOptions?.[index]?.label || series.name}</extra>`,
   }));
   const hasPoints = seriesList.some((series) => series.points.length > 0);
 

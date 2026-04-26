@@ -59,6 +59,11 @@ class FakeDashboardRepository:
                 points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
             ),
             ChartSeries(
+                name="thermostat_setpoint",
+                unit="degC",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
+            ),
+            ChartSeries(
                 name="dhw_top_temperature",
                 unit="degC",
                 points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
@@ -320,6 +325,11 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert payload["room_temperature"]["points"] == [
         {"timestamp": "2026-04-25T12:00:00+00:00", "value": 20.5}
     ]
+    assert payload["thermostat_setpoint"] == {
+        "name": "thermostat_setpoint",
+        "unit": "degC",
+        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 21.0}],
+    }
     assert [series["name"] for series in payload["dhw_temperatures"]] == [
         "dhw_top_temperature",
         "dhw_bottom_temperature",
@@ -370,6 +380,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "numeric",
             [
                 "room_temperature",
+                "thermostat_setpoint",
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
