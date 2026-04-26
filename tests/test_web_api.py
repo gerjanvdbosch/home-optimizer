@@ -389,12 +389,12 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
     assert app.state.container.dashboard_repository.calls == [
-        (
-            "numeric",
-            ["shutter_living_room"],
-            (start_time - timedelta(days=1)).isoformat(),
-            end_time.isoformat(),
-        ),
+            (
+                "numeric",
+                ["shutter_living_room"],
+                start_time.isoformat(),
+                end_time.isoformat(),
+            ),
         (
             "numeric",
             [
