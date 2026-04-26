@@ -58,7 +58,7 @@ class DashboardChartsService:
         end_time = start_time + timedelta(days=1)
         shutter_series = self.reader.read_series(
             names=["shutter_living_room"],
-            start_time=start_time - timedelta(days=1),
+            start_time=start_time,
             end_time=end_time,
         )
         series = self.reader.read_series(
