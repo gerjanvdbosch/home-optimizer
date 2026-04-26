@@ -5,10 +5,9 @@ from html import escape
 from pathlib import Path
 from string import Template
 from typing import Annotated
-from zoneinfo import ZoneInfoNotFoundError
 
 import plotly
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from home_optimizer.app.history_import_requests import build_history_import_request
@@ -22,7 +21,6 @@ from home_optimizer.web.services.dashboard_charts import DashboardChartsService
 PLOTLY_JS_PATH = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 ChartDateQuery = Annotated[date, Query(alias="date")]
-ChartTimezoneQuery = Annotated[str, Query(alias="timezone")]
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 
 
@@ -66,14 +64,7 @@ def create_dashboard_router(settings: AppSettings) -> APIRouter:
     def get_dashboard_charts(
         chart_date: ChartDateQuery,
         container: ContainerDependency,
-        timezone_name: ChartTimezoneQuery = "UTC",
     ) -> DashboardChartsResponse:
-        try:
-            return DashboardChartsService(container.dashboard_repository).get_day_charts(
-                chart_date,
-                timezone_name,
-            )
-        except ZoneInfoNotFoundError as error:
-            raise HTTPException(status_code=400, detail="Onbekende tijdzone.") from error
+        return DashboardChartsService(container.dashboard_repository).get_day_charts(chart_date)
 
     return router

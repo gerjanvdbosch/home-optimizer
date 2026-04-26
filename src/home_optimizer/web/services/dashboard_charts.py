@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
+
+
+def current_timezone() -> tzinfo:
+    return datetime.now().astimezone().tzinfo or timezone.utc
 
 
 class DashboardChartsService:
@@ -15,9 +18,8 @@ class DashboardChartsService:
     def get_day_charts(
         self,
         chart_date: date,
-        timezone_name: str = "UTC",
     ) -> DashboardChartsResponse:
-        local_timezone = ZoneInfo(timezone_name)
+        local_timezone = current_timezone()
         start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
         end_time = start_time + timedelta(days=1)
         series = self.reader.read_series(

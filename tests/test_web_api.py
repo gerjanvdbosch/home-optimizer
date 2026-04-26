@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
 from time import sleep
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +13,7 @@ from home_optimizer.domain.charts import ChartPoint, ChartSeries, ChartTextPoint
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.features.history_import.schemas import HistoryImportResult
 from home_optimizer.web.app import create_app
+from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
 
 class FakeHomeAssistantGateway:
@@ -291,6 +294,7 @@ def test_history_import_job_endpoint_returns_result() -> None:
 
 
 def test_dashboard_charts_endpoint_returns_day_series() -> None:
+    chart_date = date(2026, 4, 25)
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
     settings = AppSettings.from_options(
@@ -358,6 +362,9 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 220.0}],
         },
     ]
+    local_timezone = dashboard_charts_module.current_timezone()
+    start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
+    end_time = start_time + timedelta(days=1)
     assert app.state.container.dashboard_repository.calls == [
         (
             "numeric",
@@ -369,25 +376,25 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
                 "defrost_active",
                 "booster_heater_active",
             ],
-            "2026-04-25T00:00:00+00:00",
-            "2026-04-26T00:00:00+00:00",
+            start_time.isoformat(),
+            end_time.isoformat(),
         ),
         (
             "text",
             ["hp_mode"],
-            "2026-04-25T00:00:00+00:00",
-            "2026-04-26T00:00:00+00:00",
+            start_time.isoformat(),
+            end_time.isoformat(),
         ),
         (
             "forecast",
             ["temperature", "gti_pv", "gti_living_room_windows"],
-            "2026-04-25T00:00:00+00:00",
-            "2026-04-26T00:00:00+00:00",
+            start_time.isoformat(),
+            end_time.isoformat(),
         ),
     ]
 
 
-def test_dashboard_charts_endpoint_uses_requested_timezone() -> None:
+def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
     settings = AppSettings.from_options(
@@ -403,9 +410,14 @@ def test_dashboard_charts_endpoint_uses_requested_timezone() -> None:
             home_assistant=gateway,
         ),
     )
+    monkeypatch.setattr(
+        dashboard_charts_module,
+        "current_timezone",
+        lambda: ZoneInfo("Europe/Amsterdam"),
+    )
 
     with TestClient(app) as client:
-        response = client.get("/api/dashboard/charts?date=2026-04-25&timezone=Europe/Amsterdam")
+        response = client.get("/api/dashboard/charts?date=2026-04-25")
 
     assert response.status_code == 200
     assert app.state.container.dashboard_repository.calls[0][2:] == (

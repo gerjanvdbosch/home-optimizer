@@ -46,7 +46,6 @@ const forecastSeriesStyles = {
     color: "#1e88e5",
   },
 };
-const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 let selectedDate = new Date();
 
@@ -148,7 +147,6 @@ async function loadCharts() {
   selectedDateLabel.textContent = formatDisplayDate(selectedDate);
   const params = new URLSearchParams({
     date: formatDate(selectedDate),
-    timezone: browserTimeZone,
   });
   const response = await fetch(apiUrl(`api/dashboard/charts?${params.toString()}`));
   const payload = await response.json();
