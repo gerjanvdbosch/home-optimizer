@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from fastapi import FastAPI
-from starlette.responses import Response
+from fastapi.responses import Response
 from starlette.staticfiles import StaticFiles
 
 from home_optimizer.app.container_factories import build_home_assistant_container
