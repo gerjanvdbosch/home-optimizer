@@ -162,6 +162,19 @@ async function loadCharts() {
     throw new Error(payload.detail || "Grafiekdata ophalen mislukt.");
   }
 
+  // Ensure x-axis covers full day from 00:00 to 23:45 local time so axes are stable
+  const start = new Date(selectedDate);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(selectedDate);
+  end.setHours(23, 59, 59, 0);
+  // match chartTimestamp output: subtract timezone offset before toISOString and strip trailing Z
+  const startIso = new Date(start.getTime() - start.getTimezoneOffset() * 60 * 1000)
+    .toISOString()
+    .slice(0, 19);
+  const endIso = new Date(end.getTime() - end.getTimezoneOffset() * 60 * 1000)
+    .toISOString()
+    .slice(0, 19);
+
   renderPlot(roomChart, [payload.room_temperature, payload.thermostat_setpoint], {
     colors: ["#03a9f4", "#8e24aa"],
     emptyText: "Geen kamertemperatuur voor deze dag",
@@ -170,11 +183,13 @@ async function loadCharts() {
       { label: "Woonkamer" },
       { label: "Setpoint" },
     ],
+    xRange: [startIso, endIso],
   });
   renderPlot(dhwChart, payload.dhw_temperatures, {
     colors: ["#ff9800", "#7e57c2"],
     emptyText: "Geen boilerdata voor deze dag",
     yTitle: payload.dhw_temperatures[0]?.unit || "",
+    xRange: [startIso, endIso],
   });
   renderHeatpumpPowerPlot(
     heatpumpChart,
@@ -192,6 +207,7 @@ async function loadCharts() {
     colors: ["#607d8b"],
     emptyText: "Geen shutterdata voor deze dag",
     yTitle: payload.shutter_position.unit || "%",
+    xRange: [startIso, endIso],
   });
 
   if (shutterSummary) {
@@ -561,6 +577,7 @@ function plotLayout(options, hasPoints) {
       gridcolor: "#eceff1",
       zeroline: false,
       fixedrange: true,
+      ...(options.xRange ? { range: options.xRange } : {}),
     },
     yaxis: {
       title: { text: options.yTitle },
