@@ -76,6 +76,48 @@ def build_baseload_series(p1: ChartSeries | None, pv: ChartSeries | None, hp: Ch
     return baseload
 
 
+def build_thermal_and_cop_series(
+    flow: ChartSeries | None,
+    supply: ChartSeries | None,
+    return_s: ChartSeries | None,
+    hp_power: ChartSeries | None,
+    thermal_name: str,
+    cop_name: str,
+) -> tuple[ChartSeries, ChartSeries]:
+    """Compute thermal output (kW) and COP series aligned to flow timestamps.
+
+    Formula: Q_kW = flow_Lmin * (supply - return) * 4186 / 60000
+    COP = Q_kW / electrical_input_kW when electrical_input_kW is available and non-zero.
+    """
+    thermal_points: list[ChartPoint] = []
+    cop_points: list[ChartPoint] = []
+    factor = 4186.0 / 60000.0
+
+    if not flow:
+        return (
+            ChartSeries(name=thermal_name, unit="kW", points=[]),
+            ChartSeries(name=cop_name, unit=None, points=[]),
+        )
+
+    for fp in flow.points:
+        supply_val = latest_value_at(supply.points, fp.timestamp) if supply else None
+        return_val = latest_value_at(return_s.points, fp.timestamp) if return_s else None
+        if supply_val is None or return_val is None:
+            continue
+        delta_t = supply_val - return_val
+        q_kw = fp.value * delta_t * factor
+        thermal_points.append(ChartPoint(timestamp=fp.timestamp, value=q_kw))
+
+        elec = latest_value_at(hp_power.points, fp.timestamp) if hp_power else None
+        if elec is None or elec == 0:
+            continue
+        cop_points.append(ChartPoint(timestamp=fp.timestamp, value=q_kw / elec))
+
+    thermal_series = ChartSeries(name=thermal_name, unit="kW", points=thermal_points)
+    cop_series = ChartSeries(name=cop_name, unit=None, points=cop_points)
+    return thermal_series, cop_series
+
+
 class DashboardChartsService:
     def __init__(self, reader: DashboardDataReader) -> None:
         self.reader = reader
@@ -96,6 +138,7 @@ class DashboardChartsService:
             names=[
                 "room_temperature",
                 "thermostat_setpoint",
+                "hp_flow",
                 "p1_net_power",
                 "pv_output_power",
                 "hp_supply_temperature",
@@ -138,6 +181,16 @@ class DashboardChartsService:
         hp_power_series = series_by_name.get("hp_electric_power")
         baseload_series = build_baseload_series(p1_series, pv_series, hp_power_series, name="baseload")
 
+        flow_series = series_by_name.get("hp_flow")
+        thermal_series, cop_series = build_thermal_and_cop_series(
+            flow_series,
+            series_by_name.get("hp_supply_temperature"),
+            series_by_name.get("hp_return_temperature"),
+            hp_power_series,
+            thermal_name="thermal_output",
+            cop_name="cop",
+        )
+
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
             room_temperature=series_response(series_by_name["room_temperature"]),
@@ -165,4 +218,6 @@ class DashboardChartsService:
             pv_output_power=series_response(series_by_name["pv_output_power"]),
             baseload=series_response(baseload_series),
             hp_delta_t=series_response(delta_series),
+            thermal_output=series_response(thermal_series),
+            cop=series_response(cop_series),
         )

@@ -15,6 +15,7 @@ const heatpumpChart = document.getElementById("heatpump-chart");
 const forecastChart = document.getElementById("forecast-chart");
 const shutterChart = document.getElementById("shutter-chart");
 const supplyChart = document.getElementById("supply-chart");
+const thermalChart = document.getElementById("thermal-chart");
 const baseUrl = new URL(".", window.location.href);
 const heatpumpModeColors = {
   ufh: "#43a047",
@@ -209,6 +210,19 @@ async function loadCharts() {
     payload.forecast_gti,
     { xRange: [startIso, endIso] },
   );
+
+  // thermal output and COP chart
+  renderThermalPlot(thermalChart, payload.thermal_output, payload.cop, {
+    colors: ["#ff7043", "#4caf50"],
+    emptyText: "Geen thermische output voor deze dag",
+    yTitle: payload.thermal_output.unit || "",
+    y2Title: "COP",
+    traceOptions: [
+      { label: "Thermische output", yaxis: "y" },
+      { label: "COP", yaxis: "y2" },
+    ],
+    xRange: [startIso, endIso],
+  });
 
   // supply / return / target / delta-T chart
   renderPlot(supplyChart, [payload.hp_supply_target_temperature, payload.hp_supply_temperature, payload.hp_return_temperature, payload.hp_delta_t], {
@@ -407,6 +421,48 @@ function renderForecastPlot(element, temperatureSeries, gtiSeriesList, options =
       displayModeBar: false,
       responsive: true,
     },
+  );
+}
+
+function renderThermalPlot(element, thermalSeries, copSeries, options = {}) {
+  const seriesList = [thermalSeries, copSeries];
+  const traceOpts = options.traceOptions || [];
+  const colors = options.colors || ["#ef6c00", "#4caf50"];
+
+  const traces = [];
+  seriesList.forEach((series, idx) => {
+    const to = traceOpts[idx] || {};
+    const color = to.color || colors[idx % colors.length];
+    const width = to.width || 2;
+    const yaxis = to.yaxis === "y2" ? "y2" : undefined;
+
+    traces.push({
+      x: series.points.map((point) => chartTimestamp(point.timestamp)),
+      y: series.points.map((point) => point.value),
+      name: to.label || series.name,
+      type: "scatter",
+      mode: "lines",
+      ...(yaxis ? { yaxis } : {}),
+      line: { color, width },
+      hovertemplate: `%{x|%H:%M}<br>%{y:.2f} ${series.unit || ""}` + `<extra>${to.label || series.name}</extra>`,
+    });
+  });
+
+  const hasPoints = traces.some((t) => t.x.length > 0 && t.y.some((v) => v !== null && v !== undefined));
+
+  const defaultOptions = {
+    emptyText: "Geen thermische output voor deze dag",
+    yTitle: options.yTitle || "",
+    ...(options.y2Title ? { y2Title: options.y2Title } : {}),
+  };
+
+  const mergedOptions = { ...defaultOptions, ...options };
+
+  Plotly.react(
+    element,
+    traces,
+    plotLayout(mergedOptions, hasPoints),
+    { displayModeBar: false, responsive: true },
   );
 }
 

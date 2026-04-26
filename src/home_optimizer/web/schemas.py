@@ -66,6 +66,8 @@ class DashboardChartsResponse(BaseModel):
     forecast_gti: list[ChartSeriesResponse]
     pv_output_power: ChartSeriesResponse
     baseload: ChartSeriesResponse
+    thermal_output: ChartSeriesResponse
+    cop: ChartSeriesResponse
     hp_supply_temperature: ChartSeriesResponse
     hp_supply_target_temperature: ChartSeriesResponse
     hp_return_temperature: ChartSeriesResponse
