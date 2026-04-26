@@ -7,9 +7,11 @@ const nextDayButton = document.getElementById("next-day");
 const roomSummary = document.getElementById("room-summary");
 const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
+const forecastSummary = document.getElementById("forecast-summary");
 const roomChart = document.getElementById("room-chart");
 const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
+const forecastChart = document.getElementById("forecast-chart");
 const baseUrl = new URL(".", window.location.href);
 const heatpumpModeColors = {
   ufh: "#43a047",
@@ -28,6 +30,20 @@ const heatpumpStatusStyles = {
     label: "Booster heater",
     color: "#c62828",
     fill: "rgba(198, 40, 40, 0.13)",
+  },
+};
+const forecastSeriesStyles = {
+  gti_pv: {
+    label: "GTI PV",
+    color: "#f9a825",
+  },
+  gti_living_room_windows: {
+    label: "GTI ramen",
+    color: "#6d4c41",
+  },
+  temperature: {
+    label: "Buitentemperatuur",
+    color: "#1e88e5",
   },
 };
 const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -125,7 +141,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !selectedDateLabel) {
     return;
   }
 
@@ -157,6 +173,11 @@ async function loadCharts() {
     payload.heatpump_mode,
     payload.heatpump_statuses,
   );
+  renderForecastPlot(
+    forecastChart,
+    payload.forecast_temperature,
+    payload.forecast_gti,
+  );
 
   roomSummary.textContent = summarizeSeries(payload.room_temperature);
   dhwSummary.textContent = summarizeSeries(payload.dhw_temperatures[0]);
@@ -164,6 +185,10 @@ async function loadCharts() {
     payload.heatpump_power,
     payload.heatpump_mode,
     payload.heatpump_statuses,
+  );
+  forecastSummary.textContent = summarizeForecast(
+    payload.forecast_temperature,
+    payload.forecast_gti,
   );
 }
 
@@ -232,6 +257,65 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
         emptyText: "Geen warmtepompvermogen voor deze dag",
         yTitle: powerSeries.unit || "",
         shapes: heatpumpStatusShapes(statusIntervalsByName),
+      },
+      hasPoints,
+    ),
+    {
+      displayModeBar: false,
+      responsive: true,
+    },
+  );
+}
+
+function renderForecastPlot(element, temperatureSeries, gtiSeriesList) {
+  const useSecondaryAxis = Boolean(temperatureSeries.unit);
+  const gtiTraces = gtiSeriesList.map((series) => {
+    const style = forecastSeriesStyles[series.name] || {
+      label: series.name,
+      color: "#5c6bc0",
+    };
+    return {
+      x: series.points.map((point) => chartTimestamp(point.timestamp)),
+      y: series.points.map((point) => point.value),
+      name: style.label,
+      type: "scatter",
+      mode: "lines",
+      line: {
+        color: style.color,
+        width: 2,
+      },
+      hovertemplate:
+        `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}<extra>${style.label}</extra>`,
+    };
+  });
+  const temperatureStyle = forecastSeriesStyles.temperature;
+  const temperatureTrace = {
+    x: temperatureSeries.points.map((point) => chartTimestamp(point.timestamp)),
+    y: temperatureSeries.points.map((point) => point.value),
+    name: temperatureStyle.label,
+    type: "scatter",
+    mode: "lines",
+    ...(useSecondaryAxis ? { yaxis: "y2" } : {}),
+    line: {
+      color: temperatureStyle.color,
+      width: 2,
+      dash: "dot",
+    },
+    hovertemplate:
+      `%{x|%H:%M}<br>%{y:.1f} ${temperatureSeries.unit || ""}` +
+      `<extra>${temperatureStyle.label}</extra>`,
+  };
+  const traces = [...gtiTraces, temperatureTrace];
+  const hasPoints = traces.some((trace) => trace.x.length > 0);
+
+  Plotly.react(
+    element,
+    traces,
+    plotLayout(
+      {
+        emptyText: "Geen forecastdata voor deze dag",
+        yTitle: gtiSeriesList[0]?.unit || "",
+        ...(useSecondaryAxis ? { y2Title: temperatureSeries.unit || "" } : {}),
       },
       hasPoints,
     ),
@@ -382,6 +466,28 @@ function summarizeHeatpump(powerSeries, modeSeries, statusSeriesList) {
     .trim();
 }
 
+function summarizeForecast(temperatureSeries, gtiSeriesList) {
+  const values = [
+    ...gtiSeriesList.map((series) => summarizeNamedLatest(series, forecastSeriesStyles[series.name]?.label)),
+    summarizeNamedLatest(temperatureSeries, forecastSeriesStyles.temperature.label),
+  ].filter(Boolean);
+
+  return values.length > 0 ? values.join(" · ") : "-";
+}
+
+function summarizeNamedLatest(series, label) {
+  const latest = latestPoint(series);
+  if (!latest) {
+    return "";
+  }
+  const unit = series.unit || "";
+  return `${label}: ${latest.value.toFixed(1)} ${unit}`.trim();
+}
+
+function latestPoint(series) {
+  return series.points.length > 0 ? series.points[series.points.length - 1] : null;
+}
+
 function activeStatusLabels(statusSeriesList, timestamp) {
   return statusSeriesList
     .filter((series) => isActiveStatusValue(statusAtTimestamp(series.points, timestamp)))
@@ -417,7 +523,7 @@ function plotLayout(options, hasPoints) {
         },
       ];
 
-  return {
+  const layout = {
     autosize: true,
     margin: { t: 10, r: 12, b: 36, l: 46 },
     paper_bgcolor: "#ffffff",
@@ -450,6 +556,19 @@ function plotLayout(options, hasPoints) {
       color: "#212121",
     },
   };
+
+  if (options.y2Title) {
+    layout.yaxis2 = {
+      title: { text: options.y2Title },
+      overlaying: "y",
+      side: "right",
+      showgrid: false,
+      zeroline: false,
+      fixedrange: true,
+    };
+  }
+
+  return layout;
 }
 
 button?.addEventListener("click", runImport);
@@ -465,6 +584,9 @@ window.addEventListener("resize", () => {
   if (heatpumpChart) {
     Plotly.Plots.resize(heatpumpChart);
   }
+  if (forecastChart) {
+    Plotly.Plots.resize(forecastChart);
+  }
 });
 loadCharts().catch((error) => {
   if (roomSummary) {
@@ -475,6 +597,9 @@ loadCharts().catch((error) => {
   }
   if (heatpumpSummary) {
     heatpumpSummary.textContent = "Fout";
+  }
+  if (forecastSummary) {
+    forecastSummary.textContent = "Fout";
   }
   console.error(error);
 });

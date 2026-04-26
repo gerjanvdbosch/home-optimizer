@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from home_optimizer.domain.charts import ChartPoint, ChartSeries, ChartTextPoint, ChartTextSeries
 from home_optimizer.domain.time import normalize_utc_timestamp
-from home_optimizer.infrastructure.database.orm_models import Sample1m
+from home_optimizer.infrastructure.database.orm_models import ForecastValue, Sample1m
 from home_optimizer.infrastructure.database.session import Database
 
 
@@ -88,3 +88,47 @@ class DashboardRepository:
             points_by_name[name].append(ChartTextPoint(timestamp=timestamp, value=str(value)))
 
         return [ChartTextSeries(name=name, points=points_by_name[name]) for name in names]
+
+    def read_forecast_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[ChartSeries]:
+        if not names:
+            return []
+
+        with self.database.session() as session:
+            latest_created_at = session.execute(
+                select(func.max(ForecastValue.created_at_utc))
+            ).scalar_one()
+            if latest_created_at is None:
+                return [ChartSeries(name=name, unit=None, points=[]) for name in names]
+
+            rows = session.execute(
+                select(
+                    ForecastValue.name,
+                    ForecastValue.forecast_time_utc,
+                    ForecastValue.unit,
+                    ForecastValue.value,
+                )
+                .where(
+                    ForecastValue.created_at_utc == latest_created_at,
+                    ForecastValue.name.in_(names),
+                    ForecastValue.forecast_time_utc >= normalize_utc_timestamp(start_time),
+                    ForecastValue.forecast_time_utc < normalize_utc_timestamp(end_time),
+                )
+                .order_by(ForecastValue.name, ForecastValue.forecast_time_utc, ForecastValue.source)
+            ).all()
+
+        points_by_name = {name: [] for name in names}
+        units_by_name: dict[str, str | None] = {name: None for name in names}
+        for name, timestamp, unit, value in rows:
+            points_by_name[name].append(ChartPoint(timestamp=timestamp, value=float(value)))
+            units_by_name[name] = units_by_name[name] or unit
+
+        return [
+            ChartSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
+            for name in names
+        ]
+

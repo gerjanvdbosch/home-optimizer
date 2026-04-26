@@ -30,6 +30,13 @@ class DashboardDataReader(Protocol):
         end_time: datetime,
     ) -> list[ChartTextSeries]: ...
 
+    def read_forecast_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[ChartSeries]: ...
+
 
 class TelemetrySchedulerRunner(Protocol):
     def start(self) -> None: ...

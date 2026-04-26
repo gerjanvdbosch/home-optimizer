@@ -91,6 +91,26 @@ class FakeDashboardRepository:
             ),
         ]
 
+    def read_forecast_series(self, names, start_time, end_time) -> list[ChartSeries]:
+        self.calls.append(("forecast", names, start_time.isoformat(), end_time.isoformat()))
+        return [
+            ChartSeries(
+                name="temperature",
+                unit="degC",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=12.5)],
+            ),
+            ChartSeries(
+                name="gti_pv",
+                unit="Wm2",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=500.0)],
+            ),
+            ChartSeries(
+                name="gti_living_room_windows",
+                unit="Wm2",
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=220.0)],
+            ),
+        ]
+
 
 class FakeContainer:
     def __init__(
@@ -321,6 +341,23 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 1.0}],
         },
     ]
+    assert payload["forecast_temperature"] == {
+        "name": "temperature",
+        "unit": "degC",
+        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 12.5}],
+    }
+    assert payload["forecast_gti"] == [
+        {
+            "name": "gti_pv",
+            "unit": "Wm2",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 500.0}],
+        },
+        {
+            "name": "gti_living_room_windows",
+            "unit": "Wm2",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 220.0}],
+        },
+    ]
     assert app.state.container.dashboard_repository.calls == [
         (
             "numeric",
@@ -338,6 +375,12 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         (
             "text",
             ["hp_mode"],
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-26T00:00:00+00:00",
+        ),
+        (
+            "forecast",
+            ["temperature", "gti_pv", "gti_living_room_windows"],
             "2026-04-25T00:00:00+00:00",
             "2026-04-26T00:00:00+00:00",
         ),

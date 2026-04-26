@@ -37,8 +37,14 @@ class DashboardChartsService:
             start_time=start_time,
             end_time=end_time,
         )
+        forecast_series = self.reader.read_forecast_series(
+            names=["temperature", "gti_pv", "gti_living_room_windows"],
+            start_time=start_time,
+            end_time=end_time,
+        )
         series_by_name = {item.name: item for item in series}
         text_series_by_name = {item.name: item for item in text_series}
+        forecast_series_by_name = {item.name: item for item in forecast_series}
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
@@ -52,5 +58,10 @@ class DashboardChartsService:
             heatpump_statuses=[
                 series_response(series_by_name["defrost_active"]),
                 series_response(series_by_name["booster_heater_active"]),
+            ],
+            forecast_temperature=series_response(forecast_series_by_name["temperature"]),
+            forecast_gti=[
+                series_response(forecast_series_by_name["gti_pv"]),
+                series_response(forecast_series_by_name["gti_living_room_windows"]),
             ],
         )
