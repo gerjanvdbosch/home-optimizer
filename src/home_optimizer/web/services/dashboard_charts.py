@@ -60,6 +60,22 @@ def build_delta_series(supply: ChartSeries | None, return_s: ChartSeries | None,
     return delta
 
 
+def build_baseload_series(p1: ChartSeries | None, pv: ChartSeries | None, hp: ChartSeries | None, name: str) -> ChartSeries:
+    unit = p1.unit if p1 else "kW"
+    baseload = ChartSeries(name=name, unit=unit, points=[])
+    if not p1 or not hp:
+        return baseload
+
+    for p in p1.points:
+        hp_val = latest_value_at(hp.points, p.timestamp)
+        if hp_val is None:
+            continue
+        pv_val = latest_value_at(pv.points, p.timestamp) if pv else 0.0
+        baseload.points.append(ChartPoint(timestamp=p.timestamp, value=p.value + pv_val - hp_val))
+
+    return baseload
+
+
 class DashboardChartsService:
     def __init__(self, reader: DashboardDataReader) -> None:
         self.reader = reader
@@ -80,6 +96,8 @@ class DashboardChartsService:
             names=[
                 "room_temperature",
                 "thermostat_setpoint",
+                "p1_net_power",
+                "pv_output_power",
                 "hp_supply_temperature",
                 "hp_supply_target_temperature",
                 "hp_return_temperature",
@@ -115,6 +133,11 @@ class DashboardChartsService:
         return_series = series_by_name.get("hp_return_temperature")
         delta_series = build_delta_series(supply_series, return_series, name="hp_delta_t")
 
+        p1_series = series_by_name.get("p1_net_power")
+        pv_series = series_by_name.get("pv_output_power")
+        hp_power_series = series_by_name.get("hp_electric_power")
+        baseload_series = build_baseload_series(p1_series, pv_series, hp_power_series, name="baseload")
+
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
             room_temperature=series_response(series_by_name["room_temperature"]),
@@ -139,5 +162,7 @@ class DashboardChartsService:
             hp_supply_temperature=series_response(series_by_name["hp_supply_temperature"]),
             hp_supply_target_temperature=series_response(series_by_name["hp_supply_target_temperature"]),
             hp_return_temperature=series_response(series_by_name["hp_return_temperature"]),
+            pv_output_power=series_response(series_by_name["pv_output_power"]),
+            baseload=series_response(baseload_series),
             hp_delta_t=series_response(delta_series),
         )

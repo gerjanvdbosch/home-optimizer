@@ -18,7 +18,7 @@ const supplyChart = document.getElementById("supply-chart");
 const baseUrl = new URL(".", window.location.href);
 const heatpumpModeColors = {
   ufh: "#43a047",
-  dhw: "#ff9800",
+  dhw: "#8e24aa",
   legionella: "#d81b60",
   cool: "#03a9f4",
   off: "#9e9e9e",
@@ -201,7 +201,7 @@ async function loadCharts() {
     payload.heatpump_power,
     payload.heatpump_mode,
     payload.heatpump_statuses,
-    { xRange: [startIso, endIso] },
+    { xRange: [startIso, endIso], loadSeries: [payload.baseload, payload.pv_output_power], loadTraceOptions: [{ label: "Baseload", color: "#d32f2f" }, { label: "PV opbrengst", color: "#f9a825" }], loadColors: ["#d32f2f", "#f9a825"] },
   );
   renderForecastPlot(
     forecastChart,
@@ -307,6 +307,26 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
       `%{x|%H:%M}<br>%{y:.1f} ${powerSeries.unit || ""}` +
       "<br>Mode: %{customdata}<extra></extra>",
   }));
+  // add baseload / pv traces if provided
+  if (options.loadSeries && Array.isArray(options.loadSeries)) {
+    const loadColors = options.loadColors || ["#616161", "#f9a825"];
+    const loadTraceOptions = options.loadTraceOptions || [];
+    options.loadSeries.forEach((series, idx) => {
+      traces.push({
+        x: series.points.map((point) => chartTimestamp(point.timestamp)),
+        y: series.points.map((point) => point.value),
+        name: loadTraceOptions[idx]?.label || series.name,
+        type: "scatter",
+        mode: "lines",
+        line: {
+          color: loadTraceOptions[idx]?.color || loadColors[idx % loadColors.length],
+          width: loadTraceOptions[idx]?.width || 2,
+          ...(loadTraceOptions[idx]?.dash ? { dash: loadTraceOptions[idx].dash } : {}),
+        },
+        hovertemplate: `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}` + `<extra>${loadTraceOptions[idx]?.label || series.name}</extra>`,
+      });
+    });
+  }
   traces.push(...heatpumpStatusLegendTraces(statusIntervalsByName));
   const hasPoints = powerSeries.points.length > 0;
 
