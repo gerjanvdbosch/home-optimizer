@@ -22,8 +22,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 class NoCacheStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope: dict) -> Response:
         response = await super().get_response(path, scope)
-        if path.endswith((".css", ".js")):
-            response.headers.update(NO_CACHE_HEADERS)
+        response.headers.update(NO_CACHE_HEADERS)
         return response
 
 
