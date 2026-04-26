@@ -217,21 +217,10 @@ function modeAtTimestamp(modePoints, timestamp) {
     if (Date.parse(point.timestamp) > timestampMs) {
       break;
     }
-    currentMode = normalizeMode(point.value);
+    currentMode = point.value;
   }
 
   return currentMode;
-}
-
-function normalizeMode(value) {
-  const mode = String(value || "").trim().toLowerCase();
-  if (mode === "heat" || mode === "heating") {
-    return "ufh";
-  }
-  if (mode === "domestic_hot_water") {
-    return "dhw";
-  }
-  return mode || "onbekend";
 }
 
 function displayMode(mode) {
