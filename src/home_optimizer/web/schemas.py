@@ -72,3 +72,5 @@ class DashboardChartsResponse(BaseModel):
     hp_supply_target_temperature: ChartSeriesResponse
     hp_return_temperature: ChartSeriesResponse
     hp_delta_t: ChartSeriesResponse
+    hp_flow: ChartSeriesResponse
+    compressor_frequency: ChartSeriesResponse

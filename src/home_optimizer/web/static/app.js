@@ -14,6 +14,8 @@ const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const forecastChart = document.getElementById("forecast-chart");
 const shutterChart = document.getElementById("shutter-chart");
+const compressorSummary = document.getElementById("compressor-summary");
+const compressorChart = document.getElementById("compressor-chart");
 const supplyChart = document.getElementById("supply-chart");
 const thermalChart = document.getElementById("thermal-chart");
 const baseUrl = new URL(".", window.location.href);
@@ -148,7 +150,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !shutterChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !shutterChart || !compressorChart || !selectedDateLabel) {
     return;
   }
 
@@ -241,8 +243,32 @@ async function loadCharts() {
     xRange: [startIso, endIso],
   });
 
+  // Compressor frequency and flow
+  renderCompressorPlot(
+    compressorChart,
+    payload.compressor_frequency,
+    payload.hp_flow,
+    {
+      colors: ["#8e24aa", "#03a9f4"],
+      emptyText: "Geen compressor/flow data voor deze dag",
+      yTitle: payload.compressor_frequency.unit || "",
+      y2Title: payload.hp_flow.unit || "",
+      traceOptions: [
+        { label: "Compressor freq" },
+        { label: "Flow", yaxis: "y2" },
+      ],
+      xRange: [startIso, endIso],
+    },
+  );
+
   if (shutterSummary) {
     shutterSummary.textContent = summarizeSeries(payload.shutter_position);
+  }
+
+  if (compressorSummary) {
+    const freq = payload.compressor_frequency ? summarizeSeries(payload.compressor_frequency) : "-";
+    const flow = payload.hp_flow ? summarizeSeries(payload.hp_flow) : "-";
+    compressorSummary.textContent = `${freq} · ${flow}`;
   }
 
   roomSummary.textContent = summarizeSeries(payload.room_temperature);
@@ -469,6 +495,44 @@ function renderThermalPlot(element, thermalSeries, copSeries, options = {}) {
     plotLayout(mergedOptions, hasPoints),
     { displayModeBar: false, responsive: true },
   );
+}
+
+function renderCompressorPlot(element, freqSeries, flowSeries, options = {}) {
+  const useSecondaryAxis = Boolean(flowSeries && flowSeries.unit);
+
+  const freqTrace = {
+    x: freqSeries.points.map((point) => chartTimestamp(point.timestamp)),
+    y: freqSeries.points.map((point) => point.value),
+    name: options.traceOptions?.[0]?.label || freqSeries.name,
+    type: "scatter",
+    mode: "lines",
+    line: { color: options.colors?.[0] || "#8e24aa", width: 2 },
+    hovertemplate: `%{x|%H:%M}<br>%{y:.1f} ${freqSeries.unit || ""}` + `<extra>${options.traceOptions?.[0]?.label || freqSeries.name}</extra>`,
+  };
+
+  const flowTrace = {
+    x: flowSeries.points.map((point) => chartTimestamp(point.timestamp)),
+    y: flowSeries.points.map((point) => point.value),
+    name: options.traceOptions?.[1]?.label || flowSeries.name,
+    type: "scatter",
+    mode: "lines",
+    ...(useSecondaryAxis ? { yaxis: "y2" } : {}),
+    line: { color: options.colors?.[1] || "#03a9f4", width: 2 },
+    hovertemplate: `%{x|%H:%M}<br>%{y:.1f} ${flowSeries.unit || ""}` + `<extra>${options.traceOptions?.[1]?.label || flowSeries.name}</extra>`,
+  };
+
+  const traces = [freqTrace, flowTrace];
+  const hasPoints = traces.some((t) => t.x.length > 0);
+
+  const defaultOptions = {
+    emptyText: "Geen compressor/flow data voor deze dag",
+    yTitle: options.yTitle || "",
+    ...(useSecondaryAxis ? { y2Title: options.y2Title || "" } : {}),
+  };
+
+  const mergedOptions = { ...defaultOptions, ...options };
+
+  Plotly.react(element, traces, plotLayout(mergedOptions, hasPoints), { displayModeBar: false, responsive: true });
 }
 
 function heatpumpStatusIntervals(statusSeriesList) {

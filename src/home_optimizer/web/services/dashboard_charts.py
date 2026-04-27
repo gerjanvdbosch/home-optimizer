@@ -151,6 +151,7 @@ class DashboardChartsService:
                 "hp_electric_power",
                 "defrost_active",
                 "booster_heater_active",
+                "compressor_frequency",
             ],
             start_time=start_time,
             end_time=end_time,
@@ -222,4 +223,6 @@ class DashboardChartsService:
             hp_delta_t=series_response(delta_series),
             thermal_output=series_response(thermal_series),
             cop=series_response(cop_series),
+            hp_flow=series_response(flow_series) if flow_series else series_response(ChartSeries(name="hp_flow", unit=None, points=[])),
+            compressor_frequency=series_response(series_by_name.get("compressor_frequency")) if series_by_name.get("compressor_frequency") else series_response(ChartSeries(name="compressor_frequency", unit=None, points=[])),
         )
