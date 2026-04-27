@@ -187,6 +187,7 @@ async function loadCharts() {
     ],
     xRange: [startIso, endIso],
   });
+
   renderPlot(dhwChart, payload.dhw_temperatures, {
     colors: ["#ff9800", "#7e57c2"],
     emptyText: "Geen boilerdata voor deze dag",
@@ -197,6 +198,7 @@ async function loadCharts() {
     ],
     xRange: [startIso, endIso],
   });
+
   renderHeatpumpPowerPlot(
     heatpumpChart,
     payload.heatpump_power,
@@ -204,21 +206,34 @@ async function loadCharts() {
     payload.heatpump_statuses,
     { xRange: [startIso, endIso], loadSeries: [payload.baseload, payload.pv_output_power], loadTraceOptions: [{ label: "Baseload", color: "#d32f2f" }, { label: "PV opbrengst", color: "#f9a825" }], loadColors: ["#d32f2f", "#f9a825"] },
   );
-  renderForecastPlot(
-    forecastChart,
-    payload.forecast_temperature,
-    payload.forecast_gti,
-    { xRange: [startIso, endIso] },
-  );
 
-  renderThermalPlot(thermalChart, payload.thermal_output, payload.cop, {
+  renderPlot(forecastChart, [
+    payload.forecast_gti[0],
+    payload.forecast_gti[1],
+    payload.forecast_gti[2],
+    payload.forecast_temperature,
+  ], {
+    colors: ["#f9a825", "#6d4c41", "#6d4c41", "#1e88e5"],
+    emptyText: "Geen forecastdata voor deze dag",
+    yTitle: payload.forecast_gti[0]?.unit || "",
+    y2Title: payload.forecast_temperature.unit || "",
+    traceOptions: [
+      { label: "GTI PV", color: "#f9a825" },
+      { label: "GTI ramen", color: "#6d4c41" },
+      { label: "Instraling", color: "#6d4c41", dash: "dot" },
+      { label: "Buitentemperatuur", yaxis: "y2", color: "#1e88e5", dash: "dot", precision: 1 },
+    ],
+    xRange: [startIso, endIso],
+  });
+
+  renderPlot(thermalChart, [payload.thermal_output, payload.cop], {
     colors: ["#ff7043", "#4caf50"],
     emptyText: "Geen thermische output voor deze dag",
     yTitle: payload.thermal_output.unit || "",
     y2Title: "COP",
     traceOptions: [
-      { label: "Thermische output", yaxis: "y" },
-      { label: "COP", yaxis: "y2" },
+      { label: "Thermische output", precision: 2 },
+      { label: "COP", yaxis: "y2", precision: 2 },
     ],
     xRange: [startIso, endIso],
   });
@@ -243,7 +258,6 @@ async function loadCharts() {
     xRange: [startIso, endIso],
   });
 
-  // Compressor frequency and flow
   renderPlot(compressorChart, [payload.compressor_frequency, payload.hp_flow], {
     colors: ["#8e24aa", "#03a9f4"],
     emptyText: "Geen compressor/flow data voor deze dag",
@@ -291,23 +305,28 @@ function summarizeSeries(series) {
 }
 
 function renderPlot(element, seriesList, options) {
-  const traces = seriesList.map((series, index) => ({
-    x: series.points.map((point) => chartTimestamp(point.timestamp)),
-    y: series.points.map((point) => point.value),
-    name: options.traceOptions?.[index]?.label || series.name,
-    type: "scatter",
-    mode: "lines",
-    ...(options.traceOptions?.[index]?.yaxis === "y2" ? { yaxis: "y2" } : {}),
-    line: {
-      color: options.colors[index % options.colors.length],
-      width: 2,
-      ...(options.traceOptions?.[index]?.dash ? { dash: options.traceOptions[index].dash } : {}),
-      ...(options.traceOptions?.[index]?.shape ? { shape: options.traceOptions[index].shape } : {}),
-    },
-    hovertemplate:
-      `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}` +
-      `<extra>${options.traceOptions?.[index]?.label || series.name}</extra>`,
-  }));
+  const traces = seriesList.map((series, index) => {
+    const to = options.traceOptions?.[index] || {};
+    const precision = Number.isFinite(to.precision) ? to.precision : 1;
+    const yaxis = to.yaxis === "y2" ? "y2" : undefined;
+    return {
+      x: series.points.map((point) => chartTimestamp(point.timestamp)),
+      y: series.points.map((point) => point.value),
+      name: to.label || series.name,
+      type: "scatter",
+      mode: "lines",
+      ...(yaxis ? { yaxis } : {}),
+      line: {
+        color: to.color || options.colors?.[index % (options.colors?.length || 1)],
+        width: to.width || 2,
+        ...(to.dash ? { dash: to.dash } : {}),
+        ...(to.shape ? { shape: to.shape } : {}),
+      },
+      hovertemplate:
+        `%{x|%H:%M}<br>%{y:.${precision}f} ${series.unit || ""}` +
+        `<extra>${to.label || series.name}</extra>`,
+    };
+  });
   const hasPoints = seriesList.some((series) => series.points.length > 0);
 
   Plotly.react(element, traces, plotLayout(options, hasPoints), {
@@ -389,110 +408,6 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
     },
   );
 }
-
-function renderForecastPlot(element, temperatureSeries, gtiSeriesList, options = {}) {
-  const useSecondaryAxis = Boolean(temperatureSeries.unit);
-  const gtiTraces = gtiSeriesList.map((series) => {
-    const style = forecastSeriesStyles[series.name] || {
-      label: series.name,
-      color: "#5c6bc0",
-    };
-    return {
-      x: series.points.map((point) => chartTimestamp(point.timestamp)),
-      y: series.points.map((point) => point.value),
-      name: style.label,
-      type: "scatter",
-      mode: "lines",
-      line: {
-        color: style.color,
-        width: 2,
-        ...(style.dash ? { dash: style.dash } : {}),
-      },
-      hovertemplate:
-        `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}<extra>${style.label}</extra>`,
-    };
-  });
-  const temperatureStyle = forecastSeriesStyles.temperature;
-  const temperatureTrace = {
-    x: temperatureSeries.points.map((point) => chartTimestamp(point.timestamp)),
-    y: temperatureSeries.points.map((point) => point.value),
-    name: temperatureStyle.label,
-    type: "scatter",
-    mode: "lines",
-    ...(useSecondaryAxis ? { yaxis: "y2" } : {}),
-    line: {
-      color: temperatureStyle.color,
-      width: 2,
-      dash: "dot",
-    },
-    hovertemplate:
-      `%{x|%H:%M}<br>%{y:.1f} ${temperatureSeries.unit || ""}` +
-      `<extra>${temperatureStyle.label}</extra>`,
-  };
-  const traces = [...gtiTraces, temperatureTrace];
-  const hasPoints = traces.some((trace) => trace.x.length > 0);
-
-  const defaultOptions = {
-    emptyText: "Geen forecastdata voor deze dag",
-    yTitle: gtiSeriesList[0]?.unit || "",
-    ...(useSecondaryAxis ? { y2Title: temperatureSeries.unit || "" } : {}),
-  };
-
-  const mergedOptions = { ...defaultOptions, ...options };
-
-  Plotly.react(
-    element,
-    traces,
-    plotLayout(mergedOptions, hasPoints),
-    {
-      displayModeBar: false,
-      responsive: true,
-    },
-  );
-}
-
-function renderThermalPlot(element, thermalSeries, copSeries, options = {}) {
-  const seriesList = [thermalSeries, copSeries];
-  const traceOpts = options.traceOptions || [];
-  const colors = options.colors || ["#ef6c00", "#4caf50"];
-
-  const traces = [];
-  seriesList.forEach((series, idx) => {
-    const to = traceOpts[idx] || {};
-    const color = to.color || colors[idx % colors.length];
-    const width = to.width || 2;
-    const yaxis = to.yaxis === "y2" ? "y2" : undefined;
-
-    traces.push({
-      x: series.points.map((point) => chartTimestamp(point.timestamp)),
-      y: series.points.map((point) => point.value),
-      name: to.label || series.name,
-      type: "scatter",
-      mode: "lines",
-      ...(yaxis ? { yaxis } : {}),
-      line: { color, width },
-      hovertemplate: `%{x|%H:%M}<br>%{y:.2f} ${series.unit || ""}` + `<extra>${to.label || series.name}</extra>`,
-    });
-  });
-
-  const hasPoints = traces.some((t) => t.x.length > 0 && t.y.some((v) => v !== null && v !== undefined));
-
-  const defaultOptions = {
-    emptyText: "Geen thermische output voor deze dag",
-    yTitle: options.yTitle || "",
-    ...(options.y2Title ? { y2Title: options.y2Title } : {}),
-  };
-
-  const mergedOptions = { ...defaultOptions, ...options };
-
-  Plotly.react(
-    element,
-    traces,
-    plotLayout(mergedOptions, hasPoints),
-    { displayModeBar: false, responsive: true },
-  );
-}
-
 
 function heatpumpStatusIntervals(statusSeriesList) {
   return statusSeriesList.map((series) => ({
