@@ -184,7 +184,7 @@ class DashboardChartsService:
         hp_power_series = series_by_name.get("hp_electric_power")
         baseload_series = build_baseload_series(p1_series, pv_series, hp_power_series, name="baseload")
 
-        flow_series = series_by_name.get("hp_flow")
+        flow_series = series_by_name["hp_flow"]
         thermal_series, cop_series = build_thermal_and_cop_series(
             flow_series,
             series_by_name.get("hp_supply_temperature"),
@@ -223,6 +223,6 @@ class DashboardChartsService:
             hp_delta_t=series_response(delta_series),
             thermal_output=series_response(thermal_series),
             cop=series_response(cop_series),
-            hp_flow=series_response(flow_series) if flow_series else series_response(ChartSeries(name="hp_flow", unit=None, points=[])),
-            compressor_frequency=series_response(series_by_name.get("compressor_frequency")) if series_by_name.get("compressor_frequency") else series_response(ChartSeries(name="compressor_frequency", unit=None, points=[])),
+            hp_flow=series_response(flow_series),
+            compressor_frequency=series_response(series_by_name["compressor_frequency"]),
         )
