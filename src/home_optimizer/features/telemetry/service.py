@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import httpx
 from datetime import datetime
 from threading import Lock
 
@@ -30,6 +31,9 @@ class TelemetryService:
     def collect_sensor(self, spec: SensorSpec, now: datetime | None = None) -> bool:
         try:
             state = self.gateway.get_state(spec.entity_id)
+        except (httpx.HTTPStatusError, httpx.RequestError) as err:
+            LOGGER.warning("Telemetry skipped for %s: %s", spec.name, err)
+            return False
         except Exception:
             LOGGER.exception("Telemetry failed for %s", spec.name)
             return False
