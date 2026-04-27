@@ -17,12 +17,11 @@ const shutterChart = document.getElementById("shutter-chart");
 const supplyChart = document.getElementById("supply-chart");
 const thermalChart = document.getElementById("thermal-chart");
 const baseUrl = new URL(".", window.location.href);
-const heatpumpModeColors = {
-  ufh: "#43a047",
-  dhw: "#8e24aa",
-  legionella: "#d81b60",
-  cool: "#03a9f4",
-  off: "#9e9e9e",
+const heatpumpModeStyles = {
+  ufh: { label: "Vloerverwarming", color: "#43a047", fill: "rgba(67, 160, 71, 0.12)" },
+  dhw: { label: "Boiler", color: "#8e24aa", fill: "rgba(142, 36, 170, 0.12)" },
+  legionella: { label: "Legionella", color: "#d81b60", fill: "rgba(216, 27, 96, 0.12)" },
+  cool: { label: "Koelen", color: "#03a9f4", fill: "rgba(3, 169, 244, 0.12)" },
 };
 const heatpumpStatusStyles = {
   defrost_active: {
@@ -164,12 +163,11 @@ async function loadCharts() {
     throw new Error(payload.detail || "Grafiekdata ophalen mislukt.");
   }
 
-  // Ensure x-axis covers full day from 00:00 to 23:59 local time so axes are stable
   const start = new Date(selectedDate);
   start.setHours(0, 0, 0, 0);
   const end = new Date(selectedDate);
   end.setHours(23, 59, 59, 0);
-  // match chartTimestamp output: subtract timezone offset before toISOString and strip trailing Z
+
   const startIso = new Date(start.getTime() - start.getTimezoneOffset() * 60 * 1000)
     .toISOString()
     .slice(0, 19);
@@ -211,7 +209,6 @@ async function loadCharts() {
     { xRange: [startIso, endIso] },
   );
 
-  // thermal output and COP chart
   renderThermalPlot(thermalChart, payload.thermal_output, payload.cop, {
     colors: ["#ff7043", "#4caf50"],
     emptyText: "Geen thermische output voor deze dag",
@@ -224,7 +221,6 @@ async function loadCharts() {
     xRange: [startIso, endIso],
   });
 
-  // supply / return / target / delta-T chart
   renderPlot(supplyChart, [payload.hp_supply_target_temperature, payload.hp_supply_temperature, payload.hp_return_temperature, payload.hp_delta_t], {
     colors: ["#ffb74d", "#d32f2f", "#1976d2", "#616161"],
     emptyText: "Geen aanvoer/retour data voor deze dag",
@@ -303,25 +299,23 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
     ...point,
     mode: modeAtTimestamp(modeSeries.points, point.timestamp),
   }));
-  const modes = orderedModes(points.map((point) => point.mode));
-  const statusIntervalsByName = heatpumpStatusIntervals(statusSeriesList);
-  const traces = modes.map((mode) => ({
+
+  const traces = [{
     x: points.map((point) => chartTimestamp(point.timestamp)),
-    y: points.map((point) => (point.mode === mode ? point.value : null)),
-    customdata: points.map((point) => point.mode),
-    name: displayMode(mode),
+    y: points.map((point) => point.value),
+    customdata: points.map((point) => displayMode(point.mode)),
+    name: "Warmtepomp",
     type: "scatter",
     mode: "lines",
-    connectgaps: false,
     line: {
-      color: heatpumpModeColors[mode] || "#5c6bc0",
+      color: "#2196f3",
       width: 2,
     },
     hovertemplate:
       `%{x|%H:%M}<br>%{y:.1f} ${powerSeries.unit || ""}` +
       "<br>Mode: %{customdata}<extra></extra>",
-  }));
-  // add baseload / pv traces if provided
+  }];
+
   if (options.loadSeries && Array.isArray(options.loadSeries)) {
     const loadColors = options.loadColors || ["#616161", "#f9a825"];
     const loadTraceOptions = options.loadTraceOptions || [];
@@ -341,13 +335,24 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
       });
     });
   }
+
+  const mIntervals = modeIntervals(modeSeries.points);
+  const statusIntervalsByName = heatpumpStatusIntervals(statusSeriesList);
+
+  traces.push(...heatpumpModeLegendTraces(mIntervals));
   traces.push(...heatpumpStatusLegendTraces(statusIntervalsByName));
+
   const hasPoints = powerSeries.points.length > 0;
+
+  const combinedShapes = [
+    ...heatpumpModeShapes(mIntervals),
+    ...heatpumpStatusShapes(statusIntervalsByName)
+  ];
 
   const defaultOptions = {
     emptyText: "Geen warmtepompvermogen voor deze dag",
     yTitle: powerSeries.unit || "",
-    shapes: heatpumpStatusShapes(statusIntervalsByName),
+    shapes: combinedShapes,
   };
 
   const mergedOptions = { ...defaultOptions, ...options };
@@ -579,18 +584,67 @@ function displayMode(mode) {
   return mode.toUpperCase();
 }
 
-function orderedModes(modes) {
-  const preferredOrder = ["ufh", "dhw", "legionella", "cool", "off", "onbekend"];
-  const uniqueModes = Array.from(new Set(modes));
-  return uniqueModes.sort((left, right) => {
-    const leftIndex = preferredOrder.indexOf(left);
-    const rightIndex = preferredOrder.indexOf(right);
-    return modeSortIndex(leftIndex) - modeSortIndex(rightIndex) || left.localeCompare(right);
-  });
+function modeIntervals(modePoints) {
+  const intervals = [];
+  if (!modePoints || modePoints.length === 0) return intervals;
+
+  let currentMode = modePoints[0].value;
+  let start = modePoints[0].timestamp;
+  let previousTimestamp = modePoints[0].timestamp;
+
+  for (let i = 1; i < modePoints.length; i++) {
+    const point = modePoints[i];
+    if (point.value !== currentMode) {
+      intervals.push({ mode: currentMode, x0: start, x1: point.timestamp });
+      currentMode = point.value;
+      start = point.timestamp;
+    }
+    previousTimestamp = point.timestamp;
+  }
+
+  if (start && previousTimestamp) {
+    intervals.push({ mode: currentMode, x0: start, x1: addMinutes(previousTimestamp, 1) });
+  }
+
+  return intervals;
 }
 
-function modeSortIndex(index) {
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+function heatpumpModeShapes(intervals) {
+  return intervals
+    .filter((interval) => heatpumpModeStyles[interval.mode])
+    .map((interval) => {
+      const style = heatpumpModeStyles[interval.mode];
+      return {
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: chartTimestamp(interval.x0),
+        x1: chartTimestamp(interval.x1),
+        y0: 0,
+        y1: 1,
+        fillcolor: style.fill,
+        line: { width: 0 },
+        layer: "below",
+      };
+    });
+}
+
+function heatpumpModeLegendTraces(intervals) {
+  const activeModes = Array.from(new Set(intervals.map((i) => i.mode)));
+  return activeModes
+    .filter((mode) => heatpumpModeStyles[mode])
+    .map((mode) => {
+      const style = heatpumpModeStyles[mode];
+      return {
+        x: [null],
+        y: [null],
+        name: style.label,
+        type: "scatter",
+        mode: "lines",
+        line: { color: style.color, width: 8 },
+        hoverinfo: "skip",
+      };
+    });
 }
 
 function summarizeHeatpump(powerSeries, modeSeries, statusSeriesList) {
