@@ -20,7 +20,7 @@ const supplyChart = document.getElementById("supply-chart");
 const thermalChart = document.getElementById("thermal-chart");
 const baseUrl = new URL(".", window.location.href);
 const heatpumpModeStyles = {
-  ufh: { label: "Vloerverwarming", color: "#43a047", fill: "rgba(67, 160, 71, 0.12)" },
+  heat: { label: "Vloerverwarming", color: "#43a047", fill: "rgba(67, 160, 71, 0.12)" },
   dhw: { label: "Boiler", color: "#8e24aa", fill: "rgba(142, 36, 170, 0.12)" },
   legionella: { label: "Legionella", color: "#d81b60", fill: "rgba(216, 27, 96, 0.12)" },
   cool: { label: "Koelen", color: "#03a9f4", fill: "rgba(3, 169, 244, 0.12)" },

@@ -103,7 +103,7 @@ class FakeDashboardRepository:
         return [
             ChartTextSeries(
                 name="hp_mode",
-                points=[ChartTextPoint(timestamp="2026-04-25T11:50:00+00:00", value="ufh")],
+                points=[ChartTextPoint(timestamp="2026-04-25T11:50:00+00:00", value="heat")],
             ),
         ]
 
@@ -349,7 +349,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     }
     assert payload["heatpump_mode"] == {
         "name": "hp_mode",
-        "points": [{"timestamp": "2026-04-25T11:50:00+00:00", "value": "ufh"}],
+        "points": [{"timestamp": "2026-04-25T11:50:00+00:00", "value": "heat"}],
     }
     assert payload["heatpump_statuses"] == [
         {
