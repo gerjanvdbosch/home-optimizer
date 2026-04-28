@@ -74,3 +74,64 @@ class DashboardChartsResponse(BaseModel):
     hp_delta_t: ChartSeriesResponse
     hp_flow: ChartSeriesResponse
     compressor_frequency: ChartSeriesResponse
+
+
+class IdentificationResponse(BaseModel):
+    model_name: str
+    interval_minutes: int
+    sample_count: int
+    train_sample_count: int
+    test_sample_count: int
+    coefficients: dict[str, float]
+    intercept: float
+    train_rmse: float
+    test_rmse: float
+    target_name: str
+
+
+class IdentificationTrainRequest(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    interval_minutes: int = Field(default=15, ge=1)
+    train_fraction: float = Field(default=0.8, gt=0.0, lt=1.0)
+
+
+class StoredBuildingModelResponse(BaseModel):
+    model_name: str
+    trained_at_utc: datetime
+    training_start_time_utc: datetime
+    training_end_time_utc: datetime
+    interval_minutes: int
+    sample_count: int
+    train_sample_count: int
+    test_sample_count: int
+    coefficients: dict[str, float]
+    intercept: float
+    train_rmse: float
+    test_rmse: float
+    target_name: str
+
+
+class NumericSeriesRequestPoint(BaseModel):
+    timestamp: str
+    value: float
+
+
+class NumericSeriesRequest(BaseModel):
+    name: str
+    unit: str | None
+    points: list[NumericSeriesRequestPoint]
+
+
+class PredictionRequest(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    thermostat_schedule: NumericSeriesRequest
+    shutter_schedule: NumericSeriesRequest | None = None
+
+
+class PredictionResponse(BaseModel):
+    model_name: str
+    interval_minutes: int
+    target_name: str
+    room_temperature: ChartSeriesResponse

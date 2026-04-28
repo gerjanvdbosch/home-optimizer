@@ -4,6 +4,21 @@ const result = document.getElementById("result");
 const selectedDateLabel = document.getElementById("selected-date");
 const previousDayButton = document.getElementById("previous-day");
 const nextDayButton = document.getElementById("next-day");
+const trainingStartInput = document.getElementById("training-start");
+const trainingEndInput = document.getElementById("training-end");
+const trainingIntervalInput = document.getElementById("training-interval");
+const trainingFractionInput = document.getElementById("training-fraction");
+const trainingButton = document.getElementById("training-button");
+const trainingStatus = document.getElementById("training-status");
+const predictionForm = document.getElementById("prediction-form");
+const predictionStartInput = document.getElementById("prediction-start");
+const predictionHoursInput = document.getElementById("prediction-hours");
+const predictionSetpointInput = document.getElementById("prediction-setpoint");
+const predictionShutterInput = document.getElementById("prediction-shutter");
+const predictionButton = document.getElementById("prediction-button");
+const predictionStatus = document.getElementById("prediction-status");
+const predictionSummary = document.getElementById("prediction-summary");
+const predictionChart = document.getElementById("prediction-chart");
 const roomSummary = document.getElementById("room-summary");
 const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
@@ -58,9 +73,62 @@ const forecastSeriesStyles = {
 };
 
 let selectedDate = new Date();
+let predictionCoverage = null;
 
 function apiUrl(path) {
   return new URL(path, baseUrl).toString();
+}
+
+function toDatetimeLocalValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function localInputToIso(value) {
+  const date = new Date(value);
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
+  const offsetRemainder = String(absoluteOffset % 60).padStart(2, "0");
+  return `${toDatetimeLocalValue(date)}:00${sign}${offsetHours}:${offsetRemainder}`;
+}
+
+function setPredictionDefaults(date = selectedDate) {
+  if (!predictionStartInput) {
+    return;
+  }
+
+  if (predictionCoverage) {
+    predictionStartInput.value = toDatetimeLocalValue(predictionCoverage.start);
+    if (predictionHoursInput) {
+      predictionHoursInput.max = String(predictionCoverage.maxHours);
+      predictionHoursInput.value = String(Math.min(Number(predictionHoursInput.value || 6), predictionCoverage.maxHours));
+    }
+    return;
+  }
+
+  const start = new Date(date);
+  start.setHours(6, 0, 0, 0);
+  predictionStartInput.value = toDatetimeLocalValue(start);
+}
+
+function setTrainingDefaults(date = selectedDate) {
+  if (!trainingStartInput || !trainingEndInput) {
+    return;
+  }
+
+  const end = new Date(date);
+  end.setHours(0, 0, 0, 0);
+  end.setDate(end.getDate() + 1);
+  const start = new Date(end);
+  start.setDate(start.getDate() - 3);
+  trainingStartInput.value = toDatetimeLocalValue(start);
+  trainingEndInput.value = toDatetimeLocalValue(end);
 }
 
 function formatDate(date) {
@@ -81,7 +149,68 @@ function formatDisplayDate(date) {
 function shiftDate(days) {
   selectedDate = new Date(selectedDate);
   selectedDate.setDate(selectedDate.getDate() + days);
+  setPredictionDefaults(selectedDate);
+  setTrainingDefaults(selectedDate);
   loadCharts();
+}
+
+function buildConstantSeries(name, unit, startDate, endDate, intervalMinutes, value) {
+  const points = [];
+  const current = new Date(startDate);
+  current.setMinutes(current.getMinutes() + intervalMinutes);
+
+  while (current <= endDate) {
+    points.push({
+      timestamp: localInputToIso(toDatetimeLocalValue(current)),
+      value,
+    });
+    current.setMinutes(current.getMinutes() + intervalMinutes);
+  }
+
+  return { name, unit, points };
+}
+
+function updatePredictionCoverage(payload) {
+  const forecastPoints = [
+    ...(payload.forecast_temperature?.points || []),
+    ...(payload.forecast_gti?.[2]?.points || payload.forecast_gti?.[1]?.points || []),
+  ];
+
+  if (forecastPoints.length === 0) {
+    predictionCoverage = null;
+    if (predictionStatus) {
+      predictionStatus.className = "status error";
+      predictionStatus.textContent = "Geen forecast beschikbaar voor deze dag. Kies een dag met forecastdata.";
+    }
+    if (predictionButton) {
+      predictionButton.disabled = true;
+    }
+    return;
+  }
+
+  const timestamps = forecastPoints.map((point) => new Date(point.timestamp).getTime());
+  const firstTimestamp = new Date(Math.min(...timestamps));
+  const lastTimestamp = new Date(Math.max(...timestamps));
+  const intervalMinutes = 15;
+  const maxHours = Math.max(
+    1,
+    Math.floor((lastTimestamp.getTime() - firstTimestamp.getTime()) / (60 * 60 * 1000)),
+  );
+
+  predictionCoverage = {
+    start: firstTimestamp,
+    end: lastTimestamp,
+    intervalMinutes,
+    maxHours,
+  };
+  if (predictionButton) {
+    predictionButton.disabled = false;
+  }
+  if (predictionStatus) {
+    predictionStatus.className = "status";
+    predictionStatus.textContent = `Forecast beschikbaar van ${firstTimestamp.toLocaleString("nl-NL")} tot ${lastTimestamp.toLocaleString("nl-NL")}.`;
+  }
+  setPredictionDefaults(selectedDate);
 }
 
 async function runImport() {
@@ -291,7 +420,139 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
-  
+  updatePredictionCoverage(payload);
+}
+
+async function runPrediction(event) {
+  event.preventDefault();
+  if (
+    !predictionStartInput ||
+    !predictionHoursInput ||
+    !predictionSetpointInput ||
+    !predictionShutterInput ||
+    !predictionButton ||
+    !predictionStatus ||
+    !predictionChart
+  ) {
+    return;
+  }
+
+  predictionButton.disabled = true;
+  predictionStatus.className = "status";
+  predictionStatus.textContent = "Scenario wordt doorgerekend...";
+
+  try {
+    const startDate = new Date(predictionStartInput.value);
+    const hoursAhead = Number(predictionHoursInput.value);
+    if (!predictionCoverage) {
+      throw new Error("Geen forecast beschikbaar voor dit scenario.");
+    }
+    if (startDate < predictionCoverage.start || startDate > predictionCoverage.end) {
+      throw new Error("De scenario-start ligt buiten de beschikbare forecast.");
+    }
+    const endDate = new Date(startDate);
+    endDate.setHours(endDate.getHours() + hoursAhead);
+    if (endDate > predictionCoverage.end) {
+      throw new Error("De gekozen horizon loopt voorbij de beschikbare forecast.");
+    }
+
+    const payload = {
+      start_time: localInputToIso(predictionStartInput.value),
+      end_time: localInputToIso(toDatetimeLocalValue(endDate)),
+      thermostat_schedule: buildConstantSeries(
+        "thermostat_setpoint",
+        "degC",
+        startDate,
+        endDate,
+        15,
+        Number(predictionSetpointInput.value),
+      ),
+      shutter_schedule: buildConstantSeries(
+        "shutter_living_room",
+        "percent",
+        startDate,
+        endDate,
+        15,
+        Number(predictionShutterInput.value),
+      ),
+    };
+
+    const response = await fetch(apiUrl("api/prediction"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const responsePayload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(responsePayload.detail || "Voorspelling ophalen mislukt.");
+    }
+
+    renderPlot(predictionChart, [responsePayload.room_temperature], {
+      colors: ["#00796b"],
+      emptyText: "Geen voorspelling beschikbaar",
+      yTitle: responsePayload.room_temperature.unit || "",
+      traceOptions: [{ label: "Voorspelde kamertemperatuur", precision: 2 }],
+    });
+    predictionStatus.className = "status success";
+    predictionStatus.textContent = "Scenario voorspeld.";
+    if (predictionSummary) {
+      predictionSummary.textContent = summarizeSeries(responsePayload.room_temperature);
+    }
+  } catch (error) {
+    predictionStatus.className = "status error";
+    predictionStatus.textContent =
+      error instanceof Error ? error.message : "Voorspelling mislukt.";
+    if (predictionSummary) {
+      predictionSummary.textContent = "-";
+    }
+  } finally {
+    predictionButton.disabled = false;
+  }
+}
+
+async function runTraining() {
+  if (
+    !trainingStartInput ||
+    !trainingEndInput ||
+    !trainingIntervalInput ||
+    !trainingFractionInput ||
+    !trainingButton ||
+    !trainingStatus
+  ) {
+    return;
+  }
+
+  trainingButton.disabled = true;
+  trainingStatus.className = "status";
+  trainingStatus.textContent = "Model wordt getraind...";
+
+  try {
+    const response = await fetch(apiUrl("api/identification/train"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_time: localInputToIso(trainingStartInput.value),
+        end_time: localInputToIso(trainingEndInput.value),
+        interval_minutes: Number(trainingIntervalInput.value),
+        train_fraction: Number(trainingFractionInput.value),
+      }),
+    });
+    const responsePayload = await response.json();
+    if (!response.ok) {
+      throw new Error(responsePayload.detail || "Modeltraining mislukt.");
+    }
+
+    trainingStatus.className = "status success";
+    trainingStatus.textContent =
+      `Model opgeslagen. Test RMSE: ${responsePayload.test_rmse.toFixed(3)}`;
+  } catch (error) {
+    trainingStatus.className = "status error";
+    trainingStatus.textContent =
+      error instanceof Error ? error.message : "Modeltraining mislukt.";
+  } finally {
+    trainingButton.disabled = false;
+  }
 }
 
 function summarizeSeries(series) {
@@ -707,6 +968,8 @@ function plotLayout(options, hasPoints) {
 button?.addEventListener("click", runImport);
 previousDayButton?.addEventListener("click", () => shiftDate(-1));
 nextDayButton?.addEventListener("click", () => shiftDate(1));
+predictionForm?.addEventListener("submit", runPrediction);
+trainingButton?.addEventListener("click", runTraining);
 window.addEventListener("resize", () => {
   if (roomChart) {
     Plotly.Plots.resize(roomChart);
@@ -720,7 +983,12 @@ window.addEventListener("resize", () => {
   if (forecastChart) {
     Plotly.Plots.resize(forecastChart);
   }
+  if (predictionChart) {
+    Plotly.Plots.resize(predictionChart);
+  }
 });
+setPredictionDefaults(selectedDate);
+setTrainingDefaults(selectedDate);
 loadCharts().catch((error) => {
   if (roomSummary) {
     roomSummary.textContent = "Fout";

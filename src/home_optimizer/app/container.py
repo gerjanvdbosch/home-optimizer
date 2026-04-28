@@ -11,7 +11,10 @@ from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history_import.service import HistoryImportService
+from home_optimizer.features.identification.service import BuildingModelIdentificationService
+from home_optimizer.features.prediction.service import BuildingTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
+from home_optimizer.infrastructure.database.building_model_repository import BuildingModelRepository
 from home_optimizer.infrastructure.database.dashboard_repository import DashboardRepository
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.session import Database
@@ -32,6 +35,9 @@ class AppContainer:
     history_import_service: HistoryImportService
     telemetry_repository: TimeSeriesRepository
     dashboard_repository: DashboardRepository
+    building_model_repository: BuildingModelRepository
+    identification_service: BuildingModelIdentificationService
+    prediction_service: BuildingTemperaturePredictionService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
     forecast_repository: ForecastRepository
@@ -59,6 +65,15 @@ def build_container(
     history_import_repository = TimeSeriesRepository(database, source=history_source)
     telemetry_repository = TimeSeriesRepository(database, source=telemetry_source)
     dashboard_repository = DashboardRepository(database)
+    building_model_repository = BuildingModelRepository(database)
+    identification_service = BuildingModelIdentificationService(
+        dashboard_repository,
+        model_repository=building_model_repository,
+    )
+    prediction_service = BuildingTemperaturePredictionService(
+        dashboard_repository,
+        building_model_repository,
+    )
     forecast_repository = ForecastRepository(database)
     history_import_service = HistoryImportService(
         gateway=gateway,
@@ -94,6 +109,9 @@ def build_container(
         history_import_service=history_import_service,
         telemetry_repository=telemetry_repository,
         dashboard_repository=dashboard_repository,
+        building_model_repository=building_model_repository,
+        identification_service=identification_service,
+        prediction_service=prediction_service,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
         forecast_repository=forecast_repository,

@@ -10,13 +10,18 @@ from pydantic import ValidationError
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
+    BuildingTemperatureModel,
     NumericPoint,
     NumericSeries,
     TextPoint,
     TextSeries,
     build_sensor_specs,
 )
-from home_optimizer.features import HistoryImportResult
+from home_optimizer.features import (
+    BuildingTemperaturePrediction,
+    HistoryImportResult,
+    IdentificationResult,
+)
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
@@ -49,6 +54,87 @@ class FakeTelemetryScheduler:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+class FakeIdentificationService:
+    def __init__(self, result: IdentificationResult) -> None:
+        self.result = result
+        self.calls: list[tuple[str, str, int, float]] = []
+        self.store_calls: list[tuple[str, str, int, float]] = []
+
+    def identify(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> IdentificationResult:
+        self.calls.append(
+            (
+                start_time.isoformat(),
+                end_time.isoformat(),
+                interval_minutes,
+                train_fraction,
+            )
+        )
+        return self.result
+
+    def identify_and_store(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> BuildingTemperatureModel:
+        self.store_calls.append(
+            (
+                start_time.isoformat(),
+                end_time.isoformat(),
+                interval_minutes,
+                train_fraction,
+            )
+        )
+        return BuildingTemperatureModel(
+            model_name=self.result.model_name,
+            trained_at_utc=datetime(2026, 4, 28, 18, 0),
+            training_start_time_utc=start_time,
+            training_end_time_utc=end_time,
+            interval_minutes=interval_minutes,
+            sample_count=self.result.sample_count,
+            train_sample_count=self.result.train_sample_count,
+            test_sample_count=self.result.test_sample_count,
+            coefficients=self.result.coefficients,
+            intercept=self.result.intercept,
+            train_rmse=self.result.train_rmse,
+            test_rmse=self.result.test_rmse,
+            target_name=self.result.target_name,
+        )
+
+
+class FakePredictionService:
+    def __init__(self, result: BuildingTemperaturePrediction) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    def predict(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        thermostat_schedule: NumericSeries,
+        shutter_schedule: NumericSeries | None = None,
+    ) -> BuildingTemperaturePrediction:
+        self.calls.append(
+            {
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "thermostat_schedule": thermostat_schedule,
+                "shutter_schedule": shutter_schedule,
+            }
+        )
+        return self.result
 
 
 class FakeDashboardRepository:
@@ -142,6 +228,40 @@ class FakeContainer:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
         self.dashboard_repository = FakeDashboardRepository()
+        self.identification_service = FakeIdentificationService(
+            IdentificationResult(
+                model_name="linear_1step_room_temperature",
+                interval_minutes=15,
+                sample_count=168,
+                train_sample_count=134,
+                test_sample_count=34,
+                coefficients={
+                    "previous_room_temperature": 0.94,
+                    "outdoor_temperature": 0.01,
+                    "thermostat_setpoint": 0.06,
+                    "gti_living_room_windows_adjusted": 0.0003,
+                },
+                intercept=0.02,
+                train_rmse=0.06,
+                test_rmse=0.13,
+                target_name="room_temperature",
+            )
+        )
+        self.prediction_service = FakePredictionService(
+            BuildingTemperaturePrediction(
+                model_name="linear_1step_room_temperature",
+                interval_minutes=15,
+                target_name="room_temperature",
+                room_temperature=NumericSeries(
+                    name="room_temperature",
+                    unit="degC",
+                    points=[
+                        NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=20.7),
+                        NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=20.9),
+                    ],
+                ),
+            )
+        )
         self.telemetry_scheduler = FakeTelemetryScheduler()
         self.forecast_scheduler = FakeTelemetryScheduler()
 
@@ -185,6 +305,7 @@ def test_dashboard_shows_import_button() -> None:
 
     assert response.status_code == 200
     assert "Importeer geschiedenis" in response.text
+    assert "Scenario voorspelling" in response.text
     assert 'href="static/app.css"' in response.text
     assert 'src="plotly.js"' in response.text
     assert 'src="static/app.js"' in response.text
@@ -467,6 +588,187 @@ def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.Mon
         "2026-04-25T00:00:00+02:00",
         "2026-04-26T00:00:00+02:00",
     )
+
+
+def test_identification_endpoint_returns_model_fit() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/identification",
+            params={
+                "start_time": "2026-04-25T19:15:00+00:00",
+                "end_time": "2026-04-28T17:00:00+00:00",
+                "interval_minutes": 30,
+                "train_fraction": 0.75,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "model_name": "linear_1step_room_temperature",
+        "interval_minutes": 15,
+        "sample_count": 168,
+        "train_sample_count": 134,
+        "test_sample_count": 34,
+        "coefficients": {
+            "previous_room_temperature": 0.94,
+            "outdoor_temperature": 0.01,
+            "thermostat_setpoint": 0.06,
+            "gti_living_room_windows_adjusted": 0.0003,
+        },
+        "intercept": 0.02,
+        "train_rmse": 0.06,
+        "test_rmse": 0.13,
+        "target_name": "room_temperature",
+    }
+    assert app.state.container.identification_service.calls == [
+        (
+            "2026-04-25T19:15:00+00:00",
+            "2026-04-28T17:00:00+00:00",
+            30,
+            0.75,
+        )
+    ]
+
+
+def test_identification_train_endpoint_stores_model() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/identification/train",
+            json={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-28T00:00:00+00:00",
+                "interval_minutes": 15,
+                "train_fraction": 0.8,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_name"] == "linear_1step_room_temperature"
+    assert payload["training_start_time_utc"] == "2026-04-25T00:00:00Z"
+    assert payload["training_end_time_utc"] == "2026-04-28T00:00:00Z"
+    assert payload["test_rmse"] == 0.13
+    assert app.state.container.identification_service.store_calls == [
+        (
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-28T00:00:00+00:00",
+            15,
+            0.8,
+        )
+    ]
+
+
+def test_prediction_endpoint_returns_room_temperature_series() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/prediction",
+            json={
+                "start_time": "2026-04-28T10:00:00+00:00",
+                "end_time": "2026-04-28T10:30:00+00:00",
+                "thermostat_schedule": {
+                    "name": "thermostat_setpoint",
+                    "unit": "degC",
+                    "points": [
+                        {"timestamp": "2026-04-28T10:15:00+00:00", "value": 21.0},
+                        {"timestamp": "2026-04-28T10:30:00+00:00", "value": 21.0},
+                    ],
+                },
+                "shutter_schedule": {
+                    "name": "shutter_living_room",
+                    "unit": "percent",
+                    "points": [
+                        {"timestamp": "2026-04-28T10:15:00+00:00", "value": 50.0},
+                        {"timestamp": "2026-04-28T10:30:00+00:00", "value": 50.0},
+                    ],
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "model_name": "linear_1step_room_temperature",
+        "interval_minutes": 15,
+        "target_name": "room_temperature",
+        "room_temperature": {
+            "name": "room_temperature",
+            "unit": "degC",
+            "points": [
+                {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.7},
+                {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.9},
+            ],
+        },
+    }
+    assert app.state.container.prediction_service.calls == [
+        {
+            "start_time": "2026-04-28T10:00:00+00:00",
+            "end_time": "2026-04-28T10:30:00+00:00",
+            "thermostat_schedule": NumericSeries(
+                name="thermostat_setpoint",
+                unit="degC",
+                points=[
+                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
+                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
+                ],
+            ),
+            "shutter_schedule": NumericSeries(
+                name="shutter_living_room",
+                unit="percent",
+                points=[
+                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
+                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=50.0),
+                ],
+            ),
+        }
+    ]
 
 
 def test_plotly_script_is_served_locally() -> None:

@@ -91,13 +91,12 @@ def test_build_dataset_resamples_and_returns_feature_matrix() -> None:
         "previous_room_temperature",
         "outdoor_temperature",
         "thermostat_setpoint",
-        "hp_electric_power",
         "gti_living_room_windows_adjusted",
-        "thermal_output",
     ]
     assert len(dataset.timestamps) == len(dataset.features) == len(dataset.targets)
     assert len(dataset.features) >= 10
     assert len(dataset.features[0]) == len(dataset.feature_names)
+    assert dataset.features[1][0] == dataset.targets[0]
 
 
 def test_identify_fits_linear_baseline_and_reports_metrics() -> None:
@@ -117,9 +116,7 @@ def test_identify_fits_linear_baseline_and_reports_metrics() -> None:
         "previous_room_temperature",
         "outdoor_temperature",
         "thermostat_setpoint",
-        "hp_electric_power",
         "gti_living_room_windows_adjusted",
-        "thermal_output",
     }
     assert result.train_rmse >= 0.0
     assert result.test_rmse >= 0.0

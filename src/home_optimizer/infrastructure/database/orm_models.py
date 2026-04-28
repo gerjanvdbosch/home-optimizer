@@ -44,3 +44,24 @@ class ForecastValue(Base):
 
 Index("idx_forecast_values_name_time", ForecastValue.name, ForecastValue.forecast_time_utc)
 Index("idx_forecast_values_created", ForecastValue.created_at_utc)
+
+
+class BuildingTemperatureModelRecord(Base):
+    __tablename__ = "building_temperature_models"
+
+    trained_at_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    model_name: Mapped[str] = mapped_column(String, nullable=False)
+    training_start_time_utc: Mapped[str] = mapped_column(String, nullable=False)
+    training_end_time_utc: Mapped[str] = mapped_column(String, nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    coefficients_json: Mapped[str] = mapped_column(Text, nullable=False)
+    intercept: Mapped[float] = mapped_column(Float, nullable=False)
+    train_rmse: Mapped[float] = mapped_column(Float, nullable=False)
+    test_rmse: Mapped[float] = mapped_column(Float, nullable=False)
+    target_name: Mapped[str] = mapped_column(String, nullable=False)
+
+
+Index("idx_building_temperature_models_trained_at", BuildingTemperatureModelRecord.trained_at_utc)

@@ -5,10 +5,13 @@ from .identification import (
     IdentificationDataset,
     IdentificationResult,
 )
+from .prediction import BuildingTemperaturePrediction, BuildingTemperaturePredictionService
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
     "BuildingModelIdentificationService",
+    "BuildingTemperaturePrediction",
+    "BuildingTemperaturePredictionService",
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",

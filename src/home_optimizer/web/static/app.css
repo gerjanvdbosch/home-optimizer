@@ -138,6 +138,72 @@ p {
   font-size: 18px;
 }
 
+.scenario-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.training-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.scenario-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--ha-secondary);
+  font-size: 13px;
+}
+
+.training-panel label {
+  display: grid;
+  gap: 6px;
+  color: var(--ha-secondary);
+  font-size: 13px;
+}
+
+.scenario-form input {
+  min-height: 40px;
+  border: 1px solid var(--ha-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--ha-text);
+  background: #ffffff;
+  font: inherit;
+}
+
+.training-panel input {
+  min-height: 40px;
+  border: 1px solid var(--ha-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--ha-text);
+  background: #ffffff;
+  font: inherit;
+}
+
+.scenario-form input:focus {
+  outline: 2px solid rgba(3, 169, 244, 0.18);
+  border-color: var(--ha-primary);
+}
+
+.training-panel input:focus {
+  outline: 2px solid rgba(3, 169, 244, 0.18);
+  border-color: var(--ha-primary);
+}
+
+.scenario-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
 .chart-wrap {
   position: relative;
   width: 100%;
@@ -216,6 +282,14 @@ pre {
 
   .stats,
   .charts {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-form {
+    grid-template-columns: 1fr;
+  }
+
+  .training-panel {
     grid-template-columns: 1fr;
   }
 

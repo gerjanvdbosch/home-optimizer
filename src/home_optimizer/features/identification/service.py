@@ -7,32 +7,33 @@ import numpy as np
 import pandas as pd
 
 from home_optimizer.domain import (
+    BuildingTemperatureModel,
     GTI_LIVING_ROOM_WINDOWS,
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
-    HP_ELECTRIC_POWER,
-    HP_FLOW,
-    HP_RETURN_TEMPERATURE,
-    HP_SUPPLY_TEMPERATURE,
     NumericSeries,
     OUTDOOR_TEMPERATURE,
     ROOM_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
-    THERMAL_OUTPUT,
     THERMOSTAT_SETPOINT,
     adjusted_gti_with_shutter,
-    build_thermal_output_series,
     latest_value_at,
+    utc_now,
 )
 
-from .ports import IdentificationDataReader
+from .ports import BuildingTemperatureModelRepository, IdentificationDataReader
 from .schemas import IdentificationDataset, IdentificationResult
 
 
 class BuildingModelIdentificationService:
     """Builds a baseline autoregressive dataset and fits a linear grey-box model."""
 
-    def __init__(self, reader: IdentificationDataReader) -> None:
+    def __init__(
+        self,
+        reader: IdentificationDataReader,
+        model_repository: BuildingTemperatureModelRepository | None = None,
+    ) -> None:
         self.reader = reader
+        self.model_repository = model_repository
 
     def build_dataset(
         self,
@@ -50,10 +51,6 @@ class BuildingModelIdentificationService:
                 OUTDOOR_TEMPERATURE,
                 THERMOSTAT_SETPOINT,
                 SHUTTER_LIVING_ROOM,
-                HP_FLOW,
-                HP_SUPPLY_TEMPERATURE,
-                HP_RETURN_TEMPERATURE,
-                HP_ELECTRIC_POWER,
             ],
             start_time=start_time,
             end_time=end_time,
@@ -79,19 +76,9 @@ class BuildingModelIdentificationService:
                 NumericSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[]),
             ),
         )
-        thermal_output = build_thermal_output_series(
-            series_by_name.get(HP_FLOW),
-            series_by_name.get(HP_SUPPLY_TEMPERATURE),
-            series_by_name.get(HP_RETURN_TEMPERATURE),
-        )
 
         raw_rows: list[dict[str, float | str]] = []
-        previous_temperature: float | None = None
         for room_point in room_temperature.points:
-            if previous_temperature is None:
-                previous_temperature = room_point.value
-                continue
-
             outdoor_temperature = latest_value_at(
                 series_by_name.get(
                     OUTDOOR_TEMPERATURE,
@@ -106,39 +93,24 @@ class BuildingModelIdentificationService:
                 ).points,
                 room_point.timestamp,
             )
-            hp_electric_power = latest_value_at(
-                series_by_name.get(
-                    HP_ELECTRIC_POWER,
-                    NumericSeries(name=HP_ELECTRIC_POWER, unit="kW", points=[]),
-                ).points,
-                room_point.timestamp,
-            )
             solar_gain = latest_value_at(adjusted_gti.points, room_point.timestamp)
-            delivered_heat = latest_value_at(thermal_output.points, room_point.timestamp)
 
             if None in (
                 outdoor_temperature,
                 thermostat_setpoint,
-                hp_electric_power,
                 solar_gain,
-                delivered_heat,
             ):
-                previous_temperature = room_point.value
                 continue
 
             raw_rows.append(
                 {
                     "timestamp": room_point.timestamp,
-                    "previous_room_temperature": previous_temperature,
                     OUTDOOR_TEMPERATURE: float(outdoor_temperature),
                     THERMOSTAT_SETPOINT: float(thermostat_setpoint),
-                    HP_ELECTRIC_POWER: float(hp_electric_power),
                     GTI_LIVING_ROOM_WINDOWS_ADJUSTED: float(solar_gain),
-                    THERMAL_OUTPUT: float(delivered_heat),
                     ROOM_TEMPERATURE: room_point.value,
                 }
             )
-            previous_temperature = room_point.value
 
         frame = pd.DataFrame(raw_rows)
         if frame.empty:
@@ -149,24 +121,20 @@ class BuildingModelIdentificationService:
 
         resampled = frame.resample(f"{interval_minutes}min").agg(
             {
-                "previous_room_temperature": "first",
                 OUTDOOR_TEMPERATURE: "mean",
                 THERMOSTAT_SETPOINT: "last",
-                HP_ELECTRIC_POWER: "mean",
                 GTI_LIVING_ROOM_WINDOWS_ADJUSTED: "mean",
-                THERMAL_OUTPUT: "mean",
                 ROOM_TEMPERATURE: "last",
             }
         )
+        resampled["previous_room_temperature"] = resampled[ROOM_TEMPERATURE].shift(1)
         resampled = resampled.dropna()
 
         feature_names = [
             "previous_room_temperature",
             OUTDOOR_TEMPERATURE,
             THERMOSTAT_SETPOINT,
-            HP_ELECTRIC_POWER,
             GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
-            THERMAL_OUTPUT,
         ]
         if len(resampled) < 3:
             raise ValueError("not enough aligned samples to identify a model")
@@ -231,6 +199,41 @@ class BuildingModelIdentificationService:
             test_rmse=_rmse(test_targets, test_predictions),
             target_name=dataset.target_name,
         )
+
+    def identify_and_store(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> BuildingTemperatureModel:
+        if self.model_repository is None:
+            raise ValueError("no building temperature model repository configured")
+
+        result = self.identify(
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+            train_fraction=train_fraction,
+        )
+        model = BuildingTemperatureModel(
+            model_name=result.model_name,
+            trained_at_utc=utc_now(),
+            training_start_time_utc=start_time,
+            training_end_time_utc=end_time,
+            interval_minutes=result.interval_minutes,
+            sample_count=result.sample_count,
+            train_sample_count=result.train_sample_count,
+            test_sample_count=result.test_sample_count,
+            coefficients=result.coefficients,
+            intercept=result.intercept,
+            train_rmse=result.train_rmse,
+            test_rmse=result.test_rmse,
+            target_name=result.target_name,
+        )
+        self.model_repository.save(model)
+        return model
 
 
 def _rmse(actual: np.ndarray, predicted: np.ndarray) -> float:
