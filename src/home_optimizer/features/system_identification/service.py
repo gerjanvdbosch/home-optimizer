@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
-from home_optimizer.features.system_identification.building_model import (
-    RoomTemperatureModelIdentifier,
-    RoomTemperatureModelInputs,
-)
-from home_optimizer.features.system_identification.dataset import SeriesLookup, timed_values
-from home_optimizer.features.system_identification.schemas import (
-    NumericPoint,
-    NumericSeries,
-    RoomTemperatureModelResult,
-    TextSeries,
+import numpy as np
+
+from home_optimizer.domain.charts import ChartPoint, ChartSeries
+from home_optimizer.features.system_identification.models import (
+    IdentificationMetrics,
+    ThermalModelCoefficients,
+    ThermalModelIdentificationResult,
 )
 
 
@@ -19,105 +17,178 @@ class SystemIdentificationError(ValueError):
     pass
 
 
-class SystemIdentificationService:
-    def __init__(
-        self,
-        *,
-        sample_interval_minutes: int = 15,
-        train_fraction: float = 0.7,
-    ) -> None:
-        self.sample_interval_minutes = sample_interval_minutes
-        self.train_fraction = train_fraction
+@dataclass(frozen=True)
+class _TrainingSample:
+    room_temperature: float
+    outdoor_temperature: float
+    heatpump_power: float
+    solar_gain: float
+    next_room_temperature: float
 
-    def identify_room_temperature_model(
-        self,
-        *,
-        numeric_series: list[NumericSeries],
-        text_series: list[TextSeries] | None = None,
-    ) -> RoomTemperatureModelResult:
-        numeric_by_name = {series.name: series for series in numeric_series}
-        text_by_name = {series.name: series for series in text_series or []}
 
-        try:
-            inputs = RoomTemperatureModelInputs(
-                room_temperature=numeric_by_name["room_temperature"],
-                outdoor_temperature=numeric_by_name["outdoor_temperature"],
-                thermal_output=self._thermal_output_series(numeric_by_name),
-                solar_gain=self._optional_series(
-                    numeric_by_name,
-                    "gti_living_room_windows_adjusted",
-                    "solar_gain",
-                ),
-                defrost_active=numeric_by_name.get("defrost_active"),
-                booster_heater_active=numeric_by_name.get("booster_heater_active"),
-                hp_mode=text_by_name.get("hp_mode"),
-            )
-            return RoomTemperatureModelIdentifier(
-                sample_interval_minutes=self.sample_interval_minutes,
-                train_fraction=self.train_fraction,
-            ).identify(inputs)
-        except KeyError as error:
-            raise SystemIdentificationError(f"missing required series: {error.args[0]}") from error
-        except ValueError as error:
-            raise SystemIdentificationError(str(error)) from error
+@dataclass(frozen=True)
+class _TimedValue:
+    timestamp: datetime
+    value: float
 
-    def _thermal_output_series(self, series_by_name: dict[str, NumericSeries]) -> NumericSeries:
-        if "thermal_output" in series_by_name:
-            return series_by_name["thermal_output"]
 
-        required_names = [
-            "hp_flow",
-            "hp_supply_temperature",
-            "hp_return_temperature",
-        ]
-        if all(name in series_by_name for name in required_names):
-            return self._build_thermal_output_series(
-                flow=series_by_name["hp_flow"],
-                supply=series_by_name["hp_supply_temperature"],
-                return_temperature=series_by_name["hp_return_temperature"],
-            )
+def identify_room_temperature_model(
+    room_temperature: ChartSeries,
+    outdoor_temperature: ChartSeries,
+    heatpump_power: ChartSeries,
+    solar_gain: ChartSeries | None = None,
+    *,
+    sample_interval_minutes: int = 15,
+    max_input_age_minutes: int = 20,
+) -> ThermalModelIdentificationResult:
+    """Fit a linear one-step room-temperature model for MPC.
 
-        raise KeyError("thermal_output")
+    Model form:
+        T_room[k+1] = c + a*T_room[k] + b*T_out[k] + d*P_hp[k] + e*solar[k]
+    """
+    if sample_interval_minutes <= 0:
+        raise SystemIdentificationError("sample_interval_minutes must be positive")
 
-    def _build_thermal_output_series(
-        self,
-        *,
-        flow: NumericSeries,
-        supply: NumericSeries,
-        return_temperature: NumericSeries,
-    ) -> NumericSeries:
-        supply_lookup = SeriesLookup(timed_values(supply))
-        return_lookup = SeriesLookup(timed_values(return_temperature))
-        max_age = timedelta(minutes=20)
-        points: list[NumericPoint] = []
-
-        for flow_point in timed_values(flow):
-            supply_value = supply_lookup.latest_at(flow_point.timestamp, max_age)
-            return_value = return_lookup.latest_at(flow_point.timestamp, max_age)
-            if supply_value is None or return_value is None:
-                continue
-
-            delta_t = supply_value - return_value
-            thermal_kw = max(0.0, flow_point.value * delta_t * 4186.0 / 60000.0)
-            points.append(
-                NumericPoint(
-                    timestamp=flow_point.timestamp.isoformat(),
-                    value=thermal_kw,
-                )
-            )
-
-        return NumericSeries(
-            name="thermal_output",
-            unit="kW",
-            points=points,
+    samples = _build_training_samples(
+        room_temperature=room_temperature,
+        outdoor_temperature=outdoor_temperature,
+        heatpump_power=heatpump_power,
+        solar_gain=solar_gain,
+        sample_interval=timedelta(minutes=sample_interval_minutes),
+        max_input_age=timedelta(minutes=max_input_age_minutes),
+    )
+    if len(samples) < 6:
+        raise SystemIdentificationError(
+            "not enough aligned samples to identify a room-temperature model"
         )
 
-    def _optional_series(
-        self,
-        series_by_name: dict[str, NumericSeries],
-        *names: str,
-    ) -> NumericSeries | None:
-        for name in names:
-            if name in series_by_name:
-                return series_by_name[name]
-        return None
+    x = np.array(
+        [
+            [
+                1.0,
+                sample.room_temperature,
+                sample.outdoor_temperature,
+                sample.heatpump_power,
+                sample.solar_gain,
+            ]
+            for sample in samples
+        ],
+        dtype=float,
+    )
+    y = np.array([sample.next_room_temperature for sample in samples], dtype=float)
+
+    coefficients, *_ = np.linalg.lstsq(x, y, rcond=None)
+    predictions = x @ coefficients
+    residuals = y - predictions
+
+    rmse = float(np.sqrt(np.mean(residuals**2)))
+    mae = float(np.mean(np.abs(residuals)))
+    total_variance = float(np.sum((y - np.mean(y)) ** 2))
+    if total_variance == 0.0:
+        r_squared = 1.0
+    else:
+        r_squared = 1.0 - float(np.sum(residuals**2)) / total_variance
+
+    return ThermalModelIdentificationResult(
+        target_name=f"{room_temperature.name}_next",
+        input_names=[
+            room_temperature.name,
+            outdoor_temperature.name,
+            heatpump_power.name,
+            solar_gain.name if solar_gain else "solar_gain",
+        ],
+        sample_interval_minutes=sample_interval_minutes,
+        coefficients=ThermalModelCoefficients(
+            intercept=float(coefficients[0]),
+            room_temperature=float(coefficients[1]),
+            outdoor_temperature=float(coefficients[2]),
+            heatpump_power=float(coefficients[3]),
+            solar_gain=float(coefficients[4]),
+        ),
+        metrics=IdentificationMetrics(
+            sample_count=len(samples),
+            rmse=rmse,
+            mae=mae,
+            r_squared=r_squared,
+        ),
+    )
+
+
+def _build_training_samples(
+    *,
+    room_temperature: ChartSeries,
+    outdoor_temperature: ChartSeries,
+    heatpump_power: ChartSeries,
+    solar_gain: ChartSeries | None,
+    sample_interval: timedelta,
+    max_input_age: timedelta,
+) -> list[_TrainingSample]:
+    room_points = _timed_values(room_temperature.points)
+    next_room_by_timestamp = {point.timestamp: point.value for point in room_points}
+    outdoor_points = _timed_values(outdoor_temperature.points)
+    heatpump_points = _timed_values(heatpump_power.points)
+    solar_points = _timed_values(solar_gain.points) if solar_gain else []
+
+    samples: list[_TrainingSample] = []
+    outdoor_cursor = _LatestValueCursor(outdoor_points)
+    heatpump_cursor = _LatestValueCursor(heatpump_points)
+    solar_cursor = _LatestValueCursor(solar_points)
+    for point in room_points:
+        timestamp = point.timestamp
+        next_room = next_room_by_timestamp.get(timestamp + sample_interval)
+        if next_room is None:
+            continue
+
+        outdoor = outdoor_cursor.latest_at(timestamp, max_input_age)
+        heatpump = heatpump_cursor.latest_at(timestamp, max_input_age)
+        if outdoor is None or heatpump is None:
+            continue
+
+        solar = solar_cursor.latest_at(timestamp, max_input_age)
+        samples.append(
+            _TrainingSample(
+                room_temperature=point.value,
+                outdoor_temperature=outdoor,
+                heatpump_power=heatpump,
+                solar_gain=solar or 0.0,
+                next_room_temperature=next_room,
+            )
+        )
+
+    return samples
+
+
+def _timed_values(points: list[ChartPoint]) -> list[_TimedValue]:
+    return sorted(
+        [
+            _TimedValue(
+                timestamp=_parse_timestamp(point.timestamp),
+                value=point.value,
+            )
+            for point in points
+        ],
+        key=lambda point: point.timestamp,
+    )
+
+
+class _LatestValueCursor:
+    def __init__(self, points: list[_TimedValue]) -> None:
+        self.points = points
+        self.index = 0
+        self.latest: _TimedValue | None = None
+
+    def latest_at(self, timestamp: datetime, max_age: timedelta) -> float | None:
+        while (
+            self.index < len(self.points)
+            and self.points[self.index].timestamp <= timestamp
+        ):
+            self.latest = self.points[self.index]
+            self.index += 1
+
+        if self.latest is None or timestamp - self.latest.timestamp > max_age:
+            return None
+        return self.latest.value
+
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

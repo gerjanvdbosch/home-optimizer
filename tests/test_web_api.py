@@ -60,31 +60,20 @@ class FakeDashboardRepository:
                     points=[ChartPoint(timestamp="2026-04-25T11:55:00+00:00", value=50.0)],
                 )
             ]
-        if names == [
-            "room_temperature",
-            "outdoor_temperature",
-            "hp_flow",
-            "hp_supply_temperature",
-            "hp_return_temperature",
-            "defrost_active",
-            "booster_heater_active",
-        ]:
+        if names == ["room_temperature", "outdoor_temperature", "hp_electric_power"]:
             timestamps = [
                 (start_time + timedelta(minutes=15 * index)).isoformat()
-                for index in range(30)
+                for index in range(20)
             ]
-            outdoor_values = [8.0 + (index % 8) * 0.1 for index in range(30)]
-            thermal_values = [0.7 + (index % 6) * 0.2 for index in range(30)]
-            supply_values = [35.0 for _ in range(30)]
-            return_values = [30.0 for _ in range(30)]
-            flow_values = [value / ((35.0 - 30.0) * 4186.0 / 60000.0) for value in thermal_values]
-            room_values = [20.0, 20.1, 20.2, 20.3]
-            for index in range(3, 29):
+            outdoor_values = [8.0 + index * 0.1 for index in range(20)]
+            heatpump_values = [0.5 if index % 4 < 2 else 1.5 for index in range(20)]
+            room_values = [20.0]
+            for index in range(19):
                 room_values.append(
                     0.4
                     + 0.9 * room_values[index]
-                    - 0.02 * (room_values[index] - outdoor_values[index])
-                    + 0.1 * thermal_values[index - 1]
+                    + 0.05 * outdoor_values[index]
+                    + 0.2 * heatpump_values[index]
                 )
 
             return [
@@ -105,43 +94,11 @@ class FakeDashboardRepository:
                     ],
                 ),
                 ChartSeries(
-                    name="hp_flow",
-                    unit="Lmin",
+                    name="hp_electric_power",
+                    unit="kW",
                     points=[
                         ChartPoint(timestamp=timestamp, value=value)
-                        for timestamp, value in zip(timestamps, flow_values, strict=True)
-                    ],
-                ),
-                ChartSeries(
-                    name="hp_supply_temperature",
-                    unit="degC",
-                    points=[
-                        ChartPoint(timestamp=timestamp, value=value)
-                        for timestamp, value in zip(timestamps, supply_values, strict=True)
-                    ],
-                ),
-                ChartSeries(
-                    name="hp_return_temperature",
-                    unit="degC",
-                    points=[
-                        ChartPoint(timestamp=timestamp, value=value)
-                        for timestamp, value in zip(timestamps, return_values, strict=True)
-                    ],
-                ),
-                ChartSeries(
-                    name="defrost_active",
-                    unit="bool",
-                    points=[
-                        ChartPoint(timestamp=timestamp, value=0.0)
-                        for timestamp in timestamps
-                    ],
-                ),
-                ChartSeries(
-                    name="booster_heater_active",
-                    unit="bool",
-                    points=[
-                        ChartPoint(timestamp=timestamp, value=0.0)
-                        for timestamp in timestamps
+                        for timestamp, value in zip(timestamps, heatpump_values, strict=True)
                     ],
                 ),
             ]
@@ -173,15 +130,6 @@ class FakeDashboardRepository:
 
     def read_text_series(self, names, start_time, end_time) -> list[ChartTextSeries]:
         self.calls.append(("text", names, start_time.isoformat(), end_time.isoformat()))
-        if names == ["hp_mode"] and end_time - start_time <= timedelta(hours=6):
-            points = [
-                ChartTextPoint(
-                    timestamp=(start_time + timedelta(minutes=15 * index)).isoformat(),
-                    value="heat",
-                )
-                for index in range(30)
-            ]
-            return [ChartTextSeries(name="hp_mode", points=points)]
         return [
             ChartTextSeries(
                 name="hp_mode",
@@ -572,12 +520,9 @@ def test_system_identification_endpoint_returns_room_temperature_model() -> None
     assert response.status_code == 200
     payload = response.json()
     assert payload["target_name"] == "room_temperature_next"
-    assert payload["metrics"]["train"]["sample_count"] == 17
-    assert payload["metrics"]["test"]["sample_count"] == 8
-    assert payload["metrics"]["test"]["rmse"] == pytest.approx(0.0, abs=1e-10)
-    assert payload["actual_series"]["name"] == "room_temperature_actual"
-    assert payload["predicted_series"]["name"] == "room_temperature_predicted"
-    assert payload["residual_series"]["name"] == "room_temperature_residual"
+    assert payload["metrics"]["sample_count"] == 19
+    assert payload["metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert payload["coefficients"]["room_temperature"] == pytest.approx(0.9)
 
 
 def test_plotly_script_is_served_locally() -> None:

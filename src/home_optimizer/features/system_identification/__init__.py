@@ -1,9 +1,9 @@
 from home_optimizer.features.system_identification.service import (
     SystemIdentificationError,
-    SystemIdentificationService,
+    identify_room_temperature_model,
 )
 
 __all__ = [
     "SystemIdentificationError",
-    "SystemIdentificationService",
+    "identify_room_temperature_model",
 ]
