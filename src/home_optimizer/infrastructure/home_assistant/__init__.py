@@ -1,1 +1,3 @@
-from __future__ import annotations
+from .gateway import HomeAssistantGateway
+
+__all__ = ["HomeAssistantGateway"]

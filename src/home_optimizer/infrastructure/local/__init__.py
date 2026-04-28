@@ -1,2 +1,3 @@
-from __future__ import annotations
+from .gateway import LocalJsonGateway
 
+__all__ = ["LocalJsonGateway"]

@@ -1,1 +1,3 @@
-from __future__ import annotations
+from .service import OpenMeteoForecastService
+
+__all__ = ["OpenMeteoForecastService"]

@@ -1,1 +1,3 @@
-from __future__ import annotations
+from .openmeteo import OpenMeteoGateway
+
+__all__ = ["OpenMeteoGateway"]

@@ -22,7 +22,8 @@ def adjusted_gti_with_shutter(
         points=[
             ChartPoint(
                 timestamp=point.timestamp,
-                value=point.value * shutter_open_fraction_at(shutter_position.points, point.timestamp),
+                value=point.value
+                * shutter_open_fraction_at(shutter_position.points, point.timestamp),
             )
             for point in window_gti.points
         ],
@@ -45,7 +46,11 @@ def latest_value_at(points: list[ChartPoint], timestamp: str) -> float | None:
     return latest
 
 
-def build_delta_series(supply: ChartSeries | None, return_s: ChartSeries | None, name: str) -> ChartSeries:
+def build_delta_series(
+    supply: ChartSeries | None,
+    return_s: ChartSeries | None,
+    name: str,
+) -> ChartSeries:
     unit = supply.unit if supply else "degC"
     delta = ChartSeries(name=name, unit=unit, points=[])
     if not supply or not return_s:
@@ -60,7 +65,12 @@ def build_delta_series(supply: ChartSeries | None, return_s: ChartSeries | None,
     return delta
 
 
-def build_baseload_series(p1: ChartSeries | None, pv: ChartSeries | None, hp: ChartSeries | None, name: str) -> ChartSeries:
+def build_baseload_series(
+    p1: ChartSeries | None,
+    pv: ChartSeries | None,
+    hp: ChartSeries | None,
+    name: str,
+) -> ChartSeries:
     unit = p1.unit if p1 else "kW"
     baseload = ChartSeries(name=name, unit=unit, points=[])
     if not p1 or not hp:
@@ -182,7 +192,12 @@ class DashboardChartsService:
         p1_series = series_by_name.get("p1_net_power")
         pv_series = series_by_name.get("pv_output_power")
         hp_power_series = series_by_name.get("hp_electric_power")
-        baseload_series = build_baseload_series(p1_series, pv_series, hp_power_series, name="baseload")
+        baseload_series = build_baseload_series(
+            p1_series,
+            pv_series,
+            hp_power_series,
+            name="baseload",
+        )
 
         flow_series = series_by_name["hp_flow"]
         thermal_series, cop_series = build_thermal_and_cop_series(

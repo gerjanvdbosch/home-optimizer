@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import logging
-import httpx
 from datetime import datetime
 from threading import Lock
+
+import httpx
 
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.domain.units import parse_sensor_value
 from home_optimizer.features.telemetry.buffer import TelemetryMinuteBuffer
-from home_optimizer.features.telemetry.ports import TelemetrySampleRepository, TelemetryStateGateway
+from home_optimizer.features.telemetry.ports import (
+    TelemetrySampleRepository,
+    TelemetryStateGateway,
+)
 
 LOGGER = logging.getLogger(__name__)
 

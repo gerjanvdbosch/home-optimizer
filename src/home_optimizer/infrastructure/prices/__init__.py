@@ -1,1 +1,3 @@
-from __future__ import annotations
+from .nordpool import NordpoolGateway
+
+__all__ = ["NordpoolGateway"]
