@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.location import Location
+from home_optimizer.domain.names import GTI_LIVING_ROOM_WINDOWS, GTI_PV
 from home_optimizer.domain.time import ensure_utc
 
 from .ports import ForecastRepositoryPort, OpenMeteoGatewayPort
@@ -21,8 +22,6 @@ BASE_VARIABLES = {
     "diffuse_radiation": "diffuse_radiation",
 }
 GTI_VARIABLE = "global_tilted_irradiance"
-PV_GTI_NAME = "gti_pv"
-LIVING_ROOM_GTI_NAME = "gti_living_room_windows"
 FORECAST_UNITS = {
     "temperature": "degC",
     "humidity": "%",
@@ -30,8 +29,8 @@ FORECAST_UNITS = {
     "dew_point": "degC",
     "direct_radiation": "Wm2",
     "diffuse_radiation": "Wm2",
-    PV_GTI_NAME: "Wm2",
-    LIVING_ROOM_GTI_NAME: "Wm2",
+    GTI_PV: "Wm2",
+    GTI_LIVING_ROOM_WINDOWS: "Wm2",
 }
 LIVING_ROOM_WINDOW_TILT = 90.0
 
@@ -133,7 +132,7 @@ class OpenMeteoForecastService:
                 self._entries_from_payload(
                     payload=payload,
                     fetched_at=fetched_at,
-                    variable_map={PV_GTI_NAME: GTI_VARIABLE},
+                    variable_map={GTI_PV: GTI_VARIABLE},
                 )
             )
 
@@ -150,7 +149,7 @@ class OpenMeteoForecastService:
                 self._entries_from_payload(
                     payload=payload,
                     fetched_at=fetched_at,
-                    variable_map={LIVING_ROOM_GTI_NAME: GTI_VARIABLE},
+                    variable_map={GTI_LIVING_ROOM_WINDOWS: GTI_VARIABLE},
                 )
             )
 

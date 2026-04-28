@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from home_optimizer.domain.charts import ChartPoint, ChartSeries
+from home_optimizer.domain import NumericPoint, NumericSeries
 from home_optimizer.features.identification import BuildingModelIdentificationService
 
 
@@ -11,17 +11,17 @@ class FakeIdentificationReader:
         self.series_calls: list[tuple[list[str], str, str]] = []
         self.forecast_calls: list[tuple[list[str], str, str]] = []
 
-    def read_series(self, names, start_time, end_time) -> list[ChartSeries]:
+    def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.series_calls.append((names, start_time.isoformat(), end_time.isoformat()))
         base_time = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
-        room_points: list[ChartPoint] = []
-        outdoor_points: list[ChartPoint] = []
-        setpoint_points: list[ChartPoint] = []
-        shutter_points: list[ChartPoint] = []
-        flow_points: list[ChartPoint] = []
-        supply_points: list[ChartPoint] = []
-        return_points: list[ChartPoint] = []
-        hp_power_points: list[ChartPoint] = []
+        room_points: list[NumericPoint] = []
+        outdoor_points: list[NumericPoint] = []
+        setpoint_points: list[NumericPoint] = []
+        shutter_points: list[NumericPoint] = []
+        flow_points: list[NumericPoint] = []
+        supply_points: list[NumericPoint] = []
+        return_points: list[NumericPoint] = []
+        hp_power_points: list[NumericPoint] = []
 
         room_temperature = 20.0
         for index in range(48):
@@ -45,35 +45,35 @@ class FakeIdentificationReader:
                 + 0.35
             )
 
-            room_points.append(ChartPoint(timestamp=timestamp, value=room_temperature))
-            outdoor_points.append(ChartPoint(timestamp=timestamp, value=outdoor))
-            setpoint_points.append(ChartPoint(timestamp=timestamp, value=setpoint))
-            shutter_points.append(ChartPoint(timestamp=timestamp, value=100.0))
-            flow_points.append(ChartPoint(timestamp=timestamp, value=flow))
-            supply_points.append(ChartPoint(timestamp=timestamp, value=supply))
-            return_points.append(ChartPoint(timestamp=timestamp, value=return_temperature))
-            hp_power_points.append(ChartPoint(timestamp=timestamp, value=hp_power))
+            room_points.append(NumericPoint(timestamp=timestamp, value=room_temperature))
+            outdoor_points.append(NumericPoint(timestamp=timestamp, value=outdoor))
+            setpoint_points.append(NumericPoint(timestamp=timestamp, value=setpoint))
+            shutter_points.append(NumericPoint(timestamp=timestamp, value=100.0))
+            flow_points.append(NumericPoint(timestamp=timestamp, value=flow))
+            supply_points.append(NumericPoint(timestamp=timestamp, value=supply))
+            return_points.append(NumericPoint(timestamp=timestamp, value=return_temperature))
+            hp_power_points.append(NumericPoint(timestamp=timestamp, value=hp_power))
 
         return [
-            ChartSeries(name="room_temperature", unit="degC", points=room_points),
-            ChartSeries(name="outdoor_temperature", unit="degC", points=outdoor_points),
-            ChartSeries(name="thermostat_setpoint", unit="degC", points=setpoint_points),
-            ChartSeries(name="shutter_living_room", unit="percent", points=shutter_points),
-            ChartSeries(name="hp_flow", unit="Lmin", points=flow_points),
-            ChartSeries(name="hp_supply_temperature", unit="degC", points=supply_points),
-            ChartSeries(name="hp_return_temperature", unit="degC", points=return_points),
-            ChartSeries(name="hp_electric_power", unit="kW", points=hp_power_points),
+            NumericSeries(name="room_temperature", unit="degC", points=room_points),
+            NumericSeries(name="outdoor_temperature", unit="degC", points=outdoor_points),
+            NumericSeries(name="thermostat_setpoint", unit="degC", points=setpoint_points),
+            NumericSeries(name="shutter_living_room", unit="percent", points=shutter_points),
+            NumericSeries(name="hp_flow", unit="Lmin", points=flow_points),
+            NumericSeries(name="hp_supply_temperature", unit="degC", points=supply_points),
+            NumericSeries(name="hp_return_temperature", unit="degC", points=return_points),
+            NumericSeries(name="hp_electric_power", unit="kW", points=hp_power_points),
         ]
 
-    def read_forecast_series(self, names, start_time, end_time) -> list[ChartSeries]:
+    def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.forecast_calls.append((names, start_time.isoformat(), end_time.isoformat()))
         base_time = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
         points = []
         for index in range(48):
             timestamp = (base_time + timedelta(minutes=5 * index)).isoformat()
             solar_gain = 120.0 if 12 <= index <= 30 else 0.0
-            points.append(ChartPoint(timestamp=timestamp, value=solar_gain))
-        return [ChartSeries(name="gti_living_room_windows", unit="Wm2", points=points)]
+            points.append(NumericPoint(timestamp=timestamp, value=solar_gain))
+        return [NumericSeries(name="gti_living_room_windows", unit="Wm2", points=points)]
 
 
 def test_build_dataset_resamples_and_returns_feature_matrix() -> None:

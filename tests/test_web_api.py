@@ -10,10 +10,10 @@ from pydantic import ValidationError
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
-    ChartPoint,
-    ChartSeries,
-    ChartTextPoint,
-    ChartTextSeries,
+    NumericPoint,
+    NumericSeries,
+    TextPoint,
+    TextSeries,
     build_sensor_specs,
 )
 from home_optimizer.features import HistoryImportResult
@@ -55,80 +55,80 @@ class FakeDashboardRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str], str, str]] = []
 
-    def read_series(self, names, start_time, end_time) -> list[ChartSeries]:
+    def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.calls.append(("numeric", names, start_time.isoformat(), end_time.isoformat()))
         if names == ["shutter_living_room"]:
             return [
-                ChartSeries(
+                NumericSeries(
                     name="shutter_living_room",
                     unit="percent",
-                    points=[ChartPoint(timestamp="2026-04-25T11:55:00+00:00", value=50.0)],
+                    points=[NumericPoint(timestamp="2026-04-25T11:55:00+00:00", value=50.0)],
                 )
             ]
         return [
-            ChartSeries(
+            NumericSeries(
                 name="room_temperature",
                 unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="thermostat_setpoint",
                 unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="dhw_top_temperature",
                 unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="dhw_bottom_temperature",
                 unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=42.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=42.0)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="hp_electric_power",
                 unit="W",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1500.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=1500.0)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="defrost_active",
                 unit="bool",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="booster_heater_active",
                 unit="bool",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=1.0)],
             ),
         ]
 
-    def read_text_series(self, names, start_time, end_time) -> list[ChartTextSeries]:
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
         self.calls.append(("text", names, start_time.isoformat(), end_time.isoformat()))
         return [
-            ChartTextSeries(
+            TextSeries(
                 name="hp_mode",
-                points=[ChartTextPoint(timestamp="2026-04-25T11:50:00+00:00", value="heat")],
+                points=[TextPoint(timestamp="2026-04-25T11:50:00+00:00", value="heat")],
             ),
         ]
 
-    def read_forecast_series(self, names, start_time, end_time) -> list[ChartSeries]:
+    def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.calls.append(("forecast", names, start_time.isoformat(), end_time.isoformat()))
         return [
-            ChartSeries(
+            NumericSeries(
                 name="temperature",
                 unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=12.5)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=12.5)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="gti_pv",
                 unit="Wm2",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=500.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=500.0)],
             ),
-            ChartSeries(
+            NumericSeries(
                 name="gti_living_room_windows",
                 unit="Wm2",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=220.0)],
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=220.0)],
             ),
         ]
 

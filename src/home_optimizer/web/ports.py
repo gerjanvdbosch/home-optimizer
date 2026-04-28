@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from home_optimizer.domain.charts import ChartSeries, ChartTextSeries
+from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 
 
@@ -21,21 +21,21 @@ class DashboardDataReader(Protocol):
         names: list[str],
         start_time: datetime,
         end_time: datetime,
-    ) -> list[ChartSeries]: ...
+    ) -> list[NumericSeries]: ...
 
     def read_text_series(
         self,
         names: list[str],
         start_time: datetime,
         end_time: datetime,
-    ) -> list[ChartTextSeries]: ...
+    ) -> list[TextSeries]: ...
 
     def read_forecast_series(
         self,
         names: list[str],
         start_time: datetime,
         end_time: datetime,
-    ) -> list[ChartSeries]: ...
+    ) -> list[NumericSeries]: ...
 
 
 class TelemetrySchedulerRunner(Protocol):

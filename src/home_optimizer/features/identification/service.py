@@ -6,80 +6,26 @@ from math import sqrt
 import numpy as np
 import pandas as pd
 
-from home_optimizer.domain.charts import ChartPoint, ChartSeries
+from home_optimizer.domain import (
+    GTI_LIVING_ROOM_WINDOWS,
+    GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+    HP_ELECTRIC_POWER,
+    HP_FLOW,
+    HP_RETURN_TEMPERATURE,
+    HP_SUPPLY_TEMPERATURE,
+    NumericSeries,
+    OUTDOOR_TEMPERATURE,
+    ROOM_TEMPERATURE,
+    SHUTTER_LIVING_ROOM,
+    THERMAL_OUTPUT,
+    THERMOSTAT_SETPOINT,
+    adjusted_gti_with_shutter,
+    build_thermal_output_series,
+    latest_value_at,
+)
 
 from .ports import IdentificationDataReader
 from .schemas import IdentificationDataset, IdentificationResult
-
-ROOM_TEMPERATURE = "room_temperature"
-OUTDOOR_TEMPERATURE = "outdoor_temperature"
-THERMOSTAT_SETPOINT = "thermostat_setpoint"
-SHUTTER_LIVING_ROOM = "shutter_living_room"
-HP_FLOW = "hp_flow"
-HP_SUPPLY_TEMPERATURE = "hp_supply_temperature"
-HP_RETURN_TEMPERATURE = "hp_return_temperature"
-HP_ELECTRIC_POWER = "hp_electric_power"
-LIVING_ROOM_GTI = "gti_living_room_windows"
-ADJUSTED_LIVING_ROOM_GTI = "gti_living_room_windows_adjusted"
-THERMAL_OUTPUT = "thermal_output"
-
-
-def _latest_value_at(points: list[ChartPoint], timestamp: str) -> float | None:
-    latest: float | None = None
-    for point in points:
-        if point.timestamp > timestamp:
-            break
-        latest = point.value
-    return latest
-
-
-def _adjusted_gti_with_shutter(
-    window_gti: ChartSeries,
-    shutter_position: ChartSeries,
-) -> ChartSeries:
-    return ChartSeries(
-        name=ADJUSTED_LIVING_ROOM_GTI,
-        unit=window_gti.unit,
-        points=[
-            ChartPoint(
-                timestamp=point.timestamp,
-                value=point.value
-                * _shutter_open_fraction_at(shutter_position.points, point.timestamp),
-            )
-            for point in window_gti.points
-        ],
-    )
-
-
-def _shutter_open_fraction_at(points: list[ChartPoint], timestamp: str) -> float:
-    position = _latest_value_at(points, timestamp)
-    if position is None:
-        return 1.0
-    return max(0.0, min(position, 100.0)) / 100.0
-
-
-def _build_thermal_output_series(
-    flow: ChartSeries | None,
-    supply: ChartSeries | None,
-    return_s: ChartSeries | None,
-) -> ChartSeries:
-    factor = 4186.0 / 60000.0
-    if flow is None:
-        return ChartSeries(name=THERMAL_OUTPUT, unit="kW", points=[])
-
-    thermal_points: list[ChartPoint] = []
-    for flow_point in flow.points:
-        supply_value = _latest_value_at(supply.points, flow_point.timestamp) if supply else None
-        return_value = _latest_value_at(return_s.points, flow_point.timestamp) if return_s else None
-        if supply_value is None or return_value is None:
-            continue
-
-        thermal_output = max(0.0, flow_point.value * (supply_value - return_value) * factor)
-        thermal_points.append(
-            ChartPoint(timestamp=flow_point.timestamp, value=thermal_output)
-        )
-
-    return ChartSeries(name=THERMAL_OUTPUT, unit="kW", points=thermal_points)
 
 
 class BuildingModelIdentificationService:
@@ -113,7 +59,7 @@ class BuildingModelIdentificationService:
             end_time=end_time,
         )
         forecast_series = self.reader.read_forecast_series(
-            names=[LIVING_ROOM_GTI],
+            names=[GTI_LIVING_ROOM_WINDOWS],
             start_time=start_time,
             end_time=end_time,
         )
@@ -125,15 +71,15 @@ class BuildingModelIdentificationService:
         if not room_temperature.points:
             raise ValueError("room_temperature series is empty")
 
-        empty_gti_series = ChartSeries(name=LIVING_ROOM_GTI, unit="Wm2", points=[])
-        adjusted_gti = _adjusted_gti_with_shutter(
-            forecast_by_name.get(LIVING_ROOM_GTI, empty_gti_series),
+        empty_gti_series = NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[])
+        adjusted_gti = adjusted_gti_with_shutter(
+            forecast_by_name.get(GTI_LIVING_ROOM_WINDOWS, empty_gti_series),
             series_by_name.get(
                 SHUTTER_LIVING_ROOM,
-                ChartSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[]),
+                NumericSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[]),
             ),
         )
-        thermal_output = _build_thermal_output_series(
+        thermal_output = build_thermal_output_series(
             series_by_name.get(HP_FLOW),
             series_by_name.get(HP_SUPPLY_TEMPERATURE),
             series_by_name.get(HP_RETURN_TEMPERATURE),
@@ -146,29 +92,29 @@ class BuildingModelIdentificationService:
                 previous_temperature = room_point.value
                 continue
 
-            outdoor_temperature = _latest_value_at(
+            outdoor_temperature = latest_value_at(
                 series_by_name.get(
                     OUTDOOR_TEMPERATURE,
-                    ChartSeries(name=OUTDOOR_TEMPERATURE, unit="degC", points=[]),
+                    NumericSeries(name=OUTDOOR_TEMPERATURE, unit="degC", points=[]),
                 ).points,
                 room_point.timestamp,
             )
-            thermostat_setpoint = _latest_value_at(
+            thermostat_setpoint = latest_value_at(
                 series_by_name.get(
                     THERMOSTAT_SETPOINT,
-                    ChartSeries(name=THERMOSTAT_SETPOINT, unit="degC", points=[]),
+                    NumericSeries(name=THERMOSTAT_SETPOINT, unit="degC", points=[]),
                 ).points,
                 room_point.timestamp,
             )
-            hp_electric_power = _latest_value_at(
+            hp_electric_power = latest_value_at(
                 series_by_name.get(
                     HP_ELECTRIC_POWER,
-                    ChartSeries(name=HP_ELECTRIC_POWER, unit="kW", points=[]),
+                    NumericSeries(name=HP_ELECTRIC_POWER, unit="kW", points=[]),
                 ).points,
                 room_point.timestamp,
             )
-            solar_gain = _latest_value_at(adjusted_gti.points, room_point.timestamp)
-            delivered_heat = _latest_value_at(thermal_output.points, room_point.timestamp)
+            solar_gain = latest_value_at(adjusted_gti.points, room_point.timestamp)
+            delivered_heat = latest_value_at(thermal_output.points, room_point.timestamp)
 
             if None in (
                 outdoor_temperature,
@@ -187,7 +133,7 @@ class BuildingModelIdentificationService:
                     OUTDOOR_TEMPERATURE: float(outdoor_temperature),
                     THERMOSTAT_SETPOINT: float(thermostat_setpoint),
                     HP_ELECTRIC_POWER: float(hp_electric_power),
-                    ADJUSTED_LIVING_ROOM_GTI: float(solar_gain),
+                    GTI_LIVING_ROOM_WINDOWS_ADJUSTED: float(solar_gain),
                     THERMAL_OUTPUT: float(delivered_heat),
                     ROOM_TEMPERATURE: room_point.value,
                 }
@@ -207,7 +153,7 @@ class BuildingModelIdentificationService:
                 OUTDOOR_TEMPERATURE: "mean",
                 THERMOSTAT_SETPOINT: "last",
                 HP_ELECTRIC_POWER: "mean",
-                ADJUSTED_LIVING_ROOM_GTI: "mean",
+                GTI_LIVING_ROOM_WINDOWS_ADJUSTED: "mean",
                 THERMAL_OUTPUT: "mean",
                 ROOM_TEMPERATURE: "last",
             }
@@ -219,7 +165,7 @@ class BuildingModelIdentificationService:
             OUTDOOR_TEMPERATURE,
             THERMOSTAT_SETPOINT,
             HP_ELECTRIC_POWER,
-            ADJUSTED_LIVING_ROOM_GTI,
+            GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
             THERMAL_OUTPUT,
         ]
         if len(resampled) < 3:

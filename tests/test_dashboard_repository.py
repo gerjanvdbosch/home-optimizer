@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from home_optimizer.domain.charts import ChartPoint
+from home_optimizer.domain import NumericPoint
 from home_optimizer.infrastructure.database.dashboard_repository import DashboardRepository
 from home_optimizer.infrastructure.database.orm_models import ForecastValue
 from home_optimizer.infrastructure.database.session import Database
@@ -72,9 +72,8 @@ def test_dashboard_repository_reads_latest_forecast_batch(tmp_path) -> None:
         "gti_living_room_windows",
     ]
     assert series[0].unit == "degC"
-    assert series[0].points == [ChartPoint(timestamp="2026-04-26T12:00:00+00:00", value=12.5)]
+    assert series[0].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=12.5)]
     assert series[1].unit == "Wm2"
-    assert series[1].points == [ChartPoint(timestamp="2026-04-26T12:00:00+00:00", value=500.0)]
+    assert series[1].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=500.0)]
     assert series[2].unit == "Wm2"
-    assert series[2].points == [ChartPoint(timestamp="2026-04-26T12:00:00+00:00", value=220.0)]
-
+    assert series[2].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=220.0)]

@@ -4,25 +4,25 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class ChartPoint:
+class NumericPoint:
     timestamp: str
     value: float
 
 
 @dataclass(frozen=True)
-class ChartSeries:
+class NumericSeries:
     name: str
     unit: str | None
-    points: list[ChartPoint]
+    points: list[NumericPoint]
 
 
 @dataclass(frozen=True)
-class ChartTextPoint:
+class TextPoint:
     timestamp: str
     value: str
 
 
 @dataclass(frozen=True)
-class ChartTextSeries:
+class TextSeries:
     name: str
-    points: list[ChartTextPoint]
+    points: list[TextPoint]

@@ -2,7 +2,36 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
-from home_optimizer.domain import ChartPoint, ChartSeries, ChartTextSeries
+from home_optimizer.domain import (
+    BASELOAD,
+    BOOSTER_HEATER_ACTIVE,
+    COMPRESSOR_FREQUENCY,
+    COP,
+    DEFROST_ACTIVE,
+    DHW_BOTTOM_TEMPERATURE,
+    DHW_TOP_TEMPERATURE,
+    FORECAST_TEMPERATURE,
+    GTI_LIVING_ROOM_WINDOWS,
+    GTI_PV,
+    HP_DELTA_T,
+    HP_ELECTRIC_POWER,
+    HP_FLOW,
+    HP_MODE,
+    HP_RETURN_TEMPERATURE,
+    HP_SUPPLY_TARGET_TEMPERATURE,
+    HP_SUPPLY_TEMPERATURE,
+    NumericPoint,
+    NumericSeries,
+    P1_NET_POWER,
+    PV_OUTPUT_POWER,
+    ROOM_TEMPERATURE,
+    SHUTTER_LIVING_ROOM,
+    THERMAL_OUTPUT,
+    THERMOSTAT_SETPOINT,
+    TextSeries,
+    adjusted_gti_with_shutter,
+    latest_value_at,
+)
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
@@ -12,55 +41,21 @@ def current_timezone() -> tzinfo:
     return datetime.now().astimezone().tzinfo or timezone.utc
 
 
-def adjusted_gti_with_shutter(
-    window_gti: ChartSeries,
-    shutter_position: ChartSeries,
-) -> ChartSeries:
-    return ChartSeries(
-        name="gti_living_room_windows_adjusted",
-        unit=window_gti.unit,
-        points=[
-            ChartPoint(
-                timestamp=point.timestamp,
-                value=point.value
-                * shutter_open_fraction_at(shutter_position.points, point.timestamp),
-            )
-            for point in window_gti.points
-        ],
-    )
+def empty_series(name: str, unit: str | None = None) -> NumericSeries:
+    return NumericSeries(name=name, unit=unit, points=[])
 
 
-def shutter_open_fraction_at(points: list[ChartPoint], timestamp: str) -> float:
-    position = latest_value_at(points, timestamp)
-    if position is None:
-        return 1.0
-    return max(0.0, min(position, 100.0)) / 100.0
-
-
-def latest_value_at(points: list[ChartPoint], timestamp: str) -> float | None:
-    latest: float | None = None
-    for point in points:
-        if point.timestamp > timestamp:
-            break
-        latest = point.value
-    return latest
-
-
-def empty_series(name: str, unit: str | None = None) -> ChartSeries:
-    return ChartSeries(name=name, unit=unit, points=[])
-
-
-def empty_text_series(name: str) -> ChartTextSeries:
-    return ChartTextSeries(name=name, points=[])
+def empty_text_series(name: str) -> TextSeries:
+    return TextSeries(name=name, points=[])
 
 
 def build_delta_series(
-    supply: ChartSeries | None,
-    return_s: ChartSeries | None,
+    supply: NumericSeries | None,
+    return_s: NumericSeries | None,
     name: str,
-) -> ChartSeries:
+) -> NumericSeries:
     unit = supply.unit if supply else "degC"
-    delta = ChartSeries(name=name, unit=unit, points=[])
+    delta = NumericSeries(name=name, unit=unit, points=[])
     if not supply or not return_s:
         return delta
 
@@ -68,19 +63,19 @@ def build_delta_series(
         rt = latest_value_at(return_s.points, sp.timestamp)
         if rt is None:
             continue
-        delta.points.append(ChartPoint(timestamp=sp.timestamp, value=sp.value - rt))
+        delta.points.append(NumericPoint(timestamp=sp.timestamp, value=sp.value - rt))
 
     return delta
 
 
 def build_baseload_series(
-    p1: ChartSeries | None,
-    pv: ChartSeries | None,
-    hp: ChartSeries | None,
+    p1: NumericSeries | None,
+    pv: NumericSeries | None,
+    hp: NumericSeries | None,
     name: str,
-) -> ChartSeries:
+) -> NumericSeries:
     unit = p1.unit if p1 else "kW"
-    baseload = ChartSeries(name=name, unit=unit, points=[])
+    baseload = NumericSeries(name=name, unit=unit, points=[])
     if not p1 or not hp:
         return baseload
 
@@ -89,32 +84,32 @@ def build_baseload_series(
         if hp_val is None:
             continue
         pv_val = latest_value_at(pv.points, p.timestamp) if pv else 0.0
-        baseload.points.append(ChartPoint(timestamp=p.timestamp, value=p.value + pv_val - hp_val))
+        baseload.points.append(NumericPoint(timestamp=p.timestamp, value=p.value + pv_val - hp_val))
 
     return baseload
 
 
 def build_thermal_and_cop_series(
-    flow: ChartSeries | None,
-    supply: ChartSeries | None,
-    return_s: ChartSeries | None,
-    hp_power: ChartSeries | None,
+    flow: NumericSeries | None,
+    supply: NumericSeries | None,
+    return_s: NumericSeries | None,
+    hp_power: NumericSeries | None,
     thermal_name: str,
     cop_name: str,
-) -> tuple[ChartSeries, ChartSeries]:
+) -> tuple[NumericSeries, NumericSeries]:
     """Compute thermal output (kW) and COP series aligned to flow timestamps.
 
     Formula: Q_kW = flow_Lmin * (supply - return) * 4186 / 60000
     COP = Q_kW / electrical_input_kW when electrical_input_kW is available and non-zero.
     """
-    thermal_points: list[ChartPoint] = []
-    cop_points: list[ChartPoint] = []
+    thermal_points: list[NumericPoint] = []
+    cop_points: list[NumericPoint] = []
     factor = 4186.0 / 60000.0
 
     if not flow:
         return (
-            ChartSeries(name=thermal_name, unit="kW", points=[]),
-            ChartSeries(name=cop_name, unit=None, points=[]),
+            NumericSeries(name=thermal_name, unit="kW", points=[]),
+            NumericSeries(name=cop_name, unit=None, points=[]),
         )
 
     for fp in flow.points:
@@ -127,14 +122,14 @@ def build_thermal_and_cop_series(
         if q_kw < 0:
             q_kw = 0.0
 
-        thermal_points.append(ChartPoint(timestamp=fp.timestamp, value=q_kw))
+        thermal_points.append(NumericPoint(timestamp=fp.timestamp, value=q_kw))
         elec = latest_value_at(hp_power.points, fp.timestamp) if hp_power else None
         if elec is None or elec <= 0:
             continue
-        cop_points.append(ChartPoint(timestamp=fp.timestamp, value=q_kw / elec))
+        cop_points.append(NumericPoint(timestamp=fp.timestamp, value=q_kw / elec))
 
-    thermal_series = ChartSeries(name=thermal_name, unit="kW", points=thermal_points)
-    cop_series = ChartSeries(name=cop_name, unit=None, points=cop_points)
+    thermal_series = NumericSeries(name=thermal_name, unit="kW", points=thermal_points)
+    cop_series = NumericSeries(name=cop_name, unit=None, points=cop_points)
     return thermal_series, cop_series
 
 
@@ -150,37 +145,37 @@ class DashboardChartsService:
         start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
         end_time = start_time + timedelta(days=1)
         shutter_series = self.reader.read_series(
-            names=["shutter_living_room"],
+            names=[SHUTTER_LIVING_ROOM],
             start_time=start_time,
             end_time=end_time,
         )
         series = self.reader.read_series(
             names=[
-                "room_temperature",
-                "thermostat_setpoint",
-                "hp_flow",
-                "p1_net_power",
-                "pv_output_power",
-                "hp_supply_temperature",
-                "hp_supply_target_temperature",
-                "hp_return_temperature",
-                "dhw_top_temperature",
-                "dhw_bottom_temperature",
-                "hp_electric_power",
-                "defrost_active",
-                "booster_heater_active",
-                "compressor_frequency",
+                ROOM_TEMPERATURE,
+                THERMOSTAT_SETPOINT,
+                HP_FLOW,
+                P1_NET_POWER,
+                PV_OUTPUT_POWER,
+                HP_SUPPLY_TEMPERATURE,
+                HP_SUPPLY_TARGET_TEMPERATURE,
+                HP_RETURN_TEMPERATURE,
+                DHW_TOP_TEMPERATURE,
+                DHW_BOTTOM_TEMPERATURE,
+                HP_ELECTRIC_POWER,
+                DEFROST_ACTIVE,
+                BOOSTER_HEATER_ACTIVE,
+                COMPRESSOR_FREQUENCY,
             ],
             start_time=start_time,
             end_time=end_time,
         )
         text_series = self.reader.read_text_series(
-            names=["hp_mode"],
+            names=[HP_MODE],
             start_time=start_time,
             end_time=end_time,
         )
         forecast_series = self.reader.read_forecast_series(
-            names=["temperature", "gti_pv", "gti_living_room_windows"],
+            names=[FORECAST_TEMPERATURE, GTI_PV, GTI_LIVING_ROOM_WINDOWS],
             start_time=start_time,
             end_time=end_time + timedelta(minutes=15),
         )
@@ -190,110 +185,98 @@ class DashboardChartsService:
         forecast_series_by_name = {item.name: item for item in forecast_series}
         adjusted_living_room_gti = adjusted_gti_with_shutter(
             forecast_series_by_name.get(
-                "gti_living_room_windows",
-                empty_series("gti_living_room_windows", unit="Wm2"),
+                GTI_LIVING_ROOM_WINDOWS,
+                empty_series(GTI_LIVING_ROOM_WINDOWS, unit="Wm2"),
             ),
             shutter_by_name.get(
-                "shutter_living_room",
-                empty_series("shutter_living_room", unit="percent"),
+                SHUTTER_LIVING_ROOM,
+                empty_series(SHUTTER_LIVING_ROOM, unit="percent"),
             ),
         )
 
-        supply_series = series_by_name.get("hp_supply_temperature")
-        return_series = series_by_name.get("hp_return_temperature")
-        delta_series = build_delta_series(supply_series, return_series, name="hp_delta_t")
+        supply_series = series_by_name.get(HP_SUPPLY_TEMPERATURE)
+        return_series = series_by_name.get(HP_RETURN_TEMPERATURE)
+        delta_series = build_delta_series(supply_series, return_series, name=HP_DELTA_T)
 
-        p1_series = series_by_name.get("p1_net_power")
-        pv_series = series_by_name.get("pv_output_power")
-        hp_power_series = series_by_name.get("hp_electric_power")
+        p1_series = series_by_name.get(P1_NET_POWER)
+        pv_series = series_by_name.get(PV_OUTPUT_POWER)
+        hp_power_series = series_by_name.get(HP_ELECTRIC_POWER)
         baseload_series = build_baseload_series(
             p1_series,
             pv_series,
             hp_power_series,
-            name="baseload",
+            name=BASELOAD,
         )
 
-        flow_series = series_by_name.get("hp_flow", empty_series("hp_flow", unit="Lmin"))
+        flow_series = series_by_name.get(HP_FLOW, empty_series(HP_FLOW, unit="Lmin"))
         thermal_series, cop_series = build_thermal_and_cop_series(
             flow_series,
-            series_by_name.get("hp_supply_temperature"),
-            series_by_name.get("hp_return_temperature"),
+            series_by_name.get(HP_SUPPLY_TEMPERATURE),
+            series_by_name.get(HP_RETURN_TEMPERATURE),
             hp_power_series,
-            thermal_name="thermal_output",
-            cop_name="cop",
+            thermal_name=THERMAL_OUTPUT,
+            cop_name=COP,
         )
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
             room_temperature=series_response(
-                series_by_name.get("room_temperature", empty_series("room_temperature"))
+                series_by_name.get(ROOM_TEMPERATURE, empty_series(ROOM_TEMPERATURE))
             ),
             thermostat_setpoint=series_response(
-                series_by_name.get("thermostat_setpoint", empty_series("thermostat_setpoint"))
+                series_by_name.get(THERMOSTAT_SETPOINT, empty_series(THERMOSTAT_SETPOINT))
             ),
             shutter_position=series_response(
                 shutter_by_name.get(
-                    "shutter_living_room",
-                    empty_series("shutter_living_room", unit="percent"),
+                    SHUTTER_LIVING_ROOM,
+                    empty_series(SHUTTER_LIVING_ROOM, unit="percent"),
                 )
             ),
             dhw_temperatures=[
+                series_response(series_by_name.get(DHW_TOP_TEMPERATURE, empty_series(DHW_TOP_TEMPERATURE))),
                 series_response(
-                    series_by_name.get("dhw_top_temperature", empty_series("dhw_top_temperature"))
-                ),
-                series_response(
-                    series_by_name.get(
-                        "dhw_bottom_temperature",
-                        empty_series("dhw_bottom_temperature"),
-                    )
+                    series_by_name.get(DHW_BOTTOM_TEMPERATURE, empty_series(DHW_BOTTOM_TEMPERATURE))
                 ),
             ],
             heatpump_power=series_response(
-                series_by_name.get("hp_electric_power", empty_series("hp_electric_power"))
+                series_by_name.get(HP_ELECTRIC_POWER, empty_series(HP_ELECTRIC_POWER))
             ),
             heatpump_mode=text_series_response(
-                text_series_by_name.get("hp_mode", empty_text_series("hp_mode"))
+                text_series_by_name.get(HP_MODE, empty_text_series(HP_MODE))
             ),
             heatpump_statuses=[
+                series_response(series_by_name.get(DEFROST_ACTIVE, empty_series(DEFROST_ACTIVE))),
                 series_response(
-                    series_by_name.get("defrost_active", empty_series("defrost_active"))
-                ),
-                series_response(
-                    series_by_name.get(
-                        "booster_heater_active",
-                        empty_series("booster_heater_active"),
-                    )
+                    series_by_name.get(BOOSTER_HEATER_ACTIVE, empty_series(BOOSTER_HEATER_ACTIVE))
                 ),
             ],
             forecast_temperature=series_response(
-                forecast_series_by_name.get("temperature", empty_series("temperature"))
+                forecast_series_by_name.get(FORECAST_TEMPERATURE, empty_series(FORECAST_TEMPERATURE))
             ),
             forecast_gti=[
-                series_response(
-                    forecast_series_by_name.get("gti_pv", empty_series("gti_pv"))
-                ),
+                series_response(forecast_series_by_name.get(GTI_PV, empty_series(GTI_PV))),
                 series_response(
                     forecast_series_by_name.get(
-                        "gti_living_room_windows",
-                        empty_series("gti_living_room_windows"),
+                        GTI_LIVING_ROOM_WINDOWS,
+                        empty_series(GTI_LIVING_ROOM_WINDOWS),
                     )
                 ),
                 series_response(adjusted_living_room_gti),
             ],
             hp_supply_temperature=series_response(
-                series_by_name.get("hp_supply_temperature", empty_series("hp_supply_temperature"))
+                series_by_name.get(HP_SUPPLY_TEMPERATURE, empty_series(HP_SUPPLY_TEMPERATURE))
             ),
             hp_supply_target_temperature=series_response(
                 series_by_name.get(
-                    "hp_supply_target_temperature",
-                    empty_series("hp_supply_target_temperature"),
+                    HP_SUPPLY_TARGET_TEMPERATURE,
+                    empty_series(HP_SUPPLY_TARGET_TEMPERATURE),
                 )
             ),
             hp_return_temperature=series_response(
-                series_by_name.get("hp_return_temperature", empty_series("hp_return_temperature"))
+                series_by_name.get(HP_RETURN_TEMPERATURE, empty_series(HP_RETURN_TEMPERATURE))
             ),
             pv_output_power=series_response(
-                series_by_name.get("pv_output_power", empty_series("pv_output_power"))
+                series_by_name.get(PV_OUTPUT_POWER, empty_series(PV_OUTPUT_POWER))
             ),
             baseload=series_response(baseload_series),
             hp_delta_t=series_response(delta_series),
@@ -301,9 +284,6 @@ class DashboardChartsService:
             cop=series_response(cop_series),
             hp_flow=series_response(flow_series),
             compressor_frequency=series_response(
-                series_by_name.get(
-                    "compressor_frequency",
-                    empty_series("compressor_frequency"),
-                )
+                series_by_name.get(COMPRESSOR_FREQUENCY, empty_series(COMPRESSOR_FREQUENCY))
             ),
         )

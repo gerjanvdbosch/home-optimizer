@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from home_optimizer.app.history_import_jobs import HistoryImportJob
-from home_optimizer.domain.charts import ChartSeries, ChartTextSeries
+from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.web.schemas import (
     ChartPointResponse,
     ChartSeriesResponse,
@@ -25,7 +25,7 @@ def job_response(job: HistoryImportJob) -> HistoryImportJobResponse:
     )
 
 
-def series_response(series: ChartSeries) -> ChartSeriesResponse:
+def series_response(series: NumericSeries) -> ChartSeriesResponse:
     return ChartSeriesResponse(
         name=series.name,
         unit=series.unit,
@@ -36,7 +36,7 @@ def series_response(series: ChartSeries) -> ChartSeriesResponse:
     )
 
 
-def text_series_response(series: ChartTextSeries) -> ChartTextSeriesResponse:
+def text_series_response(series: TextSeries) -> ChartTextSeriesResponse:
     return ChartTextSeriesResponse(
         name=series.name,
         points=[

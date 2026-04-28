@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 
-from home_optimizer.domain.charts import ChartPoint, ChartSeries, ChartTextPoint, ChartTextSeries
+from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.domain.time import normalize_utc_timestamp
 from home_optimizer.infrastructure.database.orm_models import ForecastValue, Sample1m
 from home_optimizer.infrastructure.database.session import Database
@@ -19,7 +19,7 @@ class DashboardRepository:
         names: list[str],
         start_time: datetime,
         end_time: datetime,
-    ) -> list[ChartSeries]:
+    ) -> list[NumericSeries]:
         if not names:
             return []
 
@@ -50,11 +50,11 @@ class DashboardRepository:
         points_by_name = {name: [] for name in names}
         units_by_name: dict[str, str | None] = {name: None for name in names}
         for name, timestamp, unit, value in rows:
-            points_by_name[name].append(ChartPoint(timestamp=timestamp, value=float(value)))
+            points_by_name[name].append(NumericPoint(timestamp=timestamp, value=float(value)))
             units_by_name[name] = units_by_name[name] or unit
 
         return [
-            ChartSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
+            NumericSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
             for name in names
         ]
 
@@ -63,7 +63,7 @@ class DashboardRepository:
         names: list[str],
         start_time: datetime,
         end_time: datetime,
-    ) -> list[ChartTextSeries]:
+    ) -> list[TextSeries]:
         if not names:
             return []
 
@@ -85,16 +85,16 @@ class DashboardRepository:
 
         points_by_name = {name: [] for name in names}
         for name, timestamp, value in rows:
-            points_by_name[name].append(ChartTextPoint(timestamp=timestamp, value=str(value)))
+            points_by_name[name].append(TextPoint(timestamp=timestamp, value=str(value)))
 
-        return [ChartTextSeries(name=name, points=points_by_name[name]) for name in names]
+        return [TextSeries(name=name, points=points_by_name[name]) for name in names]
 
     def read_forecast_series(
         self,
         names: list[str],
         start_time: datetime,
         end_time: datetime,
-    ) -> list[ChartSeries]:
+    ) -> list[NumericSeries]:
         if not names:
             return []
 
@@ -152,7 +152,7 @@ class DashboardRepository:
 
         for name, timestamp, unit, value in rows:
             points_by_name[name].append(
-                ChartPoint(
+                NumericPoint(
                     timestamp=timestamp,
                     value=float(value),
                 )
@@ -160,7 +160,7 @@ class DashboardRepository:
             units_by_name[name] = units_by_name[name] or unit
 
         return [
-            ChartSeries(
+            NumericSeries(
                 name=name,
                 unit=units_by_name[name],
                 points=points_by_name[name],
