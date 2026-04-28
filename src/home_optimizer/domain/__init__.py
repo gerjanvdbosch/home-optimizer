@@ -1,5 +1,5 @@
-from .building_model import BuildingTemperatureModel
 from .clock import utc_now
+from .room_temperature_model import RoomTemperatureModel
 from .forecast import ForecastEntry
 from .location import Location, parse_location
 from .models import DomainModel
@@ -58,7 +58,6 @@ from .timeseries import MinuteSample
 __all__ = [
     "BASELOAD",
     "BOILER_AMBIENT_TEMPERATURE",
-    "BuildingTemperatureModel",
     "BOOSTER_HEATER_ACTIVE",
     "COMPRESSOR_FREQUENCY",
     "COP",
@@ -98,6 +97,7 @@ __all__ = [
     "REFRIGERANT_CONDENSATION_TEMPERATURE",
     "REFRIGERANT_LIQUID_LINE_TEMPERATURE",
     "ROOM_TEMPERATURE",
+    "RoomTemperatureModel",
     "SENSOR_DEFINITIONS",
     "SensorDefinition",
     "SensorSpec",

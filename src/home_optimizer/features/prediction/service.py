@@ -16,7 +16,7 @@ from home_optimizer.domain import (
     latest_value_at,
 )
 
-from .ports import BuildingTemperatureModelReader, PredictionDataReader
+from .ports import PredictionDataReader, RoomTemperatureModelReader
 from .schemas import BuildingTemperaturePrediction
 
 
@@ -24,7 +24,7 @@ class BuildingTemperaturePredictionService:
     def __init__(
         self,
         reader: PredictionDataReader,
-        model_repository: BuildingTemperatureModelReader,
+        model_repository: RoomTemperatureModelReader,
     ) -> None:
         self.reader = reader
         self.model_repository = model_repository
@@ -134,7 +134,6 @@ class BuildingTemperaturePredictionService:
             NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
         )
         current_value = latest_value_at(room_temperature.points, start_time.isoformat())
-        current_value = 20
         if current_value is None:
             raise ValueError("no room temperature available near prediction start_time")
         return float(current_value)

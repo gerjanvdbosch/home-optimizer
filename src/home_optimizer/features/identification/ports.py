@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from home_optimizer.domain import BuildingTemperatureModel, NumericSeries, TextSeries
+from home_optimizer.domain import NumericSeries, RoomTemperatureModel, TextSeries
 
 
 class IdentificationDataReader(Protocol):
@@ -29,7 +29,7 @@ class IdentificationDataReader(Protocol):
     ) -> list[TextSeries]: ...
 
 
-class BuildingTemperatureModelRepository(Protocol):
-    def save(self, model: BuildingTemperatureModel) -> None: ...
+class RoomTemperatureModelRepository(Protocol):
+    def save(self, model: RoomTemperatureModel) -> None: ...
 
-    def latest(self) -> BuildingTemperatureModel | None: ...
+    def latest(self) -> RoomTemperatureModel | None: ...

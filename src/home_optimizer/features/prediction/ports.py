@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from home_optimizer.domain import BuildingTemperatureModel, NumericSeries
+from home_optimizer.domain import NumericSeries, RoomTemperatureModel
 
 
 class PredictionDataReader(Protocol):
@@ -22,5 +22,5 @@ class PredictionDataReader(Protocol):
     ) -> list[NumericSeries]: ...
 
 
-class BuildingTemperatureModelReader(Protocol):
-    def latest(self) -> BuildingTemperatureModel | None: ...
+class RoomTemperatureModelReader(Protocol):
+    def latest(self) -> RoomTemperatureModel | None: ...

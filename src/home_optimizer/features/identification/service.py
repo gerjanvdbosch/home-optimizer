@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from home_optimizer.domain import BuildingTemperatureModel, utc_now
+from home_optimizer.domain import RoomTemperatureModel, utc_now
 
 from .dataset import IdentificationDatasetBuilder
 from .model import RoomTemperatureModelIdentifier
-from .ports import BuildingTemperatureModelRepository, IdentificationDataReader
+from .ports import IdentificationDataReader, RoomTemperatureModelRepository
 from .schemas import IdentificationDataset, IdentificationResult
 
 
@@ -16,7 +16,7 @@ class RoomTemperatureModelIdentificationService:
     def __init__(
         self,
         reader: IdentificationDataReader,
-        model_repository: BuildingTemperatureModelRepository | None = None,
+        model_repository: RoomTemperatureModelRepository | None = None,
     ) -> None:
         self.reader = reader
         self.model_repository = model_repository
@@ -62,7 +62,7 @@ class RoomTemperatureModelIdentificationService:
         *,
         interval_minutes: int = 15,
         train_fraction: float = 0.8,
-    ) -> BuildingTemperatureModel:
+    ) -> RoomTemperatureModel:
         if self.model_repository is None:
             raise ValueError("no building temperature model repository configured")
 
@@ -72,7 +72,7 @@ class RoomTemperatureModelIdentificationService:
             interval_minutes=interval_minutes,
             train_fraction=train_fraction,
         )
-        model = BuildingTemperatureModel(
+        model = RoomTemperatureModel(
             model_name=result.model_name,
             trained_at_utc=utc_now(),
             training_start_time_utc=start_time,

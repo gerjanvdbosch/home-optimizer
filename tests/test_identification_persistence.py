@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
-from home_optimizer.domain import BuildingTemperatureModel
+from home_optimizer.domain import NumericPoint, NumericSeries, RoomTemperatureModel, TextPoint, TextSeries
 from home_optimizer.features.identification import RoomTemperatureModelIdentificationService
 
 
@@ -64,19 +63,19 @@ class FakeIdentificationReader:
         ]
 
 
-class FakeBuildingModelRepository:
+class FakeRoomTemperatureModelRepository:
     def __init__(self) -> None:
-        self.saved: list[BuildingTemperatureModel] = []
+        self.saved: list[RoomTemperatureModel] = []
 
-    def save(self, model: BuildingTemperatureModel) -> None:
+    def save(self, model: RoomTemperatureModel) -> None:
         self.saved.append(model)
 
-    def latest(self) -> BuildingTemperatureModel | None:
+    def latest(self) -> RoomTemperatureModel | None:
         return self.saved[-1] if self.saved else None
 
 
 def test_identify_and_store_persists_model() -> None:
-    repository = FakeBuildingModelRepository()
+    repository = FakeRoomTemperatureModelRepository()
     service = RoomTemperatureModelIdentificationService(
         FakeIdentificationReader(),
         model_repository=repository,

@@ -2,17 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from home_optimizer.domain import BuildingTemperatureModel
-from home_optimizer.infrastructure.database.building_model_repository import BuildingModelRepository
+from home_optimizer.domain import RoomTemperatureModel
+from home_optimizer.infrastructure.database.room_temperature_model_repository import (
+    RoomTemperatureModelRepository,
+)
 from home_optimizer.infrastructure.database.session import Database
 
 
-def test_building_model_repository_returns_latest_model(tmp_path) -> None:
+def test_room_temperature_model_repository_returns_latest_model(tmp_path) -> None:
     database = Database(str(tmp_path / "models.sqlite"))
     database.init_schema()
-    repository = BuildingModelRepository(database)
+    repository = RoomTemperatureModelRepository(database)
 
-    first_model = BuildingTemperatureModel(
+    first_model = RoomTemperatureModel(
         model_name="linear_1step_room_temperature",
         trained_at_utc=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
         training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
