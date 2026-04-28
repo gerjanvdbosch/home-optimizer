@@ -7,7 +7,6 @@ from typing import Callable
 from fastapi import FastAPI
 from fastapi.responses import Response
 from starlette.staticfiles import StaticFiles
-from starlette.types import Scope
 
 from home_optimizer.app.container_factories import build_home_assistant_container
 from home_optimizer.app.history_import_jobs import HistoryImportJobRunner
@@ -16,13 +15,12 @@ from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.routers.dashboard import create_dashboard_router
 from home_optimizer.web.routers.history_import import create_history_import_router
-from home_optimizer.web.routers.system_identification import create_system_identification_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class NoCacheStaticFiles(StaticFiles):
-    async def get_response(self, path: str, scope: Scope) -> Response:
+    async def get_response(self, path: str, scope: dict) -> Response:
         response = await super().get_response(path, scope)
         response.headers.update(NO_CACHE_HEADERS)
         return response
@@ -63,6 +61,5 @@ def create_app(
 
     app.include_router(create_dashboard_router(settings))
     app.include_router(create_history_import_router(settings))
-    app.include_router(create_system_identification_router())
 
     return app
