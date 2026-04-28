@@ -123,12 +123,36 @@ Important:
 - web response models may be chart-oriented
 - domain models should stay generic
 - do not move chart/presentation semantics into domain just because the dashboard needs them
+- do not expose infrastructure models or ORM entities directly to web responses
+
+Map explicitly:
+
+infrastructure -> domain -> web response model
 
 ### Entrypoints
 
 `src/home_optimizer/entrypoints/`
 
 Put startup code here for local/add-on execution.
+
+## Dependency direction
+
+Dependencies should point inward:
+
+web -> app -> features -> domain
+
+Infrastructure implements dependencies required by features,
+but domain must never depend on infrastructure.
+
+Never import upward across layers.
+
+Examples:
+
+- `web` may depend on `features`
+- `features` may depend on `domain`
+- `domain` must not depend on `web`
+- `domain` must not depend on `infrastructure`
+- `infrastructure` adapts external systems into domain concepts
 
 ## Rules for adding new code
 
@@ -139,6 +163,11 @@ When adding code, ask:
 3. Is this external I/O? Put it in `infrastructure`.
 4. Is this app composition/runtime wiring? Put it in `app`.
 5. Is this API or UI formatting? Put it in `web`.
+
+Prefer composition over inheritance.
+
+Do not introduce class hierarchies unless polymorphism is genuinely needed.
+Prefer small explicit objects and pure functions.
 
 ## Rules for names and types
 
