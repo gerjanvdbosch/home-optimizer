@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from home_optimizer.app.history_import_jobs import HistoryImportJobRunner
+from home_optimizer.app import HistoryImportJobRunner
 from home_optimizer.web.ports import WebAppContainer
 
 

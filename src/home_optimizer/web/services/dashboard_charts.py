@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
-from home_optimizer.domain.charts import ChartPoint, ChartSeries
+from home_optimizer.domain import ChartPoint, ChartSeries, ChartTextSeries
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
@@ -44,6 +44,14 @@ def latest_value_at(points: list[ChartPoint], timestamp: str) -> float | None:
             break
         latest = point.value
     return latest
+
+
+def empty_series(name: str, unit: str | None = None) -> ChartSeries:
+    return ChartSeries(name=name, unit=unit, points=[])
+
+
+def empty_text_series(name: str) -> ChartTextSeries:
+    return ChartTextSeries(name=name, points=[])
 
 
 def build_delta_series(
@@ -181,8 +189,14 @@ class DashboardChartsService:
         text_series_by_name = {item.name: item for item in text_series}
         forecast_series_by_name = {item.name: item for item in forecast_series}
         adjusted_living_room_gti = adjusted_gti_with_shutter(
-            forecast_series_by_name["gti_living_room_windows"],
-            shutter_by_name["shutter_living_room"],
+            forecast_series_by_name.get(
+                "gti_living_room_windows",
+                empty_series("gti_living_room_windows", unit="Wm2"),
+            ),
+            shutter_by_name.get(
+                "shutter_living_room",
+                empty_series("shutter_living_room", unit="percent"),
+            ),
         )
 
         supply_series = series_by_name.get("hp_supply_temperature")
@@ -199,7 +213,7 @@ class DashboardChartsService:
             name="baseload",
         )
 
-        flow_series = series_by_name["hp_flow"]
+        flow_series = series_by_name.get("hp_flow", empty_series("hp_flow", unit="Lmin"))
         thermal_series, cop_series = build_thermal_and_cop_series(
             flow_series,
             series_by_name.get("hp_supply_temperature"),
@@ -211,33 +225,85 @@ class DashboardChartsService:
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
-            room_temperature=series_response(series_by_name["room_temperature"]),
-            thermostat_setpoint=series_response(series_by_name["thermostat_setpoint"]),
-            shutter_position=series_response(shutter_by_name["shutter_living_room"]),
+            room_temperature=series_response(
+                series_by_name.get("room_temperature", empty_series("room_temperature"))
+            ),
+            thermostat_setpoint=series_response(
+                series_by_name.get("thermostat_setpoint", empty_series("thermostat_setpoint"))
+            ),
+            shutter_position=series_response(
+                shutter_by_name.get(
+                    "shutter_living_room",
+                    empty_series("shutter_living_room", unit="percent"),
+                )
+            ),
             dhw_temperatures=[
-                series_response(series_by_name["dhw_top_temperature"]),
-                series_response(series_by_name["dhw_bottom_temperature"]),
+                series_response(
+                    series_by_name.get("dhw_top_temperature", empty_series("dhw_top_temperature"))
+                ),
+                series_response(
+                    series_by_name.get(
+                        "dhw_bottom_temperature",
+                        empty_series("dhw_bottom_temperature"),
+                    )
+                ),
             ],
-            heatpump_power=series_response(series_by_name["hp_electric_power"]),
-            heatpump_mode=text_series_response(text_series_by_name["hp_mode"]),
+            heatpump_power=series_response(
+                series_by_name.get("hp_electric_power", empty_series("hp_electric_power"))
+            ),
+            heatpump_mode=text_series_response(
+                text_series_by_name.get("hp_mode", empty_text_series("hp_mode"))
+            ),
             heatpump_statuses=[
-                series_response(series_by_name["defrost_active"]),
-                series_response(series_by_name["booster_heater_active"]),
+                series_response(
+                    series_by_name.get("defrost_active", empty_series("defrost_active"))
+                ),
+                series_response(
+                    series_by_name.get(
+                        "booster_heater_active",
+                        empty_series("booster_heater_active"),
+                    )
+                ),
             ],
-            forecast_temperature=series_response(forecast_series_by_name["temperature"]),
+            forecast_temperature=series_response(
+                forecast_series_by_name.get("temperature", empty_series("temperature"))
+            ),
             forecast_gti=[
-                series_response(forecast_series_by_name["gti_pv"]),
-                series_response(forecast_series_by_name["gti_living_room_windows"]),
+                series_response(
+                    forecast_series_by_name.get("gti_pv", empty_series("gti_pv"))
+                ),
+                series_response(
+                    forecast_series_by_name.get(
+                        "gti_living_room_windows",
+                        empty_series("gti_living_room_windows"),
+                    )
+                ),
                 series_response(adjusted_living_room_gti),
             ],
-            hp_supply_temperature=series_response(series_by_name["hp_supply_temperature"]),
-            hp_supply_target_temperature=series_response(series_by_name["hp_supply_target_temperature"]),
-            hp_return_temperature=series_response(series_by_name["hp_return_temperature"]),
-            pv_output_power=series_response(series_by_name["pv_output_power"]),
+            hp_supply_temperature=series_response(
+                series_by_name.get("hp_supply_temperature", empty_series("hp_supply_temperature"))
+            ),
+            hp_supply_target_temperature=series_response(
+                series_by_name.get(
+                    "hp_supply_target_temperature",
+                    empty_series("hp_supply_target_temperature"),
+                )
+            ),
+            hp_return_temperature=series_response(
+                series_by_name.get("hp_return_temperature", empty_series("hp_return_temperature"))
+            ),
+            pv_output_power=series_response(
+                series_by_name.get("pv_output_power", empty_series("pv_output_power"))
+            ),
             baseload=series_response(baseload_series),
             hp_delta_t=series_response(delta_series),
             thermal_output=series_response(thermal_series),
             cop=series_response(cop_series),
             hp_flow=series_response(flow_series),
-            compressor_frequency=series_response(series_by_name["compressor_frequency"]),
+            compressor_frequency=series_response(
+                series_by_name.get(
+                    "compressor_frequency",
+                    empty_series("compressor_frequency"),
+                )
+            ),
         )

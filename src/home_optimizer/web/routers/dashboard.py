@@ -10,13 +10,12 @@ import plotly
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
-from home_optimizer.app.history_import_requests import build_history_import_request
-from home_optimizer.app.settings import AppSettings
+from home_optimizer.app import AppSettings, build_history_import_request
 from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import DashboardChartsResponse, DashboardViewModel
-from home_optimizer.web.services.dashboard_charts import DashboardChartsService
+from home_optimizer.web.services import DashboardChartsService
 
 PLOTLY_JS_PATH = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"

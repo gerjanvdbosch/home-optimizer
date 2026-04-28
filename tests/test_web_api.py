@@ -8,11 +8,16 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from home_optimizer.app.settings import AppSettings
-from home_optimizer.domain.charts import ChartPoint, ChartSeries, ChartTextPoint, ChartTextSeries
-from home_optimizer.domain.sensor_factory import build_sensor_specs
-from home_optimizer.features.history_import.schemas import HistoryImportResult
-from home_optimizer.web.app import create_app
+from home_optimizer.app import AppSettings
+from home_optimizer.domain import (
+    ChartPoint,
+    ChartSeries,
+    ChartTextPoint,
+    ChartTextSeries,
+    build_sensor_specs,
+)
+from home_optimizer.features import HistoryImportResult
+from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
 
@@ -388,23 +393,31 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     local_timezone = dashboard_charts_module.current_timezone()
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
+    forecast_end_time = end_time + timedelta(minutes=15)
     assert app.state.container.dashboard_repository.calls == [
-            (
-                "numeric",
-                ["shutter_living_room"],
-                start_time.isoformat(),
-                end_time.isoformat(),
-            ),
+        (
+            "numeric",
+            ["shutter_living_room"],
+            start_time.isoformat(),
+            end_time.isoformat(),
+        ),
         (
             "numeric",
             [
                 "room_temperature",
                 "thermostat_setpoint",
+                "hp_flow",
+                "p1_net_power",
+                "pv_output_power",
+                "hp_supply_temperature",
+                "hp_supply_target_temperature",
+                "hp_return_temperature",
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
                 "defrost_active",
                 "booster_heater_active",
+                "compressor_frequency",
             ],
             start_time.isoformat(),
             end_time.isoformat(),
@@ -419,7 +432,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "forecast",
             ["temperature", "gti_pv", "gti_living_room_windows"],
             start_time.isoformat(),
-            end_time.isoformat(),
+            forecast_end_time.isoformat(),
         ),
     ]
 
