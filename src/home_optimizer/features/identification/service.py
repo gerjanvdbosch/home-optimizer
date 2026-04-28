@@ -89,6 +89,3 @@ class RoomTemperatureModelIdentificationService:
         )
         self.model_repository.save(model)
         return model
-
-
-BuildingModelIdentificationService = RoomTemperatureModelIdentificationService

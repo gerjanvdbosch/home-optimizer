@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.domain import BuildingTemperatureModel
-from home_optimizer.features.identification import BuildingModelIdentificationService
+from home_optimizer.features.identification import RoomTemperatureModelIdentificationService
 
 
 class FakeIdentificationReader:
@@ -77,7 +77,7 @@ class FakeBuildingModelRepository:
 
 def test_identify_and_store_persists_model() -> None:
     repository = FakeBuildingModelRepository()
-    service = BuildingModelIdentificationService(
+    service = RoomTemperatureModelIdentificationService(
         FakeIdentificationReader(),
         model_repository=repository,
     )

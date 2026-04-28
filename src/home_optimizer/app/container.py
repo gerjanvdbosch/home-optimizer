@@ -11,7 +11,7 @@ from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history_import.service import HistoryImportService
-from home_optimizer.features.identification.service import BuildingModelIdentificationService
+from home_optimizer.features.identification.service import RoomTemperatureModelIdentificationService
 from home_optimizer.features.prediction.service import BuildingTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.building_model_repository import BuildingModelRepository
@@ -36,7 +36,7 @@ class AppContainer:
     telemetry_repository: TimeSeriesRepository
     dashboard_repository: DashboardRepository
     building_model_repository: BuildingModelRepository
-    identification_service: BuildingModelIdentificationService
+    identification_service: RoomTemperatureModelIdentificationService
     prediction_service: BuildingTemperaturePredictionService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
@@ -66,7 +66,7 @@ def build_container(
     telemetry_repository = TimeSeriesRepository(database, source=telemetry_source)
     dashboard_repository = DashboardRepository(database)
     building_model_repository = BuildingModelRepository(database)
-    identification_service = BuildingModelIdentificationService(
+    identification_service = RoomTemperatureModelIdentificationService(
         dashboard_repository,
         model_repository=building_model_repository,
     )

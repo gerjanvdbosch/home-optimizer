@@ -1,11 +1,7 @@
 from .schemas import IdentificationDataset, IdentificationResult
-from .service import (
-    BuildingModelIdentificationService,
-    RoomTemperatureModelIdentificationService,
-)
+from .service import RoomTemperatureModelIdentificationService
 
 __all__ = [
-    "BuildingModelIdentificationService",
     "IdentificationDataset",
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",

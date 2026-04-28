@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
-from home_optimizer.features.identification import BuildingModelIdentificationService
+from home_optimizer.features.identification import RoomTemperatureModelIdentificationService
 
 
 class FakeIdentificationReader:
@@ -87,7 +87,7 @@ class FakeIdentificationReader:
 
 def test_build_dataset_resamples_and_returns_feature_matrix() -> None:
     reader = FakeIdentificationReader()
-    service = BuildingModelIdentificationService(reader)
+    service = RoomTemperatureModelIdentificationService(reader)
 
     dataset = service.build_dataset(
         start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
@@ -110,7 +110,7 @@ def test_build_dataset_resamples_and_returns_feature_matrix() -> None:
 
 def test_identify_fits_linear_baseline_and_reports_metrics() -> None:
     reader = FakeIdentificationReader()
-    service = BuildingModelIdentificationService(reader)
+    service = RoomTemperatureModelIdentificationService(reader)
 
     result = service.identify(
         start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
@@ -166,8 +166,8 @@ class StateFilteringReader(FakeIdentificationReader):
 def test_build_dataset_filters_defrost_and_dhw_samples() -> None:
     baseline_reader = FakeIdentificationReader()
     filtered_reader = StateFilteringReader()
-    baseline_service = BuildingModelIdentificationService(baseline_reader)
-    filtered_service = BuildingModelIdentificationService(filtered_reader)
+    baseline_service = RoomTemperatureModelIdentificationService(baseline_reader)
+    filtered_service = RoomTemperatureModelIdentificationService(filtered_reader)
 
     baseline_dataset = baseline_service.build_dataset(
         start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
