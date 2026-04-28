@@ -60,42 +60,72 @@ class FakeDashboardRepository:
                     points=[ChartPoint(timestamp="2026-04-25T11:55:00+00:00", value=50.0)],
                 )
             ]
+        if names == ["room_temperature", "outdoor_temperature", "hp_electric_power"]:
+            timestamps = [
+                (start_time + timedelta(minutes=15 * index)).isoformat()
+                for index in range(20)
+            ]
+            outdoor_values = [8.0 + index * 0.1 for index in range(20)]
+            heatpump_values = [0.5 if index % 4 < 2 else 1.5 for index in range(20)]
+            room_values = [20.0]
+            for index in range(19):
+                room_values.append(
+                    0.4
+                    + 0.9 * room_values[index]
+                    + 0.05 * outdoor_values[index]
+                    + 0.2 * heatpump_values[index]
+                )
+
+            return [
+                ChartSeries(
+                    name="room_temperature",
+                    unit="degC",
+                    points=[
+                        ChartPoint(timestamp=timestamp, value=value)
+                        for timestamp, value in zip(timestamps, room_values, strict=True)
+                    ],
+                ),
+                ChartSeries(
+                    name="outdoor_temperature",
+                    unit="degC",
+                    points=[
+                        ChartPoint(timestamp=timestamp, value=value)
+                        for timestamp, value in zip(timestamps, outdoor_values, strict=True)
+                    ],
+                ),
+                ChartSeries(
+                    name="hp_electric_power",
+                    unit="kW",
+                    points=[
+                        ChartPoint(timestamp=timestamp, value=value)
+                        for timestamp, value in zip(timestamps, heatpump_values, strict=True)
+                    ],
+                ),
+            ]
+        values = {
+            "room_temperature": ("degC", 20.5),
+            "outdoor_temperature": ("degC", 12.5),
+            "thermostat_setpoint": ("degC", 21.0),
+            "hp_flow": ("Lmin", 12.0),
+            "p1_net_power": ("kW", 0.2),
+            "pv_output_power": ("kW", 0.8),
+            "hp_supply_temperature": ("degC", 35.0),
+            "hp_supply_target_temperature": ("degC", 36.0),
+            "hp_return_temperature": ("degC", 30.0),
+            "dhw_top_temperature": ("degC", 48.0),
+            "dhw_bottom_temperature": ("degC", 42.0),
+            "hp_electric_power": ("W", 1500.0),
+            "defrost_active": ("bool", 0.0),
+            "booster_heater_active": ("bool", 1.0),
+            "compressor_frequency": ("Hz", 32.0),
+        }
         return [
             ChartSeries(
-                name="room_temperature",
-                unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
-            ),
-            ChartSeries(
-                name="thermostat_setpoint",
-                unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
-            ),
-            ChartSeries(
-                name="dhw_top_temperature",
-                unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
-            ),
-            ChartSeries(
-                name="dhw_bottom_temperature",
-                unit="degC",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=42.0)],
-            ),
-            ChartSeries(
-                name="hp_electric_power",
-                unit="W",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1500.0)],
-            ),
-            ChartSeries(
-                name="defrost_active",
-                unit="bool",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0)],
-            ),
-            ChartSeries(
-                name="booster_heater_active",
-                unit="bool",
-                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=1.0)],
-            ),
+                name=name,
+                unit=values[name][0],
+                points=[ChartPoint(timestamp="2026-04-25T12:00:00+00:00", value=values[name][1])],
+            )
+            for name in names
         ]
 
     def read_text_series(self, names, start_time, end_time) -> list[ChartTextSeries]:
@@ -400,11 +430,18 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             [
                 "room_temperature",
                 "thermostat_setpoint",
+                "hp_flow",
+                "p1_net_power",
+                "pv_output_power",
+                "hp_supply_temperature",
+                "hp_supply_target_temperature",
+                "hp_return_temperature",
                 "dhw_top_temperature",
                 "dhw_bottom_temperature",
                 "hp_electric_power",
                 "defrost_active",
                 "booster_heater_active",
+                "compressor_frequency",
             ],
             start_time.isoformat(),
             end_time.isoformat(),
@@ -419,7 +456,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "forecast",
             ["temperature", "gti_pv", "gti_living_room_windows"],
             start_time.isoformat(),
-            end_time.isoformat(),
+            (end_time + timedelta(minutes=15)).isoformat(),
         ),
     ]
 
@@ -454,6 +491,38 @@ def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.Mon
         "2026-04-25T00:00:00+02:00",
         "2026-04-26T00:00:00+02:00",
     )
+
+
+def test_system_identification_endpoint_returns_room_temperature_model() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/system-identification/room-temperature"
+            "?start=2026-04-25T00:00:00%2B00:00"
+            "&end=2026-04-25T05:00:00%2B00:00"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["target_name"] == "room_temperature_next"
+    assert payload["metrics"]["sample_count"] == 19
+    assert payload["metrics"]["rmse"] == pytest.approx(0.0, abs=1e-10)
+    assert payload["coefficients"]["room_temperature"] == pytest.approx(0.9)
 
 
 def test_plotly_script_is_served_locally() -> None:
