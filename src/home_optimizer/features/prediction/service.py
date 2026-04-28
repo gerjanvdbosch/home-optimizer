@@ -134,6 +134,7 @@ class BuildingTemperaturePredictionService:
             NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
         )
         current_value = latest_value_at(room_temperature.points, start_time.isoformat())
+        current_value = 20
         if current_value is None:
             raise ValueError("no room temperature available near prediction start_time")
         return float(current_value)

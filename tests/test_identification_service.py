@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from home_optimizer.domain import NumericPoint, NumericSeries
+from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.features.identification import BuildingModelIdentificationService
 
 
@@ -75,6 +75,15 @@ class FakeIdentificationReader:
             points.append(NumericPoint(timestamp=timestamp, value=solar_gain))
         return [NumericSeries(name="gti_living_room_windows", unit="Wm2", points=points)]
 
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
+        self.forecast_calls.append((names, start_time.isoformat(), end_time.isoformat()))
+        return [
+            TextSeries(
+                name="hp_mode",
+                points=[TextPoint(timestamp="2026-04-25T00:00:00+00:00", value="heat")],
+            )
+        ]
+
 
 def test_build_dataset_resamples_and_returns_feature_matrix() -> None:
     reader = FakeIdentificationReader()
@@ -120,3 +129,55 @@ def test_identify_fits_linear_baseline_and_reports_metrics() -> None:
     }
     assert result.train_rmse >= 0.0
     assert result.test_rmse >= 0.0
+
+
+class StateFilteringReader(FakeIdentificationReader):
+    def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
+        series = super().read_series(names, start_time, end_time)
+        by_name = {item.name: item for item in series}
+        by_name["defrost_active"] = NumericSeries(
+            name="defrost_active",
+            unit="bool",
+            points=[
+                NumericPoint(timestamp="2026-04-25T00:20:00+00:00", value=1.0),
+                NumericPoint(timestamp="2026-04-25T00:40:00+00:00", value=0.0),
+            ],
+        )
+        by_name["booster_heater_active"] = NumericSeries(
+            name="booster_heater_active",
+            unit="bool",
+            points=[],
+        )
+        return list(by_name.values())
+
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
+        return [
+            TextSeries(
+                name="hp_mode",
+                points=[
+                    TextPoint(timestamp="2026-04-25T00:00:00+00:00", value="heat"),
+                    TextPoint(timestamp="2026-04-25T01:00:00+00:00", value="dhw"),
+                    TextPoint(timestamp="2026-04-25T01:30:00+00:00", value="heat"),
+                ],
+            )
+        ]
+
+
+def test_build_dataset_filters_defrost_and_dhw_samples() -> None:
+    baseline_reader = FakeIdentificationReader()
+    filtered_reader = StateFilteringReader()
+    baseline_service = BuildingModelIdentificationService(baseline_reader)
+    filtered_service = BuildingModelIdentificationService(filtered_reader)
+
+    baseline_dataset = baseline_service.build_dataset(
+        start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 25, 4, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+    )
+    filtered_dataset = filtered_service.build_dataset(
+        start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 25, 4, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+    )
+
+    assert len(filtered_dataset.features) < len(baseline_dataset.features)

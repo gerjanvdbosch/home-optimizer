@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from home_optimizer.domain import NumericPoint, NumericSeries
+from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.domain import BuildingTemperatureModel
 from home_optimizer.features.identification import BuildingModelIdentificationService
 
@@ -54,6 +54,14 @@ class FakeIdentificationReader:
             solar_gain = 120.0 if 12 <= index <= 30 else 0.0
             points.append(NumericPoint(timestamp=timestamp, value=solar_gain))
         return [NumericSeries(name="gti_living_room_windows", unit="Wm2", points=points)]
+
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
+        return [
+            TextSeries(
+                name="hp_mode",
+                points=[TextPoint(timestamp="2026-04-25T00:00:00+00:00", value="heat")],
+            )
+        ]
 
 
 class FakeBuildingModelRepository:
