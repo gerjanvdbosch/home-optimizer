@@ -23,13 +23,17 @@ const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
 const predictionSummary = document.getElementById("prediction-summary");
 const predictionChart = document.getElementById("prediction-chart");
+const predictionStatDelta = document.getElementById("prediction-stat-delta");
+const predictionStatRmse = document.getElementById("prediction-stat-rmse");
+const predictionStatBias = document.getElementById("prediction-stat-bias");
+const predictionStatMaxError = document.getElementById("prediction-stat-max-error");
 
 function setPredictionDefaults(date = new Date()) {
   if (!predictionStartInput) {
     return;
   }
   const start = new Date(date);
-  start.setHours(24, 0, 0, 0);
+  start.setHours(0, 0, 0, 0);
   predictionStartInput.value = toDatetimeLocalValue(start);
 }
 
@@ -44,6 +48,13 @@ function setTrainingDefaults(date = new Date()) {
   start.setDate(start.getDate() - 3);
   trainingStartInput.value = toDatetimeLocalValue(start);
   trainingEndInput.value = toDatetimeLocalValue(end);
+}
+
+function resetPredictionStats() {
+  if (predictionStatDelta) predictionStatDelta.textContent = "-";
+  if (predictionStatRmse) predictionStatRmse.textContent = "-";
+  if (predictionStatBias) predictionStatBias.textContent = "-";
+  if (predictionStatMaxError) predictionStatMaxError.textContent = "-";
 }
 
 async function runPrediction(event) {
@@ -121,32 +132,50 @@ async function runPrediction(event) {
     if (predictionSummary) {
       const predicted = latestPoint(responsePayload.predicted_room_temperature);
       const actual = latestPoint(responsePayload.actual_room_temperature);
-      const metricParts = [];
-      if (responsePayload.rmse !== null) metricParts.push(`RMSE ${responsePayload.rmse.toFixed(2)}`);
-      if (responsePayload.bias !== null) metricParts.push(`bias ${formatSigned(responsePayload.bias, 2)}`);
-      if (responsePayload.max_absolute_error !== null) {
-        metricParts.push(`max fout ${responsePayload.max_absolute_error.toFixed(2)}`);
-      }
-
       if (predicted && actual) {
         const delta = predicted.value - actual.value;
-        predictionSummary.textContent =
-          `eindpunt voorspeld ${predicted.value.toFixed(1)} ${responsePayload.predicted_room_temperature.unit || ""}` +
-          ` · gemeten ${actual.value.toFixed(1)} ${responsePayload.actual_room_temperature.unit || ""}` +
-          ` · delta ${formatSigned(delta, 1)}` +
-          (metricParts.length > 0 ? ` · ${metricParts.join(" · ")}` : "");
-      } else if (metricParts.length > 0) {
-        predictionSummary.textContent = metricParts.join(" · ");
+        if (predictionStatDelta) predictionStatDelta.textContent = formatSigned(delta, 1);
+        if (predictionStatRmse) {
+          predictionStatRmse.textContent =
+            responsePayload.rmse !== null ? responsePayload.rmse.toFixed(2) : "-";
+        }
+        if (predictionStatBias) {
+          predictionStatBias.textContent =
+            responsePayload.bias !== null ? formatSigned(responsePayload.bias, 2) : "-";
+        }
+        if (predictionStatMaxError) {
+          predictionStatMaxError.textContent =
+            responsePayload.max_absolute_error !== null
+              ? responsePayload.max_absolute_error.toFixed(2)
+              : "-";
+        }
+        predictionSummary.textContent = "Vergelijking bijgewerkt";
       } else {
-        predictionSummary.textContent = "-";
+        if (predictionStatDelta) predictionStatDelta.textContent = "-";
+        if (predictionStatRmse) {
+          predictionStatRmse.textContent =
+            responsePayload.rmse !== null ? responsePayload.rmse.toFixed(2) : "-";
+        }
+        if (predictionStatBias) {
+          predictionStatBias.textContent =
+            responsePayload.bias !== null ? formatSigned(responsePayload.bias, 2) : "-";
+        }
+        if (predictionStatMaxError) {
+          predictionStatMaxError.textContent =
+            responsePayload.max_absolute_error !== null
+              ? responsePayload.max_absolute_error.toFixed(2)
+              : "-";
+        }
+        predictionSummary.textContent = "Vergelijking bijgewerkt";
       }
     }
   } catch (error) {
     predictionStatus.className = "status error";
     predictionStatus.textContent = error instanceof Error ? error.message : "Voorspelling mislukt.";
     if (predictionSummary) {
-      predictionSummary.textContent = "-";
+      predictionSummary.textContent = "Vergelijk voorspelling met metingen";
     }
+    resetPredictionStats();
   } finally {
     predictionButton.disabled = false;
   }
@@ -205,3 +234,4 @@ window.addEventListener("resize", () => {
 
 setPredictionDefaults();
 setTrainingDefaults();
+resetPredictionStats();

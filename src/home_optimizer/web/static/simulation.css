@@ -3,6 +3,35 @@
   gap: 12px;
 }
 
+.comparison-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.comparison-stat {
+  padding: 12px 14px;
+  border: 1px solid var(--ha-border);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbfd 100%);
+}
+
+.comparison-stat-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ha-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.comparison-stat strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 500;
+}
+
 .scenario-form,
 .training-panel {
   display: grid;
@@ -45,6 +74,7 @@
 }
 
 @media (max-width: 760px) {
+  .comparison-stats,
   .scenario-form,
   .training-panel {
     grid-template-columns: 1fr;

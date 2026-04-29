@@ -21,6 +21,54 @@
       </header>
 
       <section class="simulation-layout">
+        <article class="panel prediction-panel">
+          <div class="panel-heading">
+            <h2>Scenario voorspelling vs gemeten</h2>
+            <span id="prediction-summary">Vergelijk voorspelling met metingen</span>
+          </div>
+          <div class="comparison-stats" aria-label="Vergelijkingsstatistieken">
+            <article class="comparison-stat">
+              <span class="comparison-stat-label">Eind delta</span>
+              <strong id="prediction-stat-delta">-</strong>
+            </article>
+            <article class="comparison-stat">
+              <span class="comparison-stat-label">RMSE</span>
+              <strong id="prediction-stat-rmse">-</strong>
+            </article>
+            <article class="comparison-stat">
+              <span class="comparison-stat-label">Bias</span>
+              <strong id="prediction-stat-bias">-</strong>
+            </article>
+            <article class="comparison-stat">
+              <span class="comparison-stat-label">Max fout</span>
+              <strong id="prediction-stat-max-error">-</strong>
+            </article>
+          </div>
+          <form id="prediction-form" class="scenario-form">
+            <label>
+              Start
+              <input id="prediction-start" type="datetime-local" required />
+            </label>
+            <label>
+              Uren vooruit
+              <input id="prediction-hours" type="number" min="1" max="48" step="1" value="24" required />
+            </label>
+            <label>
+              Setpoint
+              <input id="prediction-setpoint" type="number" min="5" max="30" step="0.1" value="18" required />
+            </label>
+            <label>
+              Shutter (%)
+              <input id="prediction-shutter" type="number" min="0" max="100" step="1" value="100" required />
+            </label>
+            <div class="scenario-actions">
+              <button id="prediction-button" type="submit">Vergelijk met metingen</button>
+              <div id="prediction-status" class="status" aria-live="polite"></div>
+            </div>
+          </form>
+          <div class="chart-wrap" id="prediction-chart"></div>
+        </article>
+
         <article class="panel">
           <div class="panel-heading">
             <h2>Model trainen</h2>
@@ -47,36 +95,6 @@
               <div id="training-status" class="status" aria-live="polite"></div>
             </div>
           </div>
-        </article>
-
-        <article class="panel prediction-panel">
-          <div class="panel-heading">
-            <h2>Scenario voorspelling vs gemeten</h2>
-            <span id="prediction-summary">-</span>
-          </div>
-          <form id="prediction-form" class="scenario-form">
-            <label>
-              Start
-              <input id="prediction-start" type="datetime-local" required />
-            </label>
-            <label>
-              Uren vooruit
-              <input id="prediction-hours" type="number" min="1" max="48" step="1" value="24" required />
-            </label>
-            <label>
-              Setpoint
-              <input id="prediction-setpoint" type="number" min="5" max="30" step="0.1" value="18" required />
-            </label>
-            <label>
-              Shutter (%)
-              <input id="prediction-shutter" type="number" min="0" max="100" step="1" value="100" required />
-            </label>
-            <div class="scenario-actions">
-              <button id="prediction-button" type="submit">Vergelijk met metingen</button>
-              <div id="prediction-status" class="status" aria-live="polite"></div>
-            </div>
-          </form>
-          <div class="chart-wrap" id="prediction-chart"></div>
         </article>
       </section>
     </main>
