@@ -172,6 +172,10 @@ function latestPoint(series) {
   return series.points[series.points.length - 1];
 }
 
+function formatSigned(value, digits = 2) {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
 async function runImport() {
   if (!button) {
     return;
@@ -454,12 +458,26 @@ async function runPrediction(event) {
     if (predictionSummary) {
       const predicted = latestPoint(responsePayload.predicted_room_temperature);
       const actual = latestPoint(responsePayload.actual_room_temperature);
+      const metricParts = [];
+      if (responsePayload.rmse !== null) {
+        metricParts.push(`RMSE ${responsePayload.rmse.toFixed(2)}`);
+      }
+      if (responsePayload.bias !== null) {
+        metricParts.push(`bias ${formatSigned(responsePayload.bias, 2)}`);
+      }
+      if (responsePayload.max_absolute_error !== null) {
+        metricParts.push(`max fout ${responsePayload.max_absolute_error.toFixed(2)}`);
+      }
+
       if (predicted && actual) {
         const delta = predicted.value - actual.value;
         predictionSummary.textContent =
           `eindpunt voorspeld ${predicted.value.toFixed(1)} ${responsePayload.predicted_room_temperature.unit || ""}` +
           ` · gemeten ${actual.value.toFixed(1)} ${responsePayload.actual_room_temperature.unit || ""}` +
-          ` · delta ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+          ` · delta ${formatSigned(delta, 1)}` +
+          (metricParts.length > 0 ? ` · ${metricParts.join(" · ")}` : "");
+      } else if (metricParts.length > 0) {
+        predictionSummary.textContent = metricParts.join(" · ");
       } else if (predicted) {
         predictionSummary.textContent =
           `eindpunt voorspeld ${predicted.value.toFixed(1)} ${responsePayload.predicted_room_temperature.unit || ""}`;

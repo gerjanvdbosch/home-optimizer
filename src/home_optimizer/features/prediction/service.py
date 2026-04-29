@@ -14,6 +14,7 @@ from home_optimizer.domain import (
     THERMOSTAT_SETPOINT,
     adjusted_gti_with_shutter,
     latest_value_at,
+    normalize_utc_timestamp,
 )
 from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
 
@@ -83,13 +84,13 @@ class RoomTemperaturePredictionService:
         timestamp = start_time + interval
         while timestamp <= end_time:
             timestamp_iso = timestamp.isoformat()
-            previous_timestamp_iso = (timestamp - interval).isoformat()
-            outdoor_temperature = latest_value_at(outdoor_forecast.points, timestamp_iso)
+            previous_timestamp = timestamp - interval
+            outdoor_temperature = latest_value_at(outdoor_forecast.points, timestamp)
             thermostat_setpoint = latest_value_at(
                 thermostat_schedule.points,
-                previous_timestamp_iso,
+                previous_timestamp,
             )
-            solar_gain = latest_value_at(adjusted_gti.points, timestamp_iso)
+            solar_gain = latest_value_at(adjusted_gti.points, timestamp)
 
             if None in (
                 outdoor_temperature,
@@ -97,7 +98,8 @@ class RoomTemperaturePredictionService:
                 solar_gain,
             ):
                 raise ValueError(
-                    f"missing prediction inputs at {timestamp_iso}; provide schedules and forecast coverage"
+                    "missing prediction inputs at "
+                    f"{normalize_utc_timestamp(timestamp)}; provide schedules and forecast coverage"
                 )
 
             current_room_temperature = (
@@ -142,9 +144,23 @@ class RoomTemperaturePredictionService:
             start_time=start_time,
             end_time=end_time,
         )
-        actual_room_temperature = next(
+        actual_room_temperature_raw = next(
             iter(actual_series),
             NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
+        )
+        actual_room_temperature = NumericSeries(
+            name=actual_room_temperature_raw.name,
+            unit=actual_room_temperature_raw.unit,
+            points=[
+                NumericPoint(
+                    timestamp=point.timestamp,
+                    value=float(
+                        latest_value_at(actual_room_temperature_raw.points, point.timestamp)
+                    ),
+                )
+                for point in prediction.room_temperature.points
+                if latest_value_at(actual_room_temperature_raw.points, point.timestamp) is not None
+            ],
         )
         return RoomTemperaturePredictionComparison(
             model_name=prediction.model_name,
@@ -169,7 +185,7 @@ class RoomTemperaturePredictionService:
             iter(room_series),
             NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
         )
-        current_value = latest_value_at(room_temperature.points, start_time.isoformat())
+        current_value = latest_value_at(room_temperature.points, start_time)
         if current_value is None:
             raise ValueError("no room temperature available near prediction start_time")
         return float(current_value)

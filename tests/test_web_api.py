@@ -853,27 +853,30 @@ def test_prediction_comparison_endpoint_returns_predicted_and_actual_series() ->
         )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "model_name": "linear_1step_room_temperature",
-        "interval_minutes": 15,
-        "target_name": "room_temperature",
-        "predicted_room_temperature": {
-            "name": "room_temperature",
-            "unit": "degC",
-            "points": [
-                {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.7},
-                {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.9},
-            ],
-        },
-        "actual_room_temperature": {
-            "name": "room_temperature",
-            "unit": "degC",
-            "points": [
-                {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.6},
-                {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.8},
-            ],
-        },
+    payload = response.json()
+    assert payload["model_name"] == "linear_1step_room_temperature"
+    assert payload["interval_minutes"] == 15
+    assert payload["target_name"] == "room_temperature"
+    assert payload["predicted_room_temperature"] == {
+        "name": "room_temperature",
+        "unit": "degC",
+        "points": [
+            {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.7},
+            {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.9},
+        ],
     }
+    assert payload["actual_room_temperature"] == {
+        "name": "room_temperature",
+        "unit": "degC",
+        "points": [
+            {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.6},
+            {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.8},
+        ],
+    }
+    assert payload["overlap_count"] == 2
+    assert payload["rmse"] == pytest.approx(0.1)
+    assert payload["bias"] == pytest.approx(0.1)
+    assert payload["max_absolute_error"] == pytest.approx(0.1)
     assert app.state.container.prediction_service.comparison_calls == [
         {
             "start_time": "2026-04-28T10:00:00+00:00",

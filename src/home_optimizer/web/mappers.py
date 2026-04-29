@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from home_optimizer.app.history_import_jobs import HistoryImportJob
 from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
@@ -115,10 +117,41 @@ def prediction_response(result: RoomTemperaturePrediction) -> PredictionResponse
 def prediction_comparison_response(
     result: RoomTemperaturePredictionComparison,
 ) -> PredictionComparisonResponse:
+    overlap_count, rmse, bias, max_absolute_error = prediction_error_summary(
+        predicted=result.predicted_room_temperature,
+        actual=result.actual_room_temperature,
+    )
     return PredictionComparisonResponse(
         model_name=result.model_name,
         interval_minutes=result.interval_minutes,
         target_name=result.target_name,
         predicted_room_temperature=series_response(result.predicted_room_temperature),
         actual_room_temperature=series_response(result.actual_room_temperature),
+        overlap_count=overlap_count,
+        rmse=rmse,
+        bias=bias,
+        max_absolute_error=max_absolute_error,
     )
+
+
+def prediction_error_summary(
+    *,
+    predicted: NumericSeries,
+    actual: NumericSeries,
+) -> tuple[int, float | None, float | None, float | None]:
+    actual_by_timestamp = {point.timestamp: point.value for point in actual.points}
+    errors = [
+        point.value - actual_by_timestamp[point.timestamp]
+        for point in predicted.points
+        if point.timestamp in actual_by_timestamp
+    ]
+    if not errors:
+        return 0, None, None, None
+
+    squared_errors = [error * error for error in errors]
+    absolute_errors = [abs(error) for error in errors]
+    overlap_count = len(errors)
+    rmse = math.sqrt(sum(squared_errors) / overlap_count)
+    bias = sum(errors) / overlap_count
+    max_absolute_error = max(absolute_errors)
+    return overlap_count, rmse, bias, max_absolute_error

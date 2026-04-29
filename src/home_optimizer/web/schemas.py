@@ -145,3 +145,7 @@ class PredictionComparisonResponse(BaseModel):
     target_name: str
     predicted_room_temperature: ChartSeriesResponse
     actual_room_temperature: ChartSeriesResponse
+    overlap_count: int
+    rmse: float | None
+    bias: float | None
+    max_absolute_error: float | None

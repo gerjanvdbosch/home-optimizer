@@ -174,6 +174,6 @@ def test_prediction_service_returns_prediction_vs_actual() -> None:
         "2026-04-28T10:30:00+00:00",
     ]
     assert [point.timestamp for point in comparison.actual_room_temperature.points] == [
-        "2026-04-28T09:45:00+00:00",
-        "2026-04-28T10:00:00+00:00",
+        "2026-04-28T10:15:00+00:00",
+        "2026-04-28T10:30:00+00:00",
     ]
