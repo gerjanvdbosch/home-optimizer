@@ -61,6 +61,20 @@
               Shutter (%)
               <input id="prediction-shutter" type="number" min="0" max="100" step="1" value="100" required />
             </label>
+            <fieldset class="scenario-fieldset">
+              <legend>Shutter bron</legend>
+              <label class="radio-option">
+                <input id="prediction-shutter-source-measured" type="radio" name="prediction-shutter-source" value="measured" checked />
+                <span>Gemeten</span>
+              </label>
+              <label class="radio-option">
+                <input id="prediction-shutter-source-manual" type="radio" name="prediction-shutter-source" value="manual" />
+                <span>Handmatig</span>
+              </label>
+            </fieldset>
+            <p id="prediction-shutter-help" class="field-help">
+              De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking.
+            </p>
             <div class="scenario-actions">
               <button id="prediction-button" type="submit">Vergelijk met metingen</button>
               <div id="prediction-status" class="status" aria-live="polite"></div>

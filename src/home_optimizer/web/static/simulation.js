@@ -1,6 +1,7 @@
 const {
   apiUrl,
   buildConstantSeries,
+  formatDate,
   formatSigned,
   latestPoint,
   localInputToIso,
@@ -19,6 +20,9 @@ const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
 const predictionSetpointInput = document.getElementById("prediction-setpoint");
 const predictionShutterInput = document.getElementById("prediction-shutter");
+const predictionShutterSourceMeasured = document.getElementById("prediction-shutter-source-measured");
+const predictionShutterSourceManual = document.getElementById("prediction-shutter-source-manual");
+const predictionShutterHelp = document.getElementById("prediction-shutter-help");
 const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
 const predictionSummary = document.getElementById("prediction-summary");
@@ -57,13 +61,48 @@ function resetPredictionStats() {
   if (predictionStatMaxError) predictionStatMaxError.textContent = "-";
 }
 
+function updateShutterMode() {
+  const useMeasuredShutters = Boolean(predictionShutterSourceMeasured?.checked);
+  if (predictionShutterInput) {
+    predictionShutterInput.disabled = useMeasuredShutters;
+  }
+  if (predictionShutterHelp) {
+    predictionShutterHelp.textContent = useMeasuredShutters
+      ? "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking."
+      : "Het ingevulde shutterpercentage wordt als constant scenario over de hele horizon gebruikt.";
+  }
+}
+
+async function buildPredictionShutterSchedule(startDate, endDate) {
+  if (predictionShutterSourceMeasured?.checked) {
+    const params = new URLSearchParams({ date: formatDate(startDate) });
+    const response = await fetch(apiUrl(`api/dashboard/charts?${params.toString()}`));
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Gemeten shutterdata ophalen mislukt.");
+    }
+    if (!payload.shutter_position?.points?.length) {
+      throw new Error("geen gemeten shutterdata beschikbaar voor de startdag");
+    }
+    return payload.shutter_position;
+  }
+
+  return buildConstantSeries(
+    "shutter_living_room",
+    "percent",
+    startDate,
+    endDate,
+    15,
+    Number(predictionShutterInput?.value || 100),
+  );
+}
+
 async function runPrediction(event) {
   event.preventDefault();
   if (
     !predictionStartInput ||
     !predictionHoursInput ||
     !predictionSetpointInput ||
-    !predictionShutterInput ||
     !predictionButton ||
     !predictionStatus ||
     !predictionChart
@@ -92,14 +131,7 @@ async function runPrediction(event) {
         15,
         Number(predictionSetpointInput.value),
       ),
-      shutter_schedule: buildConstantSeries(
-        "shutter_living_room",
-        "percent",
-        startDate,
-        endDate,
-        15,
-        Number(predictionShutterInput.value),
-      ),
+      shutter_schedule: await buildPredictionShutterSchedule(startDate, endDate),
     };
 
     const response = await fetch(apiUrl("api/prediction/compare"), {
@@ -226,6 +258,8 @@ async function runTraining() {
 
 predictionForm?.addEventListener("submit", runPrediction);
 trainingButton?.addEventListener("click", runTraining);
+predictionShutterSourceMeasured?.addEventListener("change", updateShutterMode);
+predictionShutterSourceManual?.addEventListener("change", updateShutterMode);
 window.addEventListener("resize", () => {
   if (predictionChart) {
     Plotly.Plots.resize(predictionChart);
@@ -235,3 +269,4 @@ window.addEventListener("resize", () => {
 setPredictionDefaults();
 setTrainingDefaults();
 resetPredictionStats();
+updateShutterMode();

@@ -11,7 +11,7 @@
 }
 
 .comparison-stat {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--ha-border);
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #f7fbfd 100%);
@@ -28,7 +28,7 @@
 
 .comparison-stat strong {
   display: block;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 500;
 }
 
@@ -48,12 +48,47 @@
   font-size: 13px;
 }
 
+.scenario-fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  column-gap: 16px;
+  row-gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--ha-border);
+  border-radius: 8px;
+  color: var(--ha-secondary);
+}
+
+.scenario-fieldset legend {
+  grid-column: 1 / -1;
+  padding: 0 6px;
+  color: var(--ha-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.scenario-form label.radio-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--ha-text);
+  font-size: 13px;
+}
+
+.radio-option input {
+  order: 0;
+  margin: 0;
+}
+
 .scenario-form input,
 .training-panel input {
-  min-height: 40px;
   border: 1px solid var(--ha-border);
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   color: var(--ha-text);
   background: #ffffff;
   font: inherit;
@@ -73,10 +108,21 @@
   grid-column: 1 / -1;
 }
 
+.field-help {
+  margin: -4px 0 0;
+  color: var(--ha-secondary);
+  font-size: 12px;
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 760px) {
   .comparison-stats,
   .scenario-form,
   .training-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-fieldset {
     grid-template-columns: 1fr;
   }
 }
