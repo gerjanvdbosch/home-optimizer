@@ -1,38 +1,24 @@
 from __future__ import annotations
 
 from datetime import date
-from html import escape
 from pathlib import Path
-from string import Template
 from typing import Annotated
 
 import plotly
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
-from home_optimizer.app import AppSettings, build_history_import_request
+from home_optimizer.app import AppSettings
 from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.dependencies import get_container
+from home_optimizer.web.pages import build_dashboard_view_model, render_template
 from home_optimizer.web.ports import WebAppContainer
-from home_optimizer.web.schemas import DashboardChartsResponse, DashboardViewModel
+from home_optimizer.web.schemas import DashboardChartsResponse
 from home_optimizer.web.services import DashboardChartsService
 
 PLOTLY_JS_PATH = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
-TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 ChartDateQuery = Annotated[date, Query(alias="date")]
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
-
-
-def render_template(template_name: str, view_model: DashboardViewModel) -> str:
-    template = Template((TEMPLATES_DIR / template_name).read_text(encoding="utf-8"))
-    return template.substitute(
-        title=escape(view_model.title),
-        import_window_days=view_model.import_window_days,
-        chunk_days=view_model.chunk_days,
-        sensor_count=view_model.sensor_count,
-        database_path=escape(view_model.database_path),
-        api_port=view_model.api_port,
-    )
 
 
 def create_dashboard_router(settings: AppSettings) -> APIRouter:
@@ -40,29 +26,11 @@ def create_dashboard_router(settings: AppSettings) -> APIRouter:
 
     @router.get("/", response_class=HTMLResponse)
     def dashboard() -> HTMLResponse:
-        request = build_history_import_request(settings)
-        view_model = DashboardViewModel(
+        view_model = build_dashboard_view_model(
+            settings,
             title="Home Optimizer",
-            import_window_days=settings.history_import_max_days_back,
-            chunk_days=settings.history_import_chunk_days,
-            sensor_count=len(request.specs),
-            database_path=settings.database_path,
-            api_port=settings.api_port,
         )
         return HTMLResponse(render_template("dashboard.html", view_model))
-
-    @router.get("/simulation", response_class=HTMLResponse)
-    def simulation() -> HTMLResponse:
-        request = build_history_import_request(settings)
-        view_model = DashboardViewModel(
-            title="Home Optimizer Simulatie",
-            import_window_days=settings.history_import_max_days_back,
-            chunk_days=settings.history_import_chunk_days,
-            sensor_count=len(request.specs),
-            database_path=settings.database_path,
-            api_port=settings.api_port,
-        )
-        return HTMLResponse(render_template("simulation.html", view_model))
 
     @router.get("/plotly.js", response_class=FileResponse)
     def plotly_js() -> FileResponse:
