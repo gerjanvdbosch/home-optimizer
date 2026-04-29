@@ -5,7 +5,11 @@ from .identification import (
     IdentificationResult,
     RoomTemperatureModelIdentificationService,
 )
-from .prediction import RoomTemperaturePrediction, RoomTemperaturePredictionService
+from .prediction import (
+    RoomTemperaturePrediction,
+    RoomTemperaturePredictionComparison,
+    RoomTemperaturePredictionService,
+)
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
@@ -16,6 +20,7 @@ __all__ = [
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",
     "RoomTemperaturePrediction",
+    "RoomTemperaturePredictionComparison",
     "RoomTemperaturePredictionService",
     "LiveMeasurement",
     "OpenMeteoForecastService",

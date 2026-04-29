@@ -3,7 +3,10 @@ from __future__ import annotations
 from home_optimizer.app.history_import_jobs import HistoryImportJob
 from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
-from home_optimizer.features.prediction.schemas import RoomTemperaturePrediction
+from home_optimizer.features.prediction.schemas import (
+    RoomTemperaturePrediction,
+    RoomTemperaturePredictionComparison,
+)
 from home_optimizer.web.schemas import (
     ChartPointResponse,
     ChartSeriesResponse,
@@ -13,6 +16,7 @@ from home_optimizer.web.schemas import (
     IdentificationResponse,
     IdentificationTrainRequest,
     NumericSeriesRequest,
+    PredictionComparisonResponse,
     PredictionResponse,
     StoredIdentifiedModelResponse,
 )
@@ -105,4 +109,16 @@ def prediction_response(result: RoomTemperaturePrediction) -> PredictionResponse
         interval_minutes=result.interval_minutes,
         target_name=result.target_name,
         room_temperature=series_response(result.room_temperature),
+    )
+
+
+def prediction_comparison_response(
+    result: RoomTemperaturePredictionComparison,
+) -> PredictionComparisonResponse:
+    return PredictionComparisonResponse(
+        model_name=result.model_name,
+        interval_minutes=result.interval_minutes,
+        target_name=result.target_name,
+        predicted_room_temperature=series_response(result.predicted_room_temperature),
+        actual_room_temperature=series_response(result.actual_room_temperature),
     )

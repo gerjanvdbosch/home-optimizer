@@ -122,3 +122,58 @@ def test_prediction_service_simulates_multiple_steps() -> None:
     assert [point.value for point in prediction.room_temperature.points] == pytest.approx(
         [19.83, 19.227, 18.6843, 18.19587]
     )
+
+
+def test_prediction_service_returns_prediction_vs_actual() -> None:
+    model = IdentifiedModel(
+        model_kind="room_temperature",
+        model_name="linear_1step_room_temperature",
+        trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
+        training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+        sample_count=100,
+        train_sample_count=80,
+        test_sample_count=20,
+        coefficients={
+            "previous_room_temperature": 0.9,
+            "outdoor_temperature": 0.02,
+            "previous_thermostat_setpoint": 0.03,
+            "gti_living_room_windows_adjusted": 0.001,
+        },
+        intercept=0.5,
+        train_rmse=0.05,
+        test_rmse=0.1,
+        test_rmse_recursive=0.14,
+        target_name="room_temperature",
+    )
+    service = RoomTemperaturePredictionService(
+        FakePredictionReader(),
+        FakeModelRepository(model),
+    )
+
+    thermostat_schedule = NumericSeries(
+        name="thermostat_setpoint",
+        unit="degC",
+        points=[
+            NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=21.0),
+            NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
+            NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
+        ],
+    )
+
+    comparison = service.predict_vs_actual(
+        start_time=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 28, 10, 30, tzinfo=timezone.utc),
+        thermostat_schedule=thermostat_schedule,
+    )
+
+    assert comparison.model_name == "linear_1step_room_temperature"
+    assert [point.timestamp for point in comparison.predicted_room_temperature.points] == [
+        "2026-04-28T10:15:00+00:00",
+        "2026-04-28T10:30:00+00:00",
+    ]
+    assert [point.timestamp for point in comparison.actual_room_temperature.points] == [
+        "2026-04-28T09:45:00+00:00",
+        "2026-04-28T10:00:00+00:00",
+    ]

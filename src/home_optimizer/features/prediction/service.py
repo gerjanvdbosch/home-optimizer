@@ -18,7 +18,7 @@ from home_optimizer.domain import (
 from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
 
 from .ports import IdentifiedModelReader, PredictionDataReader
-from .schemas import RoomTemperaturePrediction
+from .schemas import RoomTemperaturePrediction, RoomTemperaturePredictionComparison
 
 
 class RoomTemperaturePredictionService:
@@ -121,6 +121,37 @@ class RoomTemperaturePredictionService:
                 unit="degC",
                 points=prediction_points,
             ),
+        )
+
+    def predict_vs_actual(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        thermostat_schedule: NumericSeries,
+        shutter_schedule: NumericSeries | None = None,
+    ) -> RoomTemperaturePredictionComparison:
+        prediction = self.predict(
+            start_time=start_time,
+            end_time=end_time,
+            thermostat_schedule=thermostat_schedule,
+            shutter_schedule=shutter_schedule,
+        )
+        actual_series = self.reader.read_series(
+            names=[ROOM_TEMPERATURE],
+            start_time=start_time,
+            end_time=end_time,
+        )
+        actual_room_temperature = next(
+            iter(actual_series),
+            NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
+        )
+        return RoomTemperaturePredictionComparison(
+            model_name=prediction.model_name,
+            interval_minutes=prediction.interval_minutes,
+            target_name=prediction.target_name,
+            predicted_room_temperature=prediction.room_temperature,
+            actual_room_temperature=actual_room_temperature,
         )
 
     def _read_initial_room_temperature(

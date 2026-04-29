@@ -137,3 +137,11 @@ class PredictionResponse(BaseModel):
     interval_minutes: int
     target_name: str
     room_temperature: ChartSeriesResponse
+
+
+class PredictionComparisonResponse(BaseModel):
+    model_name: str
+    interval_minutes: int
+    target_name: str
+    predicted_room_temperature: ChartSeriesResponse
+    actual_room_temperature: ChartSeriesResponse

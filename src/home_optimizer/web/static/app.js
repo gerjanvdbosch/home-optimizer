@@ -165,6 +165,13 @@ function buildConstantSeries(name, unit, startDate, endDate, intervalMinutes, va
   return { name, unit, points };
 }
 
+function latestPoint(series) {
+  if (!series || !series.points || series.points.length === 0) {
+    return null;
+  }
+  return series.points[series.points.length - 1];
+}
+
 async function runImport() {
   if (!button) {
     return;
@@ -419,7 +426,7 @@ async function runPrediction(event) {
       ),
     };
 
-    const response = await fetch(apiUrl("api/prediction"), {
+    const response = await fetch(apiUrl("api/prediction/compare"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -430,16 +437,35 @@ async function runPrediction(event) {
       throw new Error(responsePayload.detail || "Voorspelling ophalen mislukt.");
     }
 
-    renderPlot(predictionChart, [responsePayload.room_temperature], {
-      colors: ["#00796b"],
-      emptyText: "Geen voorspelling beschikbaar",
-      yTitle: responsePayload.room_temperature.unit || "",
-      traceOptions: [{ label: "Voorspelde kamertemperatuur", precision: 2 }],
+    renderPlot(predictionChart, [
+      responsePayload.predicted_room_temperature,
+      responsePayload.actual_room_temperature,
+    ], {
+      colors: ["#00796b", "#ef6c00"],
+      emptyText: "Geen voorspelling of meting beschikbaar",
+      yTitle: responsePayload.predicted_room_temperature.unit || "",
+      traceOptions: [
+        { label: "Voorspeld", precision: 2 },
+        { label: "Gemeten", precision: 2, dash: "dot" },
+      ],
     });
     predictionStatus.className = "status success";
-    predictionStatus.textContent = "Scenario voorspeld.";
+    predictionStatus.textContent = "Scenario vergeleken met metingen.";
     if (predictionSummary) {
-      predictionSummary.textContent = summarizeSeries(responsePayload.room_temperature);
+      const predicted = latestPoint(responsePayload.predicted_room_temperature);
+      const actual = latestPoint(responsePayload.actual_room_temperature);
+      if (predicted && actual) {
+        const delta = predicted.value - actual.value;
+        predictionSummary.textContent =
+          `eindpunt voorspeld ${predicted.value.toFixed(1)} ${responsePayload.predicted_room_temperature.unit || ""}` +
+          ` · gemeten ${actual.value.toFixed(1)} ${responsePayload.actual_room_temperature.unit || ""}` +
+          ` · delta ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+      } else if (predicted) {
+        predictionSummary.textContent =
+          `eindpunt voorspeld ${predicted.value.toFixed(1)} ${responsePayload.predicted_room_temperature.unit || ""}`;
+      } else {
+        predictionSummary.textContent = "-";
+      }
     }
   } catch (error) {
     predictionStatus.className = "status error";
@@ -487,7 +513,7 @@ async function runTraining() {
 
     trainingStatus.className = "status success";
     trainingStatus.textContent =
-      `Model opgeslagen. Test RMSE: ${responsePayload.test_rmse.toFixed(3)}, recursive: ${responsePayload.test_rmse_recursive.toFixed(3)}`;
+      `Model opgeslagen. 1-step test RMSE: ${responsePayload.test_rmse.toFixed(3)} · recursive test RMSE: ${responsePayload.test_rmse_recursive.toFixed(3)}`;
   } catch (error) {
     trainingStatus.className = "status error";
     trainingStatus.textContent =

@@ -21,6 +21,7 @@ from home_optimizer.features import (
     HistoryImportResult,
     IdentificationResult,
     RoomTemperaturePrediction,
+    RoomTemperaturePredictionComparison,
 )
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
@@ -119,6 +120,7 @@ class FakePredictionService:
     def __init__(self, result: RoomTemperaturePrediction) -> None:
         self.result = result
         self.calls: list[dict[str, object]] = []
+        self.comparison_calls: list[dict[str, object]] = []
 
     def predict(
         self,
@@ -137,6 +139,37 @@ class FakePredictionService:
             }
         )
         return self.result
+
+    def predict_vs_actual(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        thermostat_schedule: NumericSeries,
+        shutter_schedule: NumericSeries | None = None,
+    ) -> RoomTemperaturePredictionComparison:
+        self.comparison_calls.append(
+            {
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "thermostat_schedule": thermostat_schedule,
+                "shutter_schedule": shutter_schedule,
+            }
+        )
+        return RoomTemperaturePredictionComparison(
+            model_name=self.result.model_name,
+            interval_minutes=self.result.interval_minutes,
+            target_name=self.result.target_name,
+            predicted_room_temperature=self.result.room_temperature,
+            actual_room_temperature=NumericSeries(
+                name="room_temperature",
+                unit="degC",
+                points=[
+                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=20.6),
+                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=20.8),
+                ],
+            ),
+        )
 
 
 class FakeDashboardRepository:
@@ -760,6 +793,96 @@ def test_prediction_endpoint_returns_room_temperature_series() -> None:
                 name="thermostat_setpoint",
                 unit="degC",
                 points=[
+                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
+                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
+                ],
+            ),
+            "shutter_schedule": NumericSeries(
+                name="shutter_living_room",
+                unit="percent",
+                points=[
+                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
+                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=50.0),
+                ],
+            ),
+        }
+    ]
+
+
+def test_prediction_comparison_endpoint_returns_predicted_and_actual_series() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/prediction/compare",
+            json={
+                "start_time": "2026-04-28T10:00:00+00:00",
+                "end_time": "2026-04-28T10:30:00+00:00",
+                "thermostat_schedule": {
+                    "name": "thermostat_setpoint",
+                    "unit": "degC",
+                    "points": [
+                        {"timestamp": "2026-04-28T10:00:00+00:00", "value": 21.0},
+                        {"timestamp": "2026-04-28T10:15:00+00:00", "value": 21.0},
+                        {"timestamp": "2026-04-28T10:30:00+00:00", "value": 21.0},
+                    ],
+                },
+                "shutter_schedule": {
+                    "name": "shutter_living_room",
+                    "unit": "percent",
+                    "points": [
+                        {"timestamp": "2026-04-28T10:15:00+00:00", "value": 50.0},
+                        {"timestamp": "2026-04-28T10:30:00+00:00", "value": 50.0},
+                    ],
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "model_name": "linear_1step_room_temperature",
+        "interval_minutes": 15,
+        "target_name": "room_temperature",
+        "predicted_room_temperature": {
+            "name": "room_temperature",
+            "unit": "degC",
+            "points": [
+                {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.7},
+                {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.9},
+            ],
+        },
+        "actual_room_temperature": {
+            "name": "room_temperature",
+            "unit": "degC",
+            "points": [
+                {"timestamp": "2026-04-28T10:15:00+00:00", "value": 20.6},
+                {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.8},
+            ],
+        },
+    }
+    assert app.state.container.prediction_service.comparison_calls == [
+        {
+            "start_time": "2026-04-28T10:00:00+00:00",
+            "end_time": "2026-04-28T10:30:00+00:00",
+            "thermostat_schedule": NumericSeries(
+                name="thermostat_setpoint",
+                unit="degC",
+                points=[
+                    NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=21.0),
                     NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
                     NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
                 ],
