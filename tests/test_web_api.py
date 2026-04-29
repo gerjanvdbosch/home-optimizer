@@ -110,6 +110,7 @@ class FakeIdentificationService:
             intercept=self.result.intercept,
             train_rmse=self.result.train_rmse,
             test_rmse=self.result.test_rmse,
+            test_rmse_recursive=self.result.test_rmse_recursive,
             target_name=self.result.target_name,
         )
 
@@ -239,12 +240,13 @@ class FakeContainer:
                 coefficients={
                     "previous_room_temperature": 0.94,
                     "outdoor_temperature": 0.01,
-                    "thermostat_setpoint": 0.06,
+                    "previous_thermostat_setpoint": 0.06,
                     "gti_living_room_windows_adjusted": 0.0003,
                 },
                 intercept=0.02,
                 train_rmse=0.06,
                 test_rmse=0.13,
+                test_rmse_recursive=0.21,
                 target_name="room_temperature",
             )
         )
@@ -630,12 +632,13 @@ def test_identification_endpoint_returns_model_fit() -> None:
         "coefficients": {
             "previous_room_temperature": 0.94,
             "outdoor_temperature": 0.01,
-            "thermostat_setpoint": 0.06,
+            "previous_thermostat_setpoint": 0.06,
             "gti_living_room_windows_adjusted": 0.0003,
         },
         "intercept": 0.02,
         "train_rmse": 0.06,
         "test_rmse": 0.13,
+        "test_rmse_recursive": 0.21,
         "target_name": "room_temperature",
     }
     assert app.state.container.identification_service.calls == [
@@ -682,6 +685,7 @@ def test_identification_train_endpoint_stores_model() -> None:
     assert payload["training_start_time_utc"] == "2026-04-25T00:00:00Z"
     assert payload["training_end_time_utc"] == "2026-04-28T00:00:00Z"
     assert payload["test_rmse"] == 0.13
+    assert payload["test_rmse_recursive"] == 0.21
     assert app.state.container.identification_service.store_calls == [
         (
             "2026-04-25T00:00:00+00:00",

@@ -69,12 +69,13 @@ def test_prediction_service_simulates_multiple_steps() -> None:
         coefficients={
             "previous_room_temperature": 0.9,
             "outdoor_temperature": 0.02,
-            "thermostat_setpoint": 0.03,
+            "previous_thermostat_setpoint": 0.03,
             "gti_living_room_windows_adjusted": 0.001,
         },
         intercept=0.5,
         train_rmse=0.05,
         test_rmse=0.1,
+        test_rmse_recursive=0.14,
         target_name="room_temperature",
     )
     service = RoomTemperaturePredictionService(
@@ -86,6 +87,7 @@ def test_prediction_service_simulates_multiple_steps() -> None:
         name="thermostat_setpoint",
         unit="degC",
         points=[
+            NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=21.0),
             NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
             NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
             NumericPoint(timestamp="2026-04-28T10:45:00+00:00", value=21.0),

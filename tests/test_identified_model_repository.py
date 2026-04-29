@@ -28,6 +28,7 @@ def test_identified_model_repository_returns_latest_model_by_kind(tmp_path) -> N
         intercept=0.1,
         train_rmse=0.05,
         test_rmse=0.1,
+        test_rmse_recursive=0.12,
         target_name="room_temperature",
     )
     second_model = first_model.model_copy(
@@ -35,6 +36,7 @@ def test_identified_model_repository_returns_latest_model_by_kind(tmp_path) -> N
             "trained_at_utc": datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
             "coefficients": {"previous_room_temperature": 0.92},
             "test_rmse": 0.08,
+            "test_rmse_recursive": 0.11,
         }
     )
 

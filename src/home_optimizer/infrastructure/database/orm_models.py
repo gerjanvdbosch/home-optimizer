@@ -62,6 +62,7 @@ class IdentifiedModelRecord(Base):
     intercept: Mapped[float] = mapped_column(Float, nullable=False)
     train_rmse: Mapped[float] = mapped_column(Float, nullable=False)
     test_rmse: Mapped[float] = mapped_column(Float, nullable=False)
+    test_rmse_recursive: Mapped[float] = mapped_column(Float, nullable=False)
     target_name: Mapped[str] = mapped_column(String, nullable=False)
 
 

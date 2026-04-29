@@ -49,6 +49,7 @@ class IdentifiedModelRepository:
             intercept=model.intercept,
             train_rmse=model.train_rmse,
             test_rmse=model.test_rmse,
+            test_rmse_recursive=model.test_rmse_recursive,
             target_name=model.target_name,
         )
 
@@ -71,5 +72,6 @@ class IdentifiedModelRepository:
             intercept=row.intercept,
             train_rmse=row.train_rmse,
             test_rmse=row.test_rmse,
+            test_rmse_recursive=row.test_rmse_recursive,
             target_name=row.target_name,
         )

@@ -86,6 +86,7 @@ class IdentificationResponse(BaseModel):
     intercept: float
     train_rmse: float
     test_rmse: float
+    test_rmse_recursive: float
     target_name: str
 
 
@@ -109,6 +110,7 @@ class StoredIdentifiedModelResponse(BaseModel):
     intercept: float
     train_rmse: float
     test_rmse: float
+    test_rmse_recursive: float
     target_name: str
 
 

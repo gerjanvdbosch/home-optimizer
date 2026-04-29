@@ -64,6 +64,7 @@ def identification_response(result: IdentificationResult) -> IdentificationRespo
         intercept=result.intercept,
         train_rmse=result.train_rmse,
         test_rmse=result.test_rmse,
+        test_rmse_recursive=result.test_rmse_recursive,
         target_name=result.target_name,
     )
 
@@ -82,6 +83,7 @@ def stored_identified_model_response(model: IdentifiedModel) -> StoredIdentified
         intercept=model.intercept,
         train_rmse=model.train_rmse,
         test_rmse=model.test_rmse,
+        test_rmse_recursive=model.test_rmse_recursive,
         target_name=model.target_name,
     )
 

@@ -145,7 +145,12 @@ function shiftDate(days) {
 }
 
 function buildConstantSeries(name, unit, startDate, endDate, intervalMinutes, value) {
-  const points = [];
+  const points = [
+    {
+      timestamp: localInputToIso(toDatetimeLocalValue(startDate)),
+      value,
+    },
+  ];
   const current = new Date(startDate);
   current.setMinutes(current.getMinutes() + intervalMinutes);
 
@@ -482,7 +487,7 @@ async function runTraining() {
 
     trainingStatus.className = "status success";
     trainingStatus.textContent =
-      `Model opgeslagen. Test RMSE: ${responsePayload.test_rmse.toFixed(3)}`;
+      `Model opgeslagen. Test RMSE: ${responsePayload.test_rmse.toFixed(3)}, recursive: ${responsePayload.test_rmse_recursive.toFixed(3)}`;
   } catch (error) {
     trainingStatus.className = "status error";
     trainingStatus.textContent =

@@ -21,4 +21,5 @@ class IdentificationResult(DomainModel):
     intercept: float
     train_rmse: float
     test_rmse: float
+    test_rmse_recursive: float
     target_name: str

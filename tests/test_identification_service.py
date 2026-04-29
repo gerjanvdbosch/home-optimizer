@@ -99,7 +99,7 @@ def test_build_dataset_resamples_and_returns_feature_matrix() -> None:
     assert dataset.feature_names == [
         "previous_room_temperature",
         "outdoor_temperature",
-        "thermostat_setpoint",
+        "previous_thermostat_setpoint",
         "gti_living_room_windows_adjusted",
     ]
     assert len(dataset.timestamps) == len(dataset.features) == len(dataset.targets)
@@ -124,11 +124,12 @@ def test_identify_fits_linear_baseline_and_reports_metrics() -> None:
     assert set(result.coefficients) == {
         "previous_room_temperature",
         "outdoor_temperature",
-        "thermostat_setpoint",
+        "previous_thermostat_setpoint",
         "gti_living_room_windows_adjusted",
     }
     assert result.train_rmse >= 0.0
     assert result.test_rmse >= 0.0
+    assert result.test_rmse_recursive >= 0.0
 
 
 class StateFilteringReader(FakeIdentificationReader):

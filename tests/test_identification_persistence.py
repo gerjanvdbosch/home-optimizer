@@ -92,4 +92,5 @@ def test_identify_and_store_persists_model() -> None:
     assert model.model_kind == "room_temperature"
     assert model.model_name == "linear_1step_room_temperature"
     assert model.interval_minutes == 15
+    assert model.test_rmse_recursive >= 0.0
     assert model.target_name == "room_temperature"

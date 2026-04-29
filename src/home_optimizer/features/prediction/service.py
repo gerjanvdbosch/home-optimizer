@@ -47,8 +47,8 @@ class RoomTemperaturePredictionService:
 
         required_coefficients = {
             "previous_room_temperature",
+            "previous_thermostat_setpoint",
             OUTDOOR_TEMPERATURE,
-            THERMOSTAT_SETPOINT,
             GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
         }
         if not required_coefficients.issubset(model.coefficients):
@@ -83,8 +83,12 @@ class RoomTemperaturePredictionService:
         timestamp = start_time + interval
         while timestamp <= end_time:
             timestamp_iso = timestamp.isoformat()
+            previous_timestamp_iso = (timestamp - interval).isoformat()
             outdoor_temperature = latest_value_at(outdoor_forecast.points, timestamp_iso)
-            thermostat_setpoint = latest_value_at(thermostat_schedule.points, timestamp_iso)
+            thermostat_setpoint = latest_value_at(
+                thermostat_schedule.points,
+                previous_timestamp_iso,
+            )
             solar_gain = latest_value_at(adjusted_gti.points, timestamp_iso)
 
             if None in (
@@ -100,7 +104,7 @@ class RoomTemperaturePredictionService:
                 model.intercept
                 + model.coefficients["previous_room_temperature"] * current_room_temperature
                 + model.coefficients[OUTDOOR_TEMPERATURE] * float(outdoor_temperature)
-                + model.coefficients[THERMOSTAT_SETPOINT] * float(thermostat_setpoint)
+                + model.coefficients["previous_thermostat_setpoint"] * float(thermostat_setpoint)
                 + model.coefficients[GTI_LIVING_ROOM_WINDOWS_ADJUSTED] * float(solar_gain)
             )
             prediction_points.append(

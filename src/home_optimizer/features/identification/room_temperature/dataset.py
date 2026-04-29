@@ -27,7 +27,7 @@ from .state_filter import RoomTemperatureStateFilter
 ROOM_TEMPERATURE_FEATURE_NAMES = [
     "previous_room_temperature",
     OUTDOOR_TEMPERATURE,
-    THERMOSTAT_SETPOINT,
+    "previous_thermostat_setpoint",
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
 ]
 
@@ -122,6 +122,7 @@ class RoomTemperatureDatasetBuilder:
             }
         )
         resampled["previous_room_temperature"] = resampled[ROOM_TEMPERATURE].shift(1)
+        resampled["previous_thermostat_setpoint"] = resampled[THERMOSTAT_SETPOINT].shift(1)
         resampled = resampled.dropna()
 
         if len(resampled) < 3:

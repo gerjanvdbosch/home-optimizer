@@ -86,6 +86,7 @@ class RoomTemperatureModelIdentificationService:
             intercept=result.intercept,
             train_rmse=result.train_rmse,
             test_rmse=result.test_rmse,
+            test_rmse_recursive=result.test_rmse_recursive,
             target_name=result.target_name,
         )
         self.model_repository.save(model)
