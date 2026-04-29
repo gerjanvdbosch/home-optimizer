@@ -18,9 +18,9 @@ from home_optimizer.domain import (
     build_sensor_specs,
 )
 from home_optimizer.features import (
-    BuildingTemperaturePrediction,
     HistoryImportResult,
     IdentificationResult,
+    RoomTemperaturePrediction,
 )
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
@@ -115,7 +115,7 @@ class FakeIdentificationService:
 
 
 class FakePredictionService:
-    def __init__(self, result: BuildingTemperaturePrediction) -> None:
+    def __init__(self, result: RoomTemperaturePrediction) -> None:
         self.result = result
         self.calls: list[dict[str, object]] = []
 
@@ -126,7 +126,7 @@ class FakePredictionService:
         *,
         thermostat_schedule: NumericSeries,
         shutter_schedule: NumericSeries | None = None,
-    ) -> BuildingTemperaturePrediction:
+    ) -> RoomTemperaturePrediction:
         self.calls.append(
             {
                 "start_time": start_time.isoformat(),
@@ -249,7 +249,7 @@ class FakeContainer:
             )
         )
         self.prediction_service = FakePredictionService(
-            BuildingTemperaturePrediction(
+            RoomTemperaturePrediction(
                 model_name="linear_1step_room_temperature",
                 interval_minutes=15,
                 target_name="room_temperature",

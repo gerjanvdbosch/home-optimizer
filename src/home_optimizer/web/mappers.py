@@ -3,7 +3,7 @@ from __future__ import annotations
 from home_optimizer.app.history_import_jobs import HistoryImportJob
 from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
-from home_optimizer.features.prediction.schemas import BuildingTemperaturePrediction
+from home_optimizer.features.prediction.schemas import RoomTemperaturePrediction
 from home_optimizer.web.schemas import (
     ChartPointResponse,
     ChartSeriesResponse,
@@ -97,7 +97,7 @@ def numeric_series_from_request(series: NumericSeriesRequest) -> NumericSeries:
     )
 
 
-def prediction_response(result: BuildingTemperaturePrediction) -> PredictionResponse:
+def prediction_response(result: RoomTemperaturePrediction) -> PredictionResponse:
     return PredictionResponse(
         model_name=result.model_name,
         interval_minutes=result.interval_minutes,

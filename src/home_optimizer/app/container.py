@@ -14,7 +14,7 @@ from home_optimizer.features.history_import.service import HistoryImportService
 from home_optimizer.features.identification.room_temperature import (
     RoomTemperatureModelIdentificationService,
 )
-from home_optimizer.features.prediction.service import BuildingTemperaturePredictionService
+from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.dashboard_repository import DashboardRepository
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
@@ -41,7 +41,7 @@ class AppContainer:
     dashboard_repository: DashboardRepository
     identified_model_repository: IdentifiedModelRepository
     identification_service: RoomTemperatureModelIdentificationService
-    prediction_service: BuildingTemperaturePredictionService
+    prediction_service: RoomTemperaturePredictionService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
     forecast_repository: ForecastRepository
@@ -74,7 +74,7 @@ def build_container(
         dashboard_repository,
         model_repository=identified_model_repository,
     )
-    prediction_service = BuildingTemperaturePredictionService(
+    prediction_service = RoomTemperaturePredictionService(
         dashboard_repository,
         identified_model_repository,
     )

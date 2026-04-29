@@ -9,7 +9,7 @@ from home_optimizer.domain import (
     NumericPoint,
     NumericSeries,
 )
-from home_optimizer.features.prediction import BuildingTemperaturePredictionService
+from home_optimizer.features.prediction import RoomTemperaturePredictionService
 
 
 class FakePredictionReader:
@@ -77,7 +77,7 @@ def test_prediction_service_simulates_multiple_steps() -> None:
         test_rmse=0.1,
         target_name="room_temperature",
     )
-    service = BuildingTemperaturePredictionService(
+    service = RoomTemperaturePredictionService(
         FakePredictionReader(),
         FakeModelRepository(model),
     )

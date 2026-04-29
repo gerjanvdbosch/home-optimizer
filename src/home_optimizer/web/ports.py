@@ -6,7 +6,7 @@ from typing import Protocol
 from home_optimizer.domain import IdentifiedModel, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
-from home_optimizer.features.prediction.schemas import BuildingTemperaturePrediction
+from home_optimizer.features.prediction.schemas import RoomTemperaturePrediction
 
 
 class ClosableGateway(Protocol):
@@ -74,7 +74,7 @@ class PredictionRunner(Protocol):
         *,
         thermostat_schedule: NumericSeries,
         shutter_schedule: NumericSeries | None = None,
-    ) -> BuildingTemperaturePrediction: ...
+    ) -> RoomTemperaturePrediction: ...
 
 
 class WebAppContainer(Protocol):

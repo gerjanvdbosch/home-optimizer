@@ -18,10 +18,10 @@ from home_optimizer.domain import (
 from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
 
 from .ports import IdentifiedModelReader, PredictionDataReader
-from .schemas import BuildingTemperaturePrediction
+from .schemas import RoomTemperaturePrediction
 
 
-class BuildingTemperaturePredictionService:
+class RoomTemperaturePredictionService:
     def __init__(
         self,
         reader: PredictionDataReader,
@@ -37,7 +37,7 @@ class BuildingTemperaturePredictionService:
         *,
         thermostat_schedule: NumericSeries,
         shutter_schedule: NumericSeries | None = None,
-    ) -> BuildingTemperaturePrediction:
+    ) -> RoomTemperaturePrediction:
         if end_time <= start_time:
             raise ValueError("end_time must be later than start_time")
 
@@ -108,7 +108,7 @@ class BuildingTemperaturePredictionService:
             )
             timestamp += interval
 
-        return BuildingTemperaturePrediction(
+        return RoomTemperaturePrediction(
             model_name=model.model_name,
             interval_minutes=model.interval_minutes,
             target_name=model.target_name,

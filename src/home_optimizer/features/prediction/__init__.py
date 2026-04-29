@@ -1,7 +1,7 @@
-from .schemas import BuildingTemperaturePrediction
-from .service import BuildingTemperaturePredictionService
+from .schemas import RoomTemperaturePrediction
+from .service import RoomTemperaturePredictionService
 
 __all__ = [
-    "BuildingTemperaturePrediction",
-    "BuildingTemperaturePredictionService",
+    "RoomTemperaturePrediction",
+    "RoomTemperaturePredictionService",
 ]

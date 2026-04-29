@@ -5,18 +5,18 @@ from .identification import (
     IdentificationResult,
     RoomTemperatureModelIdentificationService,
 )
-from .prediction import BuildingTemperaturePrediction, BuildingTemperaturePredictionService
+from .prediction import RoomTemperaturePrediction, RoomTemperaturePredictionService
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
-    "BuildingTemperaturePrediction",
-    "BuildingTemperaturePredictionService",
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",
     "IdentificationDataset",
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",
+    "RoomTemperaturePrediction",
+    "RoomTemperaturePredictionService",
     "LiveMeasurement",
     "OpenMeteoForecastService",
     "TelemetryService",
