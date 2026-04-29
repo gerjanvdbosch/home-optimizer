@@ -20,9 +20,9 @@ from home_optimizer.domain import (
 )
 from home_optimizer.domain.time import parse_datetime
 
-from .ports import IdentificationDataReader
-from .schemas import IdentificationDataset
-from .state_filter import IdentificationStateFilter
+from ..ports import IdentificationDataReader
+from ..schemas import IdentificationDataset
+from .state_filter import RoomTemperatureStateFilter
 
 ROOM_TEMPERATURE_FEATURE_NAMES = [
     "previous_room_temperature",
@@ -32,7 +32,7 @@ ROOM_TEMPERATURE_FEATURE_NAMES = [
 ]
 
 
-class IdentificationDatasetBuilder:
+class RoomTemperatureDatasetBuilder:
     def __init__(self, reader: IdentificationDataReader) -> None:
         self.reader = reader
 
@@ -87,7 +87,7 @@ class IdentificationDatasetBuilder:
                 NumericSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[]),
             ),
         )
-        state_filter = IdentificationStateFilter(
+        state_filter = RoomTemperatureStateFilter(
             defrost_active=series_by_name.get(DEFROST_ACTIVE),
             booster_heater_active=series_by_name.get(BOOSTER_HEATER_ACTIVE),
             hp_mode=text_by_name.get(HP_MODE),
@@ -142,7 +142,7 @@ class IdentificationDatasetBuilder:
         outdoor_temperature: NumericSeries,
         thermostat_setpoint: NumericSeries,
         adjusted_gti: NumericSeries,
-        state_filter: IdentificationStateFilter,
+        state_filter: RoomTemperatureStateFilter,
     ) -> list[dict[str, float | str]]:
         raw_rows: list[dict[str, float | str]] = []
         for room_point in room_temperature.points:

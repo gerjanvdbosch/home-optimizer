@@ -12,7 +12,7 @@ EXCLUDED_HEATPUMP_MODES = {
 }
 
 
-class IdentificationStateFilter:
+class RoomTemperatureStateFilter:
     def __init__(
         self,
         *,
@@ -51,10 +51,7 @@ def _numeric_values(series: NumericSeries | None) -> list[tuple[datetime, float]
     if series is None:
         return []
     return sorted(
-        [
-            (parse_datetime(point.timestamp), point.value)
-            for point in series.points
-        ],
+        [(parse_datetime(point.timestamp), point.value) for point in series.points],
         key=lambda point: point[0],
     )
 
@@ -63,10 +60,7 @@ def _text_values(series: TextSeries | None) -> list[tuple[datetime, str]]:
     if series is None:
         return []
     return sorted(
-        [
-            (parse_datetime(point.timestamp), point.value)
-            for point in series.points
-        ],
+        [(parse_datetime(point.timestamp), point.value) for point in series.points],
         key=lambda point: point[0],
     )
 

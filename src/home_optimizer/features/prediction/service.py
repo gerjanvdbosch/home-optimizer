@@ -15,8 +15,9 @@ from home_optimizer.domain import (
     adjusted_gti_with_shutter,
     latest_value_at,
 )
+from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
 
-from .ports import PredictionDataReader, RoomTemperatureModelReader
+from .ports import IdentifiedModelReader, PredictionDataReader
 from .schemas import BuildingTemperaturePrediction
 
 
@@ -24,7 +25,7 @@ class BuildingTemperaturePredictionService:
     def __init__(
         self,
         reader: PredictionDataReader,
-        model_repository: RoomTemperatureModelReader,
+        model_repository: IdentifiedModelReader,
     ) -> None:
         self.reader = reader
         self.model_repository = model_repository
@@ -40,7 +41,7 @@ class BuildingTemperaturePredictionService:
         if end_time <= start_time:
             raise ValueError("end_time must be later than start_time")
 
-        model = self.model_repository.latest()
+        model = self.model_repository.latest(model_kind=MODEL_KIND)
         if model is None:
             raise ValueError("no stored building temperature model available")
 

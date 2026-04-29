@@ -2,25 +2,25 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from home_optimizer.domain import RoomTemperatureModel, utc_now
+from home_optimizer.domain import IdentifiedModel, utc_now
 
-from .dataset import IdentificationDatasetBuilder
-from .model import RoomTemperatureModelIdentifier
-from .ports import IdentificationDataReader, RoomTemperatureModelRepository
-from .schemas import IdentificationDataset, IdentificationResult
+from ..ports import IdentificationDataReader, IdentifiedModelRepository
+from ..schemas import IdentificationDataset, IdentificationResult
+from .dataset import RoomTemperatureDatasetBuilder
+from .model import MODEL_KIND, RoomTemperatureModelIdentifier
 
 
 class RoomTemperatureModelIdentificationService:
-    """Builds a baseline autoregressive dataset and fits a linear grey-box model."""
+    """Builds a baseline autoregressive room-temperature dataset and fits a linear model."""
 
     def __init__(
         self,
         reader: IdentificationDataReader,
-        model_repository: RoomTemperatureModelRepository | None = None,
+        model_repository: IdentifiedModelRepository | None = None,
     ) -> None:
         self.reader = reader
         self.model_repository = model_repository
-        self.dataset_builder = IdentificationDatasetBuilder(reader)
+        self.dataset_builder = RoomTemperatureDatasetBuilder(reader)
         self.identifier = RoomTemperatureModelIdentifier()
 
     def build_dataset(
@@ -62,9 +62,9 @@ class RoomTemperatureModelIdentificationService:
         *,
         interval_minutes: int = 15,
         train_fraction: float = 0.8,
-    ) -> RoomTemperatureModel:
+    ) -> IdentifiedModel:
         if self.model_repository is None:
-            raise ValueError("no building temperature model repository configured")
+            raise ValueError("no identified model repository configured")
 
         result = self.identify(
             start_time=start_time,
@@ -72,7 +72,8 @@ class RoomTemperatureModelIdentificationService:
             interval_minutes=interval_minutes,
             train_fraction=train_fraction,
         )
-        model = RoomTemperatureModel(
+        model = IdentifiedModel(
+            model_kind=MODEL_KIND,
             model_name=result.model_name,
             trained_at_utc=utc_now(),
             training_start_time_utc=start_time,

@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from home_optimizer.domain import RoomTemperatureModel
-from home_optimizer.infrastructure.database.room_temperature_model_repository import (
-    RoomTemperatureModelRepository,
+from home_optimizer.domain import IdentifiedModel
+from home_optimizer.infrastructure.database.identified_model_repository import (
+    IdentifiedModelRepository,
 )
 from home_optimizer.infrastructure.database.session import Database
 
 
-def test_room_temperature_model_repository_returns_latest_model(tmp_path) -> None:
+def test_identified_model_repository_returns_latest_model_by_kind(tmp_path) -> None:
     database = Database(str(tmp_path / "models.sqlite"))
     database.init_schema()
-    repository = RoomTemperatureModelRepository(database)
+    repository = IdentifiedModelRepository(database)
 
-    first_model = RoomTemperatureModel(
+    first_model = IdentifiedModel(
+        model_kind="room_temperature",
         model_name="linear_1step_room_temperature",
         trained_at_utc=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
         training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
@@ -40,4 +41,4 @@ def test_room_temperature_model_repository_returns_latest_model(tmp_path) -> Non
     repository.save(first_model)
     repository.save(second_model)
 
-    assert repository.latest() == second_model
+    assert repository.latest(model_kind="room_temperature") == second_model

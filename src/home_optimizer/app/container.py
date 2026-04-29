@@ -11,13 +11,15 @@ from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history_import.service import HistoryImportService
-from home_optimizer.features.identification.service import RoomTemperatureModelIdentificationService
+from home_optimizer.features.identification.room_temperature import (
+    RoomTemperatureModelIdentificationService,
+)
 from home_optimizer.features.prediction.service import BuildingTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.dashboard_repository import DashboardRepository
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
-from home_optimizer.infrastructure.database.room_temperature_model_repository import (
-    RoomTemperatureModelRepository,
+from home_optimizer.infrastructure.database.identified_model_repository import (
+    IdentifiedModelRepository,
 )
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
@@ -37,7 +39,7 @@ class AppContainer:
     history_import_service: HistoryImportService
     telemetry_repository: TimeSeriesRepository
     dashboard_repository: DashboardRepository
-    room_temperature_model_repository: RoomTemperatureModelRepository
+    identified_model_repository: IdentifiedModelRepository
     identification_service: RoomTemperatureModelIdentificationService
     prediction_service: BuildingTemperaturePredictionService
     telemetry_service: TelemetryService
@@ -67,14 +69,14 @@ def build_container(
     history_import_repository = TimeSeriesRepository(database, source=history_source)
     telemetry_repository = TimeSeriesRepository(database, source=telemetry_source)
     dashboard_repository = DashboardRepository(database)
-    room_temperature_model_repository = RoomTemperatureModelRepository(database)
+    identified_model_repository = IdentifiedModelRepository(database)
     identification_service = RoomTemperatureModelIdentificationService(
         dashboard_repository,
-        model_repository=room_temperature_model_repository,
+        model_repository=identified_model_repository,
     )
     prediction_service = BuildingTemperaturePredictionService(
         dashboard_repository,
-        room_temperature_model_repository,
+        identified_model_repository,
     )
     forecast_repository = ForecastRepository(database)
     history_import_service = HistoryImportService(
@@ -111,7 +113,7 @@ def build_container(
         history_import_service=history_import_service,
         telemetry_repository=telemetry_repository,
         dashboard_repository=dashboard_repository,
-        room_temperature_model_repository=room_temperature_model_repository,
+        identified_model_repository=identified_model_repository,
         identification_service=identification_service,
         prediction_service=prediction_service,
         telemetry_service=telemetry_service,

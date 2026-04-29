@@ -46,9 +46,10 @@ Index("idx_forecast_values_name_time", ForecastValue.name, ForecastValue.forecas
 Index("idx_forecast_values_created", ForecastValue.created_at_utc)
 
 
-class RoomTemperatureModelRecord(Base):
-    __tablename__ = "room_temperature_models"
+class IdentifiedModelRecord(Base):
+    __tablename__ = "identified_models"
 
+    model_kind: Mapped[str] = mapped_column(String, primary_key=True)
     trained_at_utc: Mapped[str] = mapped_column(String, primary_key=True)
     model_name: Mapped[str] = mapped_column(String, nullable=False)
     training_start_time_utc: Mapped[str] = mapped_column(String, nullable=False)
@@ -64,4 +65,4 @@ class RoomTemperatureModelRecord(Base):
     target_name: Mapped[str] = mapped_column(String, nullable=False)
 
 
-Index("idx_room_temperature_models_trained_at", RoomTemperatureModelRecord.trained_at_utc)
+Index("idx_identified_models_kind_trained_at", IdentifiedModelRecord.model_kind, IdentifiedModelRecord.trained_at_utc)

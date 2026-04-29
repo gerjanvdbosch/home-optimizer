@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from home_optimizer.domain import NumericPoint, NumericSeries, RoomTemperatureModel, TextPoint, TextSeries
+from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.features.identification import RoomTemperatureModelIdentificationService
 
 
@@ -63,19 +63,20 @@ class FakeIdentificationReader:
         ]
 
 
-class FakeRoomTemperatureModelRepository:
+class FakeIdentifiedModelRepository:
     def __init__(self) -> None:
-        self.saved: list[RoomTemperatureModel] = []
+        self.saved: list[IdentifiedModel] = []
 
-    def save(self, model: RoomTemperatureModel) -> None:
+    def save(self, model: IdentifiedModel) -> None:
         self.saved.append(model)
 
-    def latest(self) -> RoomTemperatureModel | None:
-        return self.saved[-1] if self.saved else None
+    def latest(self, *, model_kind: str) -> IdentifiedModel | None:
+        matching = [model for model in self.saved if model.model_kind == model_kind]
+        return matching[-1] if matching else None
 
 
 def test_identify_and_store_persists_model() -> None:
-    repository = FakeRoomTemperatureModelRepository()
+    repository = FakeIdentifiedModelRepository()
     service = RoomTemperatureModelIdentificationService(
         FakeIdentificationReader(),
         model_repository=repository,
@@ -88,6 +89,7 @@ def test_identify_and_store_persists_model() -> None:
     )
 
     assert repository.saved == [model]
+    assert model.model_kind == "room_temperature"
     assert model.model_name == "linear_1step_room_temperature"
     assert model.interval_minutes == 15
     assert model.target_name == "room_temperature"

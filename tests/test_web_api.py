@@ -10,9 +10,9 @@ from pydantic import ValidationError
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
+    IdentifiedModel,
     NumericPoint,
     NumericSeries,
-    RoomTemperatureModel,
     TextPoint,
     TextSeries,
     build_sensor_specs,
@@ -87,7 +87,7 @@ class FakeIdentificationService:
         *,
         interval_minutes: int = 15,
         train_fraction: float = 0.8,
-    ) -> RoomTemperatureModel:
+    ) -> IdentifiedModel:
         self.store_calls.append(
             (
                 start_time.isoformat(),
@@ -96,7 +96,8 @@ class FakeIdentificationService:
                 train_fraction,
             )
         )
-        return RoomTemperatureModel(
+        return IdentifiedModel(
+            model_kind="room_temperature",
             model_name=self.result.model_name,
             trained_at_utc=datetime(2026, 4, 28, 18, 0),
             training_start_time_utc=start_time,

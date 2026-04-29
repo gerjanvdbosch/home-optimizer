@@ -1,5 +1,5 @@
 from .schemas import IdentificationDataset, IdentificationResult
-from .service import RoomTemperatureModelIdentificationService
+from .room_temperature import RoomTemperatureModelIdentificationService
 
 __all__ = [
     "IdentificationDataset",

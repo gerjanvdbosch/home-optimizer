@@ -1,6 +1,6 @@
 from .clock import utc_now
-from .room_temperature_model import RoomTemperatureModel
 from .forecast import ForecastEntry
+from .identified_model import IdentifiedModel
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -96,8 +96,8 @@ __all__ = [
     "PV_TOTAL_KWH",
     "REFRIGERANT_CONDENSATION_TEMPERATURE",
     "REFRIGERANT_LIQUID_LINE_TEMPERATURE",
+    "IdentifiedModel",
     "ROOM_TEMPERATURE",
-    "RoomTemperatureModel",
     "SENSOR_DEFINITIONS",
     "SensorDefinition",
     "SensorSpec",

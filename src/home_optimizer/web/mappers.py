@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from home_optimizer.app.history_import_jobs import HistoryImportJob
-from home_optimizer.domain import NumericPoint, NumericSeries, RoomTemperatureModel, TextSeries
+from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.prediction.schemas import BuildingTemperaturePrediction
 from home_optimizer.web.schemas import (
@@ -68,7 +68,7 @@ def identification_response(result: IdentificationResult) -> IdentificationRespo
     )
 
 
-def stored_building_model_response(model: RoomTemperatureModel) -> StoredBuildingModelResponse:
+def stored_building_model_response(model: IdentifiedModel) -> StoredBuildingModelResponse:
     return StoredBuildingModelResponse(
         model_name=model.model_name,
         trained_at_utc=model.trained_at_utc,

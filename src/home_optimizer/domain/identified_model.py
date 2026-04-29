@@ -5,7 +5,8 @@ from datetime import datetime
 from home_optimizer.domain.models import DomainModel
 
 
-class RoomTemperatureModel(DomainModel):
+class IdentifiedModel(DomainModel):
+    model_kind: str
     model_name: str
     trained_at_utc: datetime
     training_start_time_utc: datetime

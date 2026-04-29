@@ -5,10 +5,10 @@ import numpy as np
 from .metrics import rmse
 from .schemas import IdentificationDataset, IdentificationResult
 
-MODEL_NAME = "linear_1step_room_temperature"
+class LinearModelIdentifier:
+    def __init__(self, *, model_name: str) -> None:
+        self.model_name = model_name
 
-
-class RoomTemperatureModelIdentifier:
     def identify(
         self,
         dataset: IdentificationDataset,
@@ -44,7 +44,7 @@ class RoomTemperatureModelIdentifier:
         test_predictions = test_design @ coefficients
 
         return IdentificationResult(
-            model_name=MODEL_NAME,
+            model_name=self.model_name,
             interval_minutes=interval_minutes,
             sample_count=sample_count,
             train_sample_count=len(train_targets),

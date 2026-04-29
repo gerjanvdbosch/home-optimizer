@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.domain import (
+    IdentifiedModel,
     NumericPoint,
     NumericSeries,
-    RoomTemperatureModel,
 )
 from home_optimizer.features.prediction import BuildingTemperaturePredictionService
 
@@ -48,15 +48,16 @@ class FakePredictionReader:
 
 
 class FakeModelRepository:
-    def __init__(self, model: RoomTemperatureModel) -> None:
+    def __init__(self, model: IdentifiedModel) -> None:
         self.model = model
 
-    def latest(self) -> RoomTemperatureModel | None:
-        return self.model
+    def latest(self, *, model_kind: str) -> IdentifiedModel | None:
+        return self.model if self.model.model_kind == model_kind else None
 
 
 def test_prediction_service_simulates_multiple_steps() -> None:
-    model = RoomTemperatureModel(
+    model = IdentifiedModel(
+        model_kind="room_temperature",
         model_name="linear_1step_room_temperature",
         trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
         training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),

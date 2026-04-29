@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from home_optimizer.domain import NumericSeries, RoomTemperatureModel, TextSeries
+from home_optimizer.domain import IdentifiedModel, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.prediction.schemas import BuildingTemperaturePrediction
@@ -63,7 +63,7 @@ class IdentificationRunner(Protocol):
         *,
         interval_minutes: int = 15,
         train_fraction: float = 0.8,
-    ) -> RoomTemperatureModel: ...
+    ) -> IdentifiedModel: ...
 
 
 class PredictionRunner(Protocol):
