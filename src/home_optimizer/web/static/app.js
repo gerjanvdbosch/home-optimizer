@@ -14,6 +14,7 @@ const predictionForm = document.getElementById("prediction-form");
 const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
 const predictionSetpointInput = document.getElementById("prediction-setpoint");
+const predictionPowerInput = document.getElementById("prediction-power");
 const predictionShutterInput = document.getElementById("prediction-shutter");
 const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
@@ -73,7 +74,6 @@ const forecastSeriesStyles = {
 };
 
 let selectedDate = new Date();
-let predictionCoverage = null;
 
 function apiUrl(path) {
   return new URL(path, baseUrl).toString();
@@ -100,15 +100,6 @@ function localInputToIso(value) {
 
 function setPredictionDefaults(date = selectedDate) {
   if (!predictionStartInput) {
-    return;
-  }
-
-  if (predictionCoverage) {
-    predictionStartInput.value = toDatetimeLocalValue(predictionCoverage.start);
-    if (predictionHoursInput) {
-      predictionHoursInput.max = String(predictionCoverage.maxHours);
-      predictionHoursInput.value = String(Math.min(Number(predictionHoursInput.value || 6), predictionCoverage.maxHours));
-    }
     return;
   }
 
@@ -168,49 +159,6 @@ function buildConstantSeries(name, unit, startDate, endDate, intervalMinutes, va
   }
 
   return { name, unit, points };
-}
-
-function updatePredictionCoverage(payload) {
-  const forecastPoints = [
-    ...(payload.forecast_temperature?.points || []),
-    ...(payload.forecast_gti?.[2]?.points || payload.forecast_gti?.[1]?.points || []),
-  ];
-
-  if (forecastPoints.length === 0) {
-    predictionCoverage = null;
-    if (predictionStatus) {
-      predictionStatus.className = "status error";
-      predictionStatus.textContent = "Geen forecast beschikbaar voor deze dag. Kies een dag met forecastdata.";
-    }
-    if (predictionButton) {
-      predictionButton.disabled = true;
-    }
-    return;
-  }
-
-  const timestamps = forecastPoints.map((point) => new Date(point.timestamp).getTime());
-  const firstTimestamp = new Date(Math.min(...timestamps));
-  const lastTimestamp = new Date(Math.max(...timestamps));
-  const intervalMinutes = 15;
-  const maxHours = Math.max(
-    1,
-    Math.floor((lastTimestamp.getTime() - firstTimestamp.getTime()) / (60 * 60 * 1000)),
-  );
-
-  predictionCoverage = {
-    start: firstTimestamp,
-    end: lastTimestamp,
-    intervalMinutes,
-    maxHours,
-  };
-  if (predictionButton) {
-    predictionButton.disabled = false;
-  }
-  if (predictionStatus) {
-    predictionStatus.className = "status";
-    predictionStatus.textContent = `Forecast beschikbaar van ${firstTimestamp.toLocaleString("nl-NL")} tot ${lastTimestamp.toLocaleString("nl-NL")}.`;
-  }
-  setPredictionDefaults(selectedDate);
 }
 
 async function runImport() {
@@ -420,7 +368,6 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
-  updatePredictionCoverage(payload);
 }
 
 async function runPrediction(event) {
@@ -429,6 +376,7 @@ async function runPrediction(event) {
     !predictionStartInput ||
     !predictionHoursInput ||
     !predictionSetpointInput ||
+    !predictionPowerInput ||
     !predictionShutterInput ||
     !predictionButton ||
     !predictionStatus ||
@@ -444,17 +392,8 @@ async function runPrediction(event) {
   try {
     const startDate = new Date(predictionStartInput.value);
     const hoursAhead = Number(predictionHoursInput.value);
-    if (!predictionCoverage) {
-      throw new Error("Geen forecast beschikbaar voor dit scenario.");
-    }
-    if (startDate < predictionCoverage.start || startDate > predictionCoverage.end) {
-      throw new Error("De scenario-start ligt buiten de beschikbare forecast.");
-    }
     const endDate = new Date(startDate);
     endDate.setHours(endDate.getHours() + hoursAhead);
-    if (endDate > predictionCoverage.end) {
-      throw new Error("De gekozen horizon loopt voorbij de beschikbare forecast.");
-    }
 
     const payload = {
       start_time: localInputToIso(predictionStartInput.value),

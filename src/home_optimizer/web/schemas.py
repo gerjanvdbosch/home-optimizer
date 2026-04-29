@@ -96,7 +96,7 @@ class IdentificationTrainRequest(BaseModel):
     train_fraction: float = Field(default=0.8, gt=0.0, lt=1.0)
 
 
-class StoredBuildingModelResponse(BaseModel):
+class StoredIdentifiedModelResponse(BaseModel):
     model_name: str
     trained_at_utc: datetime
     training_start_time_utc: datetime

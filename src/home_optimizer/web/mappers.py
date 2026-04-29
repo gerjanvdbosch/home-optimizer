@@ -14,7 +14,7 @@ from home_optimizer.web.schemas import (
     IdentificationTrainRequest,
     NumericSeriesRequest,
     PredictionResponse,
-    StoredBuildingModelResponse,
+    StoredIdentifiedModelResponse,
 )
 
 
@@ -68,8 +68,8 @@ def identification_response(result: IdentificationResult) -> IdentificationRespo
     )
 
 
-def stored_building_model_response(model: IdentifiedModel) -> StoredBuildingModelResponse:
-    return StoredBuildingModelResponse(
+def stored_identified_model_response(model: IdentifiedModel) -> StoredIdentifiedModelResponse:
+    return StoredIdentifiedModelResponse(
         model_name=model.model_name,
         trained_at_utc=model.trained_at_utc,
         training_start_time_utc=model.training_start_time_utc,

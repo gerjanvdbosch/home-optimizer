@@ -43,7 +43,7 @@ class BuildingTemperaturePredictionService:
 
         model = self.model_repository.latest(model_kind=MODEL_KIND)
         if model is None:
-            raise ValueError("no stored building temperature model available")
+            raise ValueError("no stored room temperature model available")
 
         required_coefficients = {
             "previous_room_temperature",
@@ -52,7 +52,7 @@ class BuildingTemperaturePredictionService:
             GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
         }
         if not required_coefficients.issubset(model.coefficients):
-            raise ValueError("stored building temperature model is missing prediction coefficients")
+            raise ValueError("stored room temperature model is missing prediction coefficients")
 
         interval = timedelta(minutes=model.interval_minutes)
         current_room_temperature = self._read_initial_room_temperature(

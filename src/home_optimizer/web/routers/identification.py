@@ -6,12 +6,12 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from home_optimizer.web.dependencies import get_container
-from home_optimizer.web.mappers import identification_response, stored_building_model_response
+from home_optimizer.web.mappers import identification_response, stored_identified_model_response
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import (
     IdentificationResponse,
     IdentificationTrainRequest,
-    StoredBuildingModelResponse,
+    StoredIdentifiedModelResponse,
 )
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
@@ -42,11 +42,11 @@ def create_identification_router() -> APIRouter:
 
         return identification_response(result)
 
-    @router.post("/api/identification/train", response_model=StoredBuildingModelResponse)
+    @router.post("/api/identification/train", response_model=StoredIdentifiedModelResponse)
     def post_identification_train(
         request: TrainBody,
         container: ContainerDependency,
-    ) -> StoredBuildingModelResponse:
+    ) -> StoredIdentifiedModelResponse:
         try:
             model = container.identification_service.identify_and_store(
                 start_time=request.start_time,
@@ -57,6 +57,6 @@ def create_identification_router() -> APIRouter:
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
-        return stored_building_model_response(model)
+        return stored_identified_model_response(model)
 
     return router
