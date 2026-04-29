@@ -11,9 +11,6 @@ from home_optimizer.app.settings_loader import load_settings
 from home_optimizer.web import create_app
 
 LOGGER = logging.getLogger(__name__)
-LOCAL_DEFAULT_OVERRIDES = [
-    "database_path=database.sqlite"
-]
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,7 +33,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    settings = load_settings(args.config, overrides=[*LOCAL_DEFAULT_OVERRIDES, *args.set])
+    settings = load_settings(args.config, overrides=args.set)
     configure_logging(settings.log_level)
     LOGGER.info("Starting Home Optimizer web API locally")
 

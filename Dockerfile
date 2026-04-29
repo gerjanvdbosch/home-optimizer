@@ -23,8 +23,8 @@ RUN /opt/venv/bin/pip install --no-cache-dir \
     --extra-index-url https://www.piwheels.org/simple \
     .
 
-COPY run.sh /run.sh
-RUN chmod a+x /run.sh
+COPY addon.sh /addon.sh
+RUN chmod a+x /addon.sh
 
 ARG BUILD_ARCH
 ARG BUILD_DATE
@@ -41,4 +41,4 @@ LABEL \
     io.hass.version="${BUILD_VERSION}" \
     maintainer="gerjanvandenbosch"
 
-CMD ["/run.sh"]
+CMD ["/addon.sh"]
