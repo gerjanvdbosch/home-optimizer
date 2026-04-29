@@ -14,7 +14,6 @@ const predictionForm = document.getElementById("prediction-form");
 const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
 const predictionSetpointInput = document.getElementById("prediction-setpoint");
-const predictionPowerInput = document.getElementById("prediction-power");
 const predictionShutterInput = document.getElementById("prediction-shutter");
 const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
@@ -104,7 +103,7 @@ function setPredictionDefaults(date = selectedDate) {
   }
 
   const start = new Date(date);
-  start.setHours(6, 0, 0, 0);
+  start.setHours(24, 0, 0, 0);
   predictionStartInput.value = toDatetimeLocalValue(start);
 }
 
@@ -376,7 +375,6 @@ async function runPrediction(event) {
     !predictionStartInput ||
     !predictionHoursInput ||
     !predictionSetpointInput ||
-    !predictionPowerInput ||
     !predictionShutterInput ||
     !predictionButton ||
     !predictionStatus ||
