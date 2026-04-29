@@ -23,8 +23,8 @@ ChartDateQuery = Annotated[date, Query(alias="date")]
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 
 
-def render_dashboard(view_model: DashboardViewModel) -> str:
-    template = Template((TEMPLATES_DIR / "dashboard.html").read_text(encoding="utf-8"))
+def render_template(template_name: str, view_model: DashboardViewModel) -> str:
+    template = Template((TEMPLATES_DIR / template_name).read_text(encoding="utf-8"))
     return template.substitute(
         title=escape(view_model.title),
         import_window_days=view_model.import_window_days,
@@ -49,7 +49,20 @@ def create_dashboard_router(settings: AppSettings) -> APIRouter:
             database_path=settings.database_path,
             api_port=settings.api_port,
         )
-        return HTMLResponse(render_dashboard(view_model))
+        return HTMLResponse(render_template("dashboard.html", view_model))
+
+    @router.get("/simulation", response_class=HTMLResponse)
+    def simulation() -> HTMLResponse:
+        request = build_history_import_request(settings)
+        view_model = DashboardViewModel(
+            title="Home Optimizer Simulatie",
+            import_window_days=settings.history_import_max_days_back,
+            chunk_days=settings.history_import_chunk_days,
+            sensor_count=len(request.specs),
+            database_path=settings.database_path,
+            api_port=settings.api_port,
+        )
+        return HTMLResponse(render_template("simulation.html", view_model))
 
     @router.get("/plotly.js", response_class=FileResponse)
     def plotly_js() -> FileResponse:

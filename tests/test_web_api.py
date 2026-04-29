@@ -341,14 +341,50 @@ def test_dashboard_shows_import_button() -> None:
 
     assert response.status_code == 200
     assert "Importeer geschiedenis" in response.text
-    assert "Scenario voorspelling" in response.text
-    assert 'href="static/app.css"' in response.text
+    assert "Scenario voorspelling" not in response.text
+    assert 'href="static/shared.css"' in response.text
+    assert 'href="static/dashboard.css"' in response.text
     assert 'src="plotly.js"' in response.text
-    assert 'src="static/app.js"' in response.text
-    assert 'href="/static/app.css"' not in response.text
+    assert 'src="static/shared.js"' in response.text
+    assert 'src="static/dashboard.js"' in response.text
+    assert 'href="/static/shared.css"' not in response.text
+    assert 'href="/simulation"' in response.text
     assert "sensor.room_temperature" not in response.text
     assert app.state.container.telemetry_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
+    assert gateway.closed is True
+
+
+def test_simulation_page_shows_prediction_panel() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={"room_temperature": 3}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+            "history_import_max_days_back": 14,
+            "sensors": {"room_temperature": "sensor.room_temperature"},
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/simulation")
+
+    assert response.status_code == 200
+    assert "Scenario voorspelling vs gemeten" in response.text
+    assert "Train en sla model op" in response.text
+    assert 'href="static/shared.css"' in response.text
+    assert 'href="static/simulation.css"' in response.text
+    assert 'src="static/shared.js"' in response.text
+    assert 'src="static/simulation.js"' in response.text
+    assert 'href="/"' in response.text
     assert gateway.closed is True
 
 
@@ -945,8 +981,12 @@ def test_javascript_and_css_are_not_cached() -> None:
 
     with TestClient(app) as client:
         responses = [
-            client.get("/static/app.js"),
-            client.get("/static/app.css"),
+            client.get("/static/shared.js"),
+            client.get("/static/dashboard.js"),
+            client.get("/static/simulation.js"),
+            client.get("/static/shared.css"),
+            client.get("/static/dashboard.css"),
+            client.get("/static/simulation.css"),
             client.get("/plotly.js"),
         ]
 

@@ -1,0 +1,89 @@
+.overview {
+  margin-bottom: 12px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  padding: 14px 16px;
+}
+
+.stat strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.stat span {
+  display: block;
+  margin-top: 4px;
+  color: var(--ha-secondary);
+  font-size: 13px;
+}
+
+.date-nav {
+  display: grid;
+  grid-template-columns: 40px minmax(124px, auto) 40px;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-nav time {
+  text-align: center;
+  font-weight: 500;
+}
+
+.icon-button {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.import-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.import-panel p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--ha-border);
+  border-radius: 4px;
+  color: var(--ha-text);
+  background: #fafafa;
+}
+
+@media (max-width: 760px) {
+  .stats,
+  .charts {
+    grid-template-columns: 1fr;
+  }
+}

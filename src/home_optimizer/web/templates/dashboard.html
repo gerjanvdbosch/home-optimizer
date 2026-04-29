@@ -4,7 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>$title</title>
-    <link rel="stylesheet" href="static/app.css" />
+    <link rel="stylesheet" href="static/shared.css" />
+    <link rel="stylesheet" href="static/dashboard.css" />
   </head>
   <body>
     <main class="shell">
@@ -13,17 +14,24 @@
           <h1>$title</h1>
           <span>Home Assistant add-on</span>
         </div>
-        <div class="date-nav">
-          <button class="icon-button" id="previous-day" type="button" aria-label="Vorige dag">
-            ‹
-          </button>
-          <time id="selected-date"></time>
-          <button class="icon-button" id="next-day" type="button" aria-label="Volgende dag">
-            ›
-          </button>
+        <div class="topbar-actions">
+          <nav class="page-nav" aria-label="Pagina navigatie">
+            <a class="page-link is-active" href="/">Dashboard</a>
+            <a class="page-link" href="/simulation">Simulatie</a>
+          </nav>
+          <div class="date-nav">
+            <button class="icon-button" id="previous-day" type="button" aria-label="Vorige dag">
+              ‹
+            </button>
+            <time id="selected-date"></time>
+            <button class="icon-button" id="next-day" type="button" aria-label="Volgende dag">
+              ›
+            </button>
+          </div>
         </div>
       </header>
 
+      <!--
       <section class="overview">
         <div class="stats">
           <article class="stat">
@@ -44,60 +52,9 @@
           </article>
         </div>
       </section>
+      -->
 
       <section class="charts" aria-label="Dag grafieken">
-        <article class="panel chart-panel prediction-panel">
-          <div class="panel-heading">
-            <h2>Scenario voorspelling vs gemeten</h2>
-            <span id="prediction-summary">-</span>
-          </div>
-          <div class="training-panel">
-            <label>
-              Trainingsstart
-              <input id="training-start" type="datetime-local" required />
-            </label>
-            <label>
-              Trainingseinde
-              <input id="training-end" type="datetime-local" required />
-            </label>
-            <label>
-              Interval (min)
-              <input id="training-interval" type="number" min="1" step="1" value="15" required />
-            </label>
-            <label>
-              Train fractie
-              <input id="training-fraction" type="number" min="0.1" max="0.95" step="0.05" value="0.8" required />
-            </label>
-            <div class="scenario-actions">
-              <button id="training-button" type="button">Train en sla model op</button>
-              <div id="training-status" class="status" aria-live="polite"></div>
-            </div>
-          </div>
-          <form id="prediction-form" class="scenario-form">
-            <label>
-              Start
-              <input id="prediction-start" type="datetime-local" required />
-            </label>
-            <label>
-              Uren vooruit
-              <input id="prediction-hours" type="number" min="1" max="48" step="1" value="24" required />
-            </label>
-            <label>
-              Setpoint
-              <input id="prediction-setpoint" type="number" min="5" max="30" step="0.1" value="18" required />
-            </label>
-            <label>
-              Shutter (%)
-              <input id="prediction-shutter" type="number" min="0" max="100" step="1" value="100" required />
-            </label>
-            <div class="scenario-actions">
-              <button id="prediction-button" type="submit">Voorspel scenario</button>
-              <div id="prediction-status" class="status" aria-live="polite"></div>
-            </div>
-          </form>
-          <div class="chart-wrap" id="prediction-chart"></div>
-        </article>
-
         <article class="panel chart-panel">
           <div class="panel-heading">
             <h2>Kamertemperatuur</h2>
@@ -177,6 +134,7 @@
     </main>
 
     <script src="plotly.js"></script>
-    <script src="static/app.js"></script>
+    <script src="static/shared.js"></script>
+    <script src="static/dashboard.js"></script>
   </body>
 </html>
