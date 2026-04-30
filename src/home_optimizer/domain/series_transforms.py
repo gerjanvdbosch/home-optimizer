@@ -1,27 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from home_optimizer.domain import (
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
     THERMAL_OUTPUT,
     NumericPoint,
     NumericSeries,
 )
-from home_optimizer.domain.time import ensure_utc
 
 
-def latest_value_at(points: list[NumericPoint], timestamp: datetime | str) -> float | None:
-    target_time = ensure_utc(timestamp)
+def latest_value_at(points: list[NumericPoint], timestamp: str) -> float | None:
     latest: float | None = None
     for point in points:
-        if ensure_utc(point.timestamp) > target_time:
+        if point.timestamp > timestamp:
             break
         latest = point.value
     return latest
 
 
-def shutter_open_fraction_at(points: list[NumericPoint], timestamp: datetime | str) -> float:
+def shutter_open_fraction_at(points: list[NumericPoint], timestamp: str) -> float:
     position = latest_value_at(points, timestamp)
     if position is None:
         return 1.0

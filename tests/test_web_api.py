@@ -348,7 +348,8 @@ def test_dashboard_shows_import_button() -> None:
     assert 'src="static/shared.js"' in response.text
     assert 'src="static/dashboard.js"' in response.text
     assert 'href="/static/shared.css"' not in response.text
-    assert 'href="/simulation"' in response.text
+    assert 'href="./"' in response.text
+    assert 'href="simulation"' in response.text
     assert "sensor.room_temperature" not in response.text
     assert app.state.container.telemetry_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
@@ -384,7 +385,7 @@ def test_simulation_page_shows_prediction_panel() -> None:
     assert 'href="static/simulation.css"' in response.text
     assert 'src="static/shared.js"' in response.text
     assert 'src="static/simulation.js"' in response.text
-    assert 'href="/"' in response.text
+    assert 'href="./"' in response.text
     assert gateway.closed is True
 
 
