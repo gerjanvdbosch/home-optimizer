@@ -1,6 +1,5 @@
 const {
   apiUrl,
-  buildConstantSeries,
   formatDate,
   formatSigned,
   latestPoint,
@@ -18,14 +17,18 @@ const trainingStatus = document.getElementById("training-status");
 const predictionForm = document.getElementById("prediction-form");
 const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
-const predictionSetpointInput = document.getElementById("prediction-setpoint");
 const predictionSetpointSourceMeasured = document.getElementById("prediction-setpoint-source-measured");
 const predictionSetpointSourceManual = document.getElementById("prediction-setpoint-source-manual");
 const predictionSetpointHelp = document.getElementById("prediction-setpoint-help");
-const predictionShutterInput = document.getElementById("prediction-shutter");
+const predictionSetpointEditor = document.getElementById("prediction-setpoint-editor");
+const predictionSetpointBlocks = document.getElementById("prediction-setpoint-blocks");
+const predictionSetpointAddBlockButton = document.getElementById("prediction-setpoint-add-block");
 const predictionShutterSourceMeasured = document.getElementById("prediction-shutter-source-measured");
 const predictionShutterSourceManual = document.getElementById("prediction-shutter-source-manual");
 const predictionShutterHelp = document.getElementById("prediction-shutter-help");
+const predictionShutterEditor = document.getElementById("prediction-shutter-editor");
+const predictionShutterBlocks = document.getElementById("prediction-shutter-blocks");
+const predictionShutterAddBlockButton = document.getElementById("prediction-shutter-add-block");
 const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
 const predictionSummary = document.getElementById("prediction-summary");
@@ -34,6 +37,16 @@ const predictionStatDelta = document.getElementById("prediction-stat-delta");
 const predictionStatRmse = document.getElementById("prediction-stat-rmse");
 const predictionStatBias = document.getElementById("prediction-stat-bias");
 const predictionStatMaxError = document.getElementById("prediction-stat-max-error");
+const DEFAULT_SETPOINT_BLOCKS = [
+  { time: "00:00", value: 18.0 },
+  { time: "06:00", value: 20.5 },
+  { time: "22:00", value: 18.0 },
+];
+const DEFAULT_SHUTTER_BLOCKS = [
+  { time: "00:00", value: 100 },
+  { time: "08:00", value: 4 },
+  { time: "18:00", value: 100 },
+];
 
 function setPredictionDefaults(date = new Date()) {
   if (!predictionStartInput) {
@@ -64,27 +77,188 @@ function resetPredictionStats() {
   if (predictionStatMaxError) predictionStatMaxError.textContent = "-";
 }
 
+function createBlockRow(container, config, { time, value }) {
+  if (!container) {
+    return;
+  }
+
+  const row = document.createElement("div");
+  row.className = "block-editor-row";
+  row.innerHTML = `
+    <label>
+      Tijd
+      <input class="${config.timeClassName}" type="time" step="900" value="${time}" required />
+    </label>
+    <label>
+      ${config.valueLabel}
+      <input class="${config.valueClassName}" type="number" min="${config.min}" max="${config.max}" step="${config.step}" value="${value}" required />
+    </label>
+    <button type="button" class="secondary-button block-remove-button">Verwijder</button>
+  `;
+
+  const removeButton = row.querySelector(".block-remove-button");
+  removeButton?.addEventListener("click", () => {
+    row.remove();
+    config.ensureRows();
+  });
+
+  container.append(row);
+}
+
+function ensureBlockRows(container, defaults, addRow) {
+  if (!container?.children.length) {
+    defaults.forEach(addRow);
+  }
+}
+
+function readBlockPattern(container, config, defaults, addRow) {
+  ensureBlockRows(container, defaults, addRow);
+  const rows = Array.from(container?.querySelectorAll(".block-editor-row") || []);
+  const blocks = rows.map((row) => {
+    const timeInput = row.querySelector(`.${config.timeClassName}`);
+    const valueInput = row.querySelector(`.${config.valueClassName}`);
+    return {
+      time: timeInput?.value || "00:00",
+      value: Number(valueInput?.value || config.defaultValue),
+    };
+  });
+
+  blocks.sort((left, right) => left.time.localeCompare(right.time));
+  return blocks;
+}
+
+function buildRepeatingSchedule(name, unit, startDate, endDate, pattern) {
+  const points = [];
+  const dayCursor = new Date(startDate);
+  dayCursor.setHours(0, 0, 0, 0);
+  const lastDay = new Date(endDate);
+  lastDay.setHours(0, 0, 0, 0);
+
+  while (dayCursor <= lastDay) {
+    const dayPrefix = toDatetimeLocalValue(dayCursor).slice(0, 10);
+    pattern.forEach((block) => {
+      points.push({
+        timestamp: localInputToIso(`${dayPrefix}T${block.time}`),
+        value: block.value,
+      });
+    });
+    dayCursor.setDate(dayCursor.getDate() + 1);
+  }
+
+  return {
+    name,
+    unit,
+    points,
+  };
+}
+
+function createSetpointBlockRow(block) {
+  createBlockRow(
+    predictionSetpointBlocks,
+    {
+      timeClassName: "setpoint-block-time",
+      valueClassName: "setpoint-block-value",
+      valueLabel: "Setpoint",
+      min: "5",
+      max: "30",
+      step: "0.1",
+      ensureRows: ensureSetpointBlockRows,
+    },
+    block,
+  );
+}
+
+function createShutterBlockRow(block) {
+  createBlockRow(
+    predictionShutterBlocks,
+    {
+      timeClassName: "shutter-block-time",
+      valueClassName: "shutter-block-value",
+      valueLabel: "Shutter (%)",
+      min: "0",
+      max: "100",
+      step: "1",
+      ensureRows: ensureShutterBlockRows,
+    },
+    block,
+  );
+}
+
+function ensureSetpointBlockRows() {
+  ensureBlockRows(predictionSetpointBlocks, DEFAULT_SETPOINT_BLOCKS, createSetpointBlockRow);
+}
+
+function ensureShutterBlockRows() {
+  ensureBlockRows(predictionShutterBlocks, DEFAULT_SHUTTER_BLOCKS, createShutterBlockRow);
+}
+
+function buildSetpointBlockPattern() {
+  return readBlockPattern(
+    predictionSetpointBlocks,
+    {
+      timeClassName: "setpoint-block-time",
+      valueClassName: "setpoint-block-value",
+      defaultValue: 18,
+    },
+    DEFAULT_SETPOINT_BLOCKS,
+    createSetpointBlockRow,
+  );
+}
+
+function buildShutterBlockPattern() {
+  return readBlockPattern(
+    predictionShutterBlocks,
+    {
+      timeClassName: "shutter-block-time",
+      valueClassName: "shutter-block-value",
+      defaultValue: 100,
+    },
+    DEFAULT_SHUTTER_BLOCKS,
+    createShutterBlockRow,
+  );
+}
+
+function buildManualSetpointSchedule(startDate, endDate) {
+  return buildRepeatingSchedule(
+    "thermostat_setpoint",
+    "degC",
+    startDate,
+    endDate,
+    buildSetpointBlockPattern(),
+  );
+}
+
+function buildManualShutterSchedule(startDate, endDate) {
+  return buildRepeatingSchedule(
+    "shutter_living_room",
+    "percent",
+    startDate,
+    endDate,
+    buildShutterBlockPattern(),
+  );
+}
+
 function updateShutterMode() {
   const useMeasuredShutters = Boolean(predictionShutterSourceMeasured?.checked);
-  if (predictionShutterInput) {
-    predictionShutterInput.disabled = useMeasuredShutters;
+  if (predictionShutterEditor) {
+    predictionShutterEditor.hidden = useMeasuredShutters;
   }
   if (predictionShutterHelp) {
     predictionShutterHelp.textContent = useMeasuredShutters
       ? "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking."
-      : "Het ingevulde shutterpercentage wordt als constant scenario over de hele horizon gebruikt.";
+      : "Gebruik hieronder tijdblokken voor een handmatig shutterprofiel; dit patroon wordt per dag herhaald.";
   }
 }
 
 function updateSetpointMode() {
   const useMeasuredSetpoints = Boolean(predictionSetpointSourceMeasured?.checked);
-  if (predictionSetpointInput) {
-    predictionSetpointInput.disabled = useMeasuredSetpoints;
+  if (predictionSetpointEditor) {
+    predictionSetpointEditor.hidden = useMeasuredSetpoints;
   }
   if (predictionSetpointHelp) {
     predictionSetpointHelp.textContent = useMeasuredSetpoints
       ? "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking."
-      : "Het ingevulde setpoint wordt als constant scenario over de hele horizon gebruikt.";
+      : "Gebruik hieronder tijdblokken voor een handmatig setpointprofiel; dit patroon wordt per dag herhaald.";
   }
 }
 
@@ -107,14 +281,7 @@ async function buildPredictionShutterSchedule(startDate, endDate) {
     return payload.shutter_position;
   }
 
-  return buildConstantSeries(
-    "shutter_living_room",
-    "percent",
-    startDate,
-    endDate,
-    15,
-    Number(predictionShutterInput?.value || 100),
-  );
+  return buildManualShutterSchedule(startDate, endDate);
 }
 
 async function buildPredictionSetpointSchedule(startDate, endDate) {
@@ -126,14 +293,7 @@ async function buildPredictionSetpointSchedule(startDate, endDate) {
     return payload.thermostat_setpoint;
   }
 
-  return buildConstantSeries(
-    "thermostat_setpoint",
-    "degC",
-    startDate,
-    endDate,
-    15,
-    Number(predictionSetpointInput?.value || 18),
-  );
+  return buildManualSetpointSchedule(startDate, endDate);
 }
 
 async function runPrediction(event) {
@@ -141,7 +301,6 @@ async function runPrediction(event) {
   if (
     !predictionStartInput ||
     !predictionHoursInput ||
-    !predictionSetpointInput ||
     !predictionButton ||
     !predictionStatus ||
     !predictionChart
@@ -294,12 +453,20 @@ predictionSetpointSourceMeasured?.addEventListener("change", updateSetpointMode)
 predictionSetpointSourceManual?.addEventListener("change", updateSetpointMode);
 predictionShutterSourceMeasured?.addEventListener("change", updateShutterMode);
 predictionShutterSourceManual?.addEventListener("change", updateShutterMode);
+predictionSetpointAddBlockButton?.addEventListener("click", () => {
+  createSetpointBlockRow({ time: "12:00", value: 20.0 });
+});
+predictionShutterAddBlockButton?.addEventListener("click", () => {
+  createShutterBlockRow({ time: "12:00", value: 50 });
+});
 window.addEventListener("resize", () => {
   if (predictionChart) {
     Plotly.Plots.resize(predictionChart);
   }
 });
 
+ensureSetpointBlockRows();
+ensureShutterBlockRows();
 setPredictionDefaults();
 setTrainingDefaults();
 resetPredictionStats();
