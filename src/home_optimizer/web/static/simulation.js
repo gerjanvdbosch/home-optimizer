@@ -19,6 +19,9 @@ const predictionForm = document.getElementById("prediction-form");
 const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
 const predictionSetpointInput = document.getElementById("prediction-setpoint");
+const predictionSetpointSourceMeasured = document.getElementById("prediction-setpoint-source-measured");
+const predictionSetpointSourceManual = document.getElementById("prediction-setpoint-source-manual");
+const predictionSetpointHelp = document.getElementById("prediction-setpoint-help");
 const predictionShutterInput = document.getElementById("prediction-shutter");
 const predictionShutterSourceMeasured = document.getElementById("prediction-shutter-source-measured");
 const predictionShutterSourceManual = document.getElementById("prediction-shutter-source-manual");
@@ -73,14 +76,31 @@ function updateShutterMode() {
   }
 }
 
+function updateSetpointMode() {
+  const useMeasuredSetpoints = Boolean(predictionSetpointSourceMeasured?.checked);
+  if (predictionSetpointInput) {
+    predictionSetpointInput.disabled = useMeasuredSetpoints;
+  }
+  if (predictionSetpointHelp) {
+    predictionSetpointHelp.textContent = useMeasuredSetpoints
+      ? "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking."
+      : "Het ingevulde setpoint wordt als constant scenario over de hele horizon gebruikt.";
+  }
+}
+
+async function fetchDayChartsPayload(startDate) {
+  const params = new URLSearchParams({ date: formatDate(startDate) });
+  const response = await fetch(apiUrl(`api/dashboard/charts?${params.toString()}`));
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || "Dagdata ophalen mislukt.");
+  }
+  return payload;
+}
+
 async function buildPredictionShutterSchedule(startDate, endDate) {
   if (predictionShutterSourceMeasured?.checked) {
-    const params = new URLSearchParams({ date: formatDate(startDate) });
-    const response = await fetch(apiUrl(`api/dashboard/charts?${params.toString()}`));
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.detail || "Gemeten shutterdata ophalen mislukt.");
-    }
+    const payload = await fetchDayChartsPayload(startDate);
     if (!payload.shutter_position?.points?.length) {
       throw new Error("geen gemeten shutterdata beschikbaar voor de startdag");
     }
@@ -94,6 +114,25 @@ async function buildPredictionShutterSchedule(startDate, endDate) {
     endDate,
     15,
     Number(predictionShutterInput?.value || 100),
+  );
+}
+
+async function buildPredictionSetpointSchedule(startDate, endDate) {
+  if (predictionSetpointSourceMeasured?.checked) {
+    const payload = await fetchDayChartsPayload(startDate);
+    if (!payload.thermostat_setpoint?.points?.length) {
+      throw new Error("geen gemeten setpointdata beschikbaar voor de startdag");
+    }
+    return payload.thermostat_setpoint;
+  }
+
+  return buildConstantSeries(
+    "thermostat_setpoint",
+    "degC",
+    startDate,
+    endDate,
+    15,
+    Number(predictionSetpointInput?.value || 18),
   );
 }
 
@@ -123,14 +162,7 @@ async function runPrediction(event) {
     const payload = {
       start_time: localInputToIso(predictionStartInput.value),
       end_time: localInputToIso(toDatetimeLocalValue(endDate)),
-      thermostat_schedule: buildConstantSeries(
-        "thermostat_setpoint",
-        "degC",
-        startDate,
-        endDate,
-        15,
-        Number(predictionSetpointInput.value),
-      ),
+      thermostat_schedule: await buildPredictionSetpointSchedule(startDate, endDate),
       shutter_schedule: await buildPredictionShutterSchedule(startDate, endDate),
     };
 
@@ -258,6 +290,8 @@ async function runTraining() {
 
 predictionForm?.addEventListener("submit", runPrediction);
 trainingButton?.addEventListener("click", runTraining);
+predictionSetpointSourceMeasured?.addEventListener("change", updateSetpointMode);
+predictionSetpointSourceManual?.addEventListener("change", updateSetpointMode);
 predictionShutterSourceMeasured?.addEventListener("change", updateShutterMode);
 predictionShutterSourceManual?.addEventListener("change", updateShutterMode);
 window.addEventListener("resize", () => {
@@ -269,4 +303,5 @@ window.addEventListener("resize", () => {
 setPredictionDefaults();
 setTrainingDefaults();
 resetPredictionStats();
+updateSetpointMode();
 updateShutterMode();
