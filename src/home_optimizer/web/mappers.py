@@ -3,7 +3,13 @@ from __future__ import annotations
 import math
 
 from home_optimizer.app.history_import_jobs import HistoryImportJob
-from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextSeries
+from home_optimizer.domain import (
+    IdentifiedModel,
+    NumericPoint,
+    NumericSeries,
+    TextSeries,
+    normalize_utc_timestamp,
+)
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.prediction.schemas import (
     RoomTemperaturePrediction,
@@ -99,7 +105,7 @@ def numeric_series_from_request(series: NumericSeriesRequest) -> NumericSeries:
         name=series.name,
         unit=series.unit,
         points=[
-            NumericPoint(timestamp=point.timestamp, value=point.value)
+            NumericPoint(timestamp=normalize_utc_timestamp(point.timestamp), value=point.value)
             for point in series.points
         ],
     )

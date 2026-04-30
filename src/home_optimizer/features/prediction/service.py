@@ -83,8 +83,8 @@ class RoomTemperaturePredictionService:
         prediction_points: list[NumericPoint] = []
         timestamp = start_time + interval
         while timestamp <= end_time:
-            timestamp_iso = timestamp.isoformat()
-            previous_timestamp_iso = (timestamp - interval).isoformat()
+            timestamp_iso = normalize_utc_timestamp(timestamp)
+            previous_timestamp_iso = normalize_utc_timestamp(timestamp - interval)
             outdoor_temperature = latest_value_at(outdoor_forecast.points, timestamp_iso)
             thermostat_setpoint = latest_value_at(
                 thermostat_schedule.points,
@@ -185,7 +185,10 @@ class RoomTemperaturePredictionService:
             iter(room_series),
             NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
         )
-        current_value = latest_value_at(room_temperature.points, start_time.isoformat())
+        current_value = latest_value_at(
+            room_temperature.points,
+            normalize_utc_timestamp(start_time),
+        )
         if current_value is None:
             raise ValueError("no room temperature available near prediction start_time")
         return float(current_value)
