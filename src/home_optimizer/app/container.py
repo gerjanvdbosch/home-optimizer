@@ -10,6 +10,7 @@ from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
+from home_optimizer.features.backtesting import RoomTemperatureBacktestingService
 from home_optimizer.features.history_import.service import HistoryImportService
 from home_optimizer.features.identification.room_temperature import (
     RoomTemperatureModelIdentificationService,
@@ -42,6 +43,7 @@ class AppContainer:
     identified_model_repository: IdentifiedModelRepository
     identification_service: RoomTemperatureModelIdentificationService
     prediction_service: RoomTemperaturePredictionService
+    backtesting_service: RoomTemperatureBacktestingService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
     forecast_repository: ForecastRepository
@@ -77,6 +79,11 @@ def build_container(
     prediction_service = RoomTemperaturePredictionService(
         dashboard_repository,
         identified_model_repository,
+    )
+    backtesting_service = RoomTemperatureBacktestingService(
+        dashboard_repository,
+        identified_model_repository,
+        prediction_service,
     )
     forecast_repository = ForecastRepository(database)
     history_import_service = HistoryImportService(
@@ -116,6 +123,7 @@ def build_container(
         identified_model_repository=identified_model_repository,
         identification_service=identification_service,
         prediction_service=prediction_service,
+        backtesting_service=backtesting_service,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
         forecast_repository=forecast_repository,

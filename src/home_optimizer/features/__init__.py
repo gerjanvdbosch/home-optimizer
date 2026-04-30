@@ -1,3 +1,8 @@
+from .backtesting import (
+    RoomTemperatureBacktestDayResult,
+    RoomTemperatureBacktestResult,
+    RoomTemperatureBacktestingService,
+)
 from .forecast import OpenMeteoForecastService
 from .history_import import HistoryImportRequest, HistoryImportResult, HistoryImportService
 from .identification import (
@@ -19,6 +24,9 @@ __all__ = [
     "IdentificationDataset",
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",
+    "RoomTemperatureBacktestDayResult",
+    "RoomTemperatureBacktestResult",
+    "RoomTemperatureBacktestingService",
     "RoomTemperaturePrediction",
     "RoomTemperaturePredictionComparison",
     "RoomTemperaturePredictionService",
