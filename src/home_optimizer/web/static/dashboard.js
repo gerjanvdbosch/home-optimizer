@@ -156,7 +156,10 @@ async function loadCharts() {
     colors: ["#03a9f4", "#8e24aa"],
     emptyText: "Geen kamertemperatuur voor deze dag",
     yTitle: payload.room_temperature.unit || "",
-    traceOptions: [{ label: "Woonkamer" }, { label: "Setpoint" }],
+    traceOptions: [
+      { label: "Woonkamer", precision: 2 },
+      { label: "Setpoint", precision: 2 },
+    ],
     xRange: [startIso, endIso],
   });
 
@@ -164,7 +167,10 @@ async function loadCharts() {
     colors: ["#ff9800", "#7e57c2"],
     emptyText: "Geen boilerdata voor deze dag",
     yTitle: payload.dhw_temperatures[0]?.unit || "",
-    traceOptions: [{ label: "Boiler (boven)" }, { label: "Boiler (onder)" }],
+    traceOptions: [
+      { label: "Boiler (boven)", precision: 2 },
+      { label: "Boiler (onder)", precision: 2 },
+    ],
     xRange: [startIso, endIso],
   });
 
