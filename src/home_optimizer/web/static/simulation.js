@@ -17,6 +17,8 @@ const trainingStatus = document.getElementById("training-status");
 const predictionForm = document.getElementById("prediction-form");
 const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
+const predictionComfortMinInput = document.getElementById("prediction-comfort-min");
+const predictionComfortMaxInput = document.getElementById("prediction-comfort-max");
 const predictionSetpointSourceMeasured = document.getElementById("prediction-setpoint-source-measured");
 const predictionSetpointSourceManual = document.getElementById("prediction-setpoint-source-manual");
 const predictionSetpointHelp = document.getElementById("prediction-setpoint-help");
@@ -65,6 +67,63 @@ function resetPredictionStats() {
   if (predictionStatRmse) predictionStatRmse.textContent = "-";
   if (predictionStatBias) predictionStatBias.textContent = "-";
   if (predictionStatMaxError) predictionStatMaxError.textContent = "-";
+}
+
+function buildComfortShapes(minTemperature, maxTemperature) {
+  return [
+    {
+      type: "rect",
+      xref: "paper",
+      x0: 0,
+      x1: 1,
+      yref: "y",
+      y0: minTemperature,
+      y1: maxTemperature,
+      fillcolor: "rgba(0, 121, 107, 0.08)",
+      line: { width: 0 },
+      layer: "below",
+    },
+    {
+      type: "line",
+      xref: "paper",
+      x0: 0,
+      x1: 1,
+      yref: "y",
+      y0: minTemperature,
+      y1: minTemperature,
+      line: { color: "rgba(0, 121, 107, 0.35)", dash: "dot", width: 1 },
+    },
+    {
+      type: "line",
+      xref: "paper",
+      x0: 0,
+      x1: 1,
+      yref: "y",
+      y0: maxTemperature,
+      y1: maxTemperature,
+      line: { color: "rgba(0, 121, 107, 0.35)", dash: "dot", width: 1 },
+    },
+  ];
+}
+
+function evaluateComfort(predictedSeries, minTemperature, maxTemperature) {
+  const values = predictedSeries.points.map((point) => point.value);
+  if (!values.length) {
+    return null;
+  }
+
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const underCount = values.filter((value) => value < minTemperature).length;
+  const overCount = values.filter((value) => value > maxTemperature).length;
+
+  return {
+    minimum,
+    maximum,
+    underCount,
+    overCount,
+    withinComfort: underCount === 0 && overCount === 0,
+  };
 }
 
 function createBlockRow(container, config, { time, value }) {
@@ -404,6 +463,8 @@ async function runPrediction(event) {
   if (
     !predictionStartInput ||
     !predictionHoursInput ||
+    !predictionComfortMinInput ||
+    !predictionComfortMaxInput ||
     !predictionButton ||
     !predictionStatus ||
     !predictionChart
@@ -418,8 +479,14 @@ async function runPrediction(event) {
   try {
     const startDate = new Date(predictionStartInput.value);
     const hoursAhead = Number(predictionHoursInput.value);
+    const comfortMin = Number(predictionComfortMinInput.value);
+    const comfortMax = Number(predictionComfortMaxInput.value);
     const endDate = new Date(startDate);
     endDate.setHours(endDate.getHours() + hoursAhead);
+
+    if (comfortMin > comfortMax) {
+      throw new Error("comfort min moet kleiner of gelijk zijn aan comfort max");
+    }
 
     const payload = {
       start_time: localInputToIso(predictionStartInput.value),
@@ -445,6 +512,7 @@ async function runPrediction(event) {
         colors: ["#00796b", "#ef6c00"],
         emptyText: "Geen voorspelling of meting beschikbaar",
         yTitle: responsePayload.predicted_room_temperature.unit || "",
+        shapes: buildComfortShapes(comfortMin, comfortMax),
         traceOptions: [
           { label: "Voorspeld", precision: 2 },
           { label: "Gemeten", precision: 2, dash: "dot" },
@@ -455,9 +523,20 @@ async function runPrediction(event) {
     predictionStatus.className = "status success";
     predictionStatus.textContent = "Scenario vergeleken met metingen.";
 
+    const comfortEvaluation = evaluateComfort(
+      responsePayload.predicted_room_temperature,
+      comfortMin,
+      comfortMax,
+    );
+
     if (predictionSummary) {
       const predicted = latestPoint(responsePayload.predicted_room_temperature);
       const actual = latestPoint(responsePayload.actual_room_temperature);
+      const comfortSummary = comfortEvaluation
+        ? comfortEvaluation.withinComfort
+          ? "binnen comfort"
+          : `${comfortEvaluation.underCount} onder / ${comfortEvaluation.overCount} boven comfort`
+        : "comfort onbekend";
       if (predicted && actual) {
         const delta = predicted.value - actual.value;
         if (predictionStatDelta) predictionStatDelta.textContent = formatSigned(delta, 1);
@@ -475,7 +554,7 @@ async function runPrediction(event) {
               ? responsePayload.max_absolute_error.toFixed(2)
               : "-";
         }
-        predictionSummary.textContent = "Vergelijking bijgewerkt";
+        predictionSummary.textContent = `Vergelijking bijgewerkt · ${comfortSummary}`;
       } else {
         if (predictionStatDelta) predictionStatDelta.textContent = "-";
         if (predictionStatRmse) {
@@ -492,7 +571,7 @@ async function runPrediction(event) {
               ? responsePayload.max_absolute_error.toFixed(2)
               : "-";
         }
-        predictionSummary.textContent = "Vergelijking bijgewerkt";
+        predictionSummary.textContent = `Vergelijking bijgewerkt · ${comfortSummary}`;
       }
     }
   } catch (error) {
