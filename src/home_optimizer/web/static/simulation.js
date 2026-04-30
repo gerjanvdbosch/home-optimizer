@@ -23,12 +23,14 @@ const predictionSetpointHelp = document.getElementById("prediction-setpoint-help
 const predictionSetpointEditor = document.getElementById("prediction-setpoint-editor");
 const predictionSetpointBlocks = document.getElementById("prediction-setpoint-blocks");
 const predictionSetpointAddBlockButton = document.getElementById("prediction-setpoint-add-block");
+const predictionSetpointCopyDayButton = document.getElementById("prediction-setpoint-copy-day");
 const predictionShutterSourceMeasured = document.getElementById("prediction-shutter-source-measured");
 const predictionShutterSourceManual = document.getElementById("prediction-shutter-source-manual");
 const predictionShutterHelp = document.getElementById("prediction-shutter-help");
 const predictionShutterEditor = document.getElementById("prediction-shutter-editor");
 const predictionShutterBlocks = document.getElementById("prediction-shutter-blocks");
 const predictionShutterAddBlockButton = document.getElementById("prediction-shutter-add-block");
+const predictionShutterCopyDayButton = document.getElementById("prediction-shutter-copy-day");
 const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
 const predictionSummary = document.getElementById("prediction-summary");
@@ -152,6 +154,49 @@ function buildRepeatingSchedule(name, unit, startDate, endDate, pattern) {
   };
 }
 
+function replaceBlockRows(container, addRow, blocks) {
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  blocks.forEach(addRow);
+}
+
+function toLocalTimeValue(timestamp) {
+  const date = new Date(timestamp);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function roundToStep(value, step) {
+  return Math.round(value / step) * step;
+}
+
+function compressSeriesToDailyBlocks(series, fallbackValue, step) {
+  const blocks = [];
+  let previousValue = null;
+
+  series.points.forEach((point) => {
+    const time = toLocalTimeValue(point.timestamp);
+    const value = roundToStep(Number(point.value), step);
+    if (previousValue === null || value !== previousValue) {
+      blocks.push({ time, value });
+      previousValue = value;
+    }
+  });
+
+  if (!blocks.length) {
+    return [{ time: "00:00", value: roundToStep(fallbackValue, step) }];
+  }
+
+  if (blocks[0].time !== "00:00") {
+    blocks.unshift({ time: "00:00", value: blocks[0].value });
+  }
+
+  return blocks;
+}
+
 function createSetpointBlockRow(block) {
   createBlockRow(
     predictionSetpointBlocks,
@@ -270,6 +315,48 @@ async function fetchDayChartsPayload(startDate) {
     throw new Error(payload.detail || "Dagdata ophalen mislukt.");
   }
   return payload;
+}
+
+async function copyMeasuredSetpointDay() {
+  if (!predictionStartInput?.value) {
+    return;
+  }
+
+  const payload = await fetchDayChartsPayload(new Date(predictionStartInput.value));
+  if (!payload.thermostat_setpoint?.points?.length) {
+    throw new Error("geen gemeten setpointdata beschikbaar voor de startdag");
+  }
+
+  replaceBlockRows(
+    predictionSetpointBlocks,
+    createSetpointBlockRow,
+    compressSeriesToDailyBlocks(payload.thermostat_setpoint, 18, 0.1),
+  );
+  if (predictionSetpointSourceManual) {
+    predictionSetpointSourceManual.checked = true;
+  }
+  updateSetpointMode();
+}
+
+async function copyMeasuredShutterDay() {
+  if (!predictionStartInput?.value) {
+    return;
+  }
+
+  const payload = await fetchDayChartsPayload(new Date(predictionStartInput.value));
+  if (!payload.shutter_position?.points?.length) {
+    throw new Error("geen gemeten shutterdata beschikbaar voor de startdag");
+  }
+
+  replaceBlockRows(
+    predictionShutterBlocks,
+    createShutterBlockRow,
+    compressSeriesToDailyBlocks(payload.shutter_position, 100, 1),
+  );
+  if (predictionShutterSourceManual) {
+    predictionShutterSourceManual.checked = true;
+  }
+  updateShutterMode();
 }
 
 async function buildPredictionShutterSchedule(startDate, endDate) {
@@ -458,6 +545,22 @@ predictionSetpointAddBlockButton?.addEventListener("click", () => {
 });
 predictionShutterAddBlockButton?.addEventListener("click", () => {
   createShutterBlockRow({ time: "12:00", value: 50 });
+});
+predictionSetpointCopyDayButton?.addEventListener("click", async () => {
+  try {
+    await copyMeasuredSetpointDay();
+  } catch (error) {
+    predictionStatus.className = "status error";
+    predictionStatus.textContent = error instanceof Error ? error.message : "Setpointprofiel overnemen mislukt.";
+  }
+});
+predictionShutterCopyDayButton?.addEventListener("click", async () => {
+  try {
+    await copyMeasuredShutterDay();
+  } catch (error) {
+    predictionStatus.className = "status error";
+    predictionStatus.textContent = error instanceof Error ? error.message : "Shutterprofiel overnemen mislukt.";
+  }
 });
 window.addEventListener("resize", () => {
   if (predictionChart) {

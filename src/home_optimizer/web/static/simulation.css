@@ -136,6 +136,13 @@
   gap: 12px;
 }
 
+.block-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .block-editor-heading strong {
   font-size: 13px;
   font-weight: 500;
@@ -190,5 +197,9 @@
   .block-editor-heading {
     align-items: start;
     flex-direction: column;
+  }
+
+  .block-editor-actions {
+    justify-content: start;
   }
 }
