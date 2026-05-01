@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from home_optimizer.domain import NumericPoint, NumericSeries
+from datetime import datetime, timezone
+
+from home_optimizer.domain import NumericPoint, NumericSeries, upsample_series_forward_fill
 from home_optimizer.web.services.dashboard_charts import adjusted_gti_with_shutter
 
 
@@ -49,3 +51,32 @@ def test_adjusted_gti_with_shutter_defaults_to_fully_open_when_no_position_is_kn
     adjusted = adjusted_gti_with_shutter(window_gti, shutter_position)
 
     assert adjusted.points == [NumericPoint(timestamp="2026-04-25T09:00:00+00:00", value=150.0)]
+
+
+def test_upsample_series_forward_fill_expands_hourly_points_to_quarters() -> None:
+    hourly_series = NumericSeries(
+        name="gti_living_room_windows",
+        unit="Wm2",
+        points=[
+            NumericPoint(timestamp="2026-04-25T10:00:00+00:00", value=100.0),
+            NumericPoint(timestamp="2026-04-25T11:00:00+00:00", value=200.0),
+        ],
+    )
+
+    upsampled = upsample_series_forward_fill(
+        hourly_series,
+        start_time=datetime(2026, 4, 25, 9, 45, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 25, 11, 30, tzinfo=timezone.utc),
+        interval_minutes=15,
+    )
+
+    assert upsampled.name == "gti_living_room_windows"
+    assert upsampled.unit == "Wm2"
+    assert upsampled.points == [
+        NumericPoint(timestamp="2026-04-25T10:00:00+00:00", value=100.0),
+        NumericPoint(timestamp="2026-04-25T10:15:00+00:00", value=100.0),
+        NumericPoint(timestamp="2026-04-25T10:30:00+00:00", value=100.0),
+        NumericPoint(timestamp="2026-04-25T10:45:00+00:00", value=100.0),
+        NumericPoint(timestamp="2026-04-25T11:00:00+00:00", value=200.0),
+        NumericPoint(timestamp="2026-04-25T11:15:00+00:00", value=200.0),
+    ]

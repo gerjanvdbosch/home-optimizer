@@ -52,6 +52,7 @@ from .series_transforms import (
     build_thermal_output_series,
     latest_value_at,
     shutter_open_fraction_at,
+    upsample_series_forward_fill,
 )
 from .time import ensure_utc, normalize_utc_timestamp
 from .timeseries import MinuteSample
@@ -116,5 +117,6 @@ __all__ = [
     "normalize_utc_timestamp",
     "parse_location",
     "shutter_open_fraction_at",
+    "upsample_series_forward_fill",
     "utc_now",
 ]

@@ -657,22 +657,24 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "unit": None,
         "points": [],
     }
-    assert payload["historical_weather_gti"] == [
-        {
-            "name": "gti_pv",
-            "unit": None,
-            "points": [],
-        },
-        {
-            "name": "gti_living_room_windows",
-            "unit": "Wm2",
-            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 210.0}],
-        },
-        {
-            "name": "gti_living_room_windows_adjusted",
-            "unit": "Wm2",
-            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 105.0}],
-        },
+    assert payload["historical_weather_gti"][0] == {
+        "name": "gti_pv",
+        "unit": None,
+        "points": [],
+    }
+    assert payload["historical_weather_gti"][1]["name"] == "gti_living_room_windows"
+    assert payload["historical_weather_gti"][1]["unit"] == "Wm2"
+    assert payload["historical_weather_gti"][1]["points"][:3] == [
+        {"timestamp": "2026-04-25T12:00:00+00:00", "value": 210.0},
+        {"timestamp": "2026-04-25T12:15:00+00:00", "value": 210.0},
+        {"timestamp": "2026-04-25T12:30:00+00:00", "value": 210.0},
+    ]
+    assert payload["historical_weather_gti"][2]["name"] == "gti_living_room_windows_adjusted"
+    assert payload["historical_weather_gti"][2]["unit"] == "Wm2"
+    assert payload["historical_weather_gti"][2]["points"][:3] == [
+        {"timestamp": "2026-04-25T12:00:00+00:00", "value": 105.0},
+        {"timestamp": "2026-04-25T12:15:00+00:00", "value": 105.0},
+        {"timestamp": "2026-04-25T12:30:00+00:00", "value": 105.0},
     ]
     local_timezone = dashboard_charts_module.current_timezone()
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)

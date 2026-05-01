@@ -17,6 +17,7 @@ from home_optimizer.domain import (
     THERMOSTAT_SETPOINT,
     adjusted_gti_with_shutter,
     latest_value_at,
+    upsample_series_forward_fill,
 )
 from home_optimizer.domain.time import parse_datetime
 
@@ -84,12 +85,17 @@ class RoomTemperatureDatasetBuilder:
             raise ValueError("room_temperature series is empty")
 
         adjusted_gti = adjusted_gti_with_shutter(
-            historical_weather_by_name.get(
-                GTI_LIVING_ROOM_WINDOWS,
-                forecast_by_name.get(
+            upsample_series_forward_fill(
+                historical_weather_by_name.get(
                     GTI_LIVING_ROOM_WINDOWS,
-                    NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[]),
+                    forecast_by_name.get(
+                        GTI_LIVING_ROOM_WINDOWS,
+                        NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[]),
+                    ),
                 ),
+                start_time=start_time,
+                end_time=end_time,
+                interval_minutes=interval_minutes,
             ),
             series_by_name.get(
                 SHUTTER_LIVING_ROOM,

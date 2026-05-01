@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from home_optimizer.domain import (
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
     THERMAL_OUTPUT,
     NumericPoint,
     NumericSeries,
 )
+from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 
 
 def latest_value_at(points: list[NumericPoint], timestamp: str) -> float | None:
@@ -39,6 +42,42 @@ def adjusted_gti_with_shutter(
             for point in window_gti.points
         ],
     )
+
+
+def upsample_series_forward_fill(
+    series: NumericSeries,
+    *,
+    start_time: datetime,
+    end_time: datetime,
+    interval_minutes: int = 15,
+) -> NumericSeries:
+    if interval_minutes <= 0:
+        raise ValueError("interval_minutes must be greater than zero")
+    if end_time <= start_time or not series.points:
+        return NumericSeries(name=series.name, unit=series.unit, points=[])
+
+    interval = timedelta(minutes=interval_minutes)
+    source_points = [(parse_datetime(point.timestamp), point.value) for point in series.points]
+    point_index = 0
+    latest_value: float | None = None
+    upsampled_points: list[NumericPoint] = []
+    cursor = start_time
+
+    while cursor < end_time:
+        while point_index < len(source_points) and source_points[point_index][0] <= cursor:
+            latest_value = source_points[point_index][1]
+            point_index += 1
+
+        if latest_value is not None:
+            upsampled_points.append(
+                NumericPoint(
+                    timestamp=normalize_utc_timestamp(cursor),
+                    value=latest_value,
+                )
+            )
+        cursor += interval
+
+    return NumericSeries(name=series.name, unit=series.unit, points=upsampled_points)
 
 
 def build_thermal_output_series(

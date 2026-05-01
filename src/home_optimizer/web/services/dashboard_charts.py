@@ -31,6 +31,7 @@ from home_optimizer.domain import (
     TextSeries,
     adjusted_gti_with_shutter,
     latest_value_at,
+    upsample_series_forward_fill,
 )
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
@@ -189,7 +190,13 @@ class DashboardChartsService:
         text_series_by_name = {item.name: item for item in text_series}
         forecast_series_by_name = {item.name: item for item in forecast_series}
         historical_weather_series_by_name = {
-            item.name: item for item in historical_weather_series
+            item.name: upsample_series_forward_fill(
+                item,
+                start_time=start_time,
+                end_time=end_time,
+                interval_minutes=15,
+            )
+            for item in historical_weather_series
         }
         adjusted_living_room_gti = adjusted_gti_with_shutter(
             forecast_series_by_name.get(
