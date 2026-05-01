@@ -26,7 +26,7 @@ class OpenMeteoGateway:
         latitude: float,
         longitude: float,
         variables: list[str],
-        forecast_steps: int,
+        forecast_steps: int | None = None,
         past_days: int | None = None,
         tilt: float | None = None,
         azimuth: float | None = None,
@@ -35,10 +35,11 @@ class OpenMeteoGateway:
             "latitude": latitude,
             "longitude": longitude,
             "minutely_15": ",".join(variables),
-            "forecast_minutely_15": forecast_steps,
             "timezone": "UTC",
             "wind_speed_unit": "ms",
         }
+        if forecast_steps is not None:
+            params["forecast_minutely_15"] = forecast_steps
         if past_days is not None:
             params["past_days"] = past_days
         if tilt is not None:

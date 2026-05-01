@@ -23,7 +23,7 @@ class OpenMeteoGatewayPort(Protocol):
         latitude: float,
         longitude: float,
         variables: list[str],
-        forecast_steps: int,
+        forecast_steps: int | None = None,
         past_days: int | None = None,
         tilt: float | None = None,
         azimuth: float | None = None,

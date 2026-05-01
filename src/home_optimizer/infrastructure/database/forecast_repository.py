@@ -10,6 +10,10 @@ from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.infrastructure.database.orm_models import ForecastValue
 from home_optimizer.infrastructure.database.session import Database
 
+SQLITE_MAX_VARIABLES = 999
+FORECAST_VALUE_COLUMN_COUNT = 6
+FORECAST_INSERT_BATCH_SIZE = SQLITE_MAX_VARIABLES // FORECAST_VALUE_COLUMN_COUNT
+
 
 class ForecastRepository:
     def __init__(
@@ -54,13 +58,17 @@ class ForecastRepository:
             }
             for entry in entries
         ]
+        inserted_rows = 0
         with self.database.session() as session:
-            result = session.execute(
-                insert(ForecastValue).values(rows).prefix_with("OR IGNORE")
-            )
+            for start_index in range(0, len(rows), FORECAST_INSERT_BATCH_SIZE):
+                batch = rows[start_index : start_index + FORECAST_INSERT_BATCH_SIZE]
+                result = session.execute(
+                    insert(ForecastValue).values(batch).prefix_with("OR IGNORE")
+                )
+                inserted_rows += int(result.rowcount or 0)
             session.commit()
 
-        return int(result.rowcount or 0)
+        return inserted_rows
 
     def _to_orm_value(self, entry: ForecastEntry) -> ForecastValue:
         return ForecastValue(

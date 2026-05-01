@@ -39,14 +39,12 @@ class OpenMeteoForecastEntryBuilder:
         pv_tilt: float | None,
         pv_azimuth: float | None,
         living_room_window_azimuth: float | None,
-        forecast_steps: int,
     ) -> None:
         self.gateway = gateway
         self.repository = repository
         self.pv_tilt = pv_tilt
         self.pv_azimuth = pv_azimuth
         self.living_room_window_azimuth = living_room_window_azimuth
-        self.forecast_steps = forecast_steps
 
     def build_entries(
         self,
@@ -54,6 +52,7 @@ class OpenMeteoForecastEntryBuilder:
         fetched_at: datetime,
         latitude: float,
         longitude: float,
+        forecast_steps: int | None = None,
         past_days: int | None = None,
         use_forecast_time_as_created_at: bool = False,
     ) -> list[ForecastEntry]:
@@ -61,6 +60,7 @@ class OpenMeteoForecastEntryBuilder:
             fetched_at,
             latitude,
             longitude,
+            forecast_steps=forecast_steps,
             past_days=past_days,
             use_forecast_time_as_created_at=use_forecast_time_as_created_at,
         )
@@ -69,6 +69,7 @@ class OpenMeteoForecastEntryBuilder:
                 fetched_at,
                 latitude,
                 longitude,
+                forecast_steps=forecast_steps,
                 past_days=past_days,
                 use_forecast_time_as_created_at=use_forecast_time_as_created_at,
             )
@@ -81,6 +82,7 @@ class OpenMeteoForecastEntryBuilder:
         latitude: float,
         longitude: float,
         *,
+        forecast_steps: int | None = None,
         past_days: int | None = None,
         use_forecast_time_as_created_at: bool = False,
     ) -> list[ForecastEntry]:
@@ -88,7 +90,7 @@ class OpenMeteoForecastEntryBuilder:
             latitude=latitude,
             longitude=longitude,
             variables=list(BASE_VARIABLES.values()),
-            forecast_steps=self.forecast_steps,
+            forecast_steps=forecast_steps,
             past_days=past_days,
         )
         return self._entries_from_payload(
@@ -104,6 +106,7 @@ class OpenMeteoForecastEntryBuilder:
         latitude: float,
         longitude: float,
         *,
+        forecast_steps: int | None = None,
         past_days: int | None = None,
         use_forecast_time_as_created_at: bool = False,
     ) -> list[ForecastEntry]:
@@ -114,7 +117,7 @@ class OpenMeteoForecastEntryBuilder:
                 latitude=latitude,
                 longitude=longitude,
                 variables=[GTI_VARIABLE],
-                forecast_steps=self.forecast_steps,
+                forecast_steps=forecast_steps,
                 past_days=past_days,
                 tilt=self.pv_tilt,
                 azimuth=_compass_to_open_meteo_azimuth(self.pv_azimuth),
@@ -133,7 +136,7 @@ class OpenMeteoForecastEntryBuilder:
                 latitude=latitude,
                 longitude=longitude,
                 variables=[GTI_VARIABLE],
-                forecast_steps=self.forecast_steps,
+                forecast_steps=forecast_steps,
                 past_days=past_days,
                 tilt=LIVING_ROOM_WINDOW_TILT,
                 azimuth=_compass_to_open_meteo_azimuth(self.living_room_window_azimuth),

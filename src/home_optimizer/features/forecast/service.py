@@ -36,13 +36,13 @@ class OpenMeteoForecastService:
         self.location = location
         self.repository = repository
         self.poll_interval = timedelta(seconds=poll_interval_seconds)
+        self.forecast_steps = forecast_steps
         self.builder = OpenMeteoForecastEntryBuilder(
             gateway,
             repository,
             pv_tilt=pv_tilt,
             pv_azimuth=pv_azimuth,
             living_room_window_azimuth=living_room_window_azimuth,
-            forecast_steps=forecast_steps,
         )
 
     @property
@@ -66,6 +66,7 @@ class OpenMeteoForecastService:
             fetched_at=fetched_at,
             latitude=self.location.latitude,
             longitude=self.location.longitude,
+            forecast_steps=self.forecast_steps,
         )
         self.repository.write_entries(entries)
         LOGGER.info("Stored %s Open-Meteo forecast values", len(entries))
