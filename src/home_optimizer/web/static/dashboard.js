@@ -19,11 +19,13 @@ const roomSummary = document.getElementById("room-summary");
 const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
 const forecastSummary = document.getElementById("forecast-summary");
+const historicalWeatherSummary = document.getElementById("historical-weather-summary");
 const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
 const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const forecastChart = document.getElementById("forecast-chart");
+const historicalWeatherChart = document.getElementById("historical-weather-chart");
 const shutterChart = document.getElementById("shutter-chart");
 const compressorSummary = document.getElementById("compressor-summary");
 const compressorChart = document.getElementById("compressor-chart");
@@ -174,7 +176,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !shutterChart || !compressorChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !historicalWeatherChart || !shutterChart || !compressorChart || !selectedDateLabel) {
     return;
   }
 
@@ -259,6 +261,29 @@ async function loadCharts() {
     },
   );
 
+  renderPlot(
+    historicalWeatherChart,
+    [
+      payload.historical_weather_gti[0],
+      payload.historical_weather_gti[1],
+      payload.historical_weather_gti[2],
+      payload.historical_weather_temperature,
+    ],
+    {
+      colors: ["#f9a825", "#6d4c41", "#6d4c41", "#1e88e5"],
+      emptyText: "Geen historische weerdata voor deze dag",
+      yTitle: payload.historical_weather_gti[0]?.unit || "",
+      y2Title: payload.historical_weather_temperature.unit || "",
+      traceOptions: [
+        { label: "GTI PV", color: "#f9a825" },
+        { label: "GTI ramen", color: "#6d4c41" },
+        { label: "Instraling", color: "#6d4c41", dash: "dot" },
+        { label: "Buitentemperatuur", yaxis: "y2", color: "#1e88e5", dash: "dot", precision: 1 },
+      ],
+      xRange: [startIso, endIso],
+    },
+  );
+
   renderPlot(thermalChart, [payload.thermal_output, payload.cop], {
     colors: ["#ff7043", "#4caf50"],
     emptyText: "Geen thermische output voor deze dag",
@@ -333,6 +358,12 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
+  if (historicalWeatherSummary) {
+    historicalWeatherSummary.textContent = summarizeForecast(
+      payload.historical_weather_temperature,
+      payload.historical_weather_gti,
+    );
+  }
 }
 
 function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesList, options = {}) {
@@ -606,7 +637,7 @@ weatherImportButton?.addEventListener("click", runWeatherImport);
 previousDayButton?.addEventListener("click", () => shiftDate(-1));
 nextDayButton?.addEventListener("click", () => shiftDate(1));
 window.addEventListener("resize", () => {
-  [roomChart, dhwChart, heatpumpChart, forecastChart, shutterChart, compressorChart, supplyChart, thermalChart]
+  [roomChart, dhwChart, heatpumpChart, forecastChart, historicalWeatherChart, shutterChart, compressorChart, supplyChart, thermalChart]
     .filter(Boolean)
     .forEach((chart) => Plotly.Plots.resize(chart));
 });

@@ -179,12 +179,30 @@ class DashboardChartsService:
             start_time=start_time,
             end_time=end_time + timedelta(minutes=15),
         )
+        historical_weather_series = self.reader.read_historical_weather_series(
+            names=[FORECAST_TEMPERATURE, GTI_PV, GTI_LIVING_ROOM_WINDOWS],
+            start_time=start_time,
+            end_time=end_time,
+        )
         series_by_name = {item.name: item for item in series}
         shutter_by_name = {item.name: item for item in shutter_series}
         text_series_by_name = {item.name: item for item in text_series}
         forecast_series_by_name = {item.name: item for item in forecast_series}
+        historical_weather_series_by_name = {
+            item.name: item for item in historical_weather_series
+        }
         adjusted_living_room_gti = adjusted_gti_with_shutter(
             forecast_series_by_name.get(
+                GTI_LIVING_ROOM_WINDOWS,
+                empty_series(GTI_LIVING_ROOM_WINDOWS, unit="Wm2"),
+            ),
+            shutter_by_name.get(
+                SHUTTER_LIVING_ROOM,
+                empty_series(SHUTTER_LIVING_ROOM, unit="percent"),
+            ),
+        )
+        adjusted_historical_living_room_gti = adjusted_gti_with_shutter(
+            historical_weather_series_by_name.get(
                 GTI_LIVING_ROOM_WINDOWS,
                 empty_series(GTI_LIVING_ROOM_WINDOWS, unit="Wm2"),
             ),
@@ -262,6 +280,24 @@ class DashboardChartsService:
                     )
                 ),
                 series_response(adjusted_living_room_gti),
+            ],
+            historical_weather_temperature=series_response(
+                historical_weather_series_by_name.get(
+                    FORECAST_TEMPERATURE,
+                    empty_series(FORECAST_TEMPERATURE),
+                )
+            ),
+            historical_weather_gti=[
+                series_response(
+                    historical_weather_series_by_name.get(GTI_PV, empty_series(GTI_PV))
+                ),
+                series_response(
+                    historical_weather_series_by_name.get(
+                        GTI_LIVING_ROOM_WINDOWS,
+                        empty_series(GTI_LIVING_ROOM_WINDOWS),
+                    )
+                ),
+                series_response(adjusted_historical_living_room_gti),
             ],
             hp_supply_temperature=series_response(
                 series_by_name.get(HP_SUPPLY_TEMPERATURE, empty_series(HP_SUPPLY_TEMPERATURE))

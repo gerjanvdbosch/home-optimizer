@@ -652,6 +652,28 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 110.0}],
         },
     ]
+    assert payload["historical_weather_temperature"] == {
+        "name": "temperature",
+        "unit": None,
+        "points": [],
+    }
+    assert payload["historical_weather_gti"] == [
+        {
+            "name": "gti_pv",
+            "unit": None,
+            "points": [],
+        },
+        {
+            "name": "gti_living_room_windows",
+            "unit": "Wm2",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 210.0}],
+        },
+        {
+            "name": "gti_living_room_windows_adjusted",
+            "unit": "Wm2",
+            "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 105.0}],
+        },
+    ]
     local_timezone = dashboard_charts_module.current_timezone()
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
@@ -695,6 +717,12 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             ["temperature", "gti_pv", "gti_living_room_windows"],
             start_time.isoformat(),
             forecast_end_time.isoformat(),
+        ),
+        (
+            "historical_weather",
+            ["temperature", "gti_pv", "gti_living_room_windows"],
+            start_time.isoformat(),
+            end_time.isoformat(),
         ),
     ]
 
