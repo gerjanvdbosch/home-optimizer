@@ -3,15 +3,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from home_optimizer.domain import NumericPoint
-from home_optimizer.infrastructure.database.dashboard_repository import DashboardRepository
+from home_optimizer.infrastructure.database.time_series_read_repository import (
+    TimeSeriesReadRepository,
+)
 from home_optimizer.infrastructure.database.orm_models import ForecastValue
 from home_optimizer.infrastructure.database.session import Database
 
 
-def test_dashboard_repository_reads_latest_forecast_batch(tmp_path) -> None:
+def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> None:
     database = Database(str(tmp_path / "dashboard.sqlite"))
     database.init_schema()
-    repository = DashboardRepository(database)
+    repository = TimeSeriesReadRepository(database)
 
     with database.session() as session:
         session.add_all(

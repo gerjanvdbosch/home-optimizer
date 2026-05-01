@@ -17,7 +17,7 @@ from home_optimizer.infrastructure.weather.ports import (
 LOGGER = logging.getLogger(__name__)
 
 
-class OpenMeteoForecastService:
+class WeatherImportService:
     def __init__(
         self,
         gateway: OpenMeteoGatewayPort,
@@ -27,15 +27,15 @@ class OpenMeteoForecastService:
         pv_tilt: float | None,
         pv_azimuth: float | None,
         living_room_window_azimuth: float | None,
-        poll_interval_seconds: int,
+        history_days_back: int,
         forecast_steps: int = 192,
     ) -> None:
-        if poll_interval_seconds <= 0:
-            raise ValueError("poll_interval_seconds must be greater than zero")
+        if history_days_back <= 0:
+            raise ValueError("history_days_back must be greater than zero")
 
         self.location = location
         self.repository = repository
-        self.poll_interval = timedelta(seconds=poll_interval_seconds)
+        self.history_days_back = history_days_back
         self.builder = OpenMeteoForecastEntryBuilder(
             gateway,
             repository,
@@ -45,28 +45,34 @@ class OpenMeteoForecastService:
             forecast_steps=forecast_steps,
         )
 
-    @property
-    def enabled(self) -> bool:
-        return True
-
-    def refresh_forecast(self, created_at: datetime | None = None) -> int:
-        fetched_at = ensure_utc(created_at or utc_now())
-        latest_created_at = self.repository.latest_created_at()
-        if latest_created_at is not None and fetched_at - latest_created_at < self.poll_interval:
-            LOGGER.info(
-                "Open-Meteo forecast refresh skipped: latest forecast is still fresh",
-            )
-            return 0
-
+    def import_weather_data(
+        self,
+        created_at: datetime | None = None,
+    ) -> int:
         if self.location is None:
-            LOGGER.info("Open-Meteo forecast refresh skipped: home coordinates unavailable")
+            LOGGER.info("Open-Meteo weather import skipped: home coordinates unavailable")
             return 0
+
+        fetched_at = ensure_utc(created_at or utc_now())
+        past_days = self.history_days_back
+        if past_days > 92:
+            raise ValueError(
+                "historische weerdata ligt verder terug dan Open-Meteo past_days ondersteunt"
+            )
 
         entries = self.builder.build_entries(
             fetched_at=fetched_at,
             latitude=self.location.latitude,
             longitude=self.location.longitude,
+            past_days=past_days,
+            use_forecast_time_as_created_at=True,
         )
-        self.repository.write_entries(entries)
-        LOGGER.info("Stored %s Open-Meteo forecast values", len(entries))
-        return len(entries)
+        window_start = fetched_at - timedelta(days=self.history_days_back)
+        historical_entries = [
+            entry
+            for entry in entries
+            if window_start <= ensure_utc(entry.forecast_time_utc) <= fetched_at
+        ]
+        inserted_rows = self.repository.write_new_entries(historical_entries)
+        LOGGER.info("Stored %s historical Open-Meteo forecast values", inserted_rows)
+        return inserted_rows

@@ -10,7 +10,7 @@ from home_optimizer.infrastructure.database.orm_models import ForecastValue, Sam
 from home_optimizer.infrastructure.database.session import Database
 
 
-class DashboardRepository:
+class TimeSeriesReadRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 

@@ -11,6 +11,10 @@ class HistoryImportRunResponse(BaseModel):
     sensor_count: int
 
 
+class WeatherImportResponse(BaseModel):
+    imported_rows: int
+
+
 class HistoryImportJobResponse(BaseModel):
     job_id: str
     status: str

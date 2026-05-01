@@ -13,6 +13,8 @@ class ForecastRepositoryPort(Protocol):
 
     def write_entries(self, entries: list[ForecastEntry]) -> None: ...
 
+    def write_new_entries(self, entries: list[ForecastEntry]) -> int: ...
+
 
 class OpenMeteoGatewayPort(Protocol):
     def fetch_minutely_forecast(
@@ -22,6 +24,7 @@ class OpenMeteoGatewayPort(Protocol):
         longitude: float,
         variables: list[str],
         forecast_steps: int,
+        past_days: int | None = None,
         tilt: float | None = None,
         azimuth: float | None = None,
     ) -> dict[str, Any]: ...

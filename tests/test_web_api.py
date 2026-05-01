@@ -57,6 +57,18 @@ class FakeTelemetryScheduler:
         self.stopped = True
 
 
+class FakeWeatherImportService:
+    def __init__(self) -> None:
+        self.import_calls = 0
+
+    def import_weather_data(
+        self,
+        created_at: datetime | None = None,
+    ) -> int:
+        self.import_calls += 1
+        return 12
+
+
 class FakeIdentificationService:
     def __init__(self, result: IdentificationResult) -> None:
         self.result = result
@@ -172,7 +184,7 @@ class FakePredictionService:
         )
 
 
-class FakeDashboardRepository:
+class FakeTimeSeriesReadRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str], str, str]] = []
 
@@ -262,7 +274,7 @@ class FakeContainer:
     ) -> None:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
-        self.dashboard_repository = FakeDashboardRepository()
+        self.time_series_read_repository = FakeTimeSeriesReadRepository()
         self.identification_service = FakeIdentificationService(
             IdentificationResult(
                 model_name="linear_1step_room_temperature",
@@ -298,6 +310,7 @@ class FakeContainer:
                 ),
             )
         )
+        self.weather_import_service = FakeWeatherImportService()
         self.telemetry_scheduler = FakeTelemetryScheduler()
         self.forecast_scheduler = FakeTelemetryScheduler()
 
@@ -341,6 +354,7 @@ def test_dashboard_shows_import_button() -> None:
 
     assert response.status_code == 200
     assert "Importeer geschiedenis" in response.text
+    assert "Importeer weerdata" in response.text
     assert "Scenario voorspelling" not in response.text
     assert 'href="static/shared.css"' in response.text
     assert 'href="static/dashboard.css"' in response.text
@@ -354,6 +368,33 @@ def test_dashboard_shows_import_button() -> None:
     assert app.state.container.telemetry_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
     assert gateway.closed is True
+
+
+def test_weather_import_endpoint_runs_forecast_backfill() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={"room_temperature": 3}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+            "history_import_max_days_back": 14,
+            "sensors": {"room_temperature": "sensor.room_temperature"},
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/weather-import")
+
+    assert response.status_code == 200
+    assert response.json() == {"imported_rows": 12}
+    assert app.state.container.weather_import_service.import_calls == 1
 
 
 def test_simulation_page_shows_prediction_panel() -> None:
@@ -588,7 +629,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
     forecast_end_time = end_time + timedelta(minutes=15)
-    assert app.state.container.dashboard_repository.calls == [
+    assert app.state.container.time_series_read_repository.calls == [
         (
             "numeric",
             ["shutter_living_room"],
@@ -657,7 +698,7 @@ def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.Mon
         response = client.get("/api/dashboard/charts?date=2026-04-25")
 
     assert response.status_code == 200
-    assert app.state.container.dashboard_repository.calls[1][2:] == (
+    assert app.state.container.time_series_read_repository.calls[1][2:] == (
         "2026-04-25T00:00:00+02:00",
         "2026-04-26T00:00:00+02:00",
     )

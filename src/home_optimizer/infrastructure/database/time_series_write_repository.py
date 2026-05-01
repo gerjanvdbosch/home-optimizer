@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert
 
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import normalize_utc_timestamp
@@ -12,7 +13,7 @@ from home_optimizer.infrastructure.database.orm_models import Sample1m
 from home_optimizer.infrastructure.database.session import Database
 
 
-class TimeSeriesRepository:
+class TimeSeriesWriteRepository:
     def __init__(
         self,
         database: Database,
@@ -34,42 +35,35 @@ class TimeSeriesRepository:
         self.write_rows([self._to_orm_sample(sample) for sample in samples])
 
     def write_new_samples(self, samples: list[MinuteSample]) -> int:
-        rows = [self._to_orm_sample(sample) for sample in samples]
-        new_rows = self._filter_new_rows(rows)
-        self.write_rows(new_rows)
-        return len(new_rows)
+        if not samples:
+            return 0
 
-    def _filter_new_rows(self, rows: list[Sample1m]) -> list[Sample1m]:
-        if not rows:
-            return []
-
-        row_keys = {
-            (row.timestamp_minute_utc, row.name, row.source)
-            for row in rows
-        }
+        rows = [
+            {
+                "timestamp_minute_utc": sample.timestamp_minute.isoformat(),
+                "name": sample.name,
+                "source": sample.source,
+                "entity_id": sample.entity_id,
+                "category": sample.category,
+                "unit": sample.unit,
+                "mean_real": sample.mean_real,
+                "min_real": sample.min_real,
+                "max_real": sample.max_real,
+                "last_real": sample.last_real,
+                "last_text": sample.last_text,
+                "last_bool": sample.last_bool,
+                "sample_count": sample.sample_count,
+            }
+            for sample in samples
+        ]
 
         with self.database.session() as session:
-            existing_keys = set(
-                session.execute(
-                    select(
-                        Sample1m.timestamp_minute_utc,
-                        Sample1m.name,
-                        Sample1m.source,
-                    ).where(
-                        tuple_(
-                            Sample1m.timestamp_minute_utc,
-                            Sample1m.name,
-                            Sample1m.source,
-                        ).in_(row_keys)
-                    )
-                ).all()
+            result = session.execute(
+                insert(Sample1m).values(rows).prefix_with("OR IGNORE")
             )
+            session.commit()
 
-        return [
-            row
-            for row in rows
-            if (row.timestamp_minute_utc, row.name, row.source) not in existing_keys
-        ]
+        return int(result.rowcount or 0)
 
     def last_stored_value_before(
         self,

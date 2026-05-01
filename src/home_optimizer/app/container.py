@@ -11,19 +11,26 @@ from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.backtesting import RoomTemperatureBacktestingService
-from home_optimizer.features.history_import.service import HistoryImportService
+from home_optimizer.features.history_import.history_import_service import (
+    HistoryImportService,
+)
+from home_optimizer.features.history_import.weather_import_service import WeatherImportService
 from home_optimizer.features.identification.room_temperature import (
     RoomTemperatureModelIdentificationService,
 )
 from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
-from home_optimizer.infrastructure.database.dashboard_repository import DashboardRepository
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.identified_model_repository import (
     IdentifiedModelRepository,
 )
 from home_optimizer.infrastructure.database.session import Database
-from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
+from home_optimizer.infrastructure.database.time_series_read_repository import (
+    TimeSeriesReadRepository,
+)
+from home_optimizer.infrastructure.database.time_series_write_repository import (
+    TimeSeriesWriteRepository,
+)
 from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
 from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
 
@@ -36,10 +43,11 @@ class AppContainer:
     database: Database
     home_assistant: SensorGateway
     open_meteo: OpenMeteoGateway
-    history_import_repository: TimeSeriesRepository
+    history_import_repository: TimeSeriesWriteRepository
     history_import_service: HistoryImportService
-    telemetry_repository: TimeSeriesRepository
-    dashboard_repository: DashboardRepository
+    weather_import_service: WeatherImportService
+    telemetry_repository: TimeSeriesWriteRepository
+    time_series_read_repository: TimeSeriesReadRepository
     identified_model_repository: IdentifiedModelRepository
     identification_service: RoomTemperatureModelIdentificationService
     prediction_service: RoomTemperaturePredictionService
@@ -68,20 +76,20 @@ def build_container(
     gateway = gateway_factory(sensor_specs) if gateway_factory else HomeAssistantGateway()
     location = gateway.get_location()
     open_meteo = OpenMeteoGateway()
-    history_import_repository = TimeSeriesRepository(database, source=history_source)
-    telemetry_repository = TimeSeriesRepository(database, source=telemetry_source)
-    dashboard_repository = DashboardRepository(database)
+    history_import_repository = TimeSeriesWriteRepository(database, source=history_source)
+    telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
+    time_series_read_repository = TimeSeriesReadRepository(database)
     identified_model_repository = IdentifiedModelRepository(database)
     identification_service = RoomTemperatureModelIdentificationService(
-        dashboard_repository,
+        time_series_read_repository,
         model_repository=identified_model_repository,
     )
     prediction_service = RoomTemperaturePredictionService(
-        dashboard_repository,
+        time_series_read_repository,
         identified_model_repository,
     )
     backtesting_service = RoomTemperatureBacktestingService(
-        dashboard_repository,
+        time_series_read_repository,
         identified_model_repository,
         prediction_service,
     )
@@ -90,6 +98,15 @@ def build_container(
         gateway=gateway,
         repository=history_import_repository,
         chunk_days=settings.history_import_chunk_days,
+    )
+    weather_import_service = WeatherImportService(
+        gateway=open_meteo,
+        location=location,
+        repository=forecast_repository,
+        pv_tilt=settings.pv_tilt,
+        pv_azimuth=settings.pv_azimuth,
+        living_room_window_azimuth=settings.living_room_window_azimuth,
+        history_days_back=settings.history_import_max_days_back,
     )
     telemetry_service = TelemetryService(
         gateway=gateway,
@@ -118,8 +135,9 @@ def build_container(
         open_meteo=open_meteo,
         history_import_repository=history_import_repository,
         history_import_service=history_import_service,
+        weather_import_service=weather_import_service,
         telemetry_repository=telemetry_repository,
-        dashboard_repository=dashboard_repository,
+        time_series_read_repository=time_series_read_repository,
         identified_model_repository=identified_model_repository,
         identification_service=identification_service,
         prediction_service=prediction_service,

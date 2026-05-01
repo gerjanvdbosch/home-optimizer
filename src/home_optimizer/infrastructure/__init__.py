@@ -1,16 +1,16 @@
-from .database import DashboardRepository, Database, ForecastRepository, TimeSeriesRepository
+from .database import Database, ForecastRepository, TimeSeriesReadRepository, TimeSeriesWriteRepository
 from .home_assistant import HomeAssistantGateway
 from .local import LocalJsonGateway
 from .prices import NordpoolGateway
 from .weather import OpenMeteoGateway
 
 __all__ = [
-    "DashboardRepository",
     "Database",
     "ForecastRepository",
+    "TimeSeriesReadRepository",
     "HomeAssistantGateway",
     "LocalJsonGateway",
     "NordpoolGateway",
     "OpenMeteoGateway",
-    "TimeSeriesRepository",
+    "TimeSeriesWriteRepository",
 ]

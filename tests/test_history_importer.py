@@ -5,10 +5,14 @@ from datetime import datetime, timedelta, timezone
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensors import ResampleMethod, SensorDefinition, SensorSpec
-from home_optimizer.features.history_import.service import HistoryImportService
+from home_optimizer.features.history_import.history_import_service import (
+    HistoryImportService,
+)
 from home_optimizer.infrastructure.database.orm_models import Sample1m
 from home_optimizer.infrastructure.database.session import Database
-from home_optimizer.infrastructure.database.timeseries_repository import TimeSeriesRepository
+from home_optimizer.infrastructure.database.time_series_write_repository import (
+    TimeSeriesWriteRepository,
+)
 
 
 class FakeHomeAssistantClient:
@@ -88,7 +92,7 @@ def test_mean_import_converts_values_and_skips_existing_samples(tmp_path) -> Non
         method="mean",
         conversion_factor=0.001,
     )
-    importer = HistoryImportService(ha, TimeSeriesRepository(db), chunk_days=1)
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, tzinfo=timezone.utc)
     end = datetime(2026, 4, 15, tzinfo=timezone.utc)
 
@@ -110,7 +114,7 @@ def test_mean_import_converts_values_and_skips_existing_samples(tmp_path) -> Non
 def test_history_import_does_not_overwrite_existing_samples(tmp_path) -> None:
     db = Database(str(tmp_path / "history.db"))
     db.init_schema()
-    repository = TimeSeriesRepository(db)
+    repository = TimeSeriesWriteRepository(db)
     ha = FakeHomeAssistantClient(
         [
             {
@@ -190,7 +194,7 @@ def test_forward_fill_creates_one_row_per_minute(tmp_path) -> None:
         unit="bool",
         method="ffill",
     )
-    importer = HistoryImportService(ha, TimeSeriesRepository(db), chunk_days=1)
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
 
@@ -225,7 +229,7 @@ def test_forward_fill_text_mode_keeps_off_as_text(tmp_path) -> None:
         unit=None,
         method="ffill",
     )
-    importer = HistoryImportService(ha, TimeSeriesRepository(db), chunk_days=1)
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
 
@@ -261,7 +265,7 @@ def test_time_weighted_mean_creates_one_row_per_minute(tmp_path) -> None:
         unit="Lmin",
         method="time_weighted_mean",
     )
-    importer = HistoryImportService(ha, TimeSeriesRepository(db), chunk_days=1)
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 4, tzinfo=timezone.utc)
 
@@ -303,7 +307,7 @@ def test_time_weighted_mean_carries_value_across_chunks(tmp_path) -> None:
         unit="Lmin",
         method="time_weighted_mean",
     )
-    importer = HistoryImportService(ha, TimeSeriesRepository(db), chunk_days=1)
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
     start = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
     split = datetime(2026, 4, 14, 0, 2, tzinfo=timezone.utc)
     end = datetime(2026, 4, 14, 0, 5, tzinfo=timezone.utc)

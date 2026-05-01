@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.sqlite import insert
 
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
@@ -37,6 +38,29 @@ class ForecastRepository:
             for entry in entries:
                 session.merge(self._to_orm_value(entry))
             session.commit()
+
+    def write_new_entries(self, entries: list[ForecastEntry]) -> int:
+        if not entries:
+            return 0
+
+        rows = [
+            {
+                "created_at_utc": normalize_utc_timestamp(entry.created_at_utc),
+                "forecast_time_utc": normalize_utc_timestamp(entry.forecast_time_utc),
+                "name": entry.name,
+                "value": entry.value,
+                "unit": entry.unit,
+                "source": entry.source,
+            }
+            for entry in entries
+        ]
+        with self.database.session() as session:
+            result = session.execute(
+                insert(ForecastValue).values(rows).prefix_with("OR IGNORE")
+            )
+            session.commit()
+
+        return int(result.rowcount or 0)
 
     def _to_orm_value(self, entry: ForecastEntry) -> ForecastValue:
         return ForecastValue(

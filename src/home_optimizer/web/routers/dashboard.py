@@ -45,6 +45,6 @@ def create_dashboard_router(settings: AppSettings) -> APIRouter:
         chart_date: ChartDateQuery,
         container: ContainerDependency,
     ) -> DashboardChartsResponse:
-        return DashboardChartsService(container.dashboard_repository).get_day_charts(chart_date)
+        return DashboardChartsService(container.time_series_read_repository).get_day_charts(chart_date)
 
     return router

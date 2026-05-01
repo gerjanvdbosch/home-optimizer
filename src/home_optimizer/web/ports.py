@@ -49,6 +49,13 @@ class TelemetrySchedulerRunner(Protocol):
     def stop(self) -> None: ...
 
 
+class WeatherImportRunner(Protocol):
+    def import_weather_data(
+        self,
+        created_at: datetime | None = None,
+    ) -> int: ...
+
+
 class IdentificationRunner(Protocol):
     def identify(
         self,
@@ -97,7 +104,7 @@ class WebAppContainer(Protocol):
     def history_import_service(self) -> HistoryImportRunner: ...
 
     @property
-    def dashboard_repository(self) -> DashboardDataReader: ...
+    def time_series_read_repository(self) -> DashboardDataReader: ...
 
     @property
     def identification_service(self) -> IdentificationRunner: ...
@@ -110,5 +117,8 @@ class WebAppContainer(Protocol):
 
     @property
     def forecast_scheduler(self) -> TelemetrySchedulerRunner: ...
+
+    @property
+    def weather_import_service(self) -> WeatherImportRunner: ...
 
     def close(self) -> None: ...

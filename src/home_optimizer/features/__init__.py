@@ -4,7 +4,12 @@ from .backtesting import (
     RoomTemperatureBacktestingService,
 )
 from .forecast import OpenMeteoForecastService
-from .history_import import HistoryImportRequest, HistoryImportResult, HistoryImportService
+from .history_import import (
+    HistoryImportRequest,
+    HistoryImportResult,
+    HistoryImportService,
+    WeatherImportService,
+)
 from .identification import (
     IdentificationDataset,
     IdentificationResult,
@@ -21,6 +26,7 @@ __all__ = [
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",
+    "WeatherImportService",
     "IdentificationDataset",
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",

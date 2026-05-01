@@ -9,6 +9,7 @@ const {
 } = window.HomeOptimizer;
 
 const button = document.getElementById("import-button");
+const weatherImportButton = document.getElementById("weather-import-button");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
 const selectedDateLabel = document.getElementById("selected-date");
@@ -58,6 +59,15 @@ const forecastSeriesStyles = {
 
 let selectedDate = new Date();
 
+function setImportButtonsDisabled(disabled) {
+  if (button) {
+    button.disabled = disabled;
+  }
+  if (weatherImportButton) {
+    weatherImportButton.disabled = disabled;
+  }
+}
+
 function shiftDate(days) {
   selectedDate = new Date(selectedDate);
   selectedDate.setDate(selectedDate.getDate() + days);
@@ -69,7 +79,7 @@ async function runImport() {
     return;
   }
 
-  button.disabled = true;
+  setImportButtonsDisabled(true);
   status.className = "status";
   status.textContent = "Import wordt gestart...";
 
@@ -94,7 +104,43 @@ async function runImport() {
     result.hidden = false;
     result.textContent = "De import kon niet worden uitgevoerd.";
   } finally {
-    button.disabled = false;
+    setImportButtonsDisabled(false);
+  }
+}
+
+async function runWeatherImport() {
+  if (!weatherImportButton) {
+    return;
+  }
+
+  setImportButtonsDisabled(true);
+  status.className = "status";
+  status.textContent = "Weerdata wordt geïmporteerd...";
+
+  try {
+    const response = await fetch(apiUrl("api/weather-import"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.detail || "Weerdata import mislukt.");
+    }
+
+    status.className = "status success";
+    status.textContent = `Weerdata bijgewerkt: ${payload.imported_rows} rijen toegevoegd.`;
+    result.hidden = false;
+    result.textContent = JSON.stringify(payload, null, 2);
+    await loadCharts();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Weerdata import mislukt.";
+    status.className = "status error";
+    status.textContent = message;
+    result.hidden = false;
+    result.textContent = "De weerdata import kon niet worden uitgevoerd.";
+  } finally {
+    setImportButtonsDisabled(false);
   }
 }
 
@@ -556,6 +602,7 @@ function statusAtTimestamp(points, timestamp) {
 }
 
 button?.addEventListener("click", runImport);
+weatherImportButton?.addEventListener("click", runWeatherImport);
 previousDayButton?.addEventListener("click", () => shiftDate(-1));
 nextDayButton?.addEventListener("click", () => shiftDate(1));
 window.addEventListener("resize", () => {

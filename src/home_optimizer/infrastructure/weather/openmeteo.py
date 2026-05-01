@@ -27,6 +27,7 @@ class OpenMeteoGateway:
         longitude: float,
         variables: list[str],
         forecast_steps: int,
+        past_days: int | None = None,
         tilt: float | None = None,
         azimuth: float | None = None,
     ) -> dict[str, Any]:
@@ -38,6 +39,8 @@ class OpenMeteoGateway:
             "timezone": "UTC",
             "wind_speed_unit": "ms",
         }
+        if past_days is not None:
+            params["past_days"] = past_days
         if tilt is not None:
             params["tilt"] = tilt
         if azimuth is not None:
