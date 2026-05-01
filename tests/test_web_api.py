@@ -69,6 +69,18 @@ class FakeWeatherImportService:
         return 12
 
 
+class FakeHistoricalWeatherImportService:
+    def __init__(self) -> None:
+        self.import_calls = 0
+
+    def import_historical_weather(
+        self,
+        created_at: datetime | None = None,
+    ) -> int:
+        self.import_calls += 1
+        return 24
+
+
 class FakeIdentificationService:
     def __init__(self, result: IdentificationResult) -> None:
         self.result = result
@@ -265,6 +277,18 @@ class FakeTimeSeriesReadRepository:
             ),
         ]
 
+    def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
+        self.calls.append(
+            ("historical_weather", names, start_time.isoformat(), end_time.isoformat())
+        )
+        return [
+            NumericSeries(
+                name="gti_living_room_windows",
+                unit="Wm2",
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=210.0)],
+            )
+        ]
+
 
 class FakeContainer:
     def __init__(
@@ -311,7 +335,9 @@ class FakeContainer:
             )
         )
         self.weather_import_service = FakeWeatherImportService()
+        self.historical_weather_import_service = FakeHistoricalWeatherImportService()
         self.telemetry_scheduler = FakeTelemetryScheduler()
+        self.historical_weather_scheduler = FakeTelemetryScheduler()
         self.forecast_scheduler = FakeTelemetryScheduler()
 
     def close(self) -> None:
@@ -366,6 +392,7 @@ def test_dashboard_shows_import_button() -> None:
     assert 'href="simulation"' in response.text
     assert "sensor.room_temperature" not in response.text
     assert app.state.container.telemetry_scheduler.started is True
+    assert app.state.container.historical_weather_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
     assert gateway.closed is True
 

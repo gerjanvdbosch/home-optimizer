@@ -9,6 +9,7 @@ from home_optimizer.features.identification import RoomTemperatureModelIdentific
 class FakeIdentificationReader:
     def __init__(self) -> None:
         self.series_calls: list[tuple[list[str], str, str]] = []
+        self.historical_weather_calls: list[tuple[list[str], str, str]] = []
         self.forecast_calls: list[tuple[list[str], str, str]] = []
 
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
@@ -67,6 +68,18 @@ class FakeIdentificationReader:
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.forecast_calls.append((names, start_time.isoformat(), end_time.isoformat()))
+        base_time = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
+        points = []
+        for index in range(48):
+            timestamp = (base_time + timedelta(minutes=5 * index)).isoformat()
+            solar_gain = 120.0 if 12 <= index <= 30 else 0.0
+            points.append(NumericPoint(timestamp=timestamp, value=solar_gain))
+        return [NumericSeries(name="gti_living_room_windows", unit="Wm2", points=points)]
+
+    def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
+        self.historical_weather_calls.append(
+            (names, start_time.isoformat(), end_time.isoformat())
+        )
         base_time = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
         points = []
         for index in range(48):

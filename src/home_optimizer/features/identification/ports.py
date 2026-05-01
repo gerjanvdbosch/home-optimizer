@@ -14,6 +14,13 @@ class IdentificationDataReader(Protocol):
         end_time: datetime,
     ) -> list[NumericSeries]: ...
 
+    def read_historical_weather_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[NumericSeries]: ...
+
     def read_forecast_series(
         self,
         names: list[str],

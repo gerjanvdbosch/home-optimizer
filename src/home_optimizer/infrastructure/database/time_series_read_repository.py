@@ -6,7 +6,11 @@ from sqlalchemy import func, select
 
 from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.domain.time import normalize_utc_timestamp
-from home_optimizer.infrastructure.database.orm_models import ForecastValue, Sample1m
+from home_optimizer.infrastructure.database.orm_models import (
+    ForecastValue,
+    HistoricalWeatherValue,
+    Sample1m,
+)
 from home_optimizer.infrastructure.database.session import Database
 
 
@@ -165,5 +169,45 @@ class TimeSeriesReadRepository:
                 unit=units_by_name[name],
                 points=points_by_name[name],
             )
+            for name in names
+        ]
+
+    def read_historical_weather_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[NumericSeries]:
+        if not names:
+            return []
+
+        with self.database.session() as session:
+            rows = session.execute(
+                select(
+                    HistoricalWeatherValue.name,
+                    HistoricalWeatherValue.timestamp_utc,
+                    HistoricalWeatherValue.unit,
+                    HistoricalWeatherValue.value,
+                )
+                .where(
+                    HistoricalWeatherValue.name.in_(names),
+                    HistoricalWeatherValue.timestamp_utc >= normalize_utc_timestamp(start_time),
+                    HistoricalWeatherValue.timestamp_utc < normalize_utc_timestamp(end_time),
+                )
+                .order_by(
+                    HistoricalWeatherValue.name,
+                    HistoricalWeatherValue.timestamp_utc,
+                )
+            ).all()
+
+        points_by_name = {name: [] for name in names}
+        units_by_name: dict[str, str | None] = {name: None for name in names}
+
+        for name, timestamp, unit, value in rows:
+            points_by_name[name].append(NumericPoint(timestamp=timestamp, value=float(value)))
+            units_by_name[name] = units_by_name[name] or unit
+
+        return [
+            NumericSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
             for name in names
         ]

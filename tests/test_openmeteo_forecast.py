@@ -7,11 +7,18 @@ from sqlalchemy import select
 
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.forecast import ForecastEntry
+from home_optimizer.domain.names import GTI_LIVING_ROOM_WINDOWS, GTI_PV
 from home_optimizer.domain.location import Location
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
+from home_optimizer.features.history_import.historical_weather_import_service import (
+    HistoricalWeatherImportService,
+)
 from home_optimizer.features.history_import.weather_import_service import WeatherImportService
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
-from home_optimizer.infrastructure.database.orm_models import ForecastValue
+from home_optimizer.infrastructure.database.historical_weather_repository import (
+    HistoricalWeatherRepository,
+)
+from home_optimizer.infrastructure.database.orm_models import ForecastValue, HistoricalWeatherValue
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
 
@@ -68,7 +75,7 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
         living_room_window_azimuth=settings.living_room_window_azimuth,
-        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
+        poll_interval_seconds=settings.forecast_poll_interval_seconds,
         forecast_steps=2,
     )
 
@@ -139,7 +146,7 @@ def test_openmeteo_forecast_service_skips_when_database_forecast_is_fresh(tmp_pa
     settings = AppSettings.from_options(
         {
             "database_path": str(tmp_path / "forecast.sqlite"),
-            "open_meteo_poll_interval_seconds": 3600,
+            "forecast_poll_interval_seconds": 3600,
         }
     )
     database = Database(settings.database_path)
@@ -153,7 +160,7 @@ def test_openmeteo_forecast_service_skips_when_database_forecast_is_fresh(tmp_pa
         pv_tilt=None,
         pv_azimuth=None,
         living_room_window_azimuth=None,
-        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
+        poll_interval_seconds=settings.forecast_poll_interval_seconds,
         forecast_steps=1,
     )
 
@@ -190,7 +197,7 @@ def test_openmeteo_forecast_service_skips_without_home_coordinates(tmp_path) -> 
         pv_tilt=settings.pv_tilt,
         pv_azimuth=settings.pv_azimuth,
         living_room_window_azimuth=settings.living_room_window_azimuth,
-        poll_interval_seconds=settings.open_meteo_poll_interval_seconds,
+        poll_interval_seconds=settings.forecast_poll_interval_seconds,
     )
 
     assert service.enabled is True
@@ -289,6 +296,85 @@ def test_forecast_repository_write_new_entries_chunks_large_insert(tmp_path) -> 
 
     assert inserted == 220
     assert len(row_count) == 220
+
+
+def test_historical_weather_import_service_stores_archive_rows(tmp_path) -> None:
+    responses = [
+        {
+            "hourly": {
+                "time": ["2026-04-29T00:00", "2026-04-29T01:00"],
+                "temperature_2m": [10.0, 10.5],
+                "relative_humidity_2m": [60.0, 61.0],
+                "wind_speed_10m": [3.0, 3.5],
+                "dew_point_2m": [4.0, 4.5],
+                "direct_radiation": [0.0, 10.0],
+                "diffuse_radiation": [0.0, 8.0],
+            }
+        },
+        {
+            "hourly": {
+                "time": ["2026-04-29T00:00", "2026-04-29T01:00"],
+                "global_tilted_irradiance": [0.0, 12.0],
+            }
+        },
+        {
+            "hourly": {
+                "time": ["2026-04-29T00:00", "2026-04-29T01:00"],
+                "global_tilted_irradiance": [0.0, 5.0],
+            }
+        },
+    ]
+    seen_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(200, json=responses.pop(0))
+
+    database = Database(str(tmp_path / "historical-weather.sqlite"))
+    database.init_schema()
+    repository = HistoricalWeatherRepository(database)
+    service = HistoricalWeatherImportService(
+        gateway=OpenMeteoGateway(client=httpx.Client(transport=httpx.MockTransport(handler))),
+        location=Location(latitude=52.09, longitude=5.12),
+        repository=repository,
+        pv_tilt=50.0,
+        pv_azimuth=148.0,
+        living_room_window_azimuth=225.0,
+        history_days_back=1,
+    )
+
+    written = service.import_historical_weather(
+        datetime(2026, 4, 29, 1, 30, tzinfo=timezone.utc)
+    )
+
+    assert written == 16
+    assert len(seen_urls) == 3
+    assert (
+        "hourly=temperature_2m%2Crelative_humidity_2m%2Cwind_speed_10m%2Cdew_point_2m"
+        "%2Cdirect_radiation%2Cdiffuse_radiation"
+        in seen_urls[0]
+    )
+    assert "hourly=global_tilted_irradiance" in seen_urls[1]
+    assert "hourly=global_tilted_irradiance" in seen_urls[2]
+    assert "start_date=2026-04-28" in seen_urls[0]
+    assert "end_date=2026-04-29" in seen_urls[0]
+
+    with database.session() as session:
+        rows = session.execute(
+            select(HistoricalWeatherValue).order_by(
+                HistoricalWeatherValue.timestamp_utc,
+                HistoricalWeatherValue.name,
+            )
+        ).scalars().all()
+
+    assert ("temperature", 10.0) in [(row.name, row.value) for row in rows]
+    assert ("humidity", 60.0) in [(row.name, row.value) for row in rows]
+    assert ("wind", 3.0) in [(row.name, row.value) for row in rows]
+    assert ("dew_point", 4.0) in [(row.name, row.value) for row in rows]
+    assert ("direct_radiation", 10.0) in [(row.name, row.value) for row in rows]
+    assert ("diffuse_radiation", 8.0) in [(row.name, row.value) for row in rows]
+    assert (GTI_PV, 12.0) in [(row.name, row.value) for row in rows]
+    assert (GTI_LIVING_ROOM_WINDOWS, 5.0) in [(row.name, row.value) for row in rows]
 
 
 def test_weather_import_service_filters_on_quarter_hour_window(tmp_path) -> None:

@@ -63,6 +63,11 @@ class RoomTemperatureDatasetBuilder:
             start_time=start_time,
             end_time=end_time,
         )
+        historical_weather_series = self.reader.read_historical_weather_series(
+            names=[GTI_LIVING_ROOM_WINDOWS],
+            start_time=start_time,
+            end_time=end_time,
+        )
         forecast_series = self.reader.read_forecast_series(
             names=[GTI_LIVING_ROOM_WINDOWS],
             start_time=start_time,
@@ -71,6 +76,7 @@ class RoomTemperatureDatasetBuilder:
 
         series_by_name = {item.name: item for item in series}
         text_by_name = {item.name: item for item in text_series}
+        historical_weather_by_name = {item.name: item for item in historical_weather_series}
         forecast_by_name = {item.name: item for item in forecast_series}
 
         room_temperature = series_by_name[ROOM_TEMPERATURE]
@@ -78,9 +84,12 @@ class RoomTemperatureDatasetBuilder:
             raise ValueError("room_temperature series is empty")
 
         adjusted_gti = adjusted_gti_with_shutter(
-            forecast_by_name.get(
+            historical_weather_by_name.get(
                 GTI_LIVING_ROOM_WINDOWS,
-                NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[]),
+                forecast_by_name.get(
+                    GTI_LIVING_ROOM_WINDOWS,
+                    NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[]),
+                ),
             ),
             series_by_name.get(
                 SHUTTER_LIVING_ROOM,

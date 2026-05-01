@@ -3,31 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 
 from home_optimizer.domain.forecast import ForecastEntry
-from home_optimizer.domain.names import GTI_LIVING_ROOM_WINDOWS, GTI_PV
-from home_optimizer.domain.time import ensure_utc
 
+from .openmeteo_common import (
+    GTI_VARIABLE,
+    OPEN_METEO_BASE_VARIABLES,
+    OPEN_METEO_WEATHER_UNITS,
+    build_entries_from_payload,
+    build_gti_entries,
+    parse_minutely_open_meteo_timestamp,
+)
 from .ports import ForecastRepositoryPort, OpenMeteoGatewayPort
-
-BASE_VARIABLES = {
-    "temperature": "temperature_2m",
-    "humidity": "relative_humidity_2m",
-    "wind": "wind_speed_10m",
-    "dew_point": "dew_point_2m",
-    "direct_radiation": "direct_radiation",
-    "diffuse_radiation": "diffuse_radiation",
-}
-GTI_VARIABLE = "global_tilted_irradiance"
-FORECAST_UNITS = {
-    "temperature": "degC",
-    "humidity": "%",
-    "wind": "ms",
-    "dew_point": "degC",
-    "direct_radiation": "Wm2",
-    "diffuse_radiation": "Wm2",
-    GTI_PV: "Wm2",
-    GTI_LIVING_ROOM_WINDOWS: "Wm2",
-}
-LIVING_ROOM_WINDOW_TILT = 90.0
 
 
 class OpenMeteoForecastEntryBuilder:
@@ -89,14 +74,14 @@ class OpenMeteoForecastEntryBuilder:
         payload = self.gateway.fetch_minutely_forecast(
             latitude=latitude,
             longitude=longitude,
-            variables=list(BASE_VARIABLES.values()),
+            variables=list(OPEN_METEO_BASE_VARIABLES.values()),
             forecast_steps=forecast_steps,
             past_days=past_days,
         )
         return self._entries_from_payload(
             payload=payload,
             fetched_at=fetched_at,
-            variable_map=BASE_VARIABLES,
+            variable_map=OPEN_METEO_BASE_VARIABLES,
             use_forecast_time_as_created_at=use_forecast_time_as_created_at,
         )
 
@@ -110,47 +95,26 @@ class OpenMeteoForecastEntryBuilder:
         past_days: int | None = None,
         use_forecast_time_as_created_at: bool = False,
     ) -> list[ForecastEntry]:
-        entries: list[ForecastEntry] = []
-
-        if self.pv_tilt is not None and self.pv_azimuth is not None:
-            payload = self.gateway.fetch_minutely_forecast(
+        return build_gti_entries(
+            pv_tilt=self.pv_tilt,
+            pv_azimuth=self.pv_azimuth,
+            living_room_window_azimuth=self.living_room_window_azimuth,
+            fetch_payload=lambda tilt, azimuth: self.gateway.fetch_minutely_forecast(
                 latitude=latitude,
                 longitude=longitude,
                 variables=[GTI_VARIABLE],
                 forecast_steps=forecast_steps,
                 past_days=past_days,
-                tilt=self.pv_tilt,
-                azimuth=_compass_to_open_meteo_azimuth(self.pv_azimuth),
-            )
-            entries.extend(
-                self._entries_from_payload(
-                    payload=payload,
-                    fetched_at=fetched_at,
-                    variable_map={GTI_PV: GTI_VARIABLE},
-                    use_forecast_time_as_created_at=use_forecast_time_as_created_at,
-                )
-            )
-
-        if self.living_room_window_azimuth is not None:
-            payload = self.gateway.fetch_minutely_forecast(
-                latitude=latitude,
-                longitude=longitude,
-                variables=[GTI_VARIABLE],
-                forecast_steps=forecast_steps,
-                past_days=past_days,
-                tilt=LIVING_ROOM_WINDOW_TILT,
-                azimuth=_compass_to_open_meteo_azimuth(self.living_room_window_azimuth),
-            )
-            entries.extend(
-                self._entries_from_payload(
-                    payload=payload,
-                    fetched_at=fetched_at,
-                    variable_map={GTI_LIVING_ROOM_WINDOWS: GTI_VARIABLE},
-                    use_forecast_time_as_created_at=use_forecast_time_as_created_at,
-                )
-            )
-
-        return entries
+                tilt=tilt,
+                azimuth=azimuth,
+            ),
+            entries_from_payload=lambda payload, variable_map: self._entries_from_payload(
+                payload=payload,
+                fetched_at=fetched_at,
+                variable_map=variable_map,
+                use_forecast_time_as_created_at=use_forecast_time_as_created_at,
+            ),
+        )
 
     def _entries_from_payload(
         self,
@@ -160,51 +124,21 @@ class OpenMeteoForecastEntryBuilder:
         variable_map: dict[str, str],
         use_forecast_time_as_created_at: bool = False,
     ) -> list[ForecastEntry]:
-        minutely = payload.get("minutely_15")
-        if not isinstance(minutely, dict):
-            raise ValueError("Open-Meteo response is missing minutely_15 data")
-
-        raw_times = minutely.get("time")
-        if not isinstance(raw_times, list):
-            raise ValueError("Open-Meteo response is missing forecast timestamps")
-
-        times = [_parse_open_meteo_timestamp(value) for value in raw_times]
-        entries: list[ForecastEntry] = []
-
-        for name, variable in variable_map.items():
-            raw_values = minutely.get(variable)
-            if not isinstance(raw_values, list):
-                raise ValueError(f"Open-Meteo response is missing {variable}")
-            if len(raw_values) != len(times):
-                raise ValueError(f"Open-Meteo response length mismatch for {variable}")
-
-            for forecast_time, value in zip(times, raw_values, strict=True):
-                if value is None:
-                    continue
-                entries.append(
-                    ForecastEntry(
-                        created_at_utc=forecast_time if use_forecast_time_as_created_at else fetched_at,
-                        forecast_time_utc=forecast_time,
-                        name=name,
-                        value=float(value),
-                        unit=FORECAST_UNITS.get(name),
-                        source=self.repository.source,
-                    )
-                )
-
-        return entries
-
-
-def _parse_open_meteo_timestamp(value: object) -> datetime:
-    if not isinstance(value, str):
-        raise ValueError("Open-Meteo timestamp must be a string")
-    return ensure_utc(datetime.fromisoformat(f"{value}:00+00:00"))
-
-
-def _compass_to_open_meteo_azimuth(compass_degrees: float) -> float:
-    converted = compass_degrees - 180.0
-    if converted > 180.0:
-        converted -= 360.0
-    if converted <= -180.0:
-        converted += 360.0
-    return converted
+        return build_entries_from_payload(
+            payload=payload,
+            section_name="minutely_15",
+            variable_map=variable_map,
+            parse_timestamp=parse_minutely_open_meteo_timestamp,
+            entry_factory=lambda forecast_time, name, value: ForecastEntry(
+                created_at_utc=forecast_time if use_forecast_time_as_created_at else fetched_at,
+                forecast_time_utc=forecast_time,
+                name=name,
+                value=value,
+                unit=OPEN_METEO_WEATHER_UNITS.get(name),
+                source=self.repository.source,
+            ),
+            missing_payload_message="Open-Meteo response is missing minutely_15 data",
+            missing_timestamp_message="Open-Meteo response is missing forecast timestamps",
+            missing_variable_message="Open-Meteo response is missing {variable}",
+            length_mismatch_message="Open-Meteo response length mismatch for {variable}",
+        )

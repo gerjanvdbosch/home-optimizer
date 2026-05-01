@@ -1,5 +1,6 @@
 from .clock import utc_now
 from .forecast import ForecastEntry
+from .historical_weather import HistoricalWeatherEntry
 from .identified_model import IdentifiedModel
 from .location import Location, parse_location
 from .models import DomainModel
@@ -76,6 +77,7 @@ __all__ = [
     "GTI_LIVING_ROOM_WINDOWS",
     "GTI_LIVING_ROOM_WINDOWS_ADJUSTED",
     "GTI_PV",
+    "HistoricalWeatherEntry",
     "HP_DELTA_T",
     "HP_ELECTRIC_POWER",
     "HP_ELECTRIC_TOTAL_KWH",

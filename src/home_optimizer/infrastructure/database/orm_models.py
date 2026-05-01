@@ -46,6 +46,23 @@ Index("idx_forecast_values_name_time", ForecastValue.name, ForecastValue.forecas
 Index("idx_forecast_values_created", ForecastValue.created_at_utc)
 
 
+class HistoricalWeatherValue(Base):
+    __tablename__ = "historical_weather_values"
+
+    timestamp_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    unit: Mapped[str | None] = mapped_column(String, nullable=True)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+Index(
+    "idx_historical_weather_values_name_time",
+    HistoricalWeatherValue.name,
+    HistoricalWeatherValue.timestamp_utc,
+)
+
+
 class IdentifiedModelRecord(Base):
     __tablename__ = "identified_models"
 

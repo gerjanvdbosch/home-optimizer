@@ -5,6 +5,7 @@ from .backtesting import (
 )
 from .forecast import OpenMeteoForecastService
 from .history_import import (
+    HistoricalWeatherImportService,
     HistoryImportRequest,
     HistoryImportResult,
     HistoryImportService,
@@ -23,6 +24,7 @@ from .prediction import (
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
+    "HistoricalWeatherImportService",
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",
