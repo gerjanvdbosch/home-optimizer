@@ -6,7 +6,7 @@ from home_optimizer.domain import NumericPoint
 from home_optimizer.infrastructure.database.time_series_read_repository import (
     TimeSeriesReadRepository,
 )
-from home_optimizer.infrastructure.database.orm_models import ForecastValue
+from home_optimizer.infrastructure.database.orm_models import ForecastValue, Sample1m
 from home_optimizer.infrastructure.database.session import Database
 
 
@@ -79,3 +79,51 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
     assert series[1].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=500.0)]
     assert series[2].unit == "Wm2"
     assert series[2].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=220.0)]
+
+
+def test_time_series_read_repository_returns_sample_time_range(tmp_path) -> None:
+    database = Database(str(tmp_path / "dashboard.sqlite"))
+    database.init_schema()
+    repository = TimeSeriesReadRepository(database)
+
+    with database.session() as session:
+        session.add_all(
+            [
+                Sample1m(
+                    timestamp_minute_utc="2026-04-25T00:00:00+00:00",
+                    name="room_temperature",
+                    source="home_assistant",
+                    entity_id="sensor.room_temperature",
+                    category="building",
+                    unit="degC",
+                    mean_real=20.0,
+                    min_real=20.0,
+                    max_real=20.0,
+                    last_real=20.0,
+                    last_text=None,
+                    last_bool=None,
+                    sample_count=1,
+                ),
+                Sample1m(
+                    timestamp_minute_utc="2026-04-28T23:59:00+00:00",
+                    name="room_temperature",
+                    source="home_assistant",
+                    entity_id="sensor.room_temperature",
+                    category="building",
+                    unit="degC",
+                    mean_real=21.0,
+                    min_real=21.0,
+                    max_real=21.0,
+                    last_real=21.0,
+                    last_text=None,
+                    last_bool=None,
+                    sample_count=1,
+                ),
+            ]
+        )
+        session.commit()
+
+    assert repository.sample_time_range() == (
+        datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 4, 28, 23, 59, tzinfo=timezone.utc),
+    )

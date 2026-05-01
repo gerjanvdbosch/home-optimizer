@@ -126,6 +126,9 @@ class WebAppContainer(Protocol):
     def historical_weather_scheduler(self) -> TelemetrySchedulerRunner: ...
 
     @property
+    def model_training_scheduler(self) -> TelemetrySchedulerRunner: ...
+
+    @property
     def forecast_scheduler(self) -> TelemetrySchedulerRunner: ...
 
     @property

@@ -8,16 +8,16 @@ from apscheduler.schedulers.background import BackgroundScheduler
 LOGGER = logging.getLogger(__name__)
 
 
-class HistoricalWeatherRunner(Protocol):
-    def import_historical_weather(self) -> int: ...
+class ModelTrainingRunner(Protocol):
+    def train_full_dataset_model(self) -> object | None: ...
 
 
-class HistoricalWeatherScheduler:
+class ModelTrainingScheduler:
     def __init__(
         self,
-        runner: HistoricalWeatherRunner,
+        runner: ModelTrainingRunner,
         *,
-        sync_hour: int = 1,
+        sync_hour: int = 2,
         sync_minute: int = 0,
     ) -> None:
         if not 0 <= sync_hour <= 23:
@@ -35,19 +35,19 @@ class HistoricalWeatherScheduler:
             return
 
         self.scheduler.add_job(
-            self.runner.import_historical_weather,
+            self.runner.train_full_dataset_model,
             "cron",
             hour=self.sync_hour,
             minute=self.sync_minute,
-            id="historical-weather:import",
+            id="identified-model:train",
             max_instances=1,
             coalesce=True,
             replace_existing=True,
         )
         self.scheduler.start()
-        LOGGER.info("Historical weather scheduler started")
+        LOGGER.info("Model training scheduler started")
 
     def stop(self) -> None:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)
-        LOGGER.info("Historical weather scheduler stopped")
+        LOGGER.info("Model training scheduler stopped")

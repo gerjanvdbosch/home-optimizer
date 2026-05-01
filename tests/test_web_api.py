@@ -200,6 +200,12 @@ class FakeTimeSeriesReadRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str], str, str]] = []
 
+    def sample_time_range(self) -> tuple[datetime | None, datetime | None]:
+        return (
+            datetime(2026, 4, 20, 0, 0),
+            datetime(2026, 4, 28, 23, 59),
+        )
+
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.calls.append(("numeric", names, start_time.isoformat(), end_time.isoformat()))
         if names == ["shutter_living_room"]:
@@ -338,6 +344,7 @@ class FakeContainer:
         self.historical_weather_import_service = FakeHistoricalWeatherImportService()
         self.telemetry_scheduler = FakeTelemetryScheduler()
         self.historical_weather_scheduler = FakeTelemetryScheduler()
+        self.model_training_scheduler = FakeTelemetryScheduler()
         self.forecast_scheduler = FakeTelemetryScheduler()
 
     def close(self) -> None:
@@ -393,6 +400,7 @@ def test_dashboard_shows_import_button() -> None:
     assert "sensor.room_temperature" not in response.text
     assert app.state.container.telemetry_scheduler.started is True
     assert app.state.container.historical_weather_scheduler.started is True
+    assert app.state.container.model_training_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
     assert gateway.closed is True
 

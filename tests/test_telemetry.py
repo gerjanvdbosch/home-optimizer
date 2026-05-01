@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from home_optimizer.app.forecast_scheduler import ForecastScheduler
+from home_optimizer.app.historical_weather_scheduler import HistoricalWeatherScheduler
+from home_optimizer.app.model_training_runner import FullDatasetModelTrainingRunner
+from home_optimizer.app.model_training_scheduler import ModelTrainingScheduler
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
+from home_optimizer.domain import IdentifiedModel
 from home_optimizer.domain.sensors import SensorDefinition, SensorSpec
 from home_optimizer.domain.timeseries import MinuteSample
 from home_optimizer.features.telemetry.service import TelemetryService
@@ -38,6 +42,71 @@ class FakeForecastRunner:
     def refresh_forecast(self) -> int:
         self.calls += 1
         return 1
+
+
+class FakeHistoricalWeatherRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def import_historical_weather(self) -> int:
+        self.calls += 1
+        return 1
+
+
+class FakeTrainingWindowReader:
+    def __init__(
+        self,
+        start_time: datetime | None = datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc),
+        end_time: datetime | None = datetime(2026, 4, 28, 23, 59, tzinfo=timezone.utc),
+    ) -> None:
+        self.start_time = start_time
+        self.end_time = end_time
+
+    def sample_time_range(self) -> tuple[datetime | None, datetime | None]:
+        return self.start_time, self.end_time
+
+
+class FakeIdentificationTrainer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, int, float]] = []
+
+    def identify_and_store(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> IdentifiedModel:
+        self.calls.append(
+            (start_time.isoformat(), end_time.isoformat(), interval_minutes, train_fraction)
+        )
+        return IdentifiedModel(
+            model_kind="room_temperature",
+            model_name="linear_1step_room_temperature",
+            trained_at_utc=datetime(2026, 4, 29, 2, 0, tzinfo=timezone.utc),
+            training_start_time_utc=start_time,
+            training_end_time_utc=end_time,
+            interval_minutes=interval_minutes,
+            sample_count=100,
+            train_sample_count=80,
+            test_sample_count=20,
+            coefficients={},
+            intercept=0.0,
+            train_rmse=0.0,
+            test_rmse=0.0,
+            test_rmse_recursive=0.0,
+            target_name="room_temperature",
+        )
+
+
+class FakeModelTrainingRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def train_full_dataset_model(self) -> object:
+        self.calls += 1
+        return object()
 
 
 def telemetry_spec(name: str = "room_temperature", poll_interval_seconds: int = 5) -> SensorSpec:
@@ -178,3 +247,58 @@ def test_forecast_scheduler_skips_start_when_disabled() -> None:
 
     assert runner.calls == 0
     assert scheduler.scheduler.running is False
+
+
+def test_historical_weather_scheduler_registers_daily_cron_job_at_1am() -> None:
+    runner = FakeHistoricalWeatherRunner()
+    scheduler = HistoricalWeatherScheduler(runner)
+
+    scheduler.start()
+    try:
+        jobs = {job.id: job for job in scheduler.scheduler.get_jobs()}
+        assert runner.calls == 0
+        assert set(jobs) == {"historical-weather:import"}
+        assert str(jobs["historical-weather:import"].trigger) == "cron[hour='1', minute='0']"
+    finally:
+        scheduler.stop()
+
+
+def test_model_training_runner_trains_on_full_sample_range() -> None:
+    trainer = FakeIdentificationTrainer()
+    runner = FullDatasetModelTrainingRunner(
+        trainer,
+        FakeTrainingWindowReader(),
+    )
+
+    runner.train_full_dataset_model()
+
+    assert trainer.calls == [
+        ("2026-04-20T00:00:00+00:00", "2026-04-29T00:00:00+00:00", 15, 0.8)
+    ]
+
+
+def test_model_training_runner_skips_when_no_samples_exist() -> None:
+    trainer = FakeIdentificationTrainer()
+    runner = FullDatasetModelTrainingRunner(
+        trainer,
+        FakeTrainingWindowReader(start_time=None, end_time=None),
+    )
+
+    result = runner.train_full_dataset_model()
+
+    assert result is None
+    assert trainer.calls == []
+
+
+def test_model_training_scheduler_registers_daily_cron_job_at_2am() -> None:
+    runner = FakeModelTrainingRunner()
+    scheduler = ModelTrainingScheduler(runner)
+
+    scheduler.start()
+    try:
+        jobs = {job.id: job for job in scheduler.scheduler.get_jobs()}
+        assert runner.calls == 0
+        assert set(jobs) == {"identified-model:train"}
+        assert str(jobs["identified-model:train"].trigger) == "cron[hour='2', minute='0']"
+    finally:
+        scheduler.stop()

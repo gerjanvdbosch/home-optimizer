@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 
 from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
-from home_optimizer.domain.time import normalize_utc_timestamp
+from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.infrastructure.database.orm_models import (
     ForecastValue,
     HistoricalWeatherValue,
@@ -61,6 +61,19 @@ class TimeSeriesReadRepository:
             NumericSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
             for name in names
         ]
+
+    def sample_time_range(self) -> tuple[datetime | None, datetime | None]:
+        with self.database.session() as session:
+            earliest, latest = session.execute(
+                select(
+                    func.min(Sample1m.timestamp_minute_utc),
+                    func.max(Sample1m.timestamp_minute_utc),
+                )
+            ).one()
+
+        if earliest is None or latest is None:
+            return None, None
+        return parse_datetime(earliest), parse_datetime(latest)
 
     def read_text_series(
         self,

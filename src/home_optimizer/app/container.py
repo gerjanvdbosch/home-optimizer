@@ -5,6 +5,8 @@ from typing import Callable
 
 from home_optimizer.app.forecast_scheduler import ForecastScheduler
 from home_optimizer.app.historical_weather_scheduler import HistoricalWeatherScheduler
+from home_optimizer.app.model_training_runner import FullDatasetModelTrainingRunner
+from home_optimizer.app.model_training_scheduler import ModelTrainingScheduler
 from home_optimizer.app.ports import SensorGateway
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
@@ -64,6 +66,7 @@ class AppContainer:
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
     historical_weather_scheduler: HistoricalWeatherScheduler
+    model_training_scheduler: ModelTrainingScheduler
     forecast_repository: ForecastRepository
     forecast_service: OpenMeteoForecastService
     forecast_scheduler: ForecastScheduler
@@ -136,8 +139,12 @@ def build_container(
     telemetry_scheduler = TelemetryScheduler(telemetry_service)
     historical_weather_scheduler = HistoricalWeatherScheduler(
         historical_weather_import_service,
-        interval_seconds=settings.historical_weather_poll_interval_seconds,
     )
+    model_training_runner = FullDatasetModelTrainingRunner(
+        identification_service,
+        time_series_read_repository,
+    )
+    model_training_scheduler = ModelTrainingScheduler(model_training_runner)
     forecast_service = OpenMeteoForecastService(
         gateway=open_meteo,
         location=location,
@@ -171,6 +178,7 @@ def build_container(
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
         historical_weather_scheduler=historical_weather_scheduler,
+        model_training_scheduler=model_training_scheduler,
         forecast_repository=forecast_repository,
         forecast_service=forecast_service,
         forecast_scheduler=forecast_scheduler,
