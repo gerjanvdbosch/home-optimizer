@@ -9,14 +9,12 @@ from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import (
     identification_response,
     model_training_run_response,
-    stored_identified_model_response,
 )
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import (
     IdentificationResponse,
     IdentificationTrainRequest,
     ModelTrainingRunResponse,
-    StoredIdentifiedModelResponse,
 )
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
@@ -47,25 +45,8 @@ def create_identification_router() -> APIRouter:
 
         return identification_response(result)
 
-    @router.post("/api/identification/train", response_model=StoredIdentifiedModelResponse)
+    @router.post("/api/identification/train", response_model=ModelTrainingRunResponse)
     def post_identification_train(
-        request: TrainBody,
-        container: ContainerDependency,
-    ) -> StoredIdentifiedModelResponse:
-        try:
-            model = container.identification_service.identify_and_store(
-                start_time=request.start_time,
-                end_time=request.end_time,
-                interval_minutes=request.interval_minutes,
-                train_fraction=request.train_fraction,
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-        return stored_identified_model_response(model)
-
-    @router.post("/api/identification/train-all", response_model=ModelTrainingRunResponse)
-    def post_identification_train_all(
         request: TrainBody,
         container: ContainerDependency,
     ) -> ModelTrainingRunResponse:

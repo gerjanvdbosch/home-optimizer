@@ -90,8 +90,7 @@ class FakeHistoricalWeatherImportService:
 class FakeIdentificationService:
     def __init__(self, result: IdentificationResult) -> None:
         self.result = result
-        self.calls: list[tuple[str, str, int, float, str | None]] = []
-        self.store_calls: list[tuple[str, str, int, float, str | None]] = []
+        self.calls: list[tuple[str, str, int, float]] = []
 
     def identify(
         self,
@@ -110,40 +109,6 @@ class FakeIdentificationService:
             )
         )
         return self.result
-
-    def identify_and_store(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        *,
-        interval_minutes: int = 15,
-        train_fraction: float = 0.8,
-    ) -> IdentifiedModel:
-        self.store_calls.append(
-            (
-                start_time.isoformat(),
-                end_time.isoformat(),
-                interval_minutes,
-                train_fraction,
-            )
-        )
-        return IdentifiedModel(
-            model_kind="room_temperature",
-            model_name=self.result.model_name,
-            trained_at_utc=datetime(2026, 4, 28, 18, 0),
-            training_start_time_utc=start_time,
-            training_end_time_utc=end_time,
-            interval_minutes=interval_minutes,
-            sample_count=self.result.sample_count,
-            train_sample_count=self.result.train_sample_count,
-            test_sample_count=self.result.test_sample_count,
-            coefficients=self.result.coefficients,
-            intercept=self.result.intercept,
-            train_rmse=self.result.train_rmse,
-            test_rmse=self.result.test_rmse,
-            test_rmse_recursive=self.result.test_rmse_recursive,
-            target_name=self.result.target_name,
-        )
 
 
 class FakeModelTrainingService:
@@ -613,8 +578,9 @@ def test_simulation_page_shows_prediction_panel() -> None:
     assert "Scenario voorspelling vs gemeten" in response.text
     assert "MPC voorstel" in response.text
     assert "MPC top kandidaten" in response.text
-    assert "Train alle modellen" in response.text
-    assert "thermal-output responsmodel" in response.text
+    assert "Train modellen" in response.text
+    assert "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking." not in response.text
+    assert "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking." not in response.text
     assert 'href="static/shared.css"' in response.text
     assert 'href="static/simulation.css"' in response.text
     assert 'src="static/shared.js"' in response.text
@@ -985,7 +951,7 @@ def test_identification_endpoint_returns_model_fit() -> None:
     ]
 
 
-def test_identification_train_endpoint_stores_model() -> None:
+def test_identification_train_endpoint_stores_all_models() -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
     settings = AppSettings.from_options(
@@ -1015,12 +981,15 @@ def test_identification_train_endpoint_stores_model() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_name"] == "linear_2state_room_temperature"
-    assert payload["training_start_time_utc"] == "2026-04-25T00:00:00Z"
-    assert payload["training_end_time_utc"] == "2026-04-28T00:00:00Z"
-    assert payload["test_rmse"] == 0.13
-    assert payload["test_rmse_recursive"] == 0.21
-    assert app.state.container.identification_service.store_calls == [
+    assert [model["model_name"] for model in payload["models"]] == [
+        "linear_1step_thermal_output",
+        "linear_2state_room_temperature",
+    ]
+    assert [model["target_name"] for model in payload["models"]] == [
+        "thermal_output",
+        "room_temperature",
+    ]
+    assert app.state.container.model_training_service.calls == [
         (
             "2026-04-25T00:00:00+00:00",
             "2026-04-28T00:00:00+00:00",
@@ -1030,7 +999,7 @@ def test_identification_train_endpoint_stores_model() -> None:
     ]
 
 
-def test_identification_train_all_endpoint_stores_all_models() -> None:
+def test_identification_train_all_endpoint_is_removed() -> None:
     gateway = FakeHomeAssistantGateway()
     service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
     settings = AppSettings.from_options(
@@ -1058,24 +1027,8 @@ def test_identification_train_all_endpoint_stores_all_models() -> None:
             },
         )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert [model["model_name"] for model in payload["models"]] == [
-        "linear_1step_thermal_output",
-        "linear_2state_room_temperature",
-    ]
-    assert [model["target_name"] for model in payload["models"]] == [
-        "thermal_output",
-        "room_temperature",
-    ]
-    assert app.state.container.model_training_service.calls == [
-        (
-            "2026-04-25T00:00:00+00:00",
-            "2026-04-28T00:00:00+00:00",
-            15,
-            0.8,
-        )
-    ]
+    assert response.status_code == 404
+    assert app.state.container.model_training_service.calls == []
 
 
 def test_prediction_endpoint_returns_room_temperature_series() -> None:

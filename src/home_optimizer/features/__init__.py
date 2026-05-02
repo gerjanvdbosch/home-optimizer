@@ -12,8 +12,11 @@ from .history_import import (
     WeatherImportService,
 )
 from .identification import (
+    IdentifiedModelTrainer,
     IdentificationDataset,
     IdentificationResult,
+    MultiModelTrainer,
+    MultiModelTrainingService,
     RoomTemperatureModelIdentificationService,
     ThermalOutputModelIdentificationService,
 )
@@ -43,6 +46,9 @@ __all__ = [
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",
     "ThermalOutputModelIdentificationService",
+    "IdentifiedModelTrainer",
+    "MultiModelTrainer",
+    "MultiModelTrainingService",
     "ThermostatSetpointCandidateGenerator",
     "ThermostatSetpointCandidateEvaluation",
     "ThermostatSetpointMpcEvaluationResult",

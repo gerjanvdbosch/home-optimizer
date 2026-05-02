@@ -347,6 +347,7 @@ function buildManualShutterSchedule(startDate, endDate) {
 function updateShutterMode() {
   if (isMpcMode()) {
     if (predictionShutterEditor) predictionShutterEditor.hidden = true;
+    if (predictionShutterHelp) predictionShutterHelp.hidden = true;
     return;
   }
   const useMeasuredShutters = Boolean(predictionShutterSourceMeasured?.checked);
@@ -354,8 +355,9 @@ function updateShutterMode() {
     predictionShutterEditor.hidden = useMeasuredShutters;
   }
   if (predictionShutterHelp) {
+    predictionShutterHelp.hidden = useMeasuredShutters;
     predictionShutterHelp.textContent = useMeasuredShutters
-      ? "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking."
+      ? ""
       : "Gebruik hieronder tijdblokken voor een handmatig shutterprofiel; dit patroon wordt per dag herhaald.";
   }
 }
@@ -363,6 +365,7 @@ function updateShutterMode() {
 function updateSetpointMode() {
   if (isMpcMode()) {
     if (predictionSetpointEditor) predictionSetpointEditor.hidden = true;
+    if (predictionSetpointHelp) predictionSetpointHelp.hidden = true;
     return;
   }
   const useMeasuredSetpoints = Boolean(predictionSetpointSourceMeasured?.checked);
@@ -370,8 +373,9 @@ function updateSetpointMode() {
     predictionSetpointEditor.hidden = useMeasuredSetpoints;
   }
   if (predictionSetpointHelp) {
+    predictionSetpointHelp.hidden = useMeasuredSetpoints;
     predictionSetpointHelp.textContent = useMeasuredSetpoints
-      ? "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking."
+      ? ""
       : "Gebruik hieronder tijdblokken voor een handmatig setpointprofiel; dit patroon wordt per dag herhaald.";
   }
 }
@@ -749,10 +753,10 @@ async function runTraining() {
 
   trainingButton.disabled = true;
   trainingStatus.className = "status";
-  trainingStatus.textContent = "Alle modellen worden getraind...";
+  trainingStatus.textContent = "Modellen worden getraind...";
 
   try {
-    const response = await fetch(apiUrl("api/identification/train-all"), {
+    const response = await fetch(apiUrl("api/identification/train"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

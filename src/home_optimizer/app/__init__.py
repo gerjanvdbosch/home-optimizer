@@ -6,7 +6,7 @@ from .history_import_jobs import HistoryImportJob, HistoryImportJobRunner
 from .history_import_requests import build_history_import_request
 from .logging import configure_logging
 from .model_training_scheduler import ModelTrainingScheduler
-from .model_training_service import MultiModelTrainingService
+from home_optimizer.features.identification import MultiModelTrainingService
 from .settings import AppSettings
 from .settings_loader import deep_merge, load_options_file, load_settings, parse_dot_overrides
 from .telemetry_scheduler import TelemetryScheduler

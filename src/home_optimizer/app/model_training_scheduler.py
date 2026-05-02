@@ -9,7 +9,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ModelTrainingRunner(Protocol):
-    def train_full_dataset_model(self) -> object | None: ...
+    def train_full_dataset_models(self) -> object | None: ...
 
 
 class ModelTrainingScheduler:
@@ -35,7 +35,7 @@ class ModelTrainingScheduler:
             return
 
         self.scheduler.add_job(
-            self.runner.train_full_dataset_model,
+            self.runner.train_full_dataset_models,
             "cron",
             hour=self.sync_hour,
             minute=self.sync_minute,

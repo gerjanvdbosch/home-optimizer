@@ -66,76 +66,64 @@ class FakeTrainingWindowReader:
         return self.start_time, self.end_time
 
 
-class FakeIdentificationTrainer:
+class FakeModelTrainingService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, int, float]] = []
 
-    def identify_and_store(
+    def train_all_models(
         self,
         start_time: datetime,
         end_time: datetime,
         *,
         interval_minutes: int = 15,
         train_fraction: float = 0.8,
-    ) -> IdentifiedModel:
+    ) -> list[IdentifiedModel]:
         self.calls.append(
             (start_time.isoformat(), end_time.isoformat(), interval_minutes, train_fraction)
         )
-        return IdentifiedModel(
-            model_kind="room_temperature",
-            model_name="linear_2state_room_temperature",
-            trained_at_utc=datetime(2026, 4, 29, 2, 0, tzinfo=timezone.utc),
-            training_start_time_utc=start_time,
-            training_end_time_utc=end_time,
-            interval_minutes=interval_minutes,
-            sample_count=100,
-            train_sample_count=80,
-            test_sample_count=20,
-            coefficients={},
-            intercept=0.0,
-            train_rmse=0.0,
-            test_rmse=0.0,
-            test_rmse_recursive=0.0,
-            target_name="room_temperature",
-        )
-
-
-class FakeThermalOutputTrainer(FakeIdentificationTrainer):
-    def identify_and_store(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        *,
-        interval_minutes: int = 15,
-        train_fraction: float = 0.8,
-    ) -> IdentifiedModel:
-        self.calls.append(
-            (start_time.isoformat(), end_time.isoformat(), interval_minutes, train_fraction)
-        )
-        return IdentifiedModel(
-            model_kind="thermal_output",
-            model_name="linear_1step_thermal_output",
-            trained_at_utc=datetime(2026, 4, 29, 2, 0, tzinfo=timezone.utc),
-            training_start_time_utc=start_time,
-            training_end_time_utc=end_time,
-            interval_minutes=interval_minutes,
-            sample_count=100,
-            train_sample_count=80,
-            test_sample_count=20,
-            coefficients={},
-            intercept=0.0,
-            train_rmse=0.0,
-            test_rmse=0.0,
-            test_rmse_recursive=0.0,
-            target_name="thermal_output",
-        )
+        return [
+            IdentifiedModel(
+                model_kind="thermal_output",
+                model_name="linear_1step_thermal_output",
+                trained_at_utc=datetime(2026, 4, 29, 2, 0, tzinfo=timezone.utc),
+                training_start_time_utc=start_time,
+                training_end_time_utc=end_time,
+                interval_minutes=interval_minutes,
+                sample_count=100,
+                train_sample_count=80,
+                test_sample_count=20,
+                coefficients={},
+                intercept=0.0,
+                train_rmse=0.0,
+                test_rmse=0.0,
+                test_rmse_recursive=0.0,
+                target_name="thermal_output",
+            ),
+            IdentifiedModel(
+                model_kind="room_temperature",
+                model_name="linear_2state_room_temperature",
+                trained_at_utc=datetime(2026, 4, 29, 2, 0, tzinfo=timezone.utc),
+                training_start_time_utc=start_time,
+                training_end_time_utc=end_time,
+                interval_minutes=interval_minutes,
+                sample_count=100,
+                train_sample_count=80,
+                test_sample_count=20,
+                coefficients={},
+                intercept=0.0,
+                train_rmse=0.0,
+                test_rmse=0.0,
+                test_rmse_recursive=0.0,
+                target_name="room_temperature",
+            ),
+        ]
 
 
 class FakeModelTrainingRunner:
     def __init__(self) -> None:
         self.calls = 0
 
-    def train_full_dataset_model(self) -> object:
+    def train_full_dataset_models(self) -> object:
         self.calls += 1
         return object()
 
@@ -295,47 +283,29 @@ def test_historical_weather_scheduler_registers_daily_cron_job_at_1am() -> None:
 
 
 def test_model_training_runner_trains_on_full_sample_range() -> None:
-    trainer = FakeIdentificationTrainer()
+    trainer = FakeModelTrainingService()
     runner = FullDatasetModelTrainingRunner(
         trainer,
         FakeTrainingWindowReader(),
     )
 
-    runner.train_full_dataset_model()
+    models = runner.train_full_dataset_models()
 
+    assert models is not None
+    assert [model.model_kind for model in models] == ["thermal_output", "room_temperature"]
     assert trainer.calls == [
         ("2026-04-20T00:00:00+00:00", "2026-04-29T00:00:00+00:00", 15, 0.8)
     ]
 
 
-def test_model_training_runner_can_train_thermal_output_first() -> None:
-    room_trainer = FakeIdentificationTrainer()
-    thermal_trainer = FakeThermalOutputTrainer()
-    runner = FullDatasetModelTrainingRunner(
-        room_trainer,
-        FakeTrainingWindowReader(),
-        thermal_output_identification_service=thermal_trainer,
-    )
-
-    model = runner.train_full_dataset_model()
-
-    assert model is not None
-    assert thermal_trainer.calls == [
-        ("2026-04-20T00:00:00+00:00", "2026-04-29T00:00:00+00:00", 15, 0.8)
-    ]
-    assert room_trainer.calls == [
-        ("2026-04-20T00:00:00+00:00", "2026-04-29T00:00:00+00:00", 15, 0.8)
-    ]
-
-
 def test_model_training_runner_skips_when_no_samples_exist() -> None:
-    trainer = FakeIdentificationTrainer()
+    trainer = FakeModelTrainingService()
     runner = FullDatasetModelTrainingRunner(
         trainer,
         FakeTrainingWindowReader(start_time=None, end_time=None),
     )
 
-    result = runner.train_full_dataset_model()
+    result = runner.train_full_dataset_models()
 
     assert result is None
     assert trainer.calls == []

@@ -45,3 +45,26 @@ class IdentifiedModelRepository(Protocol):
         model_kind: str,
         model_name: str | None = None,
     ) -> IdentifiedModel | None: ...
+
+
+class IdentifiedModelTrainer(Protocol):
+    def identify_and_store(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> IdentifiedModel: ...
+
+
+class MultiModelTrainer(Protocol):
+    def train_all_models(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> list[IdentifiedModel]: ...
+
