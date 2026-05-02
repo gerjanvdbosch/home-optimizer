@@ -155,3 +155,33 @@ class PredictionComparisonResponse(BaseModel):
     rmse: float | None
     bias: float | None
     max_absolute_error: float | None
+
+
+class MpcPlanRequest(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    interval_minutes: int = Field(default=15, ge=1)
+    allowed_setpoints: list[float]
+    switch_times: list[datetime]
+    comfort_min_temperature: float = Field(default=19.0)
+    comfort_max_temperature: float = Field(default=21.0)
+    setpoint_change_penalty: float = Field(default=0.1, ge=0.0)
+    shutter_schedule: NumericSeriesRequest | None = None
+
+
+class MpcCandidateResponse(BaseModel):
+    candidate_name: str
+    thermostat_setpoint_schedule: ChartSeriesResponse
+    predicted_room_temperature: ChartSeriesResponse
+    total_cost: float
+    comfort_violation_cost: float
+    setpoint_change_cost: float
+    minimum_predicted_temperature: float | None
+    maximum_predicted_temperature: float | None
+
+
+class MpcPlanResponse(BaseModel):
+    model_name: str
+    interval_minutes: int
+    candidate_results: list[MpcCandidateResponse]
+    best_candidate: MpcCandidateResponse

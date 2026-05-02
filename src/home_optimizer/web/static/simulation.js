@@ -19,6 +19,10 @@ const predictionStartInput = document.getElementById("prediction-start");
 const predictionHoursInput = document.getElementById("prediction-hours");
 const predictionComfortMinInput = document.getElementById("prediction-comfort-min");
 const predictionComfortMaxInput = document.getElementById("prediction-comfort-max");
+const predictionModeManual = document.getElementById("prediction-mode-manual");
+const predictionModeMpc = document.getElementById("prediction-mode-mpc");
+const predictionSetpointSourceFieldset = document.getElementById("prediction-setpoint-source-fieldset");
+const predictionShutterSourceFieldset = document.getElementById("prediction-shutter-source-fieldset");
 const predictionSetpointSourceMeasured = document.getElementById("prediction-setpoint-source-measured");
 const predictionSetpointSourceManual = document.getElementById("prediction-setpoint-source-manual");
 const predictionSetpointHelp = document.getElementById("prediction-setpoint-help");
@@ -35,6 +39,14 @@ const predictionButton = document.getElementById("prediction-button");
 const predictionStatus = document.getElementById("prediction-status");
 const predictionSummary = document.getElementById("prediction-summary");
 const predictionChart = document.getElementById("prediction-chart");
+const mpcEditor = document.getElementById("mpc-editor");
+const mpcSetpointMinInput = document.getElementById("mpc-setpoint-min");
+const mpcSetpointMaxInput = document.getElementById("mpc-setpoint-max");
+const mpcSetpointStepInput = document.getElementById("mpc-setpoint-step");
+const mpcSwitchHoursInput = document.getElementById("mpc-switch-hours");
+const mpcChangePenaltyInput = document.getElementById("mpc-change-penalty");
+const mpcResults = document.getElementById("mpc-results");
+const mpcCandidateList = document.getElementById("mpc-candidate-list");
 const predictionStatDelta = document.getElementById("prediction-stat-delta");
 const predictionStatRmse = document.getElementById("prediction-stat-rmse");
 const predictionStatBias = document.getElementById("prediction-stat-bias");
@@ -67,6 +79,10 @@ function resetPredictionStats() {
   if (predictionStatRmse) predictionStatRmse.textContent = "-";
   if (predictionStatBias) predictionStatBias.textContent = "-";
   if (predictionStatMaxError) predictionStatMaxError.textContent = "-";
+}
+
+function isMpcMode() {
+  return Boolean(predictionModeMpc?.checked);
 }
 
 function buildComfortShapes(minTemperature, maxTemperature) {
@@ -329,6 +345,10 @@ function buildManualShutterSchedule(startDate, endDate) {
 }
 
 function updateShutterMode() {
+  if (isMpcMode()) {
+    if (predictionShutterEditor) predictionShutterEditor.hidden = true;
+    return;
+  }
   const useMeasuredShutters = Boolean(predictionShutterSourceMeasured?.checked);
   if (predictionShutterEditor) {
     predictionShutterEditor.hidden = useMeasuredShutters;
@@ -341,6 +361,10 @@ function updateShutterMode() {
 }
 
 function updateSetpointMode() {
+  if (isMpcMode()) {
+    if (predictionSetpointEditor) predictionSetpointEditor.hidden = true;
+    return;
+  }
   const useMeasuredSetpoints = Boolean(predictionSetpointSourceMeasured?.checked);
   if (predictionSetpointEditor) {
     predictionSetpointEditor.hidden = useMeasuredSetpoints;
@@ -350,6 +374,21 @@ function updateSetpointMode() {
       ? "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking."
       : "Gebruik hieronder tijdblokken voor een handmatig setpointprofiel; dit patroon wordt per dag herhaald.";
   }
+}
+
+function updatePredictionMode() {
+  const mpcMode = isMpcMode();
+  if (predictionSetpointSourceFieldset) predictionSetpointSourceFieldset.hidden = mpcMode;
+  if (predictionShutterSourceFieldset) predictionShutterSourceFieldset.hidden = mpcMode;
+  if (mpcEditor) mpcEditor.hidden = !mpcMode;
+  if (predictionButton) {
+    predictionButton.textContent = mpcMode ? "Bereken MPC voorstel" : "Vergelijk met metingen";
+  }
+  if (mpcResults && !mpcMode) {
+    mpcResults.hidden = true;
+  }
+  updateSetpointMode();
+  updateShutterMode();
 }
 
 async function fetchDayChartsPayload(startDate) {
@@ -458,6 +497,107 @@ async function buildPredictionSetpointSchedule(startDate, endDate) {
   return buildManualSetpointSchedule(startDate, endDate);
 }
 
+function buildAllowedSetpoints() {
+  const minValue = Number(mpcSetpointMinInput?.value || 19);
+  const maxValue = Number(mpcSetpointMaxInput?.value || 21);
+  const stepValue = Number(mpcSetpointStepInput?.value || 0.5);
+  if (minValue > maxValue) {
+    throw new Error("MPC setpoint min moet kleiner of gelijk zijn aan max");
+  }
+  if (stepValue <= 0) {
+    throw new Error("MPC setpoint stap moet groter dan 0 zijn");
+  }
+  const values = [];
+  for (let value = minValue; value <= maxValue + 1e-9; value += stepValue) {
+    values.push(Number(value.toFixed(3)));
+  }
+  return values;
+}
+
+function buildMpcSwitchTimes(startDate, endDate) {
+  const switchHours = Number(mpcSwitchHoursInput?.value || 2);
+  if (switchHours <= 0) {
+    throw new Error("MPC switch-interval moet groter dan 0 zijn");
+  }
+  const times = [];
+  const current = new Date(startDate);
+  current.setHours(current.getHours() + switchHours);
+  while (current < endDate) {
+    times.push(localInputToIso(toDatetimeLocalValue(current)));
+    current.setHours(current.getHours() + switchHours);
+  }
+  return times;
+}
+
+function renderMpcCandidates(responsePayload) {
+  if (!mpcCandidateList || !mpcResults) {
+    return;
+  }
+  const topCandidates = responsePayload.candidate_results
+    .slice()
+    .sort((left, right) => left.total_cost - right.total_cost)
+    .slice(0, 3);
+  mpcCandidateList.replaceChildren();
+  topCandidates.forEach((candidate) => {
+    const item = document.createElement("article");
+    item.className = `mpc-candidate${candidate.candidate_name === responsePayload.best_candidate.candidate_name ? " is-best" : ""}`;
+    item.innerHTML = `
+      <div><strong>${candidate.candidate_name}</strong><span>Kost ${candidate.total_cost.toFixed(3)}</span></div>
+      <div><strong>Comfort</strong><span>${candidate.comfort_violation_cost.toFixed(3)}</span></div>
+      <div><strong>Switch</strong><span>${candidate.setpoint_change_cost.toFixed(3)}</span></div>
+      <div><strong>Min temp</strong><span>${candidate.minimum_predicted_temperature?.toFixed(2) ?? "-"}</span></div>
+      <div><strong>Max temp</strong><span>${candidate.maximum_predicted_temperature?.toFixed(2) ?? "-"}</span></div>
+    `;
+    mpcCandidateList.append(item);
+  });
+  mpcResults.hidden = false;
+}
+
+async function runMpcPrediction(startDate, endDate, comfortMin, comfortMax) {
+  const shutterSchedule = await buildPredictionShutterSchedule(startDate, endDate);
+  const response = await fetch(apiUrl("api/mpc/thermostat-setpoint"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      start_time: localInputToIso(predictionStartInput.value),
+      end_time: localInputToIso(toDatetimeLocalValue(endDate)),
+      interval_minutes: 15,
+      allowed_setpoints: buildAllowedSetpoints(),
+      switch_times: buildMpcSwitchTimes(startDate, endDate),
+      comfort_min_temperature: comfortMin,
+      comfort_max_temperature: comfortMax,
+      setpoint_change_penalty: Number(mpcChangePenaltyInput?.value || 0.1),
+      shutter_schedule: shutterSchedule,
+    }),
+  });
+  const responsePayload = await response.json();
+  if (!response.ok) {
+    throw new Error(responsePayload.detail || "MPC voorstel ophalen mislukt.");
+  }
+
+  renderPlot(
+    predictionChart,
+    [responsePayload.best_candidate.predicted_room_temperature],
+    {
+      colors: ["#00796b"],
+      emptyText: "Geen MPC voorspelling beschikbaar",
+      yTitle: responsePayload.best_candidate.predicted_room_temperature.unit || "",
+      shapes: buildComfortShapes(comfortMin, comfortMax),
+      traceOptions: [{ label: "MPC voorspeld", precision: 2 }],
+    },
+  );
+  renderMpcCandidates(responsePayload);
+  predictionStatus.className = "status success";
+  predictionStatus.textContent = "MPC voorstel berekend.";
+  if (predictionSummary) {
+    predictionSummary.textContent = `Beste kandidaat: ${responsePayload.best_candidate.candidate_name} · kost ${responsePayload.best_candidate.total_cost.toFixed(3)}`;
+  }
+  if (predictionStatDelta) predictionStatDelta.textContent = "-";
+  if (predictionStatRmse) predictionStatRmse.textContent = responsePayload.best_candidate.total_cost.toFixed(2);
+  if (predictionStatBias) predictionStatBias.textContent = responsePayload.best_candidate.comfort_violation_cost.toFixed(2);
+  if (predictionStatMaxError) predictionStatMaxError.textContent = responsePayload.best_candidate.setpoint_change_cost.toFixed(2);
+}
+
 async function runPrediction(event) {
   event.preventDefault();
   if (
@@ -486,6 +626,15 @@ async function runPrediction(event) {
 
     if (comfortMin > comfortMax) {
       throw new Error("comfort min moet kleiner of gelijk zijn aan comfort max");
+    }
+
+    if (mpcResults) {
+      mpcResults.hidden = true;
+    }
+
+    if (isMpcMode()) {
+      await runMpcPrediction(startDate, endDate, comfortMin, comfortMax);
+      return;
     }
 
     const payload = {
@@ -631,6 +780,8 @@ async function runTraining() {
 
 predictionForm?.addEventListener("submit", runPrediction);
 trainingButton?.addEventListener("click", runTraining);
+predictionModeManual?.addEventListener("change", updatePredictionMode);
+predictionModeMpc?.addEventListener("change", updatePredictionMode);
 predictionSetpointSourceMeasured?.addEventListener("change", updateSetpointMode);
 predictionSetpointSourceManual?.addEventListener("change", async () => {
   updateSetpointMode();
@@ -656,5 +807,6 @@ window.addEventListener("resize", () => {
 setPredictionDefaults();
 setTrainingDefaults();
 resetPredictionStats();
+updatePredictionMode();
 updateSetpointMode();
 updateShutterMode();

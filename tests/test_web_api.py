@@ -25,6 +25,9 @@ from home_optimizer.features import (
     RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
+    ThermostatSetpointCandidateEvaluation,
+    ThermostatSetpointMpcEvaluationResult,
+    ThermostatSetpointMpcPlanRequest,
 )
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
@@ -195,6 +198,86 @@ class FakePredictionService:
         )
 
 
+class FakeMpcPlanner:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def propose_plan(
+        self,
+        request: ThermostatSetpointMpcPlanRequest,
+        *,
+        shutter_position: ShutterPositionControl | None = None,
+    ) -> ThermostatSetpointMpcEvaluationResult:
+        self.calls.append(
+            {
+                "request": request,
+                "shutter_position": shutter_position,
+            }
+        )
+        best_schedule = NumericSeries(
+            name="thermostat_setpoint",
+            unit="degC",
+            points=[
+                NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=19.0),
+                NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=19.0),
+                NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=20.0),
+            ],
+        )
+        best_prediction = NumericSeries(
+            name="room_temperature",
+            unit="degC",
+            points=[
+                NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=19.4),
+                NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=19.7),
+            ],
+        )
+        runner_up_schedule = NumericSeries(
+            name="thermostat_setpoint",
+            unit="degC",
+            points=[
+                NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=20.0),
+                NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=20.0),
+                NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=20.0),
+            ],
+        )
+        runner_up_prediction = NumericSeries(
+            name="room_temperature",
+            unit="degC",
+            points=[
+                NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=20.2),
+                NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=20.5),
+            ],
+        )
+        best_candidate = ThermostatSetpointCandidateEvaluation(
+            candidate_name="candidate_1",
+            thermostat_setpoint_schedule=best_schedule,
+            predicted_room_temperature=best_prediction,
+            total_cost=0.25,
+            comfort_violation_cost=0.0,
+            setpoint_change_cost=0.25,
+            minimum_predicted_temperature=19.4,
+            maximum_predicted_temperature=19.7,
+        )
+        return ThermostatSetpointMpcEvaluationResult(
+            model_name="linear_1step_room_temperature",
+            interval_minutes=request.interval_minutes,
+            candidate_results=[
+                best_candidate,
+                ThermostatSetpointCandidateEvaluation(
+                    candidate_name="candidate_2",
+                    thermostat_setpoint_schedule=runner_up_schedule,
+                    predicted_room_temperature=runner_up_prediction,
+                    total_cost=0.6,
+                    comfort_violation_cost=0.5,
+                    setpoint_change_cost=0.1,
+                    minimum_predicted_temperature=20.2,
+                    maximum_predicted_temperature=20.5,
+                ),
+            ],
+            best_candidate=best_candidate,
+        )
+
+
 class FakeTimeSeriesReadRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str], str, str]] = []
@@ -339,6 +422,7 @@ class FakeContainer:
                 ),
             )
         )
+        self.mpc_planner = FakeMpcPlanner()
         self.weather_import_service = FakeWeatherImportService()
         self.historical_weather_import_service = FakeHistoricalWeatherImportService()
         self.telemetry_scheduler = FakeTelemetryScheduler()
@@ -455,6 +539,8 @@ def test_simulation_page_shows_prediction_panel() -> None:
 
     assert response.status_code == 200
     assert "Scenario voorspelling vs gemeten" in response.text
+    assert "MPC voorstel" in response.text
+    assert "MPC top kandidaten" in response.text
     assert "Train en sla model op" in response.text
     assert 'href="static/shared.css"' in response.text
     assert 'href="static/simulation.css"' in response.text
@@ -1051,6 +1137,84 @@ def test_prediction_comparison_endpoint_returns_predicted_and_actual_series() ->
                         ],
                     )
                 ),
+            ),
+        }
+    ]
+
+
+def test_mpc_plan_endpoint_returns_ranked_candidates() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/mpc/thermostat-setpoint",
+            json={
+                "start_time": "2026-04-28T10:00:00+00:00",
+                "end_time": "2026-04-28T10:30:00+00:00",
+                "interval_minutes": 15,
+                "allowed_setpoints": [19.0, 20.0, 21.0],
+                "switch_times": ["2026-04-28T10:30:00+00:00"],
+                "comfort_min_temperature": 19.0,
+                "comfort_max_temperature": 21.0,
+                "setpoint_change_penalty": 0.25,
+                "shutter_schedule": {
+                    "name": "shutter_living_room",
+                    "unit": "percent",
+                    "points": [
+                        {"timestamp": "2026-04-28T10:00:00+00:00", "value": 60.0},
+                        {"timestamp": "2026-04-28T10:15:00+00:00", "value": 50.0},
+                    ],
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_name"] == "linear_1step_room_temperature"
+    assert payload["interval_minutes"] == 15
+    assert payload["best_candidate"]["candidate_name"] == "candidate_1"
+    assert payload["best_candidate"]["total_cost"] == 0.25
+    assert payload["best_candidate"]["thermostat_setpoint_schedule"]["points"] == [
+        {"timestamp": "2026-04-28T10:00:00+00:00", "value": 19.0},
+        {"timestamp": "2026-04-28T10:15:00+00:00", "value": 19.0},
+        {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.0},
+    ]
+    assert payload["candidate_results"][1]["candidate_name"] == "candidate_2"
+    assert app.state.container.mpc_planner.calls == [
+        {
+            "request": ThermostatSetpointMpcPlanRequest(
+                start_time=datetime(2026, 4, 28, 10, 0, tzinfo=ZoneInfo("UTC")),
+                end_time=datetime(2026, 4, 28, 10, 30, tzinfo=ZoneInfo("UTC")),
+                interval_minutes=15,
+                allowed_setpoints=[19.0, 20.0, 21.0],
+                switch_times=[datetime(2026, 4, 28, 10, 30, tzinfo=ZoneInfo("UTC"))],
+                comfort_min_temperature=19.0,
+                comfort_max_temperature=21.0,
+                setpoint_change_penalty=0.25,
+            ),
+            "shutter_position": ShutterPositionControl.from_schedule(
+                NumericSeries(
+                    name="shutter_living_room",
+                    unit="percent",
+                    points=[
+                        NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=60.0),
+                        NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
+                    ],
+                )
             ),
         }
     ]

@@ -11,6 +11,10 @@ from home_optimizer.features.prediction.schemas import (
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
 )
+from home_optimizer.features.mpc.schemas import (
+    ThermostatSetpointMpcEvaluationResult,
+    ThermostatSetpointMpcPlanRequest,
+)
 
 
 class ClosableGateway(Protocol):
@@ -102,6 +106,15 @@ class PredictionRunner(Protocol):
     ) -> RoomTemperaturePredictionComparison: ...
 
 
+class ThermostatSetpointMpcPlannerRunner(Protocol):
+    def propose_plan(
+        self,
+        request: ThermostatSetpointMpcPlanRequest,
+        *,
+        shutter_position: NumericSeries | None = None,
+    ) -> ThermostatSetpointMpcEvaluationResult: ...
+
+
 class WebAppContainer(Protocol):
     @property
     def home_assistant(self) -> ClosableGateway: ...
@@ -117,6 +130,9 @@ class WebAppContainer(Protocol):
 
     @property
     def prediction_service(self) -> PredictionRunner: ...
+
+    @property
+    def mpc_planner(self) -> ThermostatSetpointMpcPlannerRunner: ...
 
     @property
     def telemetry_scheduler(self) -> TelemetrySchedulerRunner: ...

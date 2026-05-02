@@ -12,6 +12,11 @@ from home_optimizer.domain import (
 )
 from home_optimizer.features.backtesting.metrics import prediction_error_summary
 from home_optimizer.features.identification.schemas import IdentificationResult
+from home_optimizer.features.mpc.schemas import (
+    ThermostatSetpointCandidateEvaluation,
+    ThermostatSetpointMpcEvaluationResult,
+    ThermostatSetpointMpcPlanRequest,
+)
 from home_optimizer.features.prediction.schemas import (
     RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
@@ -25,6 +30,9 @@ from home_optimizer.web.schemas import (
     HistoryImportJobResponse,
     IdentificationResponse,
     NumericSeriesRequest,
+    MpcCandidateResponse,
+    MpcPlanRequest,
+    MpcPlanResponse,
     PredictionComparisonResponse,
     PredictionResponse,
     StoredIdentifiedModelResponse,
@@ -128,6 +136,19 @@ def room_temperature_control_inputs_from_request(
     )
 
 
+def mpc_plan_request_from_request(request: MpcPlanRequest) -> ThermostatSetpointMpcPlanRequest:
+    return ThermostatSetpointMpcPlanRequest(
+        start_time=request.start_time,
+        end_time=request.end_time,
+        interval_minutes=request.interval_minutes,
+        allowed_setpoints=request.allowed_setpoints,
+        switch_times=request.switch_times,
+        comfort_min_temperature=request.comfort_min_temperature,
+        comfort_max_temperature=request.comfort_max_temperature,
+        setpoint_change_penalty=request.setpoint_change_penalty,
+    )
+
+
 def prediction_response(result: RoomTemperaturePrediction) -> PredictionResponse:
     return PredictionResponse(
         model_name=result.model_name,
@@ -154,4 +175,32 @@ def prediction_comparison_response(
         rmse=rmse,
         bias=bias,
         max_absolute_error=max_absolute_error,
+    )
+
+
+def mpc_candidate_response(
+    result: ThermostatSetpointCandidateEvaluation,
+) -> MpcCandidateResponse:
+    return MpcCandidateResponse(
+        candidate_name=result.candidate_name,
+        thermostat_setpoint_schedule=series_response(result.thermostat_setpoint_schedule),
+        predicted_room_temperature=series_response(result.predicted_room_temperature),
+        total_cost=result.total_cost,
+        comfort_violation_cost=result.comfort_violation_cost,
+        setpoint_change_cost=result.setpoint_change_cost,
+        minimum_predicted_temperature=result.minimum_predicted_temperature,
+        maximum_predicted_temperature=result.maximum_predicted_temperature,
+    )
+
+
+def mpc_plan_response(result: ThermostatSetpointMpcEvaluationResult) -> MpcPlanResponse:
+    candidates = [mpc_candidate_response(item) for item in result.candidate_results]
+    best_candidate = next(
+        candidate for candidate in candidates if candidate.candidate_name == result.best_candidate.candidate_name
+    )
+    return MpcPlanResponse(
+        model_name=result.model_name,
+        interval_minutes=result.interval_minutes,
+        candidate_results=candidates,
+        best_candidate=best_candidate,
     )

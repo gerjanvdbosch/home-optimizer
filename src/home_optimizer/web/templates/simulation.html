@@ -45,6 +45,17 @@
             </article>
           </div>
           <form id="prediction-form" class="scenario-form">
+            <fieldset class="scenario-fieldset">
+              <legend>Scenario modus</legend>
+              <label class="radio-option">
+                <input id="prediction-mode-manual" type="radio" name="prediction-mode" value="manual" checked />
+                <span>Handmatig scenario</span>
+              </label>
+              <label class="radio-option">
+                <input id="prediction-mode-mpc" type="radio" name="prediction-mode" value="mpc" />
+                <span>MPC voorstel</span>
+              </label>
+            </fieldset>
             <label>
               Start
               <input id="prediction-start" type="datetime-local" required />
@@ -61,7 +72,7 @@
               Comfort max (degC)
               <input id="prediction-comfort-max" type="number" min="5" max="30" step="0.1" value="21.0" required />
             </label>
-            <fieldset class="scenario-fieldset">
+            <fieldset id="prediction-setpoint-source-fieldset" class="scenario-fieldset">
               <legend>Setpoint bron</legend>
               <label class="radio-option">
                 <input id="prediction-setpoint-source-measured" type="radio" name="prediction-setpoint-source" value="measured" checked />
@@ -72,7 +83,10 @@
                 <span>Handmatig</span>
               </label>
             </fieldset>
-             <fieldset class="scenario-fieldset">
+            <p id="prediction-setpoint-help" class="field-help">
+              De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking.
+            </p>
+             <fieldset id="prediction-shutter-source-fieldset" class="scenario-fieldset">
               <legend>Shutter bron</legend>
               <label class="radio-option">
                 <input id="prediction-shutter-source-measured" type="radio" name="prediction-shutter-source" value="measured" checked />
@@ -83,6 +97,9 @@
                 <span>Handmatig</span>
               </label>
             </fieldset>
+            <p id="prediction-shutter-help" class="field-help">
+              De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking.
+            </p>
             <section id="prediction-setpoint-editor" class="block-editor" aria-label="Handmatige setpointblokken">
               <div class="block-editor-heading">
                 <strong>Handmatige setpointblokken</strong>
@@ -102,12 +119,49 @@
               </div>
               <div id="prediction-shutter-blocks" class="block-editor-list"></div>
             </section>
+            <section id="mpc-editor" class="block-editor" aria-label="MPC instellingen" hidden>
+              <div class="block-editor-heading">
+                <strong>MPC zoekruimte</strong>
+              </div>
+              <p class="field-help">
+                Laat de planner meerdere thermostat-setpoint schema's doorrekenen met het huidige lineaire model en kies automatisch het beste voorstel.
+              </p>
+              <div class="mpc-grid">
+                <label>
+                  Setpoint min (degC)
+                  <input id="mpc-setpoint-min" type="number" min="5" max="30" step="0.1" value="19.0" required />
+                </label>
+                <label>
+                  Setpoint max (degC)
+                  <input id="mpc-setpoint-max" type="number" min="5" max="30" step="0.1" value="21.0" required />
+                </label>
+                <label>
+                  Setpoint stap (degC)
+                  <input id="mpc-setpoint-step" type="number" min="0.1" max="5" step="0.1" value="0.5" required />
+                </label>
+                <label>
+                  Wissel elke (uren)
+                  <input id="mpc-switch-hours" type="number" min="1" max="12" step="1" value="2" required />
+                </label>
+                <label>
+                  Switch penalty
+                  <input id="mpc-change-penalty" type="number" min="0" max="10" step="0.05" value="0.1" required />
+                </label>
+              </div>
+            </section>
             <div class="scenario-actions">
               <button id="prediction-button" type="submit">Vergelijk met metingen</button>
               <div id="prediction-status" class="status" aria-live="polite"></div>
             </div>
           </form>
           <div class="chart-wrap" id="prediction-chart"></div>
+          <section id="mpc-results" class="mpc-results" hidden>
+            <div class="panel-heading">
+              <h2>MPC top kandidaten</h2>
+              <span>Beste voorstel plus de sterkste alternatieven</span>
+            </div>
+            <div id="mpc-candidate-list" class="mpc-candidate-list"></div>
+          </section>
         </article>
 
         <article class="panel">

@@ -24,6 +24,11 @@ from home_optimizer.features.history_import.weather_import_service import Weathe
 from home_optimizer.features.identification.room_temperature import (
     RoomTemperatureModelIdentificationService,
 )
+from home_optimizer.features.mpc import (
+    ThermostatSetpointCandidateGenerator,
+    ThermostatSetpointMpcEvaluator,
+    ThermostatSetpointMpcPlanner,
+)
 from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
@@ -62,6 +67,7 @@ class AppContainer:
     identified_model_repository: IdentifiedModelRepository
     identification_service: RoomTemperatureModelIdentificationService
     prediction_service: RoomTemperaturePredictionService
+    mpc_planner: ThermostatSetpointMpcPlanner
     backtesting_service: RoomTemperatureBacktestingService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
@@ -100,6 +106,10 @@ def build_container(
     prediction_service = RoomTemperaturePredictionService(
         time_series_read_repository,
         identified_model_repository,
+    )
+    mpc_planner = ThermostatSetpointMpcPlanner(
+        ThermostatSetpointCandidateGenerator(),
+        ThermostatSetpointMpcEvaluator(prediction_service),
     )
     backtesting_service = RoomTemperatureBacktestingService(
         time_series_read_repository,
@@ -174,6 +184,7 @@ def build_container(
         identified_model_repository=identified_model_repository,
         identification_service=identification_service,
         prediction_service=prediction_service,
+        mpc_planner=mpc_planner,
         backtesting_service=backtesting_service,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
