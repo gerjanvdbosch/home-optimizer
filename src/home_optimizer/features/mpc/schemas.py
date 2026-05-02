@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from home_optimizer.domain import NumericSeries
 from home_optimizer.domain.models import DomainModel
 
@@ -20,3 +22,14 @@ class ThermostatSetpointMpcEvaluationResult(DomainModel):
     interval_minutes: int
     candidate_results: list[ThermostatSetpointCandidateEvaluation]
     best_candidate: ThermostatSetpointCandidateEvaluation
+
+
+class ThermostatSetpointMpcPlanRequest(DomainModel):
+    start_time: datetime
+    end_time: datetime
+    interval_minutes: int
+    allowed_setpoints: list[float]
+    switch_times: list[datetime]
+    comfort_min_temperature: float = 19.0
+    comfort_max_temperature: float = 21.0
+    setpoint_change_penalty: float = 0.1

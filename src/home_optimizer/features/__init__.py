@@ -20,6 +20,8 @@ from .mpc import (
     ThermostatSetpointCandidateGenerator,
     ThermostatSetpointCandidateEvaluation,
     ThermostatSetpointMpcEvaluationResult,
+    ThermostatSetpointMpcPlanRequest,
+    ThermostatSetpointMpcPlanner,
     ThermostatSetpointMpcEvaluator,
 )
 from .prediction import (
@@ -42,6 +44,8 @@ __all__ = [
     "ThermostatSetpointCandidateGenerator",
     "ThermostatSetpointCandidateEvaluation",
     "ThermostatSetpointMpcEvaluationResult",
+    "ThermostatSetpointMpcPlanRequest",
+    "ThermostatSetpointMpcPlanner",
     "ThermostatSetpointMpcEvaluator",
     "RoomTemperatureBacktestDayResult",
     "RoomTemperatureBacktestResult",
