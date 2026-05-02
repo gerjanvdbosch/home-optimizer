@@ -16,7 +16,7 @@ def test_identified_model_repository_returns_latest_model_by_kind(tmp_path) -> N
 
     first_model = IdentifiedModel(
         model_kind="room_temperature",
-        model_name="linear_1step_room_temperature",
+        model_name="linear_2state_room_temperature",
         trained_at_utc=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
         training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
         training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),

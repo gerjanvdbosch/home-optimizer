@@ -95,6 +95,7 @@ class PredictionRunner(Protocol):
         end_time: datetime,
         *,
         control_inputs: RoomTemperatureControlInputs,
+        model_name: str = "linear_2state_room_temperature",
     ) -> RoomTemperaturePrediction: ...
 
     def predict_vs_actual(
@@ -103,7 +104,19 @@ class PredictionRunner(Protocol):
         end_time: datetime,
         *,
         control_inputs: RoomTemperatureControlInputs,
+        model_name: str = "linear_2state_room_temperature",
     ) -> RoomTemperaturePredictionComparison: ...
+
+
+class ModelTrainingRunner(Protocol):
+    def train_all_models(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> list[IdentifiedModel]: ...
 
 
 class ThermostatSetpointMpcPlannerRunner(Protocol):
@@ -127,6 +140,9 @@ class WebAppContainer(Protocol):
 
     @property
     def identification_service(self) -> IdentificationRunner: ...
+
+    @property
+    def model_training_service(self) -> ModelTrainingRunner: ...
 
     @property
     def prediction_service(self) -> PredictionRunner: ...

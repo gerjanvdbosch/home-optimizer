@@ -30,7 +30,7 @@ class FakePredictionService:
             for step in range(1, 5)
         ]
         return RoomTemperaturePrediction(
-            model_name="linear_1step_room_temperature",
+            model_name="linear_2state_room_temperature",
             interval_minutes=15,
             target_name=ROOM_TEMPERATURE,
             room_temperature=NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=points),
@@ -78,7 +78,7 @@ def test_mpc_evaluator_ranks_thermostat_candidates_by_cost() -> None:
         comfort_max_temperature=21.0,
     )
 
-    assert result.model_name == "linear_1step_room_temperature"
+    assert result.model_name == "linear_2state_room_temperature"
     assert result.interval_minutes == 15
     assert len(result.candidate_results) == 2
     assert result.best_candidate.candidate_name == "candidate_2"

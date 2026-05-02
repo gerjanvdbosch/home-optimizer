@@ -30,6 +30,7 @@ from home_optimizer.web.schemas import (
     HistoryImportJobResponse,
     IdentificationResponse,
     NumericSeriesRequest,
+    ModelTrainingRunResponse,
     MpcCandidateResponse,
     MpcPlanRequest,
     MpcPlanResponse,
@@ -106,6 +107,12 @@ def stored_identified_model_response(model: IdentifiedModel) -> StoredIdentified
         test_rmse=model.test_rmse,
         test_rmse_recursive=model.test_rmse_recursive,
         target_name=model.target_name,
+    )
+
+
+def model_training_run_response(models: list[IdentifiedModel]) -> ModelTrainingRunResponse:
+    return ModelTrainingRunResponse(
+        models=[stored_identified_model_response(model) for model in models]
     )
 
 

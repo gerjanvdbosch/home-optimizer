@@ -27,13 +27,15 @@ class IdentificationTrainer(Protocol):
 class FullDatasetModelTrainingRunner:
     def __init__(
         self,
-        identification_service: IdentificationTrainer,
+        room_temperature_identification_service: IdentificationTrainer,
         range_reader: TrainingWindowReader,
+        thermal_output_identification_service: IdentificationTrainer | None = None,
         *,
         interval_minutes: int = 15,
         train_fraction: float = 0.8,
     ) -> None:
-        self.identification_service = identification_service
+        self.room_temperature_identification_service = room_temperature_identification_service
+        self.thermal_output_identification_service = thermal_output_identification_service
         self.range_reader = range_reader
         self.interval_minutes = interval_minutes
         self.train_fraction = train_fraction
@@ -45,7 +47,21 @@ class FullDatasetModelTrainingRunner:
             return None
 
         end_time = latest_sample_time + timedelta(minutes=1)
-        model = self.identification_service.identify_and_store(
+        if self.thermal_output_identification_service is not None:
+            thermal_model = self.thermal_output_identification_service.identify_and_store(
+                start_time=start_time,
+                end_time=end_time,
+                interval_minutes=self.interval_minutes,
+                train_fraction=self.train_fraction,
+            )
+            LOGGER.info(
+                "Trained thermal output model on full dataset from %s until %s: %s",
+                start_time.isoformat(),
+                end_time.isoformat(),
+                thermal_model.model_name,
+            )
+
+        model = self.room_temperature_identification_service.identify_and_store(
             start_time=start_time,
             end_time=end_time,
             interval_minutes=self.interval_minutes,

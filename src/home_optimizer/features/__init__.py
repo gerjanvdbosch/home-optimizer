@@ -15,6 +15,7 @@ from .identification import (
     IdentificationDataset,
     IdentificationResult,
     RoomTemperatureModelIdentificationService,
+    ThermalOutputModelIdentificationService,
 )
 from .mpc import (
     ThermostatSetpointCandidateGenerator,
@@ -41,6 +42,7 @@ __all__ = [
     "IdentificationDataset",
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",
+    "ThermalOutputModelIdentificationService",
     "ThermostatSetpointCandidateGenerator",
     "ThermostatSetpointCandidateEvaluation",
     "ThermostatSetpointMpcEvaluationResult",

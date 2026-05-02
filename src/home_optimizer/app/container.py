@@ -7,6 +7,7 @@ from home_optimizer.app.forecast_scheduler import ForecastScheduler
 from home_optimizer.app.historical_weather_scheduler import HistoricalWeatherScheduler
 from home_optimizer.app.model_training_runner import FullDatasetModelTrainingRunner
 from home_optimizer.app.model_training_scheduler import ModelTrainingScheduler
+from home_optimizer.app.model_training_service import MultiModelTrainingService
 from home_optimizer.app.ports import SensorGateway
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
@@ -23,6 +24,9 @@ from home_optimizer.features.history_import.historical_weather_import_service im
 from home_optimizer.features.history_import.weather_import_service import WeatherImportService
 from home_optimizer.features.identification.room_temperature import (
     RoomTemperatureModelIdentificationService,
+)
+from home_optimizer.features.identification.thermal_output import (
+    ThermalOutputModelIdentificationService,
 )
 from home_optimizer.features.mpc import (
     ThermostatSetpointCandidateGenerator,
@@ -66,6 +70,7 @@ class AppContainer:
     time_series_read_repository: TimeSeriesReadRepository
     identified_model_repository: IdentifiedModelRepository
     identification_service: RoomTemperatureModelIdentificationService
+    model_training_service: MultiModelTrainingService
     prediction_service: RoomTemperaturePredictionService
     mpc_planner: ThermostatSetpointMpcPlanner
     backtesting_service: RoomTemperatureBacktestingService
@@ -103,9 +108,17 @@ def build_container(
         time_series_read_repository,
         model_repository=identified_model_repository,
     )
+    thermal_output_identification_service = ThermalOutputModelIdentificationService(
+        time_series_read_repository,
+        model_repository=identified_model_repository,
+    )
     prediction_service = RoomTemperaturePredictionService(
         time_series_read_repository,
         identified_model_repository,
+    )
+    model_training_service = MultiModelTrainingService(
+        thermal_output_identification_service,
+        identification_service,
     )
     mpc_planner = ThermostatSetpointMpcPlanner(
         ThermostatSetpointCandidateGenerator(),
@@ -153,6 +166,7 @@ def build_container(
     model_training_runner = FullDatasetModelTrainingRunner(
         identification_service,
         time_series_read_repository,
+        thermal_output_identification_service=thermal_output_identification_service,
     )
     model_training_scheduler = ModelTrainingScheduler(model_training_runner)
     forecast_service = OpenMeteoForecastService(
@@ -183,6 +197,7 @@ def build_container(
         time_series_read_repository=time_series_read_repository,
         identified_model_repository=identified_model_repository,
         identification_service=identification_service,
+        model_training_service=model_training_service,
         prediction_service=prediction_service,
         mpc_planner=mpc_planner,
         backtesting_service=backtesting_service,

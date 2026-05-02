@@ -19,14 +19,19 @@ class IdentifiedModelRepository:
             session.merge(self._to_record(model))
             session.commit()
 
-    def latest(self, *, model_kind: str) -> IdentifiedModel | None:
+    def latest(
+        self,
+        *,
+        model_kind: str,
+        model_name: str | None = None,
+    ) -> IdentifiedModel | None:
         with self.database.session() as session:
-            stmt = (
-                select(IdentifiedModelRecord)
-                .where(IdentifiedModelRecord.model_kind == model_kind)
-                .order_by(IdentifiedModelRecord.trained_at_utc.desc())
-                .limit(1)
+            stmt = select(IdentifiedModelRecord).where(
+                IdentifiedModelRecord.model_kind == model_kind
             )
+            if model_name is not None:
+                stmt = stmt.where(IdentifiedModelRecord.model_name == model_name)
+            stmt = stmt.order_by(IdentifiedModelRecord.trained_at_utc.desc()).limit(1)
             row = session.execute(stmt).scalar_one_or_none()
 
         if row is None:

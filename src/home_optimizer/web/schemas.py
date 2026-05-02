@@ -120,6 +120,10 @@ class StoredIdentifiedModelResponse(BaseModel):
     target_name: str
 
 
+class ModelTrainingRunResponse(BaseModel):
+    models: list[StoredIdentifiedModelResponse]
+
+
 class NumericSeriesRequestPoint(BaseModel):
     timestamp: str
     value: float

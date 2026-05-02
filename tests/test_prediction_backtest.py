@@ -77,6 +77,39 @@ class FakeBacktestReader:
                 unit="Wm2",
                 points=solar_points,
             ),
+            "hp_flow": NumericSeries(
+                name="hp_flow",
+                unit="Lmin",
+                points=[
+                    NumericPoint(
+                        timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
+                        value=10.0,
+                    )
+                    for step in range(0, 96)
+                ],
+            ),
+            "hp_supply_temperature": NumericSeries(
+                name="hp_supply_temperature",
+                unit="degC",
+                points=[
+                    NumericPoint(
+                        timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
+                        value=30.0,
+                    )
+                    for step in range(0, 96)
+                ],
+            ),
+            "hp_return_temperature": NumericSeries(
+                name="hp_return_temperature",
+                unit="degC",
+                points=[
+                    NumericPoint(
+                        timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
+                        value=29.0,
+                    )
+                    for step in range(0, 96)
+                ],
+            ),
         }
 
 
@@ -84,14 +117,18 @@ class FakeModelRepository:
     def __init__(self, model: IdentifiedModel) -> None:
         self.model = model
 
-    def latest(self, *, model_kind: str) -> IdentifiedModel | None:
-        return self.model if self.model.model_kind == model_kind else None
+    def latest(self, *, model_kind: str, model_name: str | None = None) -> IdentifiedModel | None:
+        if self.model.model_kind != model_kind:
+            return None
+        if model_name is not None and self.model.model_name != model_name:
+            return None
+        return self.model
 
 
 def test_prediction_service_backtests_day_range() -> None:
     model = IdentifiedModel(
         model_kind="room_temperature",
-        model_name="linear_1step_room_temperature",
+        model_name="linear_2state_room_temperature",
         trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
         training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
         training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
@@ -102,8 +139,8 @@ def test_prediction_service_backtests_day_range() -> None:
         coefficients={
             "previous_room_temperature": 1.0,
             "outdoor_temperature": 0.0,
-            "previous_thermostat_setpoint": 0.0,
             "gti_living_room_windows_adjusted": 0.0,
+            "floor_heat_state": 0.0,
         },
         intercept=0.0,
         train_rmse=0.05,
@@ -151,7 +188,7 @@ def test_prediction_service_backtests_day_range() -> None:
 def test_prediction_service_backtests_configured_horizon_hours() -> None:
     model = IdentifiedModel(
         model_kind="room_temperature",
-        model_name="linear_1step_room_temperature",
+        model_name="linear_2state_room_temperature",
         trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
         training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
         training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
@@ -162,8 +199,8 @@ def test_prediction_service_backtests_configured_horizon_hours() -> None:
         coefficients={
             "previous_room_temperature": 1.0,
             "outdoor_temperature": 0.0,
-            "previous_thermostat_setpoint": 0.0,
             "gti_living_room_windows_adjusted": 0.0,
+            "floor_heat_state": 0.0,
         },
         intercept=0.0,
         train_rmse=0.05,
@@ -191,3 +228,48 @@ def test_prediction_service_backtests_configured_horizon_hours() -> None:
     assert result.horizon_hours == 6
     assert result.day_results[0].horizon_hours == 6
     assert result.day_results[0].overlap_count == 23
+
+
+def test_prediction_service_backtests_selected_model_name() -> None:
+    model = IdentifiedModel(
+        model_kind="room_temperature",
+        model_name="linear_2state_room_temperature",
+        trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
+        training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+        sample_count=100,
+        train_sample_count=80,
+        test_sample_count=20,
+        coefficients={
+            "previous_room_temperature": 1.0,
+            "outdoor_temperature": 0.0,
+            "gti_living_room_windows_adjusted": 0.0,
+            "floor_heat_state": 0.0,
+        },
+        intercept=0.0,
+        train_rmse=0.05,
+        test_rmse=0.1,
+        test_rmse_recursive=0.14,
+        target_name="room_temperature",
+    )
+    service = RoomTemperaturePredictionService(
+        FakeBacktestReader(),
+        FakeModelRepository(model),
+    )
+    backtesting_service = RoomTemperatureBacktestingService(
+        FakeBacktestReader(),
+        FakeModelRepository(model),
+        service,
+    )
+
+    result = backtesting_service.backtest_by_day(
+        start_date=date(2026, 4, 28),
+        end_date=date(2026, 4, 28),
+        horizon_hours=6,
+        timezone_info=timezone.utc,
+        model_name="linear_2state_room_temperature",
+    )
+
+    assert result.model_name == "linear_2state_room_temperature"
+    assert result.successful_days == 1

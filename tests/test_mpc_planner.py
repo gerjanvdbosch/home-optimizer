@@ -22,7 +22,7 @@ class FakePredictionService:
             NumericPoint(timestamp="2026-05-02T10:30:00+00:00", value=predicted_value),
         ]
         return RoomTemperaturePrediction(
-            model_name="linear_1step_room_temperature",
+            model_name="linear_2state_room_temperature",
             interval_minutes=15,
             target_name=ROOM_TEMPERATURE,
             room_temperature=NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=points),
@@ -48,7 +48,7 @@ def test_mpc_planner_proposes_best_schedule_from_generated_candidates() -> None:
         )
     )
 
-    assert result.model_name == "linear_1step_room_temperature"
+    assert result.model_name == "linear_2state_room_temperature"
     assert result.best_candidate.total_cost == min(
         candidate.total_cost for candidate in result.candidate_results
     )

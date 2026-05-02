@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
-from home_optimizer.features.identification import RoomTemperatureModelIdentificationService
+from home_optimizer.features.identification import (
+    RoomTemperatureModelIdentificationService,
+    ThermalOutputModelIdentificationService,
+)
 
 
 class FakeIdentificationReader:
@@ -112,8 +115,8 @@ def test_build_dataset_resamples_and_returns_feature_matrix() -> None:
     assert dataset.feature_names == [
         "previous_room_temperature",
         "outdoor_temperature",
-        "previous_thermostat_setpoint",
         "gti_living_room_windows_adjusted",
+        "floor_heat_state",
     ]
     assert len(dataset.timestamps) == len(dataset.features) == len(dataset.targets)
     assert len(dataset.features) >= 10
@@ -131,18 +134,38 @@ def test_identify_fits_linear_baseline_and_reports_metrics() -> None:
         interval_minutes=15,
     )
 
-    assert result.model_name == "linear_1step_room_temperature"
+    assert result.model_name == "linear_2state_room_temperature"
     assert result.sample_count == result.train_sample_count + result.test_sample_count
     assert result.train_sample_count > result.test_sample_count >= 1
     assert set(result.coefficients) == {
         "previous_room_temperature",
         "outdoor_temperature",
-        "previous_thermostat_setpoint",
         "gti_living_room_windows_adjusted",
+        "floor_heat_state",
     }
     assert result.train_rmse >= 0.0
     assert result.test_rmse >= 0.0
     assert result.test_rmse_recursive >= 0.0
+
+
+def test_identify_thermal_output_response_model_reports_metrics() -> None:
+    reader = FakeIdentificationReader()
+    service = ThermalOutputModelIdentificationService(reader)
+
+    result = service.identify(
+        start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 25, 4, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+    )
+
+    assert result.model_name == "linear_1step_thermal_output"
+    assert set(result.coefficients) == {
+        "previous_thermal_output",
+        "previous_heating_demand",
+        "outdoor_temperature",
+    }
+    assert result.train_rmse >= 0.0
+    assert result.test_rmse >= 0.0
 
 
 class StateFilteringReader(FakeIdentificationReader):

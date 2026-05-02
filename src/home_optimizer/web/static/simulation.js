@@ -749,10 +749,10 @@ async function runTraining() {
 
   trainingButton.disabled = true;
   trainingStatus.className = "status";
-  trainingStatus.textContent = "Model wordt getraind...";
+  trainingStatus.textContent = "Alle modellen worden getraind...";
 
   try {
-    const response = await fetch(apiUrl("api/identification/train"), {
+    const response = await fetch(apiUrl("api/identification/train-all"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -767,9 +767,22 @@ async function runTraining() {
       throw new Error(responsePayload.detail || "Modeltraining mislukt.");
     }
 
+    const trainedModels = Array.isArray(responsePayload.models) ? responsePayload.models : [];
+    const roomModel = trainedModels.find((model) => model.target_name === "room_temperature");
+    const thermalModel = trainedModels.find((model) => model.target_name === "thermal_output");
+    const parts = [];
+    if (thermalModel) {
+      parts.push(`thermal RMSE: ${thermalModel.test_rmse.toFixed(3)}`);
+    }
+    if (roomModel) {
+      parts.push(`room 1-step RMSE: ${roomModel.test_rmse.toFixed(3)}`);
+      parts.push(`room recursive RMSE: ${roomModel.test_rmse_recursive.toFixed(3)}`);
+    }
+
     trainingStatus.className = "status success";
-    trainingStatus.textContent =
-      `Model opgeslagen. 1-step test RMSE: ${responsePayload.test_rmse.toFixed(3)} · recursive test RMSE: ${responsePayload.test_rmse_recursive.toFixed(3)}`;
+    trainingStatus.textContent = parts.length
+      ? `Modellen opgeslagen. ${parts.join(" · ")}`
+      : "Modellen opgeslagen.";
   } catch (error) {
     trainingStatus.className = "status error";
     trainingStatus.textContent = error instanceof Error ? error.message : "Modeltraining mislukt.";

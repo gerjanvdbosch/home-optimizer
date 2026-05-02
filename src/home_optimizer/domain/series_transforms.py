@@ -3,12 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from home_optimizer.domain import (
+    FLOOR_HEAT_STATE,
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
     THERMAL_OUTPUT,
     NumericPoint,
     NumericSeries,
 )
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
+
+DEFAULT_FLOOR_HEAT_STATE_ALPHA = 0.97
 
 
 def latest_value_at(points: list[NumericPoint], timestamp: str) -> float | None:
@@ -102,3 +105,21 @@ def build_thermal_output_series(
         thermal_points.append(NumericPoint(timestamp=flow_point.timestamp, value=thermal_output))
 
     return NumericSeries(name=name, unit="kW", points=thermal_points)
+
+
+def build_floor_heat_state_series(
+    thermal_output: NumericSeries,
+    *,
+    alpha: float = DEFAULT_FLOOR_HEAT_STATE_ALPHA,
+    name: str = FLOOR_HEAT_STATE,
+) -> NumericSeries:
+    if not 0.0 <= alpha < 1.0:
+        raise ValueError("alpha must be in [0.0, 1.0)")
+
+    floor_points: list[NumericPoint] = []
+    state = 0.0
+    for point in thermal_output.points:
+        state = alpha * state + (1.0 - alpha) * point.value
+        floor_points.append(NumericPoint(timestamp=point.timestamp, value=state))
+
+    return NumericSeries(name=name, unit=thermal_output.unit, points=floor_points)

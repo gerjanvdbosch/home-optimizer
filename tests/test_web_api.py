@@ -90,8 +90,8 @@ class FakeHistoricalWeatherImportService:
 class FakeIdentificationService:
     def __init__(self, result: IdentificationResult) -> None:
         self.result = result
-        self.calls: list[tuple[str, str, int, float]] = []
-        self.store_calls: list[tuple[str, str, int, float]] = []
+        self.calls: list[tuple[str, str, int, float, str | None]] = []
+        self.store_calls: list[tuple[str, str, int, float, str | None]] = []
 
     def identify(
         self,
@@ -146,6 +146,73 @@ class FakeIdentificationService:
         )
 
 
+class FakeModelTrainingService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, int, float]] = []
+
+    def train_all_models(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+        train_fraction: float = 0.8,
+    ) -> list[IdentifiedModel]:
+        self.calls.append(
+            (
+                start_time.isoformat(),
+                end_time.isoformat(),
+                interval_minutes,
+                train_fraction,
+            )
+        )
+        return [
+            IdentifiedModel(
+                model_kind="thermal_output",
+                model_name="linear_1step_thermal_output",
+                trained_at_utc=datetime(2026, 4, 28, 18, 0),
+                training_start_time_utc=start_time,
+                training_end_time_utc=end_time,
+                interval_minutes=interval_minutes,
+                sample_count=168,
+                train_sample_count=134,
+                test_sample_count=34,
+                coefficients={
+                    "previous_thermal_output": 0.7,
+                    "previous_heating_demand": 0.2,
+                    "outdoor_temperature": -0.01,
+                },
+                intercept=0.05,
+                train_rmse=0.11,
+                test_rmse=0.18,
+                test_rmse_recursive=0.22,
+                target_name="thermal_output",
+            ),
+            IdentifiedModel(
+                model_kind="room_temperature",
+                model_name="linear_2state_room_temperature",
+                trained_at_utc=datetime(2026, 4, 28, 18, 1),
+                training_start_time_utc=start_time,
+                training_end_time_utc=end_time,
+                interval_minutes=interval_minutes,
+                sample_count=168,
+                train_sample_count=134,
+                test_sample_count=34,
+                coefficients={
+                    "previous_room_temperature": 0.94,
+                    "outdoor_temperature": 0.01,
+                    "floor_heat_state": 0.06,
+                    "gti_living_room_windows_adjusted": 0.0003,
+                },
+                intercept=0.02,
+                train_rmse=0.06,
+                test_rmse=0.13,
+                test_rmse_recursive=0.21,
+                target_name="room_temperature",
+            ),
+        ]
+
+
 class FakePredictionService:
     def __init__(self, result: RoomTemperaturePrediction) -> None:
         self.result = result
@@ -158,12 +225,14 @@ class FakePredictionService:
         end_time: datetime,
         *,
         control_inputs: RoomTemperatureControlInputs,
+        model_name: str = "linear_2state_room_temperature",
     ) -> RoomTemperaturePrediction:
         self.calls.append(
             {
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
                 "control_inputs": control_inputs,
+                "model_name": model_name,
             }
         )
         return self.result
@@ -174,12 +243,14 @@ class FakePredictionService:
         end_time: datetime,
         *,
         control_inputs: RoomTemperatureControlInputs,
+        model_name: str = "linear_2state_room_temperature",
     ) -> RoomTemperaturePredictionComparison:
         self.comparison_calls.append(
             {
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
                 "control_inputs": control_inputs,
+                "model_name": model_name,
             }
         )
         return RoomTemperaturePredictionComparison(
@@ -259,7 +330,7 @@ class FakeMpcPlanner:
             maximum_predicted_temperature=19.7,
         )
         return ThermostatSetpointMpcEvaluationResult(
-            model_name="linear_1step_room_temperature",
+            model_name="linear_2state_room_temperature",
             interval_minutes=request.interval_minutes,
             candidate_results=[
                 best_candidate,
@@ -389,7 +460,7 @@ class FakeContainer:
         self.time_series_read_repository = FakeTimeSeriesReadRepository()
         self.identification_service = FakeIdentificationService(
             IdentificationResult(
-                model_name="linear_1step_room_temperature",
+                model_name="linear_2state_room_temperature",
                 interval_minutes=15,
                 sample_count=168,
                 train_sample_count=134,
@@ -397,7 +468,7 @@ class FakeContainer:
                 coefficients={
                     "previous_room_temperature": 0.94,
                     "outdoor_temperature": 0.01,
-                    "previous_thermostat_setpoint": 0.06,
+                    "floor_heat_state": 0.06,
                     "gti_living_room_windows_adjusted": 0.0003,
                 },
                 intercept=0.02,
@@ -407,9 +478,10 @@ class FakeContainer:
                 target_name="room_temperature",
             )
         )
+        self.model_training_service = FakeModelTrainingService()
         self.prediction_service = FakePredictionService(
             RoomTemperaturePrediction(
-                model_name="linear_1step_room_temperature",
+                model_name="linear_2state_room_temperature",
                 interval_minutes=15,
                 target_name="room_temperature",
                 room_temperature=NumericSeries(
@@ -541,7 +613,8 @@ def test_simulation_page_shows_prediction_panel() -> None:
     assert "Scenario voorspelling vs gemeten" in response.text
     assert "MPC voorstel" in response.text
     assert "MPC top kandidaten" in response.text
-    assert "Train en sla model op" in response.text
+    assert "Train alle modellen" in response.text
+    assert "thermal-output responsmodel" in response.text
     assert 'href="static/shared.css"' in response.text
     assert 'href="static/simulation.css"' in response.text
     assert 'src="static/shared.js"' in response.text
@@ -885,7 +958,7 @@ def test_identification_endpoint_returns_model_fit() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload == {
-        "model_name": "linear_1step_room_temperature",
+        "model_name": "linear_2state_room_temperature",
         "interval_minutes": 15,
         "sample_count": 168,
         "train_sample_count": 134,
@@ -893,7 +966,7 @@ def test_identification_endpoint_returns_model_fit() -> None:
         "coefficients": {
             "previous_room_temperature": 0.94,
             "outdoor_temperature": 0.01,
-            "previous_thermostat_setpoint": 0.06,
+            "floor_heat_state": 0.06,
             "gti_living_room_windows_adjusted": 0.0003,
         },
         "intercept": 0.02,
@@ -942,12 +1015,60 @@ def test_identification_train_endpoint_stores_model() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_name"] == "linear_1step_room_temperature"
+    assert payload["model_name"] == "linear_2state_room_temperature"
     assert payload["training_start_time_utc"] == "2026-04-25T00:00:00Z"
     assert payload["training_end_time_utc"] == "2026-04-28T00:00:00Z"
     assert payload["test_rmse"] == 0.13
     assert payload["test_rmse_recursive"] == 0.21
     assert app.state.container.identification_service.store_calls == [
+        (
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-28T00:00:00+00:00",
+            15,
+            0.8,
+        )
+    ]
+
+
+def test_identification_train_all_endpoint_stores_all_models() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/identification/train-all",
+            json={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-28T00:00:00+00:00",
+                "interval_minutes": 15,
+                "train_fraction": 0.8,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [model["model_name"] for model in payload["models"]] == [
+        "linear_1step_thermal_output",
+        "linear_2state_room_temperature",
+    ]
+    assert [model["target_name"] for model in payload["models"]] == [
+        "thermal_output",
+        "room_temperature",
+    ]
+    assert app.state.container.model_training_service.calls == [
         (
             "2026-04-25T00:00:00+00:00",
             "2026-04-28T00:00:00+00:00",
@@ -1001,7 +1122,7 @@ def test_prediction_endpoint_returns_room_temperature_series() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        "model_name": "linear_1step_room_temperature",
+        "model_name": "linear_2state_room_temperature",
         "interval_minutes": 15,
         "target_name": "room_temperature",
         "room_temperature": {
@@ -1039,6 +1160,7 @@ def test_prediction_endpoint_returns_room_temperature_series() -> None:
                     )
                 ),
             ),
+            "model_name": "linear_2state_room_temperature",
         }
     ]
 
@@ -1088,7 +1210,7 @@ def test_prediction_comparison_endpoint_returns_predicted_and_actual_series() ->
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_name"] == "linear_1step_room_temperature"
+    assert payload["model_name"] == "linear_2state_room_temperature"
     assert payload["interval_minutes"] == 15
     assert payload["target_name"] == "room_temperature"
     assert payload["predicted_room_temperature"] == {
@@ -1138,6 +1260,7 @@ def test_prediction_comparison_endpoint_returns_predicted_and_actual_series() ->
                     )
                 ),
             ),
+            "model_name": "linear_2state_room_temperature",
         }
     ]
 
@@ -1184,7 +1307,7 @@ def test_mpc_plan_endpoint_returns_ranked_candidates() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_name"] == "linear_1step_room_temperature"
+    assert payload["model_name"] == "linear_2state_room_temperature"
     assert payload["interval_minutes"] == 15
     assert payload["best_candidate"]["candidate_name"] == "candidate_1"
     assert payload["best_candidate"]["total_cost"] == 0.25

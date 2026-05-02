@@ -41,6 +41,7 @@ GTI_LIVING_ROOM_WINDOWS = "gti_living_room_windows"
 GTI_LIVING_ROOM_WINDOWS_ADJUSTED = "gti_living_room_windows_adjusted"
 
 THERMAL_OUTPUT = "thermal_output"
+FLOOR_HEAT_STATE = "floor_heat_state"
 COP = "cop"
 BASELOAD = "baseload"
 HP_DELTA_T = "hp_delta_t"
@@ -64,6 +65,7 @@ __all__ = [
     "GTI_LIVING_ROOM_WINDOWS",
     "GTI_LIVING_ROOM_WINDOWS_ADJUSTED",
     "GTI_PV",
+    "FLOOR_HEAT_STATE",
     "HP_DELTA_T",
     "HP_ELECTRIC_POWER",
     "HP_ELECTRIC_TOTAL_KWH",

@@ -21,6 +21,7 @@ from .names import (
     FORECAST_HUMIDITY,
     FORECAST_TEMPERATURE,
     FORECAST_WIND,
+    FLOOR_HEAT_STATE,
     GTI_LIVING_ROOM_WINDOWS,
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
     GTI_PV,
@@ -49,7 +50,9 @@ from .sensor_factory import build_sensor_specs
 from .sensors import SENSOR_DEFINITIONS, SensorDefinition, SensorSpec
 from .series import NumericPoint, NumericSeries, TextPoint, TextSeries
 from .series_transforms import (
+    DEFAULT_FLOOR_HEAT_STATE_ALPHA,
     adjusted_gti_with_shutter,
+    build_floor_heat_state_series,
     build_thermal_output_series,
     latest_value_at,
     shutter_open_fraction_at,
@@ -64,6 +67,7 @@ __all__ = [
     "BOOSTER_HEATER_ACTIVE",
     "COMPRESSOR_FREQUENCY",
     "COP",
+    "DEFAULT_FLOOR_HEAT_STATE_ALPHA",
     "DEFROST_ACTIVE",
     "DHW_BOTTOM_TEMPERATURE",
     "DHW_TOP_TEMPERATURE",
@@ -76,6 +80,7 @@ __all__ = [
     "FORECAST_HUMIDITY",
     "FORECAST_TEMPERATURE",
     "FORECAST_WIND",
+    "FLOOR_HEAT_STATE",
     "GTI_LIVING_ROOM_WINDOWS",
     "GTI_LIVING_ROOM_WINDOWS_ADJUSTED",
     "GTI_PV",
@@ -113,6 +118,7 @@ __all__ = [
     "TextPoint",
     "TextSeries",
     "adjusted_gti_with_shutter",
+    "build_floor_heat_state_series",
     "build_sensor_specs",
     "build_thermal_output_series",
     "ensure_utc",

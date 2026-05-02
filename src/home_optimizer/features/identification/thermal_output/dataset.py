@@ -7,9 +7,7 @@ import pandas as pd
 from home_optimizer.domain import (
     BOOSTER_HEATER_ACTIVE,
     DEFROST_ACTIVE,
-    FLOOR_HEAT_STATE,
     GTI_LIVING_ROOM_WINDOWS,
-    GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
     HP_FLOW,
     HP_MODE,
     HP_RETURN_TEMPERATURE,
@@ -19,8 +17,8 @@ from home_optimizer.domain import (
     ROOM_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
     THERMAL_OUTPUT,
+    THERMOSTAT_SETPOINT,
     adjusted_gti_with_shutter,
-    build_floor_heat_state_series,
     build_thermal_output_series,
     latest_value_at,
     upsample_series_forward_fill,
@@ -29,11 +27,11 @@ from home_optimizer.domain.time import parse_datetime
 
 from ..ports import IdentificationDataReader
 from ..schemas import IdentificationDataset
-from .model import FLOOR_HEAT_STATE_FEATURE_NAME, ROOM_TEMPERATURE_FEATURE_NAMES
-from .state_filter import RoomTemperatureStateFilter
+from ..room_temperature.state_filter import RoomTemperatureStateFilter
+from .model import THERMAL_OUTPUT_FEATURE_NAMES
 
 
-class RoomTemperatureDatasetBuilder:
+class ThermalOutputDatasetBuilder:
     def __init__(self, reader: IdentificationDataReader) -> None:
         self.reader = reader
 
@@ -47,19 +45,18 @@ class RoomTemperatureDatasetBuilder:
         if interval_minutes <= 0:
             raise ValueError("interval_minutes must be greater than zero")
 
-        series_names = [
-            ROOM_TEMPERATURE,
-            OUTDOOR_TEMPERATURE,
-            SHUTTER_LIVING_ROOM,
-            DEFROST_ACTIVE,
-            BOOSTER_HEATER_ACTIVE,
-            HP_FLOW,
-            HP_SUPPLY_TEMPERATURE,
-            HP_RETURN_TEMPERATURE,
-        ]
-
         series = self.reader.read_series(
-            names=series_names,
+            names=[
+                ROOM_TEMPERATURE,
+                OUTDOOR_TEMPERATURE,
+                THERMOSTAT_SETPOINT,
+                SHUTTER_LIVING_ROOM,
+                HP_FLOW,
+                HP_SUPPLY_TEMPERATURE,
+                HP_RETURN_TEMPERATURE,
+                DEFROST_ACTIVE,
+                BOOSTER_HEATER_ACTIVE,
+            ],
             start_time=start_time,
             end_time=end_time,
         )
@@ -84,11 +81,23 @@ class RoomTemperatureDatasetBuilder:
         historical_weather_by_name = {item.name: item for item in historical_weather_series}
         forecast_by_name = {item.name: item for item in forecast_series}
 
-        room_temperature = series_by_name[ROOM_TEMPERATURE]
+        room_temperature = series_by_name.get(
+            ROOM_TEMPERATURE,
+            NumericSeries(name=ROOM_TEMPERATURE, unit="degC", points=[]),
+        )
         if not room_temperature.points:
             raise ValueError("room_temperature series is empty")
 
-        adjusted_gti = adjusted_gti_with_shutter(
+        thermal_output = build_thermal_output_series(
+            series_by_name.get(HP_FLOW),
+            series_by_name.get(HP_SUPPLY_TEMPERATURE),
+            series_by_name.get(HP_RETURN_TEMPERATURE),
+        )
+        if not thermal_output.points:
+            raise ValueError("thermal_output series is empty")
+
+        # Keep the same state filtering window as the room model so both layers align.
+        _ = adjusted_gti_with_shutter(
             upsample_series_forward_fill(
                 historical_weather_by_name.get(
                     GTI_LIVING_ROOM_WINDOWS,
@@ -111,12 +120,6 @@ class RoomTemperatureDatasetBuilder:
             booster_heater_active=series_by_name.get(BOOSTER_HEATER_ACTIVE),
             hp_mode=text_by_name.get(HP_MODE),
         )
-        thermal_output = build_thermal_output_series(
-            series_by_name.get(HP_FLOW),
-            series_by_name.get(HP_SUPPLY_TEMPERATURE),
-            series_by_name.get(HP_RETURN_TEMPERATURE),
-        )
-        floor_heat_state = build_floor_heat_state_series(thermal_output)
 
         raw_rows = self._build_raw_rows(
             room_temperature=room_temperature,
@@ -124,8 +127,11 @@ class RoomTemperatureDatasetBuilder:
                 OUTDOOR_TEMPERATURE,
                 NumericSeries(name=OUTDOOR_TEMPERATURE, unit="degC", points=[]),
             ),
-            adjusted_gti=adjusted_gti,
-            floor_heat_state=floor_heat_state,
+            thermostat_setpoint=series_by_name.get(
+                THERMOSTAT_SETPOINT,
+                NumericSeries(name=THERMOSTAT_SETPOINT, unit="degC", points=[]),
+            ),
+            thermal_output=thermal_output,
             state_filter=state_filter,
         )
         frame = pd.DataFrame(raw_rows)
@@ -135,15 +141,15 @@ class RoomTemperatureDatasetBuilder:
         frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
         frame = frame.set_index("timestamp").sort_index()
 
-        resample_aggregations: dict[str, str] = {
-            OUTDOOR_TEMPERATURE: "mean",
-            GTI_LIVING_ROOM_WINDOWS_ADJUSTED: "mean",
-            FLOOR_HEAT_STATE: "last",
-            ROOM_TEMPERATURE: "last",
-        }
-        resampled = frame.resample(f"{interval_minutes}min").agg(resample_aggregations)
-        resampled["previous_room_temperature"] = resampled[ROOM_TEMPERATURE].shift(1)
-        resampled[FLOOR_HEAT_STATE_FEATURE_NAME] = resampled[FLOOR_HEAT_STATE].shift(1)
+        resampled = frame.resample(f"{interval_minutes}min").agg(
+            {
+                OUTDOOR_TEMPERATURE: "mean",
+                "heating_demand": "mean",
+                THERMAL_OUTPUT: "mean",
+            }
+        )
+        resampled["previous_thermal_output"] = resampled[THERMAL_OUTPUT].shift(1)
+        resampled["previous_heating_demand"] = resampled["heating_demand"].shift(1)
         resampled = resampled.dropna()
 
         if len(resampled) < 3:
@@ -151,10 +157,10 @@ class RoomTemperatureDatasetBuilder:
 
         return IdentificationDataset(
             timestamps=[timestamp.isoformat() for timestamp in resampled.index.to_pydatetime()],
-            feature_names=ROOM_TEMPERATURE_FEATURE_NAMES,
-            target_name=ROOM_TEMPERATURE,
-            features=resampled[ROOM_TEMPERATURE_FEATURE_NAMES].to_numpy(dtype=float).tolist(),
-            targets=resampled[ROOM_TEMPERATURE].to_numpy(dtype=float).tolist(),
+            feature_names=THERMAL_OUTPUT_FEATURE_NAMES,
+            target_name=THERMAL_OUTPUT,
+            features=resampled[THERMAL_OUTPUT_FEATURE_NAMES].to_numpy(dtype=float).tolist(),
+            targets=resampled[THERMAL_OUTPUT].to_numpy(dtype=float).tolist(),
         )
 
     def _build_raw_rows(
@@ -162,32 +168,29 @@ class RoomTemperatureDatasetBuilder:
         *,
         room_temperature: NumericSeries,
         outdoor_temperature: NumericSeries,
-        adjusted_gti: NumericSeries,
-        floor_heat_state: NumericSeries,
+        thermostat_setpoint: NumericSeries,
+        thermal_output: NumericSeries,
         state_filter: RoomTemperatureStateFilter,
     ) -> list[dict[str, float | str]]:
         raw_rows: list[dict[str, float | str]] = []
-        for room_point in room_temperature.points:
-            if not state_filter.is_valid(parse_datetime(room_point.timestamp)):
+        for thermal_point in thermal_output.points:
+            timestamp = parse_datetime(thermal_point.timestamp)
+            if not state_filter.is_valid(timestamp):
                 continue
 
-            outdoor_value = latest_value_at(outdoor_temperature.points, room_point.timestamp)
-            solar_gain = latest_value_at(adjusted_gti.points, room_point.timestamp)
-            floor_heat_state_value = latest_value_at(
-                floor_heat_state.points,
-                room_point.timestamp,
-            )
-
-            if None in (outdoor_value, solar_gain, floor_heat_state_value):
+            room_temperature_value = latest_value_at(room_temperature.points, thermal_point.timestamp)
+            outdoor_value = latest_value_at(outdoor_temperature.points, thermal_point.timestamp)
+            setpoint_value = latest_value_at(thermostat_setpoint.points, thermal_point.timestamp)
+            if None in (room_temperature_value, outdoor_value, setpoint_value):
                 continue
 
+            heating_demand = max(float(setpoint_value) - float(room_temperature_value), 0.0)
             raw_rows.append(
                 {
-                    "timestamp": room_point.timestamp,
+                    "timestamp": thermal_point.timestamp,
                     OUTDOOR_TEMPERATURE: float(outdoor_value),
-                    GTI_LIVING_ROOM_WINDOWS_ADJUSTED: float(solar_gain),
-                    FLOOR_HEAT_STATE: float(floor_heat_state_value),
-                    ROOM_TEMPERATURE: room_point.value,
+                    "heating_demand": heating_demand,
+                    THERMAL_OUTPUT: thermal_point.value,
                 }
             )
         return raw_rows

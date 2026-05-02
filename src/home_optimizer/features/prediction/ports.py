@@ -23,4 +23,9 @@ class PredictionDataReader(Protocol):
 
 
 class IdentifiedModelReader(Protocol):
-    def latest(self, *, model_kind: str) -> IdentifiedModel | None: ...
+    def latest(
+        self,
+        *,
+        model_kind: str,
+        model_name: str | None = None,
+    ) -> IdentifiedModel | None: ...

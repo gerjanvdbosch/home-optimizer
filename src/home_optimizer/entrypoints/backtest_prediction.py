@@ -54,6 +54,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional maximum comfort temperature in degC.",
     )
+    parser.add_argument(
+        "--model-name",
+        default="linear_2state_room_temperature",
+        help="Stored model name to backtest, e.g. linear_2state_room_temperature.",
+    )
     return parser.parse_args()
 
 
@@ -94,6 +99,7 @@ def main() -> None:
             horizon_hours=args.horizon_hours,
             comfort_min_temperature=args.comfort_min,
             comfort_max_temperature=args.comfort_max,
+            model_name=args.model_name,
         )
     finally:
         container.close()

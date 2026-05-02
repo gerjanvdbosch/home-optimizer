@@ -39,4 +39,9 @@ class IdentificationDataReader(Protocol):
 class IdentifiedModelRepository(Protocol):
     def save(self, model: IdentifiedModel) -> None: ...
 
-    def latest(self, *, model_kind: str) -> IdentifiedModel | None: ...
+    def latest(
+        self,
+        *,
+        model_kind: str,
+        model_name: str | None = None,
+    ) -> IdentifiedModel | None: ...

@@ -5,12 +5,13 @@ from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from home_optimizer.domain import (
     NumericSeries,
     ROOM_TEMPERATURE,
-    THERMOSTAT_SETPOINT,
+    THERMAL_OUTPUT,
     SHUTTER_LIVING_ROOM,
     ShutterPositionControl,
+    THERMOSTAT_SETPOINT,
     ThermostatSetpointControl,
 )
-from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
+from home_optimizer.features.identification.room_temperature.model import MODEL_KIND, MODEL_NAME
 from home_optimizer.features.prediction.ports import IdentifiedModelReader, PredictionDataReader
 from home_optimizer.features.prediction.schemas import RoomTemperatureControlInputs
 from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
@@ -39,6 +40,7 @@ class RoomTemperatureBacktestingService:
         timezone_info: tzinfo | None = None,
         comfort_min_temperature: float | None = None,
         comfort_max_temperature: float | None = None,
+        model_name: str = MODEL_NAME,
     ) -> RoomTemperatureBacktestResult:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
@@ -51,7 +53,7 @@ class RoomTemperatureBacktestingService:
         ):
             raise ValueError("comfort_min_temperature must be <= comfort_max_temperature")
 
-        model = self.model_repository.latest(model_kind=MODEL_KIND)
+        model = self.model_repository.latest(model_kind=MODEL_KIND, model_name=model_name)
         if model is None:
             raise ValueError("no stored room temperature model available")
 
@@ -95,6 +97,7 @@ class RoomTemperatureBacktestingService:
                         ),
                         shutter_position=ShutterPositionControl.from_schedule(shutter_schedule),
                     ),
+                    model_name=model_name,
                 )
                 overlap_count, rmse, bias, max_absolute_error = prediction_error_summary(
                     predicted=comparison.predicted_room_temperature,
