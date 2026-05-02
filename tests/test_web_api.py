@@ -147,6 +147,7 @@ class FakeModelTrainingService:
                     "previous_heating_demand": 0.2,
                     "previous_floor_heat_state": 0.15,
                     "outdoor_temperature": -0.01,
+                    "hp_supply_target_temperature": 0.08,
                 },
                 intercept=0.05,
                 train_rmse=0.11,

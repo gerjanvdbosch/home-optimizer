@@ -13,6 +13,7 @@ from home_optimizer.domain import (
     HP_FLOW,
     HP_MODE,
     HP_RETURN_TEMPERATURE,
+    HP_SUPPLY_TARGET_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
     NumericPoint,
     NumericSeries,
@@ -140,6 +141,10 @@ class RoomTemperaturePredictionService:
                 )
 
             if thermal_output_model is not None:
+                supply_target_temperature = self._read_latest_supply_target_temperature(
+                    start_time=timestamp - interval,
+                    end_time=timestamp,
+                )
                 predicted_thermal_output = self._predict_thermal_output_step(
                     model=thermal_output_model,
                     previous_thermal_output=previous_thermal_output,
@@ -147,6 +152,7 @@ class RoomTemperaturePredictionService:
                     previous_room_temperature=current_room_temperature,
                     thermostat_setpoint=float(thermostat_setpoint),
                     outdoor_temperature=float(outdoor_temperature),
+                    supply_target_temperature=supply_target_temperature,
                 )
                 previous_thermal_output = predicted_thermal_output
                 floor_heat_state_value = (
@@ -254,12 +260,14 @@ class RoomTemperaturePredictionService:
         previous_room_temperature: float,
         thermostat_setpoint: float,
         outdoor_temperature: float,
+        supply_target_temperature: float,
     ) -> float:
         required_coefficients = {
             "previous_thermal_output",
             "previous_heating_demand",
             f"previous_{FLOOR_HEAT_STATE}",
             OUTDOOR_TEMPERATURE,
+            HP_SUPPLY_TARGET_TEMPERATURE,
         }
         if not required_coefficients.issubset(model.coefficients):
             raise ValueError("stored thermal output model is missing prediction coefficients")
@@ -270,7 +278,8 @@ class RoomTemperaturePredictionService:
             + model.coefficients["previous_thermal_output"] * previous_thermal_output
             + model.coefficients["previous_heating_demand"] * previous_heating_demand
             + model.coefficients[f"previous_{FLOOR_HEAT_STATE}"] * previous_floor_heat_state
-            + model.coefficients[OUTDOOR_TEMPERATURE] * outdoor_temperature,
+            + model.coefficients[OUTDOOR_TEMPERATURE] * outdoor_temperature
+            + model.coefficients[HP_SUPPLY_TARGET_TEMPERATURE] * supply_target_temperature
         )
 
     def _read_initial_thermal_output(
@@ -285,6 +294,27 @@ class RoomTemperaturePredictionService:
         value = latest_value_at(
             historical_thermal_output.points,
             normalize_utc_timestamp(start_time),
+        )
+        return float(value) if value is not None else 0.0
+
+    def _read_latest_supply_target_temperature(
+        self,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> float:
+        series = self.reader.read_series(
+            names=[HP_SUPPLY_TARGET_TEMPERATURE],
+            start_time=start_time,
+            end_time=end_time,
+        )
+        supply_target_temperature = next(
+            iter(series),
+            NumericSeries(name=HP_SUPPLY_TARGET_TEMPERATURE, unit="degC", points=[]),
+        )
+        value = latest_value_at(
+            supply_target_temperature.points,
+            normalize_utc_timestamp(end_time),
         )
         return float(value) if value is not None else 0.0
 

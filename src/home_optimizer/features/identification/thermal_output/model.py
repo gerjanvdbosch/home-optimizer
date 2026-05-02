@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from home_optimizer.domain import FLOOR_HEAT_STATE, THERMAL_OUTPUT
+from home_optimizer.domain import FLOOR_HEAT_STATE, HP_SUPPLY_TARGET_TEMPERATURE, THERMAL_OUTPUT
 
 from ..model import LinearModelIdentifier
 from ..schemas import IdentificationDataset, IdentificationResult
@@ -13,6 +13,7 @@ THERMAL_OUTPUT_FEATURE_NAMES = [
     "previous_heating_demand",
     f"previous_{FLOOR_HEAT_STATE}",
     "outdoor_temperature",
+    HP_SUPPLY_TARGET_TEMPERATURE,
 ]
 
 

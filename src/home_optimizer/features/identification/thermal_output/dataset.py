@@ -12,6 +12,7 @@ from home_optimizer.domain import (
     HP_FLOW,
     HP_MODE,
     HP_RETURN_TEMPERATURE,
+    HP_SUPPLY_TARGET_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
     NumericSeries,
     OUTDOOR_TEMPERATURE,
@@ -55,6 +56,7 @@ class ThermalOutputDatasetBuilder:
                 SHUTTER_LIVING_ROOM,
                 HP_FLOW,
                 HP_SUPPLY_TEMPERATURE,
+                HP_SUPPLY_TARGET_TEMPERATURE,
                 HP_RETURN_TEMPERATURE,
                 DEFROST_ACTIVE,
                 BOOSTER_HEATER_ACTIVE,
@@ -137,6 +139,10 @@ class ThermalOutputDatasetBuilder:
                 THERMOSTAT_SETPOINT,
                 NumericSeries(name=THERMOSTAT_SETPOINT, unit="degC", points=[]),
             ),
+            supply_target_temperature=series_by_name.get(
+                HP_SUPPLY_TARGET_TEMPERATURE,
+                NumericSeries(name=HP_SUPPLY_TARGET_TEMPERATURE, unit="degC", points=[]),
+            ),
             thermal_output=thermal_output,
             floor_heat_state=floor_heat_state,
             state_filter=state_filter,
@@ -154,6 +160,7 @@ class ThermalOutputDatasetBuilder:
                 "heating_demand": "mean",
                 THERMAL_OUTPUT: "mean",
                 FLOOR_HEAT_STATE: "last",
+                HP_SUPPLY_TARGET_TEMPERATURE: "mean",
             }
         )
         resampled["previous_thermal_output"] = resampled[THERMAL_OUTPUT].shift(1)
@@ -178,6 +185,7 @@ class ThermalOutputDatasetBuilder:
         room_temperature: NumericSeries,
         outdoor_temperature: NumericSeries,
         thermostat_setpoint: NumericSeries,
+        supply_target_temperature: NumericSeries,
         thermal_output: NumericSeries,
         floor_heat_state: NumericSeries,
         state_filter: RoomTemperatureStateFilter,
@@ -191,8 +199,18 @@ class ThermalOutputDatasetBuilder:
             room_temperature_value = latest_value_at(room_temperature.points, thermal_point.timestamp)
             outdoor_value = latest_value_at(outdoor_temperature.points, thermal_point.timestamp)
             setpoint_value = latest_value_at(thermostat_setpoint.points, thermal_point.timestamp)
+            supply_target_value = latest_value_at(
+                supply_target_temperature.points,
+                thermal_point.timestamp,
+            )
             floor_heat_state_value = latest_value_at(floor_heat_state.points, thermal_point.timestamp)
-            if None in (room_temperature_value, outdoor_value, setpoint_value, floor_heat_state_value):
+            if None in (
+                room_temperature_value,
+                outdoor_value,
+                setpoint_value,
+                supply_target_value,
+                floor_heat_state_value,
+            ):
                 continue
 
             heating_demand = max(float(setpoint_value) - float(room_temperature_value), 0.0)
@@ -202,6 +220,7 @@ class ThermalOutputDatasetBuilder:
                     OUTDOOR_TEMPERATURE: float(outdoor_value),
                     "heating_demand": heating_demand,
                     FLOOR_HEAT_STATE: float(floor_heat_state_value),
+                    HP_SUPPLY_TARGET_TEMPERATURE: float(supply_target_value),
                     THERMAL_OUTPUT: thermal_point.value,
                 }
             )

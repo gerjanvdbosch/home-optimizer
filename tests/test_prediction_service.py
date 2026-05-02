@@ -10,6 +10,7 @@ from home_optimizer.domain import (
     HP_FLOW,
     HP_MODE,
     HP_RETURN_TEMPERATURE,
+    HP_SUPPLY_TARGET_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
     IdentifiedModel,
     NumericPoint,
@@ -59,6 +60,15 @@ class FakePredictionReader:
                     NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=30.0),
                     NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=30.0),
                     NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=30.0),
+                ],
+            ),
+            HP_SUPPLY_TARGET_TEMPERATURE: NumericSeries(
+                name=HP_SUPPLY_TARGET_TEMPERATURE,
+                unit="degC",
+                points=[
+                    NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=31.0),
+                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=31.0),
+                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=31.0),
                 ],
             ),
             DEFROST_ACTIVE: NumericSeries(
@@ -283,6 +293,7 @@ def test_prediction_service_uses_thermal_output_response_model_when_available() 
             "previous_heating_demand": 0.6,
             "previous_floor_heat_state": 0.4,
             "outdoor_temperature": -0.05,
+            "hp_supply_target_temperature": 0.1,
         },
         intercept=0.3,
         train_rmse=0.05,

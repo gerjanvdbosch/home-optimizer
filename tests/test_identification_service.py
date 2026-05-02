@@ -24,6 +24,7 @@ class FakeIdentificationReader:
         shutter_points: list[NumericPoint] = []
         flow_points: list[NumericPoint] = []
         supply_points: list[NumericPoint] = []
+        supply_target_points: list[NumericPoint] = []
         return_points: list[NumericPoint] = []
         hp_power_points: list[NumericPoint] = []
 
@@ -35,6 +36,7 @@ class FakeIdentificationReader:
             hp_power = 0.8 + 0.01 * (index % 5)
             flow = 12.0 + 0.2 * (index % 3)
             supply = 33.0 + 0.03 * index
+            supply_target = 31.5 + 0.02 * index
             return_temperature = 29.0 + 0.01 * index
             solar_gain = 120.0 if 12 <= index <= 30 else 0.0
             thermal_output = flow * max(supply - return_temperature, 0.0) * 4186.0 / 60000.0
@@ -55,6 +57,7 @@ class FakeIdentificationReader:
             shutter_points.append(NumericPoint(timestamp=timestamp, value=100.0))
             flow_points.append(NumericPoint(timestamp=timestamp, value=flow))
             supply_points.append(NumericPoint(timestamp=timestamp, value=supply))
+            supply_target_points.append(NumericPoint(timestamp=timestamp, value=supply_target))
             return_points.append(NumericPoint(timestamp=timestamp, value=return_temperature))
             hp_power_points.append(NumericPoint(timestamp=timestamp, value=hp_power))
 
@@ -65,6 +68,11 @@ class FakeIdentificationReader:
             NumericSeries(name="shutter_living_room", unit="percent", points=shutter_points),
             NumericSeries(name="hp_flow", unit="Lmin", points=flow_points),
             NumericSeries(name="hp_supply_temperature", unit="degC", points=supply_points),
+            NumericSeries(
+                name="hp_supply_target_temperature",
+                unit="degC",
+                points=supply_target_points,
+            ),
             NumericSeries(name="hp_return_temperature", unit="degC", points=return_points),
             NumericSeries(name="hp_electric_power", unit="kW", points=hp_power_points),
         ]
@@ -164,6 +172,7 @@ def test_identify_thermal_output_response_model_reports_metrics() -> None:
         "previous_heating_demand",
         "previous_floor_heat_state",
         "outdoor_temperature",
+        "hp_supply_target_temperature",
     }
     assert result.train_rmse >= 0.0
     assert result.test_rmse >= 0.0
