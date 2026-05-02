@@ -578,13 +578,13 @@ def test_simulation_page_shows_prediction_panel() -> None:
 
     assert response.status_code == 200
     assert "Scenario voorspelling vs gemeten" in response.text
-    assert "MPC voorstel" in response.text
+    assert ">MPC<" in response.text
     assert "MPC top kandidaten" in response.text
-    assert "standaard receding-horizon planning gebruikt 6 uur vooruit" in response.text
-    assert "Train alle modellen" in response.text
-    assert "thermal-output responsmodel" in response.text
-    assert "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking." in response.text
-    assert "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking." in response.text
+    assert ">Handmatig<" in response.text
+    assert "Modellen trainen" in response.text
+    assert "Train modellen" in response.text
+    assert 'id="prediction-setpoint-help" class="field-help" hidden' in response.text
+    assert 'id="prediction-shutter-help" class="field-help" hidden' in response.text
     assert 'href="static/shared.css"' in response.text
     assert 'href="static/simulation.css"' in response.text
     assert 'src="static/shared.js"' in response.text

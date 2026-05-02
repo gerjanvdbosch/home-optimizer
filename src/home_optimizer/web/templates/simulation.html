@@ -45,17 +45,7 @@
             </article>
           </div>
           <form id="prediction-form" class="scenario-form">
-            <fieldset class="scenario-fieldset">
-              <legend>Scenario modus</legend>
-              <label class="radio-option">
-                <input id="prediction-mode-manual" type="radio" name="prediction-mode" value="manual" checked />
-                <span>Handmatig scenario</span>
-              </label>
-              <label class="radio-option">
-                <input id="prediction-mode-mpc" type="radio" name="prediction-mode" value="mpc" />
-                <span>MPC voorstel</span>
-              </label>
-            </fieldset>
+
             <label>
               Start
               <input id="prediction-start" type="datetime-local" required />
@@ -72,6 +62,17 @@
               Comfort max (degC)
               <input id="prediction-comfort-max" type="number" min="5" max="30" step="0.1" value="21.0" required />
             </label>
+            <fieldset class="scenario-fieldset">
+              <legend>Scenario modus</legend>
+              <label class="radio-option">
+                <input id="prediction-mode-manual" type="radio" name="prediction-mode" value="manual" checked />
+                <span>Handmatig</span>
+              </label>
+              <label class="radio-option">
+                <input id="prediction-mode-mpc" type="radio" name="prediction-mode" value="mpc" />
+                <span>MPC</span>
+              </label>
+            </fieldset>
             <fieldset id="prediction-setpoint-source-fieldset" class="scenario-fieldset">
               <legend>Setpoint bron</legend>
               <label class="radio-option">
@@ -83,9 +84,7 @@
                 <span>Handmatig</span>
               </label>
             </fieldset>
-            <p id="prediction-setpoint-help" class="field-help">
-              De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking.
-            </p>
+            <p id="prediction-setpoint-help" class="field-help" hidden></p>
              <fieldset id="prediction-shutter-source-fieldset" class="scenario-fieldset">
               <legend>Shutter bron</legend>
               <label class="radio-option">
@@ -97,9 +96,7 @@
                 <span>Handmatig</span>
               </label>
             </fieldset>
-            <p id="prediction-shutter-help" class="field-help">
-              De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking.
-            </p>
+            <p id="prediction-shutter-help" class="field-help" hidden></p>
             <section id="prediction-setpoint-editor" class="block-editor" aria-label="Handmatige setpointblokken">
               <div class="block-editor-heading">
                 <strong>Handmatige setpointblokken</strong>
@@ -124,7 +121,7 @@
                 <strong>MPC zoekruimte</strong>
               </div>
               <p class="field-help">
-                Laat de planner meerdere thermostat-setpoint schema's doorrekenen met het huidige lineaire model en kies automatisch het beste voorstel. De standaard receding-horizon planning gebruikt 6 uur vooruit.
+                Laat de planner meerdere thermostat-setpoint schema's doorrekenen met het huidige lineaire model en kies automatisch het beste voorstel.
               </p>
               <div class="mpc-grid">
                 <label>
@@ -166,12 +163,9 @@
 
         <article class="panel">
           <div class="panel-heading">
-            <h2>Model trainen</h2>
+            <h2>Modellen trainen</h2>
           </div>
           <div class="training-panel">
-            <p class="field-help">
-              Deze actie traint eerst het thermal-output responsmodel en daarna het 2-state room-temperature model met exact dezelfde range en instellingen.
-            </p>
             <label>
               Trainingsstart
               <input id="training-start" type="datetime-local" required />
@@ -189,7 +183,7 @@
               <input id="training-fraction" type="number" min="0.1" max="0.95" step="0.05" value="0.8" required />
             </label>
             <div class="scenario-actions">
-              <button id="training-button" type="button">Train alle modellen</button>
+              <button id="training-button" type="button">Train modellen</button>
               <div id="training-status" class="status" aria-live="polite"></div>
             </div>
           </div>
