@@ -16,6 +16,12 @@ from .identification import (
     IdentificationResult,
     RoomTemperatureModelIdentificationService,
 )
+from .mpc import (
+    ThermostatSetpointCandidateGenerator,
+    ThermostatSetpointCandidateEvaluation,
+    ThermostatSetpointMpcEvaluationResult,
+    ThermostatSetpointMpcEvaluator,
+)
 from .prediction import (
     RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
@@ -33,6 +39,10 @@ __all__ = [
     "IdentificationDataset",
     "IdentificationResult",
     "RoomTemperatureModelIdentificationService",
+    "ThermostatSetpointCandidateGenerator",
+    "ThermostatSetpointCandidateEvaluation",
+    "ThermostatSetpointMpcEvaluationResult",
+    "ThermostatSetpointMpcEvaluator",
     "RoomTemperatureBacktestDayResult",
     "RoomTemperatureBacktestResult",
     "RoomTemperatureBacktestingService",
