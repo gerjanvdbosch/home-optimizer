@@ -7,6 +7,7 @@ from home_optimizer.domain.models import DomainModel
 
 class RoomTemperatureBacktestDayResult(DomainModel):
     day: date
+    horizon_hours: int
     overlap_count: int
     rmse: float | None
     bias: float | None
@@ -21,6 +22,7 @@ class RoomTemperatureBacktestDayResult(DomainModel):
 class RoomTemperatureBacktestResult(DomainModel):
     model_name: str
     interval_minutes: int
+    horizon_hours: int
     start_date: date
     end_date: date
     total_days: int

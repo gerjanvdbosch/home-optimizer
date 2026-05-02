@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
         help="Last local day to backtest, e.g. 2026-04-30.",
     )
     parser.add_argument(
+        "--horizon-hours",
+        type=int,
+        default=24,
+        help="Prediction horizon per day in hours, e.g. 6, 12, or 24.",
+    )
+    parser.add_argument(
         "--comfort-min",
         type=float,
         default=None,
@@ -85,6 +91,7 @@ def main() -> None:
         result = service.backtest_by_day(
             start_date=args.start_date,
             end_date=args.end_date,
+            horizon_hours=args.horizon_hours,
             comfort_min_temperature=args.comfort_min,
             comfort_max_temperature=args.comfort_max,
         )
@@ -93,6 +100,7 @@ def main() -> None:
 
     print(
         f"Model: {result.model_name} | interval: {result.interval_minutes} min | "
+        f"horizon: {result.horizon_hours} h | "
         f"days: {result.total_days} | success: {result.successful_days} | failed: {result.failed_days}"
     )
     print(

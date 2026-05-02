@@ -32,12 +32,15 @@ class RoomTemperatureBacktestingService:
         *,
         start_date: date,
         end_date: date,
+        horizon_hours: int = 24,
         timezone_info: tzinfo | None = None,
         comfort_min_temperature: float | None = None,
         comfort_max_temperature: float | None = None,
     ) -> RoomTemperatureBacktestResult:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
+        if horizon_hours <= 0:
+            raise ValueError("horizon_hours must be greater than zero")
         if (
             comfort_min_temperature is not None
             and comfort_max_temperature is not None
@@ -56,7 +59,8 @@ class RoomTemperatureBacktestingService:
 
         while current_date <= end_date:
             day_start = datetime.combine(current_date, time.min, tzinfo=local_timezone)
-            day_end = day_start + timedelta(days=1) - interval
+            full_day_end = day_start + timedelta(days=1) - interval
+            day_end = min(day_start + timedelta(hours=horizon_hours) - interval, full_day_end)
             schedule_start = day_start - interval
 
             try:
@@ -114,6 +118,7 @@ class RoomTemperatureBacktestingService:
                 day_results.append(
                     RoomTemperatureBacktestDayResult(
                         day=current_date,
+                        horizon_hours=horizon_hours,
                         overlap_count=overlap_count,
                         rmse=rmse,
                         bias=bias,
@@ -128,6 +133,7 @@ class RoomTemperatureBacktestingService:
                 day_results.append(
                     RoomTemperatureBacktestDayResult(
                         day=current_date,
+                        horizon_hours=horizon_hours,
                         overlap_count=0,
                         rmse=None,
                         bias=None,
@@ -163,6 +169,7 @@ class RoomTemperatureBacktestingService:
         return RoomTemperatureBacktestResult(
             model_name=model.model_name,
             interval_minutes=model.interval_minutes,
+            horizon_hours=horizon_hours,
             start_date=start_date,
             end_date=end_date,
             total_days=len(day_results),

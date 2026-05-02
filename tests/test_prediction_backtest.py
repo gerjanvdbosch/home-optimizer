@@ -125,11 +125,13 @@ def test_prediction_service_backtests_day_range() -> None:
     result = backtesting_service.backtest_by_day(
         start_date=date(2026, 4, 28),
         end_date=date(2026, 4, 28),
+        horizon_hours=24,
         timezone_info=timezone.utc,
         comfort_min_temperature=19.5,
         comfort_max_temperature=20.5,
     )
 
+    assert result.horizon_hours == 24
     assert result.total_days == 1
     assert result.successful_days == 1
     assert result.failed_days == 0
@@ -137,9 +139,55 @@ def test_prediction_service_backtests_day_range() -> None:
     assert result.average_bias == pytest.approx(0.0)
     assert result.average_max_absolute_error == pytest.approx(0.0)
     assert result.worst_day_by_rmse == date(2026, 4, 28)
+    assert result.day_results[0].horizon_hours == 24
     assert result.day_results[0].overlap_count == 95
     assert result.day_results[0].minimum_predicted_temperature == pytest.approx(20.0)
     assert result.day_results[0].maximum_predicted_temperature == pytest.approx(20.0)
     assert result.day_results[0].under_comfort_count == 0
     assert result.day_results[0].over_comfort_count == 0
     assert result.day_results[0].error is None
+
+
+def test_prediction_service_backtests_configured_horizon_hours() -> None:
+    model = IdentifiedModel(
+        model_kind="room_temperature",
+        model_name="linear_1step_room_temperature",
+        trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
+        training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+        sample_count=100,
+        train_sample_count=80,
+        test_sample_count=20,
+        coefficients={
+            "previous_room_temperature": 1.0,
+            "outdoor_temperature": 0.0,
+            "previous_thermostat_setpoint": 0.0,
+            "gti_living_room_windows_adjusted": 0.0,
+        },
+        intercept=0.0,
+        train_rmse=0.05,
+        test_rmse=0.1,
+        test_rmse_recursive=0.14,
+        target_name="room_temperature",
+    )
+    service = RoomTemperaturePredictionService(
+        FakeBacktestReader(),
+        FakeModelRepository(model),
+    )
+    backtesting_service = RoomTemperatureBacktestingService(
+        FakeBacktestReader(),
+        FakeModelRepository(model),
+        service,
+    )
+
+    result = backtesting_service.backtest_by_day(
+        start_date=date(2026, 4, 28),
+        end_date=date(2026, 4, 28),
+        horizon_hours=6,
+        timezone_info=timezone.utc,
+    )
+
+    assert result.horizon_hours == 6
+    assert result.day_results[0].horizon_hours == 6
+    assert result.day_results[0].overlap_count == 23
