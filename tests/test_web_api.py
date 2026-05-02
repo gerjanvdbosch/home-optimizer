@@ -13,6 +13,8 @@ from home_optimizer.domain import (
     IdentifiedModel,
     NumericPoint,
     NumericSeries,
+    ShutterPositionControl,
+    ThermostatSetpointControl,
     TextPoint,
     TextSeries,
     build_sensor_specs,
@@ -20,6 +22,7 @@ from home_optimizer.domain import (
 from home_optimizer.features import (
     HistoryImportResult,
     IdentificationResult,
+    RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
 )
@@ -151,15 +154,13 @@ class FakePredictionService:
         start_time: datetime,
         end_time: datetime,
         *,
-        thermostat_schedule: NumericSeries,
-        shutter_schedule: NumericSeries | None = None,
+        control_inputs: RoomTemperatureControlInputs,
     ) -> RoomTemperaturePrediction:
         self.calls.append(
             {
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
-                "thermostat_schedule": thermostat_schedule,
-                "shutter_schedule": shutter_schedule,
+                "control_inputs": control_inputs,
             }
         )
         return self.result
@@ -169,15 +170,13 @@ class FakePredictionService:
         start_time: datetime,
         end_time: datetime,
         *,
-        thermostat_schedule: NumericSeries,
-        shutter_schedule: NumericSeries | None = None,
+        control_inputs: RoomTemperatureControlInputs,
     ) -> RoomTemperaturePredictionComparison:
         self.comparison_calls.append(
             {
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
-                "thermostat_schedule": thermostat_schedule,
-                "shutter_schedule": shutter_schedule,
+                "control_inputs": control_inputs,
             }
         )
         return RoomTemperaturePredictionComparison(
@@ -932,21 +931,27 @@ def test_prediction_endpoint_returns_room_temperature_series() -> None:
         {
             "start_time": "2026-04-28T10:00:00+00:00",
             "end_time": "2026-04-28T10:30:00+00:00",
-            "thermostat_schedule": NumericSeries(
-                name="thermostat_setpoint",
-                unit="degC",
-                points=[
-                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
-                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
-                ],
-            ),
-            "shutter_schedule": NumericSeries(
-                name="shutter_living_room",
-                unit="percent",
-                points=[
-                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
-                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=50.0),
-                ],
+            "control_inputs": RoomTemperatureControlInputs(
+                thermostat_setpoint=ThermostatSetpointControl.from_schedule(
+                    NumericSeries(
+                        name="thermostat_setpoint",
+                        unit="degC",
+                        points=[
+                            NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
+                            NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
+                        ],
+                    )
+                ),
+                shutter_position=ShutterPositionControl.from_schedule(
+                    NumericSeries(
+                        name="shutter_living_room",
+                        unit="percent",
+                        points=[
+                            NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
+                            NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=50.0),
+                        ],
+                    )
+                ),
             ),
         }
     ]
@@ -1024,22 +1029,28 @@ def test_prediction_comparison_endpoint_returns_predicted_and_actual_series() ->
         {
             "start_time": "2026-04-28T10:00:00+00:00",
             "end_time": "2026-04-28T10:30:00+00:00",
-            "thermostat_schedule": NumericSeries(
-                name="thermostat_setpoint",
-                unit="degC",
-                points=[
-                    NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=21.0),
-                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
-                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
-                ],
-            ),
-            "shutter_schedule": NumericSeries(
-                name="shutter_living_room",
-                unit="percent",
-                points=[
-                    NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
-                    NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=50.0),
-                ],
+            "control_inputs": RoomTemperatureControlInputs(
+                thermostat_setpoint=ThermostatSetpointControl.from_schedule(
+                    NumericSeries(
+                        name="thermostat_setpoint",
+                        unit="degC",
+                        points=[
+                            NumericPoint(timestamp="2026-04-28T10:00:00+00:00", value=21.0),
+                            NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=21.0),
+                            NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=21.0),
+                        ],
+                    )
+                ),
+                shutter_position=ShutterPositionControl.from_schedule(
+                    NumericSeries(
+                        name="shutter_living_room",
+                        unit="percent",
+                        points=[
+                            NumericPoint(timestamp="2026-04-28T10:15:00+00:00", value=50.0),
+                            NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=50.0),
+                        ],
+                    )
+                ),
             ),
         }
     ]

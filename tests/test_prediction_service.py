@@ -8,7 +8,10 @@ from home_optimizer.domain import (
     IdentifiedModel,
     NumericPoint,
     NumericSeries,
+    ShutterPositionControl,
+    ThermostatSetpointControl,
 )
+from home_optimizer.features.prediction.schemas import RoomTemperatureControlInputs
 from home_optimizer.features.prediction import RoomTemperaturePredictionService
 
 
@@ -108,8 +111,10 @@ def test_prediction_service_simulates_multiple_steps() -> None:
     prediction = service.predict(
         start_time=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
         end_time=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
-        thermostat_schedule=thermostat_schedule,
-        shutter_schedule=shutter_schedule,
+        control_inputs=RoomTemperatureControlInputs(
+            thermostat_setpoint=ThermostatSetpointControl.from_schedule(thermostat_schedule),
+            shutter_position=ShutterPositionControl.from_schedule(shutter_schedule),
+        ),
     )
 
     assert prediction.model_name == "linear_1step_room_temperature"
@@ -165,7 +170,9 @@ def test_prediction_service_returns_prediction_vs_actual() -> None:
     comparison = service.predict_vs_actual(
         start_time=datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc),
         end_time=datetime(2026, 4, 28, 10, 30, tzinfo=timezone.utc),
-        thermostat_schedule=thermostat_schedule,
+        control_inputs=RoomTemperatureControlInputs(
+            thermostat_setpoint=ThermostatSetpointControl.from_schedule(thermostat_schedule),
+        ),
     )
 
     assert comparison.model_name == "linear_1step_room_temperature"

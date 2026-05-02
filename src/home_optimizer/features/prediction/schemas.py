@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from home_optimizer.domain import DomainModel, NumericSeries
+from home_optimizer.domain import (
+    DomainModel,
+    NumericSeries,
+    ShutterPositionControl,
+    ThermostatSetpointControl,
+)
+
+
+class RoomTemperatureControlInputs(DomainModel):
+    thermostat_setpoint: ThermostatSetpointControl
+    shutter_position: ShutterPositionControl | None = None
 
 
 class RoomTemperaturePrediction(DomainModel):

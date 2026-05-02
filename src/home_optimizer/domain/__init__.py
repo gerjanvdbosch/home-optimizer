@@ -1,4 +1,5 @@
 from .clock import utc_now
+from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
 from .historical_weather import HistoricalWeatherEntry
 from .identified_model import IdentifiedModel
@@ -105,6 +106,8 @@ __all__ = [
     "SensorDefinition",
     "SensorSpec",
     "SHUTTER_LIVING_ROOM",
+    "ShutterPositionControl",
+    "ThermostatSetpointControl",
     "THERMAL_OUTPUT",
     "THERMOSTAT_SETPOINT",
     "TextPoint",

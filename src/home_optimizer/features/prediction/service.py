@@ -11,7 +11,6 @@ from home_optimizer.domain import (
     OUTDOOR_TEMPERATURE,
     ROOM_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
-    THERMOSTAT_SETPOINT,
     adjusted_gti_with_shutter,
     latest_value_at,
     normalize_utc_timestamp,
@@ -19,7 +18,11 @@ from home_optimizer.domain import (
 from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
 
 from .ports import IdentifiedModelReader, PredictionDataReader
-from .schemas import RoomTemperaturePrediction, RoomTemperaturePredictionComparison
+from .schemas import (
+    RoomTemperatureControlInputs,
+    RoomTemperaturePrediction,
+    RoomTemperaturePredictionComparison,
+)
 
 
 class RoomTemperaturePredictionService:
@@ -36,8 +39,7 @@ class RoomTemperaturePredictionService:
         start_time: datetime,
         end_time: datetime,
         *,
-        thermostat_schedule: NumericSeries,
-        shutter_schedule: NumericSeries | None = None,
+        control_inputs: RoomTemperatureControlInputs,
     ) -> RoomTemperaturePrediction:
         if end_time <= start_time:
             raise ValueError("end_time must be later than start_time")
@@ -76,8 +78,11 @@ class RoomTemperaturePredictionService:
                 GTI_LIVING_ROOM_WINDOWS,
                 NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[]),
             ),
-            shutter_schedule
-            or NumericSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[]),
+            (
+                control_inputs.shutter_position.schedule
+                if control_inputs.shutter_position is not None
+                else NumericSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[])
+            ),
         )
 
         prediction_points: list[NumericPoint] = []
@@ -87,7 +92,7 @@ class RoomTemperaturePredictionService:
             previous_timestamp_iso = normalize_utc_timestamp(timestamp - interval)
             outdoor_temperature = latest_value_at(outdoor_forecast.points, timestamp_iso)
             thermostat_setpoint = latest_value_at(
-                thermostat_schedule.points,
+                control_inputs.thermostat_setpoint.schedule.points,
                 previous_timestamp_iso,
             )
             solar_gain = latest_value_at(adjusted_gti.points, timestamp_iso)
@@ -130,14 +135,12 @@ class RoomTemperaturePredictionService:
         start_time: datetime,
         end_time: datetime,
         *,
-        thermostat_schedule: NumericSeries,
-        shutter_schedule: NumericSeries | None = None,
+        control_inputs: RoomTemperatureControlInputs,
     ) -> RoomTemperaturePredictionComparison:
         prediction = self.predict(
             start_time=start_time,
             end_time=end_time,
-            thermostat_schedule=thermostat_schedule,
-            shutter_schedule=shutter_schedule,
+            control_inputs=control_inputs,
         )
         actual_series = self.reader.read_series(
             names=[ROOM_TEMPERATURE],

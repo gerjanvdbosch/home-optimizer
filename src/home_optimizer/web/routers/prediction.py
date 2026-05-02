@@ -6,9 +6,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import (
-    numeric_series_from_request,
     prediction_comparison_response,
     prediction_response,
+    room_temperature_control_inputs_from_request,
 )
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import (
@@ -33,11 +33,9 @@ def create_prediction_router() -> APIRouter:
             result = container.prediction_service.predict(
                 start_time=request.start_time,
                 end_time=request.end_time,
-                thermostat_schedule=numeric_series_from_request(request.thermostat_schedule),
-                shutter_schedule=(
-                    numeric_series_from_request(request.shutter_schedule)
-                    if request.shutter_schedule is not None
-                    else None
+                control_inputs=room_temperature_control_inputs_from_request(
+                    request.thermostat_schedule,
+                    request.shutter_schedule,
                 ),
             )
         except ValueError as error:
@@ -54,11 +52,9 @@ def create_prediction_router() -> APIRouter:
             result = container.prediction_service.predict_vs_actual(
                 start_time=request.start_time,
                 end_time=request.end_time,
-                thermostat_schedule=numeric_series_from_request(request.thermostat_schedule),
-                shutter_schedule=(
-                    numeric_series_from_request(request.shutter_schedule)
-                    if request.shutter_schedule is not None
-                    else None
+                control_inputs=room_temperature_control_inputs_from_request(
+                    request.thermostat_schedule,
+                    request.shutter_schedule,
                 ),
             )
         except ValueError as error:

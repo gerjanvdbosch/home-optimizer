@@ -17,6 +17,7 @@ from .identification import (
     RoomTemperatureModelIdentificationService,
 )
 from .prediction import (
+    RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
     RoomTemperaturePredictionService,
@@ -35,6 +36,7 @@ __all__ = [
     "RoomTemperatureBacktestDayResult",
     "RoomTemperatureBacktestResult",
     "RoomTemperatureBacktestingService",
+    "RoomTemperatureControlInputs",
     "RoomTemperaturePrediction",
     "RoomTemperaturePredictionComparison",
     "RoomTemperaturePredictionService",

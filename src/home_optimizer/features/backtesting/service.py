@@ -5,11 +5,14 @@ from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from home_optimizer.domain import (
     NumericSeries,
     ROOM_TEMPERATURE,
-    SHUTTER_LIVING_ROOM,
     THERMOSTAT_SETPOINT,
+    SHUTTER_LIVING_ROOM,
+    ShutterPositionControl,
+    ThermostatSetpointControl,
 )
 from home_optimizer.features.identification.room_temperature.model import MODEL_KIND
 from home_optimizer.features.prediction.ports import IdentifiedModelReader, PredictionDataReader
+from home_optimizer.features.prediction.schemas import RoomTemperatureControlInputs
 from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
 
 from .metrics import prediction_error_summary
@@ -86,8 +89,12 @@ class RoomTemperatureBacktestingService:
                 comparison = self.prediction_service.predict_vs_actual(
                     start_time=day_start,
                     end_time=day_end,
-                    thermostat_schedule=thermostat_schedule,
-                    shutter_schedule=shutter_schedule,
+                    control_inputs=RoomTemperatureControlInputs(
+                        thermostat_setpoint=ThermostatSetpointControl.from_schedule(
+                            thermostat_schedule
+                        ),
+                        shutter_position=ShutterPositionControl.from_schedule(shutter_schedule),
+                    ),
                 )
                 overlap_count, rmse, bias, max_absolute_error = prediction_error_summary(
                     predicted=comparison.predicted_room_temperature,

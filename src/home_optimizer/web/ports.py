@@ -7,6 +7,7 @@ from home_optimizer.domain import IdentifiedModel, NumericSeries, TextSeries
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.prediction.schemas import (
+    RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
 )
@@ -89,8 +90,7 @@ class PredictionRunner(Protocol):
         start_time: datetime,
         end_time: datetime,
         *,
-        thermostat_schedule: NumericSeries,
-        shutter_schedule: NumericSeries | None = None,
+        control_inputs: RoomTemperatureControlInputs,
     ) -> RoomTemperaturePrediction: ...
 
     def predict_vs_actual(
@@ -98,8 +98,7 @@ class PredictionRunner(Protocol):
         start_time: datetime,
         end_time: datetime,
         *,
-        thermostat_schedule: NumericSeries,
-        shutter_schedule: NumericSeries | None = None,
+        control_inputs: RoomTemperatureControlInputs,
     ) -> RoomTemperaturePredictionComparison: ...
 
 

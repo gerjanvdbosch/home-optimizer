@@ -5,12 +5,15 @@ from home_optimizer.domain import (
     IdentifiedModel,
     NumericPoint,
     NumericSeries,
+    ShutterPositionControl,
     TextSeries,
+    ThermostatSetpointControl,
     normalize_utc_timestamp,
 )
 from home_optimizer.features.backtesting.metrics import prediction_error_summary
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.prediction.schemas import (
+    RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
 )
@@ -106,6 +109,22 @@ def numeric_series_from_request(series: NumericSeriesRequest) -> NumericSeries:
             NumericPoint(timestamp=normalize_utc_timestamp(point.timestamp), value=point.value)
             for point in series.points
         ],
+    )
+
+
+def room_temperature_control_inputs_from_request(
+    thermostat_schedule: NumericSeriesRequest,
+    shutter_schedule: NumericSeriesRequest | None = None,
+) -> RoomTemperatureControlInputs:
+    return RoomTemperatureControlInputs(
+        thermostat_setpoint=ThermostatSetpointControl.from_schedule(
+            numeric_series_from_request(thermostat_schedule)
+        ),
+        shutter_position=(
+            ShutterPositionControl.from_schedule(numeric_series_from_request(shutter_schedule))
+            if shutter_schedule is not None
+            else None
+        ),
     )
 
 
