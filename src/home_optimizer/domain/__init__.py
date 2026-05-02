@@ -1,6 +1,7 @@
 from .clock import utc_now
 from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
+from .heatpump_state import SpaceHeatingStateFilter
 from .historical_weather import HistoricalWeatherEntry
 from .identified_model import IdentifiedModel
 from .location import Location, parse_location
@@ -53,6 +54,7 @@ from .series_transforms import (
     DEFAULT_FLOOR_HEAT_STATE_ALPHA,
     adjusted_gti_with_shutter,
     build_floor_heat_state_series,
+    build_space_heating_thermal_output_series,
     build_thermal_output_series,
     latest_value_at,
     shutter_open_fraction_at,
@@ -111,6 +113,7 @@ __all__ = [
     "SensorDefinition",
     "SensorSpec",
     "SHUTTER_LIVING_ROOM",
+    "SpaceHeatingStateFilter",
     "ShutterPositionControl",
     "ThermostatSetpointControl",
     "THERMAL_OUTPUT",
@@ -119,6 +122,7 @@ __all__ = [
     "TextSeries",
     "adjusted_gti_with_shutter",
     "build_floor_heat_state_series",
+    "build_space_heating_thermal_output_series",
     "build_sensor_specs",
     "build_thermal_output_series",
     "ensure_utc",

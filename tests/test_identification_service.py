@@ -162,6 +162,7 @@ def test_identify_thermal_output_response_model_reports_metrics() -> None:
     assert set(result.coefficients) == {
         "previous_thermal_output",
         "previous_heating_demand",
+        "previous_floor_heat_state",
         "outdoor_temperature",
     }
     assert result.train_rmse >= 0.0

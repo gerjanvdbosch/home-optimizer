@@ -7,6 +7,7 @@ import pandas as pd
 from home_optimizer.domain import (
     BOOSTER_HEATER_ACTIVE,
     DEFROST_ACTIVE,
+    FLOOR_HEAT_STATE,
     GTI_LIVING_ROOM_WINDOWS,
     HP_FLOW,
     HP_MODE,
@@ -19,7 +20,8 @@ from home_optimizer.domain import (
     THERMAL_OUTPUT,
     THERMOSTAT_SETPOINT,
     adjusted_gti_with_shutter,
-    build_thermal_output_series,
+    build_floor_heat_state_series,
+    build_space_heating_thermal_output_series,
     latest_value_at,
     upsample_series_forward_fill,
 )
@@ -88,13 +90,17 @@ class ThermalOutputDatasetBuilder:
         if not room_temperature.points:
             raise ValueError("room_temperature series is empty")
 
-        thermal_output = build_thermal_output_series(
+        thermal_output = build_space_heating_thermal_output_series(
             series_by_name.get(HP_FLOW),
             series_by_name.get(HP_SUPPLY_TEMPERATURE),
             series_by_name.get(HP_RETURN_TEMPERATURE),
+            defrost_active=series_by_name.get(DEFROST_ACTIVE),
+            booster_heater_active=series_by_name.get(BOOSTER_HEATER_ACTIVE),
+            hp_mode=text_by_name.get(HP_MODE),
         )
         if not thermal_output.points:
             raise ValueError("thermal_output series is empty")
+        floor_heat_state = build_floor_heat_state_series(thermal_output)
 
         # Keep the same state filtering window as the room model so both layers align.
         _ = adjusted_gti_with_shutter(
@@ -132,6 +138,7 @@ class ThermalOutputDatasetBuilder:
                 NumericSeries(name=THERMOSTAT_SETPOINT, unit="degC", points=[]),
             ),
             thermal_output=thermal_output,
+            floor_heat_state=floor_heat_state,
             state_filter=state_filter,
         )
         frame = pd.DataFrame(raw_rows)
@@ -146,10 +153,12 @@ class ThermalOutputDatasetBuilder:
                 OUTDOOR_TEMPERATURE: "mean",
                 "heating_demand": "mean",
                 THERMAL_OUTPUT: "mean",
+                FLOOR_HEAT_STATE: "last",
             }
         )
         resampled["previous_thermal_output"] = resampled[THERMAL_OUTPUT].shift(1)
         resampled["previous_heating_demand"] = resampled["heating_demand"].shift(1)
+        resampled[f"previous_{FLOOR_HEAT_STATE}"] = resampled[FLOOR_HEAT_STATE].shift(1)
         resampled = resampled.dropna()
 
         if len(resampled) < 3:
@@ -170,6 +179,7 @@ class ThermalOutputDatasetBuilder:
         outdoor_temperature: NumericSeries,
         thermostat_setpoint: NumericSeries,
         thermal_output: NumericSeries,
+        floor_heat_state: NumericSeries,
         state_filter: RoomTemperatureStateFilter,
     ) -> list[dict[str, float | str]]:
         raw_rows: list[dict[str, float | str]] = []
@@ -181,7 +191,8 @@ class ThermalOutputDatasetBuilder:
             room_temperature_value = latest_value_at(room_temperature.points, thermal_point.timestamp)
             outdoor_value = latest_value_at(outdoor_temperature.points, thermal_point.timestamp)
             setpoint_value = latest_value_at(thermostat_setpoint.points, thermal_point.timestamp)
-            if None in (room_temperature_value, outdoor_value, setpoint_value):
+            floor_heat_state_value = latest_value_at(floor_heat_state.points, thermal_point.timestamp)
+            if None in (room_temperature_value, outdoor_value, setpoint_value, floor_heat_state_value):
                 continue
 
             heating_demand = max(float(setpoint_value) - float(room_temperature_value), 0.0)
@@ -190,6 +201,7 @@ class ThermalOutputDatasetBuilder:
                     "timestamp": thermal_point.timestamp,
                     OUTDOOR_TEMPERATURE: float(outdoor_value),
                     "heating_demand": heating_demand,
+                    FLOOR_HEAT_STATE: float(floor_heat_state_value),
                     THERMAL_OUTPUT: thermal_point.value,
                 }
             )

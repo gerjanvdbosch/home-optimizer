@@ -21,7 +21,7 @@ from home_optimizer.domain import (
     THERMAL_OUTPUT,
     adjusted_gti_with_shutter,
     build_floor_heat_state_series,
-    build_thermal_output_series,
+    build_space_heating_thermal_output_series,
     latest_value_at,
     upsample_series_forward_fill,
 )
@@ -111,10 +111,13 @@ class RoomTemperatureDatasetBuilder:
             booster_heater_active=series_by_name.get(BOOSTER_HEATER_ACTIVE),
             hp_mode=text_by_name.get(HP_MODE),
         )
-        thermal_output = build_thermal_output_series(
+        thermal_output = build_space_heating_thermal_output_series(
             series_by_name.get(HP_FLOW),
             series_by_name.get(HP_SUPPLY_TEMPERATURE),
             series_by_name.get(HP_RETURN_TEMPERATURE),
+            defrost_active=series_by_name.get(DEFROST_ACTIVE),
+            booster_heater_active=series_by_name.get(BOOSTER_HEATER_ACTIVE),
+            hp_mode=text_by_name.get(HP_MODE),
         )
         floor_heat_state = build_floor_heat_state_series(thermal_output)
 

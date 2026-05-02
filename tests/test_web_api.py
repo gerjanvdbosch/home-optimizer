@@ -145,6 +145,7 @@ class FakeModelTrainingService:
                 coefficients={
                     "previous_thermal_output": 0.7,
                     "previous_heating_demand": 0.2,
+                    "previous_floor_heat_state": 0.15,
                     "outdoor_temperature": -0.01,
                 },
                 intercept=0.05,
@@ -578,9 +579,10 @@ def test_simulation_page_shows_prediction_panel() -> None:
     assert "Scenario voorspelling vs gemeten" in response.text
     assert "MPC voorstel" in response.text
     assert "MPC top kandidaten" in response.text
-    assert "Train modellen" in response.text
-    assert "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking." not in response.text
-    assert "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking." not in response.text
+    assert "Train alle modellen" in response.text
+    assert "thermal-output responsmodel" in response.text
+    assert "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking." in response.text
+    assert "De gemeten shutterreeks van de startdag wordt gebruikt voor de vergelijking." in response.text
     assert 'href="static/shared.css"' in response.text
     assert 'href="static/simulation.css"' in response.text
     assert 'src="static/shared.js"' in response.text

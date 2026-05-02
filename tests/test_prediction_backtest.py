@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries
+from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextPoint, TextSeries
 from home_optimizer.features.backtesting import RoomTemperatureBacktestingService
 from home_optimizer.features.prediction import RoomTemperaturePredictionService
 
@@ -18,6 +18,15 @@ class FakeBacktestReader:
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [self._series_by_name[name] for name in names if name in self._series_by_name]
+
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
+        series_by_name = {
+            "hp_mode": TextSeries(
+                name="hp_mode",
+                points=[TextPoint(timestamp="2026-04-28T00:00:00+00:00", value="heat")],
+            ),
+        }
+        return [series_by_name[name] for name in names if name in series_by_name]
 
     @staticmethod
     def _build_series() -> dict[str, NumericSeries]:

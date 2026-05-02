@@ -5,7 +5,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.domain import (
+    BOOSTER_HEATER_ACTIVE,
+    DEFROST_ACTIVE,
     HP_FLOW,
+    HP_MODE,
     HP_RETURN_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
     IdentifiedModel,
@@ -13,6 +16,8 @@ from home_optimizer.domain import (
     NumericSeries,
     ShutterPositionControl,
     ThermostatSetpointControl,
+    TextPoint,
+    TextSeries,
 )
 from home_optimizer.features.prediction.schemas import RoomTemperatureControlInputs
 from home_optimizer.features.prediction import RoomTemperaturePredictionService
@@ -56,6 +61,16 @@ class FakePredictionReader:
                     NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=30.0),
                 ],
             ),
+            DEFROST_ACTIVE: NumericSeries(
+                name=DEFROST_ACTIVE,
+                unit="bool",
+                points=[],
+            ),
+            BOOSTER_HEATER_ACTIVE: NumericSeries(
+                name=BOOSTER_HEATER_ACTIVE,
+                unit="bool",
+                points=[],
+            ),
         }
         return [series_by_name[name] for name in names]
 
@@ -78,6 +93,17 @@ class FakePredictionReader:
                 points=[NumericPoint(timestamp=timestamp, value=100.0) for timestamp in timestamps],
             ),
         ]
+
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
+        series_by_name = {
+            HP_MODE: TextSeries(
+                name=HP_MODE,
+                points=[
+                    TextPoint(timestamp="2026-04-28T10:00:00+00:00", value="heat"),
+                ],
+            )
+        }
+        return [series_by_name[name] for name in names]
 
 
 class FakeModelRepository:
@@ -255,6 +281,7 @@ def test_prediction_service_uses_thermal_output_response_model_when_available() 
         coefficients={
             "previous_thermal_output": 0.8,
             "previous_heating_demand": 0.6,
+            "previous_floor_heat_state": 0.4,
             "outdoor_temperature": -0.05,
         },
         intercept=0.3,

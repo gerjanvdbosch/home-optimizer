@@ -3,12 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from home_optimizer.domain import (
+    BOOSTER_HEATER_ACTIVE,
     DEFAULT_FLOOR_HEAT_STATE_ALPHA,
+    DEFROST_ACTIVE,
     FLOOR_HEAT_STATE,
     FORECAST_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
     HP_FLOW,
+    HP_MODE,
     HP_RETURN_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
     NumericPoint,
@@ -18,7 +21,7 @@ from home_optimizer.domain import (
     SHUTTER_LIVING_ROOM,
     adjusted_gti_with_shutter,
     build_floor_heat_state_series,
-    build_thermal_output_series,
+    build_space_heating_thermal_output_series,
     latest_value_at,
     normalize_utc_timestamp,
 )
@@ -140,6 +143,7 @@ class RoomTemperaturePredictionService:
                 predicted_thermal_output = self._predict_thermal_output_step(
                     model=thermal_output_model,
                     previous_thermal_output=previous_thermal_output,
+                    previous_floor_heat_state=float(floor_heat_state_value),
                     previous_room_temperature=current_room_temperature,
                     thermostat_setpoint=float(thermostat_setpoint),
                     outdoor_temperature=float(outdoor_temperature),
@@ -246,6 +250,7 @@ class RoomTemperaturePredictionService:
         *,
         model,
         previous_thermal_output: float,
+        previous_floor_heat_state: float,
         previous_room_temperature: float,
         thermostat_setpoint: float,
         outdoor_temperature: float,
@@ -253,6 +258,7 @@ class RoomTemperaturePredictionService:
         required_coefficients = {
             "previous_thermal_output",
             "previous_heating_demand",
+            f"previous_{FLOOR_HEAT_STATE}",
             OUTDOOR_TEMPERATURE,
         }
         if not required_coefficients.issubset(model.coefficients):
@@ -263,6 +269,7 @@ class RoomTemperaturePredictionService:
             model.intercept
             + model.coefficients["previous_thermal_output"] * previous_thermal_output
             + model.coefficients["previous_heating_demand"] * previous_heating_demand
+            + model.coefficients[f"previous_{FLOOR_HEAT_STATE}"] * previous_floor_heat_state
             + model.coefficients[OUTDOOR_TEMPERATURE] * outdoor_temperature,
         )
 
@@ -299,13 +306,28 @@ class RoomTemperaturePredictionService:
         end_time: datetime,
     ) -> NumericSeries:
         source_series = self.reader.read_series(
-            names=[HP_FLOW, HP_SUPPLY_TEMPERATURE, HP_RETURN_TEMPERATURE],
+            names=[
+                HP_FLOW,
+                HP_SUPPLY_TEMPERATURE,
+                HP_RETURN_TEMPERATURE,
+                DEFROST_ACTIVE,
+                BOOSTER_HEATER_ACTIVE,
+            ],
+            start_time=start_time,
+            end_time=end_time,
+        )
+        text_series = self.reader.read_text_series(
+            names=[HP_MODE],
             start_time=start_time,
             end_time=end_time,
         )
         by_name = {series.name: series for series in source_series}
-        return build_thermal_output_series(
+        text_by_name = {series.name: series for series in text_series}
+        return build_space_heating_thermal_output_series(
             by_name.get(HP_FLOW),
             by_name.get(HP_SUPPLY_TEMPERATURE),
             by_name.get(HP_RETURN_TEMPERATURE),
+            defrost_active=by_name.get(DEFROST_ACTIVE),
+            booster_heater_active=by_name.get(BOOSTER_HEATER_ACTIVE),
+            hp_mode=text_by_name.get(HP_MODE),
         )
