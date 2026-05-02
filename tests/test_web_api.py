@@ -580,6 +580,7 @@ def test_simulation_page_shows_prediction_panel() -> None:
     assert "Scenario voorspelling vs gemeten" in response.text
     assert "MPC voorstel" in response.text
     assert "MPC top kandidaten" in response.text
+    assert "standaard receding-horizon planning gebruikt 6 uur vooruit" in response.text
     assert "Train alle modellen" in response.text
     assert "thermal-output responsmodel" in response.text
     assert "De gemeten setpointreeks van de startdag wordt gebruikt voor de vergelijking." in response.text
@@ -1297,6 +1298,54 @@ def test_mpc_plan_endpoint_returns_ranked_candidates() -> None:
             ),
         }
     ]
+
+
+def test_mpc_plan_endpoint_defaults_to_six_hour_horizon_when_end_time_missing() -> None:
+    gateway = FakeHomeAssistantGateway()
+    service = FakeHistoryImportService(HistoryImportResult(imported_rows={}))
+    settings = AppSettings.from_options(
+        {
+            "api_port": 8099,
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+    app = create_app(
+        settings,
+        container_factory=lambda _: FakeContainer(
+            history_import_service=service,
+            home_assistant=gateway,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/mpc/thermostat-setpoint",
+            json={
+                "start_time": "2026-04-28T10:00:00+00:00",
+                "horizon_hours": 6,
+                "interval_minutes": 15,
+                "allowed_setpoints": [19.0, 20.0, 21.0],
+                "switch_times": ["2026-04-28T12:00:00+00:00", "2026-04-28T14:00:00+00:00"],
+                "comfort_min_temperature": 19.0,
+                "comfort_max_temperature": 21.0,
+                "setpoint_change_penalty": 0.25,
+            },
+        )
+
+    assert response.status_code == 200
+    assert app.state.container.mpc_planner.calls[-1]["request"] == ThermostatSetpointMpcPlanRequest(
+        start_time=datetime(2026, 4, 28, 10, 0, tzinfo=ZoneInfo("UTC")),
+        end_time=datetime(2026, 4, 28, 16, 0, tzinfo=ZoneInfo("UTC")),
+        interval_minutes=15,
+        allowed_setpoints=[19.0, 20.0, 21.0],
+        switch_times=[
+            datetime(2026, 4, 28, 12, 0, tzinfo=ZoneInfo("UTC")),
+            datetime(2026, 4, 28, 14, 0, tzinfo=ZoneInfo("UTC")),
+        ],
+        comfort_min_temperature=19.0,
+        comfort_max_temperature=21.0,
+        setpoint_change_penalty=0.25,
+    )
 
 
 def test_plotly_script_is_served_locally() -> None:

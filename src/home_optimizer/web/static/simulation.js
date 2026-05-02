@@ -51,6 +51,8 @@ const predictionStatDelta = document.getElementById("prediction-stat-delta");
 const predictionStatRmse = document.getElementById("prediction-stat-rmse");
 const predictionStatBias = document.getElementById("prediction-stat-bias");
 const predictionStatMaxError = document.getElementById("prediction-stat-max-error");
+const DEFAULT_PREDICTION_HOURS = 24;
+const DEFAULT_MPC_HORIZON_HOURS = 6;
 
 function setPredictionDefaults(date = new Date()) {
   if (!predictionStartInput) {
@@ -59,6 +61,9 @@ function setPredictionDefaults(date = new Date()) {
   const start = new Date(date);
   start.setHours(0, 0, 0, 0);
   predictionStartInput.value = toDatetimeLocalValue(start);
+  if (predictionHoursInput && !predictionHoursInput.value) {
+    predictionHoursInput.value = String(DEFAULT_PREDICTION_HOURS);
+  }
 }
 
 function setTrainingDefaults(date = new Date()) {
@@ -385,6 +390,14 @@ function updatePredictionMode() {
   if (predictionSetpointSourceFieldset) predictionSetpointSourceFieldset.hidden = mpcMode;
   if (predictionShutterSourceFieldset) predictionShutterSourceFieldset.hidden = mpcMode;
   if (mpcEditor) mpcEditor.hidden = !mpcMode;
+  if (predictionHoursInput) {
+    const currentHours = Number(predictionHoursInput.value || 0);
+    if (mpcMode && (!currentHours || currentHours === DEFAULT_PREDICTION_HOURS)) {
+      predictionHoursInput.value = String(DEFAULT_MPC_HORIZON_HOURS);
+    } else if (!mpcMode && currentHours === DEFAULT_MPC_HORIZON_HOURS) {
+      predictionHoursInput.value = String(DEFAULT_PREDICTION_HOURS);
+    }
+  }
   if (predictionButton) {
     predictionButton.textContent = mpcMode ? "Bereken MPC voorstel" : "Vergelijk met metingen";
   }
@@ -559,12 +572,13 @@ function renderMpcCandidates(responsePayload) {
 
 async function runMpcPrediction(startDate, endDate, comfortMin, comfortMax) {
   const shutterSchedule = await buildPredictionShutterSchedule(startDate, endDate);
+  const horizonHours = Number(predictionHoursInput?.value || DEFAULT_MPC_HORIZON_HOURS);
   const response = await fetch(apiUrl("api/mpc/thermostat-setpoint"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       start_time: localInputToIso(predictionStartInput.value),
-      end_time: localInputToIso(toDatetimeLocalValue(endDate)),
+      horizon_hours: horizonHours,
       interval_minutes: 15,
       allowed_setpoints: buildAllowedSetpoints(),
       switch_times: buildMpcSwitchTimes(startDate, endDate),

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from home_optimizer.features.mpc.schemas import DEFAULT_MPC_HORIZON_HOURS
 
 class HistoryImportRunResponse(BaseModel):
     job_id: str
@@ -163,7 +164,8 @@ class PredictionComparisonResponse(BaseModel):
 
 class MpcPlanRequest(BaseModel):
     start_time: datetime
-    end_time: datetime
+    end_time: datetime | None = None
+    horizon_hours: int = Field(default=DEFAULT_MPC_HORIZON_HOURS, ge=1, le=48)
     interval_minutes: int = Field(default=15, ge=1)
     allowed_setpoints: list[float]
     switch_times: list[datetime]

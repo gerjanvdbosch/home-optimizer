@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from home_optimizer.app.history_import_jobs import HistoryImportJob
 from home_optimizer.domain import (
     IdentifiedModel,
@@ -144,9 +146,10 @@ def room_temperature_control_inputs_from_request(
 
 
 def mpc_plan_request_from_request(request: MpcPlanRequest) -> ThermostatSetpointMpcPlanRequest:
+    end_time = request.end_time or (request.start_time + timedelta(hours=request.horizon_hours))
     return ThermostatSetpointMpcPlanRequest(
         start_time=request.start_time,
-        end_time=request.end_time,
+        end_time=end_time,
         interval_minutes=request.interval_minutes,
         allowed_setpoints=request.allowed_setpoints,
         switch_times=request.switch_times,
