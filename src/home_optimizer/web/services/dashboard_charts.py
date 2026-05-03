@@ -20,14 +20,14 @@ from home_optimizer.domain import (
     HP_RETURN_TEMPERATURE,
     HP_SUPPLY_TARGET_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
-    NumericPoint,
-    NumericSeries,
     P1_NET_POWER,
     PV_OUTPUT_POWER,
     ROOM_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
     THERMAL_OUTPUT,
     THERMOSTAT_SETPOINT,
+    NumericPoint,
+    NumericSeries,
     TextSeries,
     adjusted_gti_with_shutter,
     latest_value_at,
@@ -67,6 +67,32 @@ def build_delta_series(
         delta.points.append(NumericPoint(timestamp=sp.timestamp, value=sp.value - rt))
 
     return delta
+
+
+def clamp_series(
+    series: NumericSeries,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> NumericSeries:
+    return NumericSeries(
+        name=series.name,
+        unit=series.unit,
+        points=[
+            NumericPoint(
+                timestamp=point.timestamp,
+                value=min(
+                    max(point.value, minimum) if minimum is not None else point.value,
+                    maximum,
+                )
+                if maximum is not None
+                else max(point.value, minimum)
+                if minimum is not None
+                else point.value,
+            )
+            for point in series.points
+        ],
+    )
 
 
 def build_baseload_series(
@@ -222,6 +248,7 @@ class DashboardChartsService:
         supply_series = series_by_name.get(HP_SUPPLY_TEMPERATURE)
         return_series = series_by_name.get(HP_RETURN_TEMPERATURE)
         delta_series = build_delta_series(supply_series, return_series, name=HP_DELTA_T)
+        clamped_delta_series = clamp_series(delta_series, minimum=0.0)
 
         p1_series = series_by_name.get(P1_NET_POWER)
         pv_series = series_by_name.get(PV_OUTPUT_POWER)
@@ -242,6 +269,7 @@ class DashboardChartsService:
             thermal_name=THERMAL_OUTPUT,
             cop_name=COP,
         )
+        clamped_cop_series = clamp_series(cop_series, maximum=10.0)
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
@@ -258,7 +286,9 @@ class DashboardChartsService:
                 )
             ),
             dhw_temperatures=[
-                series_response(series_by_name.get(DHW_TOP_TEMPERATURE, empty_series(DHW_TOP_TEMPERATURE))),
+                series_response(
+                    series_by_name.get(DHW_TOP_TEMPERATURE, empty_series(DHW_TOP_TEMPERATURE))
+                ),
                 series_response(
                     series_by_name.get(DHW_BOTTOM_TEMPERATURE, empty_series(DHW_BOTTOM_TEMPERATURE))
                 ),
@@ -276,7 +306,10 @@ class DashboardChartsService:
                 ),
             ],
             forecast_temperature=series_response(
-                forecast_series_by_name.get(FORECAST_TEMPERATURE, empty_series(FORECAST_TEMPERATURE))
+                forecast_series_by_name.get(
+                    FORECAST_TEMPERATURE,
+                    empty_series(FORECAST_TEMPERATURE),
+                )
             ),
             forecast_gti=[
                 series_response(forecast_series_by_name.get(GTI_PV, empty_series(GTI_PV))),
@@ -322,9 +355,9 @@ class DashboardChartsService:
                 series_by_name.get(PV_OUTPUT_POWER, empty_series(PV_OUTPUT_POWER))
             ),
             baseload=series_response(baseload_series),
-            hp_delta_t=series_response(delta_series),
+            hp_delta_t=series_response(clamped_delta_series),
             thermal_output=series_response(thermal_series),
-            cop=series_response(cop_series),
+            cop=series_response(clamped_cop_series),
             hp_flow=series_response(flow_series),
             compressor_frequency=series_response(
                 series_by_name.get(COMPRESSOR_FREQUENCY, empty_series(COMPRESSOR_FREQUENCY))

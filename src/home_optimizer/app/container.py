@@ -5,18 +5,12 @@ from typing import Callable
 
 from home_optimizer.app.forecast_scheduler import ForecastScheduler
 from home_optimizer.app.historical_weather_scheduler import HistoricalWeatherScheduler
-from home_optimizer.app.model_training_runner import FullDatasetModelTrainingRunner
-from home_optimizer.app.model_training_scheduler import ModelTrainingScheduler
 from home_optimizer.app.ports import SensorGateway
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
-from home_optimizer.features.backtesting import (
-    RoomTemperatureBacktestingService,
-    ThermalOutputBacktestingService,
-)
 from home_optimizer.features.history_import.history_import_service import (
     HistoryImportService,
 )
@@ -24,24 +18,10 @@ from home_optimizer.features.history_import.historical_weather_import_service im
     HistoricalWeatherImportService,
 )
 from home_optimizer.features.history_import.weather_import_service import WeatherImportService
-from home_optimizer.features.identification.room_temperature import (
-    RoomTemperatureModelIdentificationService,
-)
-from home_optimizer.features.identification.thermal_output import (
-    ThermalOutputModelIdentificationService,
-)
-from home_optimizer.features.identification import MultiModelTrainer, MultiModelTrainingService
-from home_optimizer.features.mpc import (
-    ThermostatSetpointMpcPlanner,
-)
-from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.historical_weather_repository import (
     HistoricalWeatherRepository,
-)
-from home_optimizer.infrastructure.database.identified_model_repository import (
-    IdentifiedModelRepository,
 )
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.time_series_read_repository import (
@@ -69,17 +49,9 @@ class AppContainer:
     historical_weather_import_service: HistoricalWeatherImportService
     telemetry_repository: TimeSeriesWriteRepository
     time_series_read_repository: TimeSeriesReadRepository
-    identified_model_repository: IdentifiedModelRepository
-    identification_service: RoomTemperatureModelIdentificationService
-    model_training_service: MultiModelTrainer
-    prediction_service: RoomTemperaturePredictionService
-    mpc_planner: ThermostatSetpointMpcPlanner
-    backtesting_service: RoomTemperatureBacktestingService
-    thermal_output_backtesting_service: ThermalOutputBacktestingService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
     historical_weather_scheduler: HistoricalWeatherScheduler
-    model_training_scheduler: ModelTrainingScheduler
     forecast_repository: ForecastRepository
     forecast_service: OpenMeteoForecastService
     forecast_scheduler: ForecastScheduler
@@ -105,34 +77,6 @@ def build_container(
     history_import_repository = TimeSeriesWriteRepository(database, source=history_source)
     telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
     time_series_read_repository = TimeSeriesReadRepository(database)
-    identified_model_repository = IdentifiedModelRepository(database)
-    identification_service = RoomTemperatureModelIdentificationService(
-        time_series_read_repository,
-        model_repository=identified_model_repository,
-    )
-    thermal_output_identification_service = ThermalOutputModelIdentificationService(
-        time_series_read_repository,
-        model_repository=identified_model_repository,
-    )
-    prediction_service = RoomTemperaturePredictionService(
-        time_series_read_repository,
-        identified_model_repository,
-    )
-    model_training_service = MultiModelTrainingService(
-        [thermal_output_identification_service, identification_service]
-    )
-    mpc_planner = ThermostatSetpointMpcPlanner(
-        prediction_service=prediction_service,
-    )
-    backtesting_service = RoomTemperatureBacktestingService(
-        time_series_read_repository,
-        identified_model_repository,
-        prediction_service,
-    )
-    thermal_output_backtesting_service = ThermalOutputBacktestingService(
-        time_series_read_repository,
-        identified_model_repository,
-    )
     forecast_repository = ForecastRepository(database)
     historical_weather_repository = HistoricalWeatherRepository(database)
     history_import_service = HistoryImportService(
@@ -167,11 +111,6 @@ def build_container(
     historical_weather_scheduler = HistoricalWeatherScheduler(
         historical_weather_import_service,
     )
-    model_training_runner = FullDatasetModelTrainingRunner(
-        model_training_service,
-        time_series_read_repository,
-    )
-    model_training_scheduler = ModelTrainingScheduler(model_training_runner)
     forecast_service = OpenMeteoForecastService(
         gateway=open_meteo,
         location=location,
@@ -198,17 +137,9 @@ def build_container(
         historical_weather_import_service=historical_weather_import_service,
         telemetry_repository=telemetry_repository,
         time_series_read_repository=time_series_read_repository,
-        identified_model_repository=identified_model_repository,
-        identification_service=identification_service,
-        model_training_service=model_training_service,
-        prediction_service=prediction_service,
-        mpc_planner=mpc_planner,
-        backtesting_service=backtesting_service,
-        thermal_output_backtesting_service=thermal_output_backtesting_service,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
         historical_weather_scheduler=historical_weather_scheduler,
-        model_training_scheduler=model_training_scheduler,
         forecast_repository=forecast_repository,
         forecast_service=forecast_service,
         forecast_scheduler=forecast_scheduler,

@@ -3,7 +3,6 @@ from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
 from .heatpump_state import SpaceHeatingStateFilter
 from .historical_weather import HistoricalWeatherEntry
-from .identified_model import IdentifiedModel
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -107,7 +106,6 @@ __all__ = [
     "PV_TOTAL_KWH",
     "REFRIGERANT_CONDENSATION_TEMPERATURE",
     "REFRIGERANT_LIQUID_LINE_TEMPERATURE",
-    "IdentifiedModel",
     "ROOM_TEMPERATURE",
     "SENSOR_DEFINITIONS",
     "SensorDefinition",

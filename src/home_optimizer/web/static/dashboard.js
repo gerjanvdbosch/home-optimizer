@@ -1,12 +1,141 @@
-const {
-  apiUrl,
-  chartTimestamp,
-  formatDate,
-  formatDisplayDate,
-  latestPoint,
-  renderPlot,
-  summarizeSeries,
-} = window.HomeOptimizer;
+const baseUrl = new URL(".", window.location.href);
+
+function apiUrl(path) {
+  return new URL(path, baseUrl).toString();
+}
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDisplayDate(date) {
+  return new Intl.DateTimeFormat("nl-NL", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
+function latestPoint(series) {
+  if (!series || !series.points || series.points.length === 0) {
+    return null;
+  }
+  return series.points[series.points.length - 1];
+}
+
+function summarizeSeries(series) {
+  const values = series.points.map((point) => point.value);
+  if (values.length === 0) {
+    return "-";
+  }
+  const latest = values[values.length - 1];
+  const unit = series.unit || "";
+  return `${latest.toFixed(1)} ${unit}`.trim();
+}
+
+function chartTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  const localTimestamp = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return localTimestamp.toISOString().slice(0, 19);
+}
+
+function plotLayout(options, hasPoints) {
+  const annotations = hasPoints
+    ? []
+    : [
+        {
+          text: options.emptyText,
+          xref: "paper",
+          yref: "paper",
+          x: 0.5,
+          y: 0.5,
+          showarrow: false,
+          font: { color: "#727272", size: 14 },
+        },
+      ];
+
+  const layout = {
+    autosize: true,
+    margin: { t: 10, r: 12, b: 36, l: 46 },
+    paper_bgcolor: "#ffffff",
+    plot_bgcolor: "#ffffff",
+    annotations,
+    shapes: options.shapes || [],
+    xaxis: {
+      type: "date",
+      tickformat: "%H:%M",
+      showgrid: true,
+      gridcolor: "#eceff1",
+      zeroline: false,
+      fixedrange: true,
+      ...(options.xRange ? { range: options.xRange } : {}),
+    },
+    yaxis: {
+      title: { text: options.yTitle },
+      showgrid: true,
+      gridcolor: "#eceff1",
+      zeroline: false,
+      fixedrange: true,
+    },
+    legend: {
+      orientation: "h",
+      x: 0,
+      y: -0.18,
+      font: { size: 12 },
+    },
+    font: {
+      family: 'Roboto, "Noto Sans", "Segoe UI", Arial, sans-serif',
+      color: "#212121",
+    },
+  };
+
+  if (options.y2Title) {
+    layout.yaxis2 = {
+      title: { text: options.y2Title },
+      overlaying: "y",
+      side: "right",
+      showgrid: false,
+      zeroline: false,
+      fixedrange: true,
+    };
+  }
+
+  return layout;
+}
+
+function renderPlot(element, seriesList, options) {
+  const traces = seriesList.map((series, index) => {
+    const traceOptions = options.traceOptions?.[index] || {};
+    const precision = Number.isFinite(traceOptions.precision) ? traceOptions.precision : 1;
+    const yaxis = traceOptions.yaxis === "y2" ? "y2" : undefined;
+    return {
+      x: series.points.map((point) => chartTimestamp(point.timestamp)),
+      y: series.points.map((point) => point.value),
+      name: traceOptions.label || series.name,
+      type: "scatter",
+      mode: "lines",
+      ...(yaxis ? { yaxis } : {}),
+      line: {
+        color: traceOptions.color || options.colors?.[index % (options.colors?.length || 1)],
+        width: traceOptions.width || 2,
+        ...(traceOptions.dash ? { dash: traceOptions.dash } : {}),
+        ...(traceOptions.shape ? { shape: traceOptions.shape } : {}),
+      },
+      hovertemplate:
+        `%{x|%H:%M}<br>%{y:.${precision}f} ${series.unit || ""}` +
+        `<extra>${traceOptions.label || series.name}</extra>`,
+    };
+  });
+  const hasPoints = seriesList.some((series) => series.points.length > 0);
+
+  Plotly.react(element, traces, plotLayout(options, hasPoints), {
+    displayModeBar: false,
+    responsive: true,
+  });
+}
 
 const button = document.getElementById("import-button");
 const weatherImportButton = document.getElementById("weather-import-button");
@@ -31,6 +160,17 @@ const compressorSummary = document.getElementById("compressor-summary");
 const compressorChart = document.getElementById("compressor-chart");
 const supplyChart = document.getElementById("supply-chart");
 const thermalChart = document.getElementById("thermal-chart");
+const chartElements = [
+  roomChart,
+  dhwChart,
+  heatpumpChart,
+  forecastChart,
+  historicalWeatherChart,
+  shutterChart,
+  compressorChart,
+  supplyChart,
+  thermalChart,
+];
 
 const heatpumpModeStyles = {
   heat: { label: "Vloerverwarming", color: "#43a047", fill: "rgba(67, 160, 71, 0.12)" },
@@ -73,7 +213,24 @@ function setImportButtonsDisabled(disabled) {
 function shiftDate(days) {
   selectedDate = new Date(selectedDate);
   selectedDate.setDate(selectedDate.getDate() + days);
-  loadCharts();
+  loadCharts().catch(handleChartLoadError);
+}
+
+function handleChartLoadError(error) {
+  [
+    roomSummary,
+    dhwSummary,
+    heatpumpSummary,
+    forecastSummary,
+    historicalWeatherSummary,
+    shutterSummary,
+    compressorSummary,
+  ]
+    .filter(Boolean)
+    .forEach((element) => {
+      element.textContent = "Fout";
+    });
+  console.error(error);
 }
 
 async function runImport() {
@@ -421,7 +578,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
     ...options,
   };
 
-  Plotly.react(element, traces, window.HomeOptimizer.plotLayout(mergedOptions, hasPoints), {
+  Plotly.react(element, traces, plotLayout(mergedOptions, hasPoints), {
     displayModeBar: false,
     responsive: true,
   });
@@ -637,15 +794,7 @@ weatherImportButton?.addEventListener("click", runWeatherImport);
 previousDayButton?.addEventListener("click", () => shiftDate(-1));
 nextDayButton?.addEventListener("click", () => shiftDate(1));
 window.addEventListener("resize", () => {
-  [roomChart, dhwChart, heatpumpChart, forecastChart, historicalWeatherChart, shutterChart, compressorChart, supplyChart, thermalChart]
-    .filter(Boolean)
-    .forEach((chart) => Plotly.Plots.resize(chart));
+  chartElements.filter(Boolean).forEach((chart) => Plotly.Plots.resize(chart));
 });
 
-loadCharts().catch((error) => {
-  if (roomSummary) roomSummary.textContent = "Fout";
-  if (dhwSummary) dhwSummary.textContent = "Fout";
-  if (heatpumpSummary) heatpumpSummary.textContent = "Fout";
-  if (forecastSummary) forecastSummary.textContent = "Fout";
-  console.error(error);
-});
+loadCharts().catch(handleChartLoadError);

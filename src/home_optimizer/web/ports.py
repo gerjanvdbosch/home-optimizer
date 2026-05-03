@@ -5,17 +5,6 @@ from typing import Protocol
 
 from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
-from home_optimizer.features.identification import MultiModelTrainer
-from home_optimizer.features.identification.schemas import IdentificationResult
-from home_optimizer.features.prediction.schemas import (
-    RoomTemperatureControlInputs,
-    RoomTemperaturePrediction,
-    RoomTemperaturePredictionComparison,
-)
-from home_optimizer.features.mpc.schemas import (
-    ThermostatSetpointMpcEvaluationResult,
-    ThermostatSetpointMpcPlanRequest,
-)
 
 
 class ClosableGateway(Protocol):
@@ -69,46 +58,6 @@ class WeatherImportRunner(Protocol):
     ) -> int: ...
 
 
-class IdentificationRunner(Protocol):
-    def identify(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        *,
-        interval_minutes: int = 15,
-        train_fraction: float = 0.8,
-    ) -> IdentificationResult: ...
-
-
-class PredictionRunner(Protocol):
-    def predict(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        *,
-        control_inputs: RoomTemperatureControlInputs,
-        model_name: str = "linear_2state_room_temperature",
-    ) -> RoomTemperaturePrediction: ...
-
-    def predict_vs_actual(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        *,
-        control_inputs: RoomTemperatureControlInputs,
-        model_name: str = "linear_2state_room_temperature",
-    ) -> RoomTemperaturePredictionComparison: ...
-
-
-class ThermostatSetpointMpcPlannerRunner(Protocol):
-    def propose_plan(
-        self,
-        request: ThermostatSetpointMpcPlanRequest,
-        *,
-        shutter_position: NumericSeries | None = None,
-    ) -> ThermostatSetpointMpcEvaluationResult: ...
-
-
 class WebAppContainer(Protocol):
     @property
     def home_assistant(self) -> ClosableGateway: ...
@@ -120,25 +69,11 @@ class WebAppContainer(Protocol):
     def time_series_read_repository(self) -> DashboardDataReader: ...
 
     @property
-    def identification_service(self) -> IdentificationRunner: ...
-
-    @property
-    def model_training_service(self) -> MultiModelTrainer: ...
-
-    @property
-    def prediction_service(self) -> PredictionRunner: ...
-
-    @property
-    def mpc_planner(self) -> ThermostatSetpointMpcPlannerRunner: ...
-
-    @property
     def telemetry_scheduler(self) -> TelemetrySchedulerRunner: ...
 
     @property
     def historical_weather_scheduler(self) -> TelemetrySchedulerRunner: ...
 
-    @property
-    def model_training_scheduler(self) -> TelemetrySchedulerRunner: ...
 
     @property
     def forecast_scheduler(self) -> TelemetrySchedulerRunner: ...
