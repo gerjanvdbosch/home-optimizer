@@ -1,3 +1,4 @@
+from .diagnostics import StateSpaceActuatorSensitivityService
 from .model import (
     StateSpaceThermalControlInput,
     StateSpaceThermalDisturbance,
@@ -6,6 +7,8 @@ from .model import (
 )
 from .schemas import (
     OPTIMIZED_CONTROL_PLAN_NAME,
+    StateSpaceActuatorSensitivityResult,
+    StateSpaceActuatorSensitivityRow,
     StateSpaceThermalMpcPlanRequest,
     StateSpaceThermalMpcPlanResult,
     StateSpaceThermalPlanEvaluation,
@@ -13,8 +16,12 @@ from .schemas import (
     StateSpaceThermalPredictionResult,
     StateSpaceSetpointPredictionRequest,
     StateSpaceSetpointPredictionResult,
+    StateSpaceSetpointMpcPlanRequest,
+    StateSpaceSetpointMpcPlanResult,
+    StateSpaceSetpointPlanEvaluation,
 )
 from .service import (
+    StateSpaceSetpointMpcService,
     StateSpaceSetpointPredictionService,
     StateSpaceThermalMpcService,
     StateSpaceThermalPredictionService,
@@ -22,6 +29,9 @@ from .service import (
 
 __all__ = [
     "OPTIMIZED_CONTROL_PLAN_NAME",
+    "StateSpaceActuatorSensitivityResult",
+    "StateSpaceActuatorSensitivityRow",
+    "StateSpaceActuatorSensitivityService",
     "StateSpaceThermalControlInput",
     "StateSpaceThermalDisturbance",
     "StateSpaceThermalModel",
@@ -32,6 +42,10 @@ __all__ = [
     "StateSpaceThermalPredictionRequest",
     "StateSpaceThermalPredictionResult",
     "StateSpaceThermalPredictionService",
+    "StateSpaceSetpointMpcPlanRequest",
+    "StateSpaceSetpointMpcPlanResult",
+    "StateSpaceSetpointMpcService",
+    "StateSpaceSetpointPlanEvaluation",
     "StateSpaceSetpointPredictionRequest",
     "StateSpaceSetpointPredictionResult",
     "StateSpaceSetpointPredictionService",

@@ -1,5 +1,8 @@
 from .control_oriented import (
     OPTIMIZED_CONTROL_PLAN_NAME,
+    StateSpaceActuatorSensitivityResult,
+    StateSpaceActuatorSensitivityRow,
+    StateSpaceActuatorSensitivityService,
     StateSpaceThermalControlInput,
     StateSpaceThermalDisturbance,
     StateSpaceThermalModel,
@@ -13,6 +16,10 @@ from .control_oriented import (
     StateSpaceSetpointPredictionRequest,
     StateSpaceSetpointPredictionResult,
     StateSpaceSetpointPredictionService,
+    StateSpaceSetpointMpcPlanRequest,
+    StateSpaceSetpointMpcPlanResult,
+    StateSpaceSetpointMpcService,
+    StateSpaceSetpointPlanEvaluation,
     StateSpaceThermalState,
 )
 from .closed_loop import ThermostatSetpointMpcClosedLoopService
@@ -26,11 +33,13 @@ from .schemas import (
     ThermostatSetpointMpcPlanRequest,
     ThermostatSetpointPlanEvaluation,
 )
-from .service import ThermostatSetpointMpcEvaluator, ThermostatSetpointMpcOptimizer
 
 __all__ = [
     "DEFAULT_MPC_HORIZON_HOURS",
     "OPTIMIZED_CONTROL_PLAN_NAME",
+    "StateSpaceActuatorSensitivityResult",
+    "StateSpaceActuatorSensitivityRow",
+    "StateSpaceActuatorSensitivityService",
     "StateSpaceThermalControlInput",
     "StateSpaceThermalDisturbance",
     "StateSpaceThermalModel",
@@ -41,6 +50,10 @@ __all__ = [
     "StateSpaceThermalPredictionRequest",
     "StateSpaceThermalPredictionResult",
     "StateSpaceThermalPredictionService",
+    "StateSpaceSetpointMpcPlanRequest",
+    "StateSpaceSetpointMpcPlanResult",
+    "StateSpaceSetpointMpcService",
+    "StateSpaceSetpointPlanEvaluation",
     "StateSpaceSetpointPredictionRequest",
     "StateSpaceSetpointPredictionResult",
     "StateSpaceSetpointPredictionService",
@@ -53,6 +66,4 @@ __all__ = [
     "ThermostatSetpointMpcPlanRequest",
     "ThermostatSetpointPlanEvaluation",
     "ThermostatSetpointMpcPlanner",
-    "ThermostatSetpointMpcEvaluator",
-    "ThermostatSetpointMpcOptimizer",
 ]

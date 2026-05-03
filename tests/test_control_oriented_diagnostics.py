@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries
-from home_optimizer.features.mpc import (
-    ThermostatSetpointMpcPlanRequest,
-    ThermostatSetpointMpcPlanner,
-)
+from home_optimizer.features.mpc.control_oriented import StateSpaceActuatorSensitivityService
+from home_optimizer.features.prediction.service import _PreparedPredictionContext
 
 
 def build_room_temperature_model() -> IdentifiedModel:
@@ -68,61 +65,68 @@ def build_thermal_output_model() -> IdentifiedModel:
     )
 
 
+def series(name: str, unit: str | None, points: list[tuple[str, float]]) -> NumericSeries:
+    return NumericSeries(
+        name=name,
+        unit=unit,
+        points=[NumericPoint(timestamp=timestamp, value=value) for timestamp, value in points],
+    )
+
+
 class FakePredictionService:
     def prepare_prediction_context(self, *, start_time, end_time, shutter_position=None, model_name=None):
-        return SimpleNamespace(
+        return _PreparedPredictionContext(
             model=build_room_temperature_model(),
+            interval=(end_time - start_time) / 2,
             start_time=start_time,
             end_time=end_time,
+            outdoor_forecast=series(
+                "outdoor_temperature",
+                "degC",
+                [
+                    ("2026-05-03T10:15:00+00:00", 10.0),
+                    ("2026-05-03T10:30:00+00:00", 10.0),
+                ],
+            ),
+            adjusted_gti=series(
+                "gti_living_room_windows_adjusted",
+                "Wm2",
+                [
+                    ("2026-05-03T10:15:00+00:00", 0.0),
+                    ("2026-05-03T10:30:00+00:00", 0.0),
+                ],
+            ),
             initial_room_temperature=19.0,
             initial_floor_heat_state=0.0,
             thermal_output_model=build_thermal_output_model(),
             initial_thermal_output=0.0,
-            outdoor_forecast=NumericSeries(
-                name="outdoor_temperature",
-                unit="degC",
-                points=[
-                    NumericPoint(timestamp="2026-05-02T10:15:00+00:00", value=10.0),
-                    NumericPoint(timestamp="2026-05-02T10:30:00+00:00", value=10.0),
-                ],
-            ),
-            adjusted_gti=NumericSeries(
-                name="gti_living_room_windows_adjusted",
-                unit="Wm2",
-                points=[
-                    NumericPoint(timestamp="2026-05-02T10:15:00+00:00", value=0.0),
-                    NumericPoint(timestamp="2026-05-02T10:30:00+00:00", value=0.0),
-                ],
-            ),
-            supply_target_temperature_series=NumericSeries(
-                name="hp_supply_target_temperature",
-                unit="degC",
-                points=[
-                    NumericPoint(timestamp="2026-05-02T10:15:00+00:00", value=24.0),
-                    NumericPoint(timestamp="2026-05-02T10:30:00+00:00", value=24.0),
+            supply_target_temperature_series=series(
+                "hp_supply_target_temperature",
+                "degC",
+                [
+                    ("2026-05-03T10:15:00+00:00", 24.0),
+                    ("2026-05-03T10:30:00+00:00", 24.0),
                 ],
             ),
         )
 
 
-def test_mpc_planner_proposes_control_oriented_schedule() -> None:
-    planner = ThermostatSetpointMpcPlanner(
+def test_actuator_sensitivity_rows_reflect_setpoint_influence() -> None:
+    service = StateSpaceActuatorSensitivityService(
         prediction_service=FakePredictionService(),
     )
 
-    result = planner.propose_plan(
-        ThermostatSetpointMpcPlanRequest(
-            start_time=datetime(2026, 5, 2, 10, 0, tzinfo=timezone.utc),
-            end_time=datetime(2026, 5, 2, 10, 30, tzinfo=timezone.utc),
-            interval_minutes=15,
-            allowed_setpoints=[19.0, 20.0, 21.0],
-            switch_times=[datetime(2026, 5, 2, 10, 15, tzinfo=timezone.utc)],
-            comfort_min_temperature=19.4,
-            comfort_max_temperature=20.2,
-            setpoint_change_penalty=0.05,
-        )
+    result = service.inspect(
+        start_time=datetime(2026, 5, 3, 10, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 5, 3, 10, 30, tzinfo=timezone.utc),
+        setpoints=[19.0, 21.0],
     )
 
     assert result.model_name == "linear_2state_room_temperature"
-    assert result.recommended_plan.thermostat_setpoint_schedule.name == "thermostat_setpoint"
-    assert len(result.plan_results) == 1
+    assert result.thermal_output_model_name == "linear_1step_thermal_output"
+    assert len(result.rows) == 2
+    assert result.rows[0].thermostat_setpoint == 19.0
+    assert result.rows[1].thermostat_setpoint == 21.0
+    assert result.rows[0].first_predicted_thermal_output == 0.0
+    assert result.rows[1].first_predicted_thermal_output is not None
+    assert result.rows[1].first_predicted_thermal_output > result.rows[0].first_predicted_thermal_output

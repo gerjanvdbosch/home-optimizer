@@ -32,7 +32,6 @@ from home_optimizer.features.identification.thermal_output import (
 )
 from home_optimizer.features.identification import MultiModelTrainer, MultiModelTrainingService
 from home_optimizer.features.mpc import (
-    ThermostatSetpointMpcOptimizer,
     ThermostatSetpointMpcPlanner,
 )
 from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
@@ -123,7 +122,7 @@ def build_container(
         [thermal_output_identification_service, identification_service]
     )
     mpc_planner = ThermostatSetpointMpcPlanner(
-        ThermostatSetpointMpcOptimizer(prediction_service),
+        prediction_service=prediction_service,
     )
     backtesting_service = RoomTemperatureBacktestingService(
         time_series_read_repository,

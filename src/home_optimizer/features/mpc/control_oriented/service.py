@@ -8,6 +8,7 @@ from home_optimizer.domain import (
     FLOOR_HEAT_STATE,
     ROOM_TEMPERATURE,
     THERMAL_OUTPUT,
+    THERMOSTAT_SETPOINT,
     NumericPoint,
     NumericSeries,
     latest_value_at,
@@ -29,6 +30,9 @@ from .schemas import (
     StateSpaceThermalPredictionResult,
     StateSpaceSetpointPredictionRequest,
     StateSpaceSetpointPredictionResult,
+    StateSpaceSetpointMpcPlanRequest,
+    StateSpaceSetpointMpcPlanResult,
+    StateSpaceSetpointPlanEvaluation,
 )
 
 
@@ -124,6 +128,10 @@ class StateSpaceThermalMpcService:
             raise ValueError("allowed_thermal_outputs must not be empty")
         if request.comfort_min_temperature > request.comfort_max_temperature:
             raise ValueError("comfort_min_temperature must be <= comfort_max_temperature")
+        if request.comfort_undershoot_penalty < 0:
+            raise ValueError("comfort_undershoot_penalty must be >= 0")
+        if request.comfort_overshoot_penalty < 0:
+            raise ValueError("comfort_overshoot_penalty must be >= 0")
         if request.thermal_output_usage_penalty < 0:
             raise ValueError("thermal_output_usage_penalty must be >= 0")
         if request.thermal_output_change_penalty < 0:
@@ -290,14 +298,15 @@ class StateSpaceThermalMpcService:
             ),
         )
         predicted_values = [point.value for point in prediction.room_temperature.points]
-        comfort_cost = 0.0
-        for value in predicted_values:
-            if value < request.comfort_min_temperature:
-                comfort_cost += (request.comfort_min_temperature - value) ** 2
-            elif value > request.comfort_max_temperature:
-                comfort_cost += (value - request.comfort_max_temperature) ** 2
-        usage_cost = request.thermal_output_usage_penalty * sum(
-            point.value**2 for point in schedule.points
+        comfort_cost = self._mean_squared_comfort_violation(
+            predicted_values,
+            comfort_min_temperature=request.comfort_min_temperature,
+            comfort_max_temperature=request.comfort_max_temperature,
+            undershoot_penalty=request.comfort_undershoot_penalty,
+            overshoot_penalty=request.comfort_overshoot_penalty,
+        )
+        usage_cost = request.thermal_output_usage_penalty * self._mean_squared_values(
+            point.value for point in schedule.points
         )
         change_cost = self._thermal_output_change_cost(
             schedule,
@@ -373,17 +382,48 @@ class StateSpaceThermalMpcService:
     ) -> float:
         if penalty <= 0 or not schedule.points:
             return 0.0
-        cost = 0.0
         previous_value = (
             float(previous_applied_thermal_output)
             if previous_applied_thermal_output is not None
             else schedule.points[0].value
         )
+        deltas: list[float] = []
         for point in schedule.points:
-            delta = point.value - previous_value
-            cost += penalty * (delta**2)
+            deltas.append(point.value - previous_value)
             previous_value = point.value
-        return cost
+        return penalty * StateSpaceThermalMpcService._mean_squared_values(deltas)
+
+    @staticmethod
+    def _mean_squared_values(values) -> float:
+        values_list = [float(value) for value in values]
+        if not values_list:
+            return 0.0
+        return sum(value**2 for value in values_list) / len(values_list)
+
+    @staticmethod
+    def _mean_squared_comfort_violation(
+        predicted_values: list[float],
+        *,
+        comfort_min_temperature: float,
+        comfort_max_temperature: float,
+        undershoot_penalty: float,
+        overshoot_penalty: float,
+    ) -> float:
+        if not predicted_values:
+            return 0.0
+        violations: list[float] = []
+        for value in predicted_values:
+            if value < comfort_min_temperature:
+                violations.append(
+                    (comfort_min_temperature - value) * undershoot_penalty
+                )
+            elif value > comfort_max_temperature:
+                violations.append(
+                    (value - comfort_max_temperature) * overshoot_penalty
+                )
+            else:
+                violations.append(0.0)
+        return StateSpaceThermalMpcService._mean_squared_values(violations)
 
 
 @dataclass(frozen=True)
@@ -505,3 +545,249 @@ class StateSpaceSetpointPredictionService:
                 points=thermal_output_points,
             ),
         )
+
+
+class StateSpaceSetpointMpcService:
+    def __init__(
+        self,
+        *,
+        thermal_mpc_service: StateSpaceThermalMpcService | None = None,
+        setpoint_prediction_service: StateSpaceSetpointPredictionService | None = None,
+    ) -> None:
+        self.thermal_mpc_service = thermal_mpc_service or StateSpaceThermalMpcService()
+        self.setpoint_prediction_service = (
+            setpoint_prediction_service or StateSpaceSetpointPredictionService()
+        )
+
+    def optimize(
+        self,
+        *,
+        thermal_model: StateSpaceThermalModel,
+        thermal_output_model,
+        request: StateSpaceSetpointMpcPlanRequest,
+    ) -> StateSpaceSetpointMpcPlanResult:
+        if not request.allowed_setpoints:
+            raise ValueError("allowed_setpoints must not be empty")
+        if request.comfort_undershoot_penalty < 0:
+            raise ValueError("comfort_undershoot_penalty must be >= 0")
+        if request.comfort_overshoot_penalty < 0:
+            raise ValueError("comfort_overshoot_penalty must be >= 0")
+        if request.thermal_output_tracking_penalty < 0:
+            raise ValueError("thermal_output_tracking_penalty must be >= 0")
+        if request.setpoint_change_penalty < 0:
+            raise ValueError("setpoint_change_penalty must be >= 0")
+
+        thermal_plan = self.thermal_mpc_service.optimize(
+            model=thermal_model,
+            request=StateSpaceThermalMpcPlanRequest(
+                start_time=request.start_time,
+                end_time=request.end_time,
+                initial_state=request.initial_state,
+                allowed_thermal_outputs=request.allowed_thermal_outputs,
+                move_block_times=request.move_block_times,
+                outdoor_temperature_series=request.outdoor_temperature_series,
+                solar_gain_series=request.solar_gain_series,
+                comfort_min_temperature=request.comfort_min_temperature,
+                comfort_max_temperature=request.comfort_max_temperature,
+                comfort_undershoot_penalty=request.comfort_undershoot_penalty,
+                comfort_overshoot_penalty=request.comfort_overshoot_penalty,
+                thermal_output_usage_penalty=request.thermal_output_usage_penalty,
+                thermal_output_change_penalty=request.thermal_output_change_penalty,
+                previous_applied_thermal_output=request.previous_applied_thermal_output,
+            ),
+        )
+        target_thermal_output_schedule = thermal_plan.recommended_plan.thermal_output_schedule
+
+        block_starts = self.thermal_mpc_service._control_block_starts(
+            start_time=request.start_time,
+            end_time=request.end_time,
+            move_block_times=request.move_block_times,
+        )
+        initial_value = (
+            request.previous_applied_setpoint
+            if request.previous_applied_setpoint is not None
+            else min(request.allowed_setpoints)
+        )
+        block_values = [float(initial_value) for _ in block_starts]
+
+        for _ in range(3):
+            changed = False
+            for index in range(len(block_values)):
+                optimized_value = self._optimize_block_value(
+                    thermal_model=thermal_model,
+                    thermal_output_model=thermal_output_model,
+                    request=request,
+                    target_thermal_output_schedule=target_thermal_output_schedule,
+                    block_starts=block_starts,
+                    block_values=block_values,
+                    block_index=index,
+                )
+                if abs(optimized_value - block_values[index]) > 1e-3:
+                    changed = True
+                block_values[index] = optimized_value
+            if not changed:
+                break
+
+        recommended_plan = self._evaluate_setpoint_block_values(
+            thermal_model=thermal_model,
+            thermal_output_model=thermal_output_model,
+            request=request,
+            target_thermal_output_schedule=target_thermal_output_schedule,
+            block_starts=block_starts,
+            block_values=block_values,
+        )
+
+        return StateSpaceSetpointMpcPlanResult(
+            model_name=thermal_model.model_name,
+            interval_minutes=thermal_model.interval_minutes,
+            thermal_output_model_name=thermal_output_model.model_name,
+            thermal_plan=thermal_plan.recommended_plan,
+            plan_results=[recommended_plan],
+            recommended_plan=recommended_plan,
+        )
+
+    def _optimize_block_value(
+        self,
+        *,
+        thermal_model: StateSpaceThermalModel,
+        thermal_output_model,
+        request: StateSpaceSetpointMpcPlanRequest,
+        target_thermal_output_schedule: NumericSeries,
+        block_starts: list,
+        block_values: list[float],
+        block_index: int,
+    ) -> float:
+        candidates = sorted(set(float(value) for value in request.allowed_setpoints))
+        return min(
+            candidates,
+            key=lambda candidate: self._evaluate_setpoint_block_values(
+                thermal_model=thermal_model,
+                thermal_output_model=thermal_output_model,
+                request=request,
+                target_thermal_output_schedule=target_thermal_output_schedule,
+                block_starts=block_starts,
+                block_values=self.thermal_mpc_service._updated_block_values(
+                    block_values,
+                    block_index,
+                    candidate,
+                ),
+            ).total_cost,
+        )
+
+    def _evaluate_setpoint_block_values(
+        self,
+        *,
+        thermal_model: StateSpaceThermalModel,
+        thermal_output_model,
+        request: StateSpaceSetpointMpcPlanRequest,
+        target_thermal_output_schedule: NumericSeries,
+        block_starts: list,
+        block_values: list[float],
+    ) -> StateSpaceSetpointPlanEvaluation:
+        thermostat_setpoint_schedule = self._build_setpoint_schedule(
+            start_time=request.start_time,
+            end_time=request.end_time,
+            interval_minutes=thermal_model.interval_minutes,
+            block_starts=block_starts,
+            block_values=block_values,
+        )
+        prediction = self.setpoint_prediction_service.predict(
+            thermal_model=thermal_model,
+            thermal_output_model=thermal_output_model,
+            request=StateSpaceSetpointPredictionRequest(
+                start_time=request.start_time,
+                end_time=request.end_time,
+                initial_state=request.initial_state,
+                initial_thermal_output=request.initial_thermal_output,
+                thermostat_setpoint_schedule=thermostat_setpoint_schedule,
+                outdoor_temperature_series=request.outdoor_temperature_series,
+                solar_gain_series=request.solar_gain_series,
+                supply_target_temperature_series=request.supply_target_temperature_series,
+            ),
+        )
+        predicted_temperatures = [point.value for point in prediction.room_temperature.points]
+        comfort_cost = self.thermal_mpc_service._mean_squared_comfort_violation(
+            predicted_temperatures,
+            comfort_min_temperature=request.comfort_min_temperature,
+            comfort_max_temperature=request.comfort_max_temperature,
+            undershoot_penalty=request.comfort_undershoot_penalty,
+            overshoot_penalty=request.comfort_overshoot_penalty,
+        )
+        tracking_errors: list[float] = []
+        for target_point, predicted_point in zip(
+            target_thermal_output_schedule.points,
+            prediction.thermal_output.points,
+            strict=True,
+        ):
+            tracking_errors.append(predicted_point.value - target_point.value)
+        tracking_cost = (
+            request.thermal_output_tracking_penalty
+            * self.thermal_mpc_service._mean_squared_values(tracking_errors)
+        )
+        setpoint_change_cost = self._setpoint_change_cost(
+            thermostat_setpoint_schedule,
+            penalty=request.setpoint_change_penalty,
+            previous_applied_setpoint=request.previous_applied_setpoint,
+        )
+        return StateSpaceSetpointPlanEvaluation(
+            plan_name=OPTIMIZED_CONTROL_PLAN_NAME,
+            thermostat_setpoint_schedule=thermostat_setpoint_schedule,
+            target_thermal_output_schedule=target_thermal_output_schedule,
+            predicted_thermal_output=prediction.thermal_output,
+            predicted_room_temperature=prediction.room_temperature,
+            predicted_floor_heat_state=prediction.floor_heat_state,
+            total_cost=comfort_cost + tracking_cost + setpoint_change_cost,
+            comfort_violation_cost=comfort_cost,
+            thermal_output_tracking_cost=tracking_cost,
+            setpoint_change_cost=setpoint_change_cost,
+            minimum_predicted_temperature=min(predicted_temperatures) if predicted_temperatures else None,
+            maximum_predicted_temperature=max(predicted_temperatures) if predicted_temperatures else None,
+        )
+
+    @staticmethod
+    def _build_setpoint_schedule(
+        *,
+        start_time,
+        end_time,
+        interval_minutes: int,
+        block_starts,
+        block_values: list[float],
+    ) -> NumericSeries:
+        interval = timedelta(minutes=interval_minutes)
+        points: list[NumericPoint] = []
+        cursor = start_time
+        while cursor <= end_time:
+            active_block_index = 0
+            for index, block_start in enumerate(block_starts):
+                if block_start <= cursor:
+                    active_block_index = index
+                else:
+                    break
+            points.append(
+                NumericPoint(
+                    timestamp=normalize_utc_timestamp(cursor),
+                    value=float(block_values[active_block_index]),
+                )
+            )
+            cursor += interval
+        return NumericSeries(name=THERMOSTAT_SETPOINT, unit="degC", points=points)
+
+    @staticmethod
+    def _setpoint_change_cost(
+        schedule: NumericSeries,
+        *,
+        penalty: float,
+        previous_applied_setpoint: float | None,
+    ) -> float:
+        if penalty <= 0 or not schedule.points:
+            return 0.0
+        previous_value = (
+            float(previous_applied_setpoint)
+            if previous_applied_setpoint is not None
+            else schedule.points[0].value
+        )
+        deltas: list[float] = []
+        for point in schedule.points:
+            deltas.append(point.value - previous_value)
+            previous_value = point.value
+        return penalty * StateSpaceThermalMpcService._mean_squared_values(deltas)
