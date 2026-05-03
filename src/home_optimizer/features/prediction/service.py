@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from home_optimizer.domain import (
@@ -33,6 +34,7 @@ from home_optimizer.features.identification.room_temperature.model import (
 )
 from home_optimizer.features.identification.thermal_output.model import (
     MODEL_KIND as THERMAL_OUTPUT_MODEL_KIND,
+    predict_thermal_output,
 )
 
 from .ports import IdentifiedModelReader, PredictionDataReader
@@ -60,6 +62,45 @@ class RoomTemperaturePredictionService:
         control_inputs: RoomTemperatureControlInputs,
         model_name: str = MODEL_NAME,
     ) -> RoomTemperaturePrediction:
+        context = self.prepare_prediction_context(
+            start_time=start_time,
+            end_time=end_time,
+            shutter_position=control_inputs.shutter_position,
+            model_name=model_name,
+        )
+        return self.predict_with_context(
+            context=context,
+            thermostat_setpoint=control_inputs.thermostat_setpoint,
+        )
+
+    def predict_many(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        thermostat_setpoint_candidates,
+        shutter_position=None,
+        model_name: str = MODEL_NAME,
+    ) -> list[RoomTemperaturePrediction]:
+        context = self.prepare_prediction_context(
+            start_time=start_time,
+            end_time=end_time,
+            shutter_position=shutter_position,
+            model_name=model_name,
+        )
+        return [
+            self.predict_with_context(context=context, thermostat_setpoint=candidate)
+            for candidate in thermostat_setpoint_candidates
+        ]
+
+    def prepare_prediction_context(
+        self,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        shutter_position=None,
+        model_name: str = MODEL_NAME,
+    ) -> "_PreparedPredictionContext":
         if end_time <= start_time:
             raise ValueError("end_time must be later than start_time")
 
@@ -98,8 +139,8 @@ class RoomTemperaturePredictionService:
                 NumericSeries(name=GTI_LIVING_ROOM_WINDOWS, unit="Wm2", points=[]),
             ),
             (
-                control_inputs.shutter_position.schedule
-                if control_inputs.shutter_position is not None
+                shutter_position.schedule
+                if shutter_position is not None
                 else NumericSeries(name=SHUTTER_LIVING_ROOM, unit="percent", points=[])
             ),
         )
@@ -117,40 +158,65 @@ class RoomTemperaturePredictionService:
         previous_thermal_output = 0.0
         if thermal_output_model is not None:
             previous_thermal_output = self._read_initial_thermal_output(start_time=start_time)
+        supply_target_temperature_series = self._read_supply_target_temperature_series(
+            start_time=start_time,
+            end_time=end_time + interval,
+        )
 
+        return _PreparedPredictionContext(
+            model=model,
+            interval=interval,
+            start_time=start_time,
+            end_time=end_time,
+            outdoor_forecast=outdoor_forecast,
+            adjusted_gti=adjusted_gti,
+            initial_room_temperature=current_room_temperature,
+            initial_floor_heat_state=float(floor_heat_state_value),
+            thermal_output_model=thermal_output_model,
+            initial_thermal_output=previous_thermal_output,
+            supply_target_temperature_series=supply_target_temperature_series,
+        )
+
+    def predict_with_context(
+        self,
+        *,
+        context: "_PreparedPredictionContext",
+        thermostat_setpoint,
+    ) -> RoomTemperaturePrediction:
+        current_room_temperature = context.initial_room_temperature
+        floor_heat_state_value = context.initial_floor_heat_state
+        previous_thermal_output = context.initial_thermal_output
         prediction_points: list[NumericPoint] = []
-        timestamp = start_time + interval
-        while timestamp <= end_time:
+        timestamp = context.start_time + context.interval
+        while timestamp <= context.end_time:
             timestamp_iso = normalize_utc_timestamp(timestamp)
-            previous_timestamp_iso = normalize_utc_timestamp(timestamp - interval)
-            outdoor_temperature = latest_value_at(outdoor_forecast.points, timestamp_iso)
-            solar_gain = latest_value_at(adjusted_gti.points, timestamp_iso)
-            thermostat_setpoint = latest_value_at(
-                control_inputs.thermostat_setpoint.schedule.points,
+            previous_timestamp_iso = normalize_utc_timestamp(timestamp - context.interval)
+            outdoor_temperature = latest_value_at(context.outdoor_forecast.points, timestamp_iso)
+            solar_gain = latest_value_at(context.adjusted_gti.points, timestamp_iso)
+            thermostat_setpoint_value = latest_value_at(
+                thermostat_setpoint.schedule.points,
                 previous_timestamp_iso,
             )
 
-            if None in (
-                outdoor_temperature,
-                solar_gain,
-                thermostat_setpoint,
-            ):
+            if None in (outdoor_temperature, solar_gain, thermostat_setpoint_value):
                 raise ValueError(
                     "missing prediction inputs at "
                     f"{normalize_utc_timestamp(timestamp)}; provide schedules and forecast coverage"
                 )
 
-            if thermal_output_model is not None:
-                supply_target_temperature = self._read_latest_supply_target_temperature(
-                    start_time=timestamp - interval,
-                    end_time=timestamp,
+            if context.thermal_output_model is not None:
+                supply_target_temperature = latest_value_at(
+                    context.supply_target_temperature_series.points,
+                    timestamp_iso,
                 )
+                if supply_target_temperature is None:
+                    supply_target_temperature = 0.0
                 predicted_thermal_output = self._predict_thermal_output_step(
-                    model=thermal_output_model,
+                    model=context.thermal_output_model,
                     previous_thermal_output=previous_thermal_output,
                     previous_floor_heat_state=float(floor_heat_state_value),
                     previous_room_temperature=current_room_temperature,
-                    thermostat_setpoint=float(thermostat_setpoint),
+                    thermostat_setpoint=float(thermostat_setpoint_value),
                     outdoor_temperature=float(outdoor_temperature),
                     supply_target_temperature=supply_target_temperature,
                 )
@@ -161,21 +227,22 @@ class RoomTemperaturePredictionService:
                 )
 
             current_room_temperature = (
-                model.intercept
-                + model.coefficients["previous_room_temperature"] * current_room_temperature
-                + model.coefficients[OUTDOOR_TEMPERATURE] * float(outdoor_temperature)
-                + model.coefficients[GTI_LIVING_ROOM_WINDOWS_ADJUSTED] * float(solar_gain)
-                + model.coefficients[FLOOR_HEAT_STATE_FEATURE_NAME] * float(floor_heat_state_value)
+                context.model.intercept
+                + context.model.coefficients["previous_room_temperature"] * current_room_temperature
+                + context.model.coefficients[OUTDOOR_TEMPERATURE] * float(outdoor_temperature)
+                + context.model.coefficients[GTI_LIVING_ROOM_WINDOWS_ADJUSTED] * float(solar_gain)
+                + context.model.coefficients[FLOOR_HEAT_STATE_FEATURE_NAME]
+                * float(floor_heat_state_value)
             )
             prediction_points.append(
                 NumericPoint(timestamp=timestamp_iso, value=current_room_temperature)
             )
-            timestamp += interval
+            timestamp += context.interval
 
         return RoomTemperaturePrediction(
-            model_name=model.model_name,
-            interval_minutes=model.interval_minutes,
-            target_name=model.target_name,
+            model_name=context.model.model_name,
+            interval_minutes=context.model.interval_minutes,
+            target_name=context.model.target_name,
             room_temperature=NumericSeries(
                 name=ROOM_TEMPERATURE,
                 unit="degC",
@@ -272,14 +339,14 @@ class RoomTemperaturePredictionService:
         if not required_coefficients.issubset(model.coefficients):
             raise ValueError("stored thermal output model is missing prediction coefficients")
         previous_heating_demand = max(thermostat_setpoint - previous_room_temperature, 0.0)
-        return max(
-            0.0,
-            model.intercept
-            + model.coefficients["previous_thermal_output"] * previous_thermal_output
-            + model.coefficients["previous_heating_demand"] * previous_heating_demand
-            + model.coefficients[f"previous_{FLOOR_HEAT_STATE}"] * previous_floor_heat_state
-            + model.coefficients[OUTDOOR_TEMPERATURE] * outdoor_temperature
-            + model.coefficients[HP_SUPPLY_TARGET_TEMPERATURE] * supply_target_temperature
+        return predict_thermal_output(
+            coefficients=model.coefficients,
+            intercept=model.intercept,
+            previous_thermal_output=previous_thermal_output,
+            previous_heating_demand=previous_heating_demand,
+            previous_floor_heat_state=previous_floor_heat_state,
+            outdoor_temperature=outdoor_temperature,
+            supply_target_temperature=supply_target_temperature,
         )
 
     def _read_initial_thermal_output(
@@ -297,26 +364,21 @@ class RoomTemperaturePredictionService:
         )
         return float(value) if value is not None else 0.0
 
-    def _read_latest_supply_target_temperature(
+    def _read_supply_target_temperature_series(
         self,
         *,
         start_time: datetime,
         end_time: datetime,
-    ) -> float:
+    ) -> NumericSeries:
         series = self.reader.read_series(
             names=[HP_SUPPLY_TARGET_TEMPERATURE],
             start_time=start_time,
             end_time=end_time,
         )
-        supply_target_temperature = next(
+        return next(
             iter(series),
             NumericSeries(name=HP_SUPPLY_TARGET_TEMPERATURE, unit="degC", points=[]),
         )
-        value = latest_value_at(
-            supply_target_temperature.points,
-            normalize_utc_timestamp(end_time),
-        )
-        return float(value) if value is not None else 0.0
 
     def _read_historical_floor_heat_state_series(
         self,
@@ -361,3 +423,18 @@ class RoomTemperaturePredictionService:
             booster_heater_active=by_name.get(BOOSTER_HEATER_ACTIVE),
             hp_mode=text_by_name.get(HP_MODE),
         )
+
+
+@dataclass(frozen=True)
+class _PreparedPredictionContext:
+    model: object
+    interval: timedelta
+    start_time: datetime
+    end_time: datetime
+    outdoor_forecast: NumericSeries
+    adjusted_gti: NumericSeries
+    initial_room_temperature: float
+    initial_floor_heat_state: float
+    thermal_output_model: object | None
+    initial_thermal_output: float
+    supply_target_temperature_series: NumericSeries

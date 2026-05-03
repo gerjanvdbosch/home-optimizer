@@ -118,19 +118,30 @@ def main() -> None:
         )
     )
     print("")
-    print("day         avg_cost comfort switch min_pred max_pred under over status")
+    print("day         avg_cost comfort switch min_sp max_sp n_sw first_sw last_sw plan   status")
     for day_result in result.day_results:
         status = day_result.error or "ok"
+        first_switch = day_result.first_switch_time.isoformat() if day_result.first_switch_time else "-"
+        last_switch = day_result.last_switch_time.isoformat() if day_result.last_switch_time else "-"
         print(
             f"{day_result.day} "
             f"{day_result.average_total_cost:>8.3f} "
             f"{day_result.average_comfort_violation_cost:>7.3f} "
             f"{day_result.average_setpoint_change_cost:>6.3f} "
-            f"{day_result.minimum_predicted_temperature if day_result.minimum_predicted_temperature is not None else '-':>8} "
-            f"{day_result.maximum_predicted_temperature if day_result.maximum_predicted_temperature is not None else '-':>8} "
-            f"{day_result.under_comfort_count:>5} "
-            f"{day_result.over_comfort_count:>4} "
+            f"{day_result.minimum_applied_setpoint if day_result.minimum_applied_setpoint is not None else '-':>6} "
+            f"{day_result.maximum_applied_setpoint if day_result.maximum_applied_setpoint is not None else '-':>6} "
+            f"{day_result.chosen_switch_count:>4} "
+            f"{first_switch:>8} "
+            f"{last_switch:>8} "
+            f"{(day_result.dominant_plan_name or '-'):>8} "
             f"{status}"
+        )
+        if day_result.selected_plan_names:
+            print(f"  plans: {', '.join(day_result.selected_plan_names)}")
+        print(
+            f"  predicted_temp: min={day_result.minimum_predicted_temperature if day_result.minimum_predicted_temperature is not None else '-'} "
+            f"max={day_result.maximum_predicted_temperature if day_result.maximum_predicted_temperature is not None else '-'} "
+            f"under={day_result.under_comfort_count} over={day_result.over_comfort_count}"
         )
 
 

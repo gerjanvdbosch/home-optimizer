@@ -45,6 +45,27 @@ class ThermalOutputDatasetBuilder:
         *,
         interval_minutes: int = 15,
     ) -> IdentificationDataset:
+        resampled = self.build_aligned_frame(
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+        )
+
+        return IdentificationDataset(
+            timestamps=[timestamp.isoformat() for timestamp in resampled.index.to_pydatetime()],
+            feature_names=THERMAL_OUTPUT_FEATURE_NAMES,
+            target_name=THERMAL_OUTPUT,
+            features=resampled[THERMAL_OUTPUT_FEATURE_NAMES].to_numpy(dtype=float).tolist(),
+            targets=resampled[THERMAL_OUTPUT].to_numpy(dtype=float).tolist(),
+        )
+
+    def build_aligned_frame(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        interval_minutes: int = 15,
+    ) -> pd.DataFrame:
         if interval_minutes <= 0:
             raise ValueError("interval_minutes must be greater than zero")
 
@@ -157,6 +178,8 @@ class ThermalOutputDatasetBuilder:
         resampled = frame.resample(f"{interval_minutes}min").agg(
             {
                 OUTDOOR_TEMPERATURE: "mean",
+                ROOM_TEMPERATURE: "mean",
+                THERMOSTAT_SETPOINT: "mean",
                 "heating_demand": "mean",
                 THERMAL_OUTPUT: "mean",
                 FLOOR_HEAT_STATE: "last",
@@ -171,13 +194,7 @@ class ThermalOutputDatasetBuilder:
         if len(resampled) < 3:
             raise ValueError("not enough aligned samples to identify a model")
 
-        return IdentificationDataset(
-            timestamps=[timestamp.isoformat() for timestamp in resampled.index.to_pydatetime()],
-            feature_names=THERMAL_OUTPUT_FEATURE_NAMES,
-            target_name=THERMAL_OUTPUT,
-            features=resampled[THERMAL_OUTPUT_FEATURE_NAMES].to_numpy(dtype=float).tolist(),
-            targets=resampled[THERMAL_OUTPUT].to_numpy(dtype=float).tolist(),
-        )
+        return resampled
 
     def _build_raw_rows(
         self,
@@ -218,6 +235,8 @@ class ThermalOutputDatasetBuilder:
                 {
                     "timestamp": thermal_point.timestamp,
                     OUTDOOR_TEMPERATURE: float(outdoor_value),
+                    ROOM_TEMPERATURE: float(room_temperature_value),
+                    THERMOSTAT_SETPOINT: float(setpoint_value),
                     "heating_demand": heating_demand,
                     FLOOR_HEAT_STATE: float(floor_heat_state_value),
                     HP_SUPPLY_TARGET_TEMPERATURE: float(supply_target_value),

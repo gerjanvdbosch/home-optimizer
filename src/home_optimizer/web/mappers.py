@@ -15,9 +15,9 @@ from home_optimizer.domain import (
 from home_optimizer.features.backtesting.metrics import prediction_error_summary
 from home_optimizer.features.identification.schemas import IdentificationResult
 from home_optimizer.features.mpc.schemas import (
-    ThermostatSetpointCandidateEvaluation,
     ThermostatSetpointMpcEvaluationResult,
     ThermostatSetpointMpcPlanRequest,
+    ThermostatSetpointPlanEvaluation,
 )
 from home_optimizer.features.prediction.schemas import (
     RoomTemperatureControlInputs,
@@ -33,7 +33,7 @@ from home_optimizer.web.schemas import (
     IdentificationResponse,
     NumericSeriesRequest,
     ModelTrainingRunResponse,
-    MpcCandidateResponse,
+    MpcPlanResultResponse,
     MpcPlanRequest,
     MpcPlanResponse,
     PredictionComparisonResponse,
@@ -188,11 +188,11 @@ def prediction_comparison_response(
     )
 
 
-def mpc_candidate_response(
-    result: ThermostatSetpointCandidateEvaluation,
-) -> MpcCandidateResponse:
-    return MpcCandidateResponse(
-        candidate_name=result.candidate_name,
+def mpc_plan_result_response(
+    result: ThermostatSetpointPlanEvaluation,
+) -> MpcPlanResultResponse:
+    return MpcPlanResultResponse(
+        plan_name=result.plan_name,
         thermostat_setpoint_schedule=series_response(result.thermostat_setpoint_schedule),
         predicted_room_temperature=series_response(result.predicted_room_temperature),
         total_cost=result.total_cost,
@@ -204,13 +204,13 @@ def mpc_candidate_response(
 
 
 def mpc_plan_response(result: ThermostatSetpointMpcEvaluationResult) -> MpcPlanResponse:
-    candidates = [mpc_candidate_response(item) for item in result.candidate_results]
-    best_candidate = next(
-        candidate for candidate in candidates if candidate.candidate_name == result.best_candidate.candidate_name
+    plan_results = [mpc_plan_result_response(item) for item in result.plan_results]
+    recommended_plan = next(
+        plan for plan in plan_results if plan.plan_name == result.recommended_plan.plan_name
     )
     return MpcPlanResponse(
         model_name=result.model_name,
         interval_minutes=result.interval_minutes,
-        candidate_results=candidates,
-        best_candidate=best_candidate,
+        plan_results=plan_results,
+        recommended_plan=recommended_plan,
     )

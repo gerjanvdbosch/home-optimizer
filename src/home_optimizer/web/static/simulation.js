@@ -546,24 +546,24 @@ function buildMpcSwitchTimes(startDate, endDate) {
   return times;
 }
 
-function renderMpcCandidates(responsePayload) {
+function renderMpcPlanResults(responsePayload) {
   if (!mpcCandidateList || !mpcResults) {
     return;
   }
-  const topCandidates = responsePayload.candidate_results
+  const topPlans = responsePayload.plan_results
     .slice()
     .sort((left, right) => left.total_cost - right.total_cost)
     .slice(0, 3);
   mpcCandidateList.replaceChildren();
-  topCandidates.forEach((candidate) => {
+  topPlans.forEach((plan) => {
     const item = document.createElement("article");
-    item.className = `mpc-candidate${candidate.candidate_name === responsePayload.best_candidate.candidate_name ? " is-best" : ""}`;
+    item.className = `mpc-candidate${plan.plan_name === responsePayload.recommended_plan.plan_name ? " is-best" : ""}`;
     item.innerHTML = `
-      <div><strong>${candidate.candidate_name}</strong><span>Kost ${candidate.total_cost.toFixed(3)}</span></div>
-      <div><strong>Comfort</strong><span>${candidate.comfort_violation_cost.toFixed(3)}</span></div>
-      <div><strong>Switch</strong><span>${candidate.setpoint_change_cost.toFixed(3)}</span></div>
-      <div><strong>Min temp</strong><span>${candidate.minimum_predicted_temperature?.toFixed(2) ?? "-"}</span></div>
-      <div><strong>Max temp</strong><span>${candidate.maximum_predicted_temperature?.toFixed(2) ?? "-"}</span></div>
+      <div><strong>${plan.plan_name}</strong><span>Kost ${plan.total_cost.toFixed(3)}</span></div>
+      <div><strong>Comfort</strong><span>${plan.comfort_violation_cost.toFixed(3)}</span></div>
+      <div><strong>Wijziging</strong><span>${plan.setpoint_change_cost.toFixed(3)}</span></div>
+      <div><strong>Min temp</strong><span>${plan.minimum_predicted_temperature?.toFixed(2) ?? "-"}</span></div>
+      <div><strong>Max temp</strong><span>${plan.maximum_predicted_temperature?.toFixed(2) ?? "-"}</span></div>
     `;
     mpcCandidateList.append(item);
   });
@@ -595,25 +595,25 @@ async function runMpcPrediction(startDate, endDate, comfortMin, comfortMax) {
 
   renderPlot(
     predictionChart,
-    [responsePayload.best_candidate.predicted_room_temperature],
+    [responsePayload.recommended_plan.predicted_room_temperature],
     {
       colors: ["#00796b"],
       emptyText: "Geen MPC voorspelling beschikbaar",
-      yTitle: responsePayload.best_candidate.predicted_room_temperature.unit || "",
+      yTitle: responsePayload.recommended_plan.predicted_room_temperature.unit || "",
       shapes: buildComfortShapes(comfortMin, comfortMax),
       traceOptions: [{ label: "MPC voorspeld", precision: 2 }],
     },
   );
-  renderMpcCandidates(responsePayload);
+  renderMpcPlanResults(responsePayload);
   predictionStatus.className = "status success";
   predictionStatus.textContent = "MPC voorstel berekend.";
   if (predictionSummary) {
-    predictionSummary.textContent = `Beste kandidaat: ${responsePayload.best_candidate.candidate_name} · kost ${responsePayload.best_candidate.total_cost.toFixed(3)}`;
+    predictionSummary.textContent = `Aanbevolen plan: ${responsePayload.recommended_plan.plan_name} · kost ${responsePayload.recommended_plan.total_cost.toFixed(3)}`;
   }
   if (predictionStatDelta) predictionStatDelta.textContent = "-";
-  if (predictionStatRmse) predictionStatRmse.textContent = responsePayload.best_candidate.total_cost.toFixed(2);
-  if (predictionStatBias) predictionStatBias.textContent = responsePayload.best_candidate.comfort_violation_cost.toFixed(2);
-  if (predictionStatMaxError) predictionStatMaxError.textContent = responsePayload.best_candidate.setpoint_change_cost.toFixed(2);
+  if (predictionStatRmse) predictionStatRmse.textContent = responsePayload.recommended_plan.total_cost.toFixed(2);
+  if (predictionStatBias) predictionStatBias.textContent = responsePayload.recommended_plan.comfort_violation_cost.toFixed(2);
+  if (predictionStatMaxError) predictionStatMaxError.textContent = responsePayload.recommended_plan.setpoint_change_cost.toFixed(2);
 }
 
 async function runPrediction(event) {

@@ -25,9 +25,9 @@ from home_optimizer.features import (
     RoomTemperatureControlInputs,
     RoomTemperaturePrediction,
     RoomTemperaturePredictionComparison,
-    ThermostatSetpointCandidateEvaluation,
     ThermostatSetpointMpcEvaluationResult,
     ThermostatSetpointMpcPlanRequest,
+    ThermostatSetpointPlanEvaluation,
 )
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
@@ -286,8 +286,8 @@ class FakeMpcPlanner:
                 NumericPoint(timestamp="2026-04-28T10:30:00+00:00", value=20.5),
             ],
         )
-        best_candidate = ThermostatSetpointCandidateEvaluation(
-            candidate_name="candidate_1",
+        best_candidate = ThermostatSetpointPlanEvaluation(
+            plan_name="optimized_plan",
             thermostat_setpoint_schedule=best_schedule,
             predicted_room_temperature=best_prediction,
             total_cost=0.25,
@@ -299,10 +299,10 @@ class FakeMpcPlanner:
         return ThermostatSetpointMpcEvaluationResult(
             model_name="linear_2state_room_temperature",
             interval_minutes=request.interval_minutes,
-            candidate_results=[
+            plan_results=[
                 best_candidate,
-                ThermostatSetpointCandidateEvaluation(
-                    candidate_name="candidate_2",
+                ThermostatSetpointPlanEvaluation(
+                    plan_name="alternative_plan",
                     thermostat_setpoint_schedule=runner_up_schedule,
                     predicted_room_temperature=runner_up_prediction,
                     total_cost=0.6,
@@ -312,7 +312,7 @@ class FakeMpcPlanner:
                     maximum_predicted_temperature=20.5,
                 ),
             ],
-            best_candidate=best_candidate,
+            recommended_plan=best_candidate,
         )
 
 
@@ -1266,14 +1266,14 @@ def test_mpc_plan_endpoint_returns_ranked_candidates() -> None:
     payload = response.json()
     assert payload["model_name"] == "linear_2state_room_temperature"
     assert payload["interval_minutes"] == 15
-    assert payload["best_candidate"]["candidate_name"] == "candidate_1"
-    assert payload["best_candidate"]["total_cost"] == 0.25
-    assert payload["best_candidate"]["thermostat_setpoint_schedule"]["points"] == [
+    assert payload["recommended_plan"]["plan_name"] == "optimized_plan"
+    assert payload["recommended_plan"]["total_cost"] == 0.25
+    assert payload["recommended_plan"]["thermostat_setpoint_schedule"]["points"] == [
         {"timestamp": "2026-04-28T10:00:00+00:00", "value": 19.0},
         {"timestamp": "2026-04-28T10:15:00+00:00", "value": 19.0},
         {"timestamp": "2026-04-28T10:30:00+00:00", "value": 20.0},
     ]
-    assert payload["candidate_results"][1]["candidate_name"] == "candidate_2"
+    assert payload["plan_results"][1]["plan_name"] == "alternative_plan"
     assert app.state.container.mpc_planner.calls == [
         {
             "request": ThermostatSetpointMpcPlanRequest(

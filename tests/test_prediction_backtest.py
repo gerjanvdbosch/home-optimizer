@@ -5,7 +5,10 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.domain import IdentifiedModel, NumericPoint, NumericSeries, TextPoint, TextSeries
-from home_optimizer.features.backtesting import RoomTemperatureBacktestingService
+from home_optimizer.features.backtesting import (
+    RoomTemperatureBacktestingService,
+    ThermalOutputBacktestingService,
+)
 from home_optimizer.features.prediction import RoomTemperaturePredictionService
 
 
@@ -17,6 +20,9 @@ class FakeBacktestReader:
         return [self._series_by_name[name] for name in names if name in self._series_by_name]
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
+        return [self._series_by_name[name] for name in names if name in self._series_by_name]
+
+    def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [self._series_by_name[name] for name in names if name in self._series_by_name]
 
     def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
@@ -36,7 +42,7 @@ class FakeBacktestReader:
                 timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
                 value=20.0,
             )
-            for step in range(0, 96)
+            for step in range(-1, 96)
         ]
         room_points = [
             NumericPoint(
@@ -50,14 +56,14 @@ class FakeBacktestReader:
                 timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
                 value=10.0,
             )
-            for step in range(1, 97)
+            for step in range(-1, 97)
         ]
         solar_points = [
             NumericPoint(
                 timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
                 value=0.0,
             )
-            for step in range(1, 97)
+            for step in range(-1, 97)
         ]
 
         return {
@@ -81,6 +87,11 @@ class FakeBacktestReader:
                 unit="degC",
                 points=forecast_points,
             ),
+            "outdoor_temperature": NumericSeries(
+                name="outdoor_temperature",
+                unit="degC",
+                points=forecast_points,
+            ),
             "gti_living_room_windows": NumericSeries(
                 name="gti_living_room_windows",
                 unit="Wm2",
@@ -94,7 +105,7 @@ class FakeBacktestReader:
                         timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
                         value=10.0,
                     )
-                    for step in range(0, 96)
+                    for step in range(-1, 96)
                 ],
             ),
             "hp_supply_temperature": NumericSeries(
@@ -105,7 +116,18 @@ class FakeBacktestReader:
                         timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
                         value=30.0,
                     )
-                    for step in range(0, 96)
+                    for step in range(-1, 96)
+                ],
+            ),
+            "hp_supply_target_temperature": NumericSeries(
+                name="hp_supply_target_temperature",
+                unit="degC",
+                points=[
+                    NumericPoint(
+                        timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
+                        value=32.0,
+                    )
+                    for step in range(-1, 96)
                 ],
             ),
             "hp_return_temperature": NumericSeries(
@@ -116,7 +138,29 @@ class FakeBacktestReader:
                         timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
                         value=29.0,
                     )
-                    for step in range(0, 96)
+                    for step in range(-1, 96)
+                ],
+            ),
+            "defrost_active": NumericSeries(
+                name="defrost_active",
+                unit="bool",
+                points=[
+                    NumericPoint(
+                        timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
+                        value=0.0,
+                    )
+                    for step in range(-1, 96)
+                ],
+            ),
+            "booster_heater_active": NumericSeries(
+                name="booster_heater_active",
+                unit="bool",
+                points=[
+                    NumericPoint(
+                        timestamp=(base_time + timedelta(minutes=15 * step)).isoformat(),
+                        value=0.0,
+                    )
+                    for step in range(-1, 96)
                 ],
             ),
         }
@@ -282,3 +326,59 @@ def test_prediction_service_backtests_selected_model_name() -> None:
 
     assert result.model_name == "linear_2state_room_temperature"
     assert result.successful_days == 1
+
+
+def test_thermal_output_backtesting_service_reports_day_metrics_and_diagnostics() -> None:
+    model = IdentifiedModel(
+        model_kind="thermal_output",
+        model_name="linear_1step_thermal_output",
+        trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
+        training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+        sample_count=100,
+        train_sample_count=80,
+        test_sample_count=20,
+        coefficients={
+            "previous_thermal_output": 1.0,
+            "previous_heating_demand": 0.0,
+            "previous_floor_heat_state": 0.0,
+            "outdoor_temperature": 0.0,
+            "hp_supply_target_temperature": 0.0,
+        },
+        intercept=0.0,
+        train_rmse=0.01,
+        test_rmse=0.02,
+        test_rmse_recursive=0.02,
+        target_name="thermal_output",
+    )
+    backtesting_service = ThermalOutputBacktestingService(
+        FakeBacktestReader(),
+        FakeModelRepository(model),
+    )
+
+    result = backtesting_service.backtest_by_day(
+        start_date=date(2026, 4, 28),
+        end_date=date(2026, 4, 28),
+        horizon_hours=6,
+        timezone_info=timezone.utc,
+    )
+
+    assert result.model_name == "linear_1step_thermal_output"
+    assert result.horizon_hours == 6
+    assert result.total_days == 1
+    assert result.successful_days == 1
+    assert result.failed_days == 0
+    assert result.average_rmse == pytest.approx(0.0)
+    assert result.average_bias == pytest.approx(0.0)
+    assert result.average_max_absolute_error == pytest.approx(0.0)
+    day_result = result.day_results[0]
+    assert day_result.overlap_count == 24
+    assert day_result.minimum_actual_thermal_output == pytest.approx(0.6976666666666667)
+    assert day_result.maximum_actual_thermal_output == pytest.approx(0.6976666666666667)
+    assert day_result.minimum_predicted_thermal_output == pytest.approx(0.6976666666666667)
+    assert day_result.maximum_predicted_thermal_output == pytest.approx(0.6976666666666667)
+    assert len(day_result.diagnostic_points) == 24
+    assert day_result.diagnostic_points[0].thermostat_setpoint == pytest.approx(20.0)
+    assert day_result.diagnostic_points[0].supply_target_temperature == pytest.approx(32.0)
+    assert day_result.error is None

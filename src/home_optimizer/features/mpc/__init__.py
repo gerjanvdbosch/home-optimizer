@@ -1,27 +1,58 @@
-from .candidates import ThermostatSetpointCandidateGenerator
+from .control_oriented import (
+    OPTIMIZED_CONTROL_PLAN_NAME,
+    StateSpaceThermalControlInput,
+    StateSpaceThermalDisturbance,
+    StateSpaceThermalModel,
+    StateSpaceThermalMpcPlanRequest,
+    StateSpaceThermalMpcPlanResult,
+    StateSpaceThermalMpcService,
+    StateSpaceThermalPlanEvaluation,
+    StateSpaceThermalPredictionRequest,
+    StateSpaceThermalPredictionResult,
+    StateSpaceThermalPredictionService,
+    StateSpaceSetpointPredictionRequest,
+    StateSpaceSetpointPredictionResult,
+    StateSpaceSetpointPredictionService,
+    StateSpaceThermalState,
+)
 from .closed_loop import ThermostatSetpointMpcClosedLoopService
 from .planner import ThermostatSetpointMpcPlanner
 from .schemas import (
     DEFAULT_MPC_HORIZON_HOURS,
-    ThermostatSetpointCandidateEvaluation,
     ThermostatSetpointMpcClosedLoopDayResult,
     ThermostatSetpointMpcClosedLoopResult,
     ThermostatSetpointMpcClosedLoopStepResult,
     ThermostatSetpointMpcEvaluationResult,
     ThermostatSetpointMpcPlanRequest,
+    ThermostatSetpointPlanEvaluation,
 )
-from .service import ThermostatSetpointMpcEvaluator
+from .service import ThermostatSetpointMpcEvaluator, ThermostatSetpointMpcOptimizer
 
 __all__ = [
-    "ThermostatSetpointCandidateGenerator",
     "DEFAULT_MPC_HORIZON_HOURS",
-    "ThermostatSetpointCandidateEvaluation",
+    "OPTIMIZED_CONTROL_PLAN_NAME",
+    "StateSpaceThermalControlInput",
+    "StateSpaceThermalDisturbance",
+    "StateSpaceThermalModel",
+    "StateSpaceThermalMpcPlanRequest",
+    "StateSpaceThermalMpcPlanResult",
+    "StateSpaceThermalMpcService",
+    "StateSpaceThermalPlanEvaluation",
+    "StateSpaceThermalPredictionRequest",
+    "StateSpaceThermalPredictionResult",
+    "StateSpaceThermalPredictionService",
+    "StateSpaceSetpointPredictionRequest",
+    "StateSpaceSetpointPredictionResult",
+    "StateSpaceSetpointPredictionService",
+    "StateSpaceThermalState",
     "ThermostatSetpointMpcClosedLoopDayResult",
     "ThermostatSetpointMpcClosedLoopResult",
     "ThermostatSetpointMpcClosedLoopService",
     "ThermostatSetpointMpcClosedLoopStepResult",
     "ThermostatSetpointMpcEvaluationResult",
     "ThermostatSetpointMpcPlanRequest",
+    "ThermostatSetpointPlanEvaluation",
     "ThermostatSetpointMpcPlanner",
     "ThermostatSetpointMpcEvaluator",
+    "ThermostatSetpointMpcOptimizer",
 ]

@@ -22,6 +22,10 @@ from home_optimizer.domain import (
 )
 from home_optimizer.features.prediction.schemas import RoomTemperatureControlInputs
 from home_optimizer.features.prediction import RoomTemperaturePredictionService
+from home_optimizer.features.identification.thermal_output.model import (
+    ACTIVE_INTERCEPT_KEY,
+    active_feature_name,
+)
 
 
 class FakePredictionReader:
@@ -326,3 +330,51 @@ def test_prediction_service_uses_thermal_output_response_model_when_available() 
 
     assert prediction.model_name == "linear_2state_room_temperature"
     assert len(prediction.room_temperature.points) == 2
+
+
+def test_prediction_service_turns_thermal_output_off_when_gate_predicts_inactive() -> None:
+    thermal_model = IdentifiedModel(
+        model_kind="thermal_output",
+        model_name="linear_1step_thermal_output",
+        trained_at_utc=datetime(2026, 4, 28, 11, 0, tzinfo=timezone.utc),
+        training_start_time_utc=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        training_end_time_utc=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=15,
+        sample_count=100,
+        train_sample_count=80,
+        test_sample_count=20,
+        coefficients={
+            "previous_thermal_output": 0.8,
+            "previous_heating_demand": 0.6,
+            "previous_floor_heat_state": 0.4,
+            "outdoor_temperature": -0.05,
+            "hp_supply_target_temperature": 0.1,
+            ACTIVE_INTERCEPT_KEY: -1.0,
+            active_feature_name("previous_thermal_output"): 0.0,
+            active_feature_name("previous_heating_demand"): 0.0,
+            active_feature_name("previous_floor_heat_state"): 0.0,
+            active_feature_name("outdoor_temperature"): 0.0,
+            active_feature_name("hp_supply_target_temperature"): 0.0,
+        },
+        intercept=0.3,
+        train_rmse=0.05,
+        test_rmse=0.1,
+        test_rmse_recursive=0.14,
+        target_name="thermal_output",
+    )
+    service = RoomTemperaturePredictionService(
+        FakePredictionReader(),
+        FakeModelRepository(thermal_model),
+    )
+
+    predicted = service._predict_thermal_output_step(
+        model=thermal_model,
+        previous_thermal_output=1.0,
+        previous_floor_heat_state=1.0,
+        previous_room_temperature=20.0,
+        thermostat_setpoint=21.0,
+        outdoor_temperature=10.0,
+        supply_target_temperature=31.0,
+    )
+
+    assert predicted == 0.0

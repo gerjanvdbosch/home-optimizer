@@ -13,7 +13,10 @@ from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
-from home_optimizer.features.backtesting import RoomTemperatureBacktestingService
+from home_optimizer.features.backtesting import (
+    RoomTemperatureBacktestingService,
+    ThermalOutputBacktestingService,
+)
 from home_optimizer.features.history_import.history_import_service import (
     HistoryImportService,
 )
@@ -29,8 +32,7 @@ from home_optimizer.features.identification.thermal_output import (
 )
 from home_optimizer.features.identification import MultiModelTrainer, MultiModelTrainingService
 from home_optimizer.features.mpc import (
-    ThermostatSetpointCandidateGenerator,
-    ThermostatSetpointMpcEvaluator,
+    ThermostatSetpointMpcOptimizer,
     ThermostatSetpointMpcPlanner,
 )
 from home_optimizer.features.prediction.service import RoomTemperaturePredictionService
@@ -74,6 +76,7 @@ class AppContainer:
     prediction_service: RoomTemperaturePredictionService
     mpc_planner: ThermostatSetpointMpcPlanner
     backtesting_service: RoomTemperatureBacktestingService
+    thermal_output_backtesting_service: ThermalOutputBacktestingService
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
     historical_weather_scheduler: HistoricalWeatherScheduler
@@ -120,13 +123,16 @@ def build_container(
         [thermal_output_identification_service, identification_service]
     )
     mpc_planner = ThermostatSetpointMpcPlanner(
-        ThermostatSetpointCandidateGenerator(),
-        ThermostatSetpointMpcEvaluator(prediction_service),
+        ThermostatSetpointMpcOptimizer(prediction_service),
     )
     backtesting_service = RoomTemperatureBacktestingService(
         time_series_read_repository,
         identified_model_repository,
         prediction_service,
+    )
+    thermal_output_backtesting_service = ThermalOutputBacktestingService(
+        time_series_read_repository,
+        identified_model_repository,
     )
     forecast_repository = ForecastRepository(database)
     historical_weather_repository = HistoricalWeatherRepository(database)
@@ -199,6 +205,7 @@ def build_container(
         prediction_service=prediction_service,
         mpc_planner=mpc_planner,
         backtesting_service=backtesting_service,
+        thermal_output_backtesting_service=thermal_output_backtesting_service,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
         historical_weather_scheduler=historical_weather_scheduler,

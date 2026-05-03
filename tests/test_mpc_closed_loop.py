@@ -10,9 +10,9 @@ from home_optimizer.domain import (
     THERMOSTAT_SETPOINT,
 )
 from home_optimizer.features.mpc import (
-    ThermostatSetpointCandidateEvaluation,
     ThermostatSetpointMpcClosedLoopService,
     ThermostatSetpointMpcEvaluationResult,
+    ThermostatSetpointPlanEvaluation,
 )
 
 
@@ -48,10 +48,16 @@ class FakeClosedLoopReader:
 
 class FakeClosedLoopPlanner:
     def __init__(self) -> None:
-        self.calls: list[tuple[datetime, datetime]] = []
+        self.calls: list[tuple[datetime, datetime, float | None]] = []
 
     def propose_plan(self, request, *, shutter_position=None) -> ThermostatSetpointMpcEvaluationResult:
-        self.calls.append((request.start_time, request.end_time))
+        self.calls.append(
+            (
+                request.start_time,
+                request.end_time,
+                request.previous_applied_setpoint,
+            )
+        )
         schedule = NumericSeries(
             name=THERMOSTAT_SETPOINT,
             unit="degC",
@@ -73,8 +79,8 @@ class FakeClosedLoopPlanner:
                 )
             ],
         )
-        best_candidate = ThermostatSetpointCandidateEvaluation(
-            candidate_name="candidate_1",
+        best_candidate = ThermostatSetpointPlanEvaluation(
+            plan_name="optimized_plan",
             thermostat_setpoint_schedule=schedule,
             predicted_room_temperature=predicted_room_temperature,
             total_cost=0.2,
@@ -86,15 +92,16 @@ class FakeClosedLoopPlanner:
         return ThermostatSetpointMpcEvaluationResult(
             model_name="linear_2state_room_temperature",
             interval_minutes=request.interval_minutes,
-            candidate_results=[best_candidate],
-            best_candidate=best_candidate,
+            plan_results=[best_candidate],
+            recommended_plan=best_candidate,
         )
 
 
 def test_closed_loop_service_replans_each_interval_and_applies_first_step() -> None:
+    planner = FakeClosedLoopPlanner()
     service = ThermostatSetpointMpcClosedLoopService(
         FakeClosedLoopReader(),
-        FakeClosedLoopPlanner(),
+        planner,
     )
 
     result = service.evaluate_by_day(
@@ -117,8 +124,17 @@ def test_closed_loop_service_replans_each_interval_and_applies_first_step() -> N
     assert len(day_result.step_results) == 95
     assert len(day_result.applied_thermostat_setpoint_schedule.points) == 95
     assert len(day_result.predicted_room_temperature.points) == 95
+    assert day_result.chosen_switch_count == 0
+    assert day_result.minimum_applied_setpoint == 19.5
+    assert day_result.maximum_applied_setpoint == 19.5
+    assert day_result.first_switch_time is None
+    assert day_result.last_switch_time is None
+    assert day_result.dominant_plan_name == "optimized_plan"
+    assert day_result.selected_plan_names == ["optimized_plan"]
     assert day_result.average_total_cost == 0.2
     assert day_result.average_comfort_violation_cost == 0.1
     assert day_result.average_setpoint_change_cost == 0.1
     assert day_result.under_comfort_count == 0
     assert day_result.over_comfort_count == 0
+    assert planner.calls[0][2] is None
+    assert planner.calls[1][2] == 19.5

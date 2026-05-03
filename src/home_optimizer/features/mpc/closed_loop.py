@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from collections import Counter
 from typing import Protocol
 
 from home_optimizer.domain import (
@@ -22,6 +24,8 @@ from .schemas import (
     ThermostatSetpointMpcClosedLoopStepResult,
     ThermostatSetpointMpcPlanRequest,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ScheduleReader(Protocol):
@@ -87,6 +91,12 @@ class ThermostatSetpointMpcClosedLoopService:
         while current_date <= end_date:
             day_start = datetime.combine(current_date, time.min, tzinfo=local_timezone)
             full_day_end = day_start + timedelta(days=1) - interval
+            LOGGER.info(
+                "Closed-loop MPC day %s: replanning every %s min with %s h horizon",
+                current_date,
+                interval_minutes,
+                horizon_hours,
+            )
             try:
                 schedules = self.reader.read_series(
                     names=[THERMOSTAT_SETPOINT, SHUTTER_LIVING_ROOM],
@@ -114,6 +124,7 @@ class ThermostatSetpointMpcClosedLoopService:
                 comfort_costs: list[float] = []
                 change_costs: list[float] = []
                 total_costs: list[float] = []
+                previous_applied_setpoint: float | None = None
 
                 step_start = day_start
                 while step_start < full_day_end:
@@ -135,36 +146,38 @@ class ThermostatSetpointMpcClosedLoopService:
                             comfort_min_temperature=comfort_min_temperature,
                             comfort_max_temperature=comfort_max_temperature,
                             setpoint_change_penalty=setpoint_change_penalty,
+                            previous_applied_setpoint=previous_applied_setpoint,
                         ),
                         shutter_position=shutter_position,
                     )
                     model_name = model_name or plan.model_name
                     first_setpoint = latest_value_at(
-                        plan.best_candidate.thermostat_setpoint_schedule.points,
+                        plan.recommended_plan.thermostat_setpoint_schedule.points,
                         normalize_utc_timestamp(step_start),
                     )
                     if first_setpoint is None:
-                        raise ValueError("best candidate is missing setpoint at current step")
-                    if not plan.best_candidate.predicted_room_temperature.points:
-                        raise ValueError("best candidate is missing predicted room temperature")
+                        raise ValueError("recommended plan is missing setpoint at current step")
+                    if not plan.recommended_plan.predicted_room_temperature.points:
+                        raise ValueError("recommended plan is missing predicted room temperature")
 
-                    predicted_next_point = plan.best_candidate.predicted_room_temperature.points[0]
+                    predicted_next_point = plan.recommended_plan.predicted_room_temperature.points[0]
                     applied_points.append(
                         NumericPoint(
                             timestamp=normalize_utc_timestamp(step_start),
                             value=float(first_setpoint),
                         )
                     )
+                    previous_applied_setpoint = float(first_setpoint)
                     predicted_points.append(predicted_next_point)
-                    total_costs.append(plan.best_candidate.total_cost)
-                    comfort_costs.append(plan.best_candidate.comfort_violation_cost)
-                    change_costs.append(plan.best_candidate.setpoint_change_cost)
+                    total_costs.append(plan.recommended_plan.total_cost)
+                    comfort_costs.append(plan.recommended_plan.comfort_violation_cost)
+                    change_costs.append(plan.recommended_plan.setpoint_change_cost)
                     step_results.append(
                         ThermostatSetpointMpcClosedLoopStepResult(
                             step_start_time=step_start,
                             applied_setpoint=float(first_setpoint),
-                            best_candidate_name=plan.best_candidate.candidate_name,
-                            best_candidate_total_cost=plan.best_candidate.total_cost,
+                            selected_plan_name=plan.recommended_plan.plan_name,
+                            selected_plan_total_cost=plan.recommended_plan.total_cost,
                             predicted_next_room_temperature=predicted_next_point.value,
                         )
                     )
@@ -187,6 +200,19 @@ class ThermostatSetpointMpcClosedLoopService:
                             unit="degC",
                             points=predicted_points,
                         ),
+                        chosen_switch_count=self._count_switches(applied_points),
+                        minimum_applied_setpoint=min(
+                            (point.value for point in applied_points),
+                            default=None,
+                        ),
+                        maximum_applied_setpoint=max(
+                            (point.value for point in applied_points),
+                            default=None,
+                        ),
+                        first_switch_time=self._first_switch_time(applied_points),
+                        last_switch_time=self._last_switch_time(applied_points),
+                        dominant_plan_name=self._dominant_plan_name(step_results),
+                        selected_plan_names=self._selected_plan_names(step_results),
                         average_total_cost=sum(total_costs) / len(total_costs),
                         average_comfort_violation_cost=sum(comfort_costs) / len(comfort_costs),
                         average_setpoint_change_cost=sum(change_costs) / len(change_costs),
@@ -201,7 +227,15 @@ class ThermostatSetpointMpcClosedLoopService:
                         step_results=step_results,
                     )
                 )
+                LOGGER.info(
+                    "Closed-loop MPC day %s done: avg cost %.3f, under %s, over %s",
+                    current_date,
+                    day_results[-1].average_total_cost,
+                    day_results[-1].under_comfort_count,
+                    day_results[-1].over_comfort_count,
+                )
             except ValueError as error:
+                LOGGER.warning("Closed-loop MPC day %s failed: %s", current_date, error)
                 day_results.append(
                     ThermostatSetpointMpcClosedLoopDayResult(
                         day=current_date,
@@ -222,6 +256,13 @@ class ThermostatSetpointMpcClosedLoopService:
                             unit="degC",
                             points=[],
                         ),
+                        chosen_switch_count=0,
+                        minimum_applied_setpoint=None,
+                        maximum_applied_setpoint=None,
+                        first_switch_time=None,
+                        last_switch_time=None,
+                        dominant_plan_name=None,
+                        selected_plan_names=[],
                         average_total_cost=0.0,
                         average_comfort_violation_cost=0.0,
                         average_setpoint_change_cost=0.0,
@@ -279,3 +320,53 @@ class ThermostatSetpointMpcClosedLoopService:
             switch_times.append(cursor)
             cursor += timedelta(hours=switch_interval_hours)
         return switch_times
+
+    @staticmethod
+    def _count_switches(points: list[NumericPoint]) -> int:
+        if not points:
+            return 0
+        count = 0
+        previous_value = points[0].value
+        for point in points[1:]:
+            if point.value != previous_value:
+                count += 1
+                previous_value = point.value
+        return count
+
+    @staticmethod
+    def _first_switch_time(points: list[NumericPoint]) -> datetime | None:
+        if not points:
+            return None
+        previous_value = points[0].value
+        for point in points[1:]:
+            if point.value != previous_value:
+                return datetime.fromisoformat(point.timestamp)
+            previous_value = point.value
+        return None
+
+    @staticmethod
+    def _last_switch_time(points: list[NumericPoint]) -> datetime | None:
+        if not points:
+            return None
+        previous_value = points[0].value
+        last_timestamp: datetime | None = None
+        for point in points[1:]:
+            if point.value != previous_value:
+                last_timestamp = datetime.fromisoformat(point.timestamp)
+            previous_value = point.value
+        return last_timestamp
+
+    @staticmethod
+    def _dominant_plan_name(
+        step_results: list[ThermostatSetpointMpcClosedLoopStepResult],
+    ) -> str | None:
+        if not step_results:
+            return None
+        counts = Counter(result.selected_plan_name for result in step_results)
+        return counts.most_common(1)[0][0]
+
+    @staticmethod
+    def _selected_plan_names(
+        step_results: list[ThermostatSetpointMpcClosedLoopStepResult],
+    ) -> list[str]:
+        return sorted({result.selected_plan_name for result in step_results})

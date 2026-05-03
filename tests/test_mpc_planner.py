@@ -3,10 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from home_optimizer.features.mpc import (
-    ThermostatSetpointCandidateGenerator,
-    ThermostatSetpointMpcEvaluator,
     ThermostatSetpointMpcPlanRequest,
     ThermostatSetpointMpcPlanner,
+    ThermostatSetpointMpcOptimizer,
 )
 from home_optimizer.features.prediction.schemas import RoomTemperaturePrediction
 from home_optimizer.domain import NumericPoint, NumericSeries, ROOM_TEMPERATURE
@@ -29,10 +28,9 @@ class FakePredictionService:
         )
 
 
-def test_mpc_planner_proposes_best_schedule_from_generated_candidates() -> None:
+def test_mpc_planner_proposes_control_oriented_schedule() -> None:
     planner = ThermostatSetpointMpcPlanner(
-        ThermostatSetpointCandidateGenerator(),
-        ThermostatSetpointMpcEvaluator(FakePredictionService()),
+        ThermostatSetpointMpcOptimizer(FakePredictionService()),
     )
 
     result = planner.propose_plan(
@@ -49,8 +47,6 @@ def test_mpc_planner_proposes_best_schedule_from_generated_candidates() -> None:
     )
 
     assert result.model_name == "linear_2state_room_temperature"
-    assert result.best_candidate.total_cost == min(
-        candidate.total_cost for candidate in result.candidate_results
-    )
-    assert result.best_candidate.thermostat_setpoint_schedule.name == "thermostat_setpoint"
-    assert len(result.candidate_results) == 9
+    assert result.recommended_plan.total_cost == 0.0
+    assert result.recommended_plan.thermostat_setpoint_schedule.name == "thermostat_setpoint"
+    assert len(result.plan_results) == 1

@@ -175,8 +175,8 @@ class MpcPlanRequest(BaseModel):
     shutter_schedule: NumericSeriesRequest | None = None
 
 
-class MpcCandidateResponse(BaseModel):
-    candidate_name: str
+class MpcPlanResultResponse(BaseModel):
+    plan_name: str
     thermostat_setpoint_schedule: ChartSeriesResponse
     predicted_room_temperature: ChartSeriesResponse
     total_cost: float
@@ -189,5 +189,5 @@ class MpcCandidateResponse(BaseModel):
 class MpcPlanResponse(BaseModel):
     model_name: str
     interval_minutes: int
-    candidate_results: list[MpcCandidateResponse]
-    best_candidate: MpcCandidateResponse
+    plan_results: list[MpcPlanResultResponse]
+    recommended_plan: MpcPlanResultResponse

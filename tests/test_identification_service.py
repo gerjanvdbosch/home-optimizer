@@ -7,6 +7,11 @@ from home_optimizer.features.identification import (
     RoomTemperatureModelIdentificationService,
     ThermalOutputModelIdentificationService,
 )
+from home_optimizer.features.identification.thermal_output.model import (
+    ACTIVE_INTERCEPT_KEY,
+    ACTIVE_TARGET_THRESHOLD_KEY,
+    active_feature_name,
+)
 
 
 class FakeIdentificationReader:
@@ -167,13 +172,22 @@ def test_identify_thermal_output_response_model_reports_metrics() -> None:
     )
 
     assert result.model_name == "linear_1step_thermal_output"
-    assert set(result.coefficients) == {
+    assert {
         "previous_thermal_output",
         "previous_heating_demand",
         "previous_floor_heat_state",
         "outdoor_temperature",
         "hp_supply_target_temperature",
-    }
+    }.issubset(result.coefficients)
+    assert ACTIVE_INTERCEPT_KEY in result.coefficients
+    assert ACTIVE_TARGET_THRESHOLD_KEY in result.coefficients
+    assert {
+        active_feature_name("previous_thermal_output"),
+        active_feature_name("previous_heating_demand"),
+        active_feature_name("previous_floor_heat_state"),
+        active_feature_name("outdoor_temperature"),
+        active_feature_name("hp_supply_target_temperature"),
+    }.issubset(result.coefficients)
     assert result.train_rmse >= 0.0
     assert result.test_rmse >= 0.0
 
