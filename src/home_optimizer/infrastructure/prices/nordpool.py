@@ -9,13 +9,11 @@ from home_optimizer.domain.names import ELECTRICITY_PRICE
 from home_optimizer.domain.series import NumericPoint, NumericSeries
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 
-_BASE_URL = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices"
-
 
 class NordpoolGateway:
     def __init__(
         self,
-        base_url: str = _BASE_URL,
+        base_url: str = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices",
         timeout: float = 30.0,
         client: httpx.Client | None = None,
     ) -> None:
