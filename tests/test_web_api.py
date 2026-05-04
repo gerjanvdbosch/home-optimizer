@@ -167,6 +167,7 @@ class FakeContainer:
         self.weather_import_service = FakeWeatherImportService()
         self.telemetry_scheduler = FakeScheduler()
         self.historical_weather_scheduler = FakeScheduler()
+        self.electricity_price_scheduler = FakeScheduler()
         self.forecast_scheduler = FakeScheduler()
 
     def close(self) -> None:
@@ -241,6 +242,7 @@ def test_dashboard_shows_import_button_without_simulation_link() -> None:
     assert 'href="simulation"' not in response.text
     assert app.state.container.telemetry_scheduler.started is True
     assert app.state.container.historical_weather_scheduler.started is True
+    assert app.state.container.electricity_price_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
     assert gateway.closed is True
 

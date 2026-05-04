@@ -4,11 +4,11 @@ from datetime import datetime
 
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import ensure_utc
-from home_optimizer.features.history_import.chunking import HistoryChunkPlanner
-from home_optimizer.features.history_import.history_mapping import map_history_points
-from home_optimizer.features.history_import.ports import HistoryRepository, HistorySourceGateway
-from home_optimizer.features.history_import.resampling import MinuteResampler
-from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
+from home_optimizer.features.history.chunking import HistoryChunkPlanner
+from home_optimizer.features.history.history_mapping import map_history_points
+from home_optimizer.features.history.ports import HistoryRepository, HistorySourceGateway
+from home_optimizer.features.history.resampling import MinuteResampler
+from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 
 
 class HistoryImportService:
@@ -68,3 +68,4 @@ class HistoryImportService:
             total_written += written
 
         return total_written
+

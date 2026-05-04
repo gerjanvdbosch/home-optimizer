@@ -10,10 +10,10 @@ from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.names import GTI_LIVING_ROOM_WINDOWS, GTI_PV
 from home_optimizer.domain.location import Location
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
-from home_optimizer.features.history_import.historical_weather_import_service import (
+from home_optimizer.features.history.historical_weather_import_service import (
     HistoricalWeatherImportService,
 )
-from home_optimizer.features.history_import.weather_import_service import WeatherImportService
+from home_optimizer.features.history.weather_import_service import WeatherImportService
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.historical_weather_repository import (
     HistoricalWeatherRepository,
@@ -279,8 +279,22 @@ def test_forecast_repository_write_new_entries_chunks_large_insert(tmp_path) -> 
     repository = ForecastRepository(database)
     entries = [
         ForecastEntry(
-            created_at_utc=f"2026-04-25T12:{(index % 60):02d}:00+00:00",
-            forecast_time_utc=f"2026-04-26T{(index // 4) % 24:02d}:{((index % 4) * 15):02d}:00+00:00",
+            created_at_utc=datetime(
+                2026,
+                4,
+                25,
+                12,
+                index % 60,
+                tzinfo=timezone.utc,
+            ),
+            forecast_time_utc=datetime(
+                2026,
+                4,
+                26,
+                (index // 4) % 24,
+                (index % 4) * 15,
+                tzinfo=timezone.utc,
+            ),
             name=f"temperature_{index}",
             source="openmeteo",
             unit="degC",

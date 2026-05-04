@@ -87,3 +87,4 @@ class NordpoolGateway:
         points = _extract_price_points(response.json(), delivery_area=delivery_area)
 
         return electricity_price_series(currency=currency, points=points)
+

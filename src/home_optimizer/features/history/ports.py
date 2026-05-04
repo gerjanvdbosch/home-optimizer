@@ -29,3 +29,4 @@ class HistoryRepository(Protocol):
         spec: SensorSpec,
         before_time: datetime,
     ) -> Any | None: ...
+

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from home_optimizer.features.history_import.models import ImportChunkWindow
+from home_optimizer.features.history.models import ImportChunkWindow
 
 
 class HistoryChunkPlanner:
@@ -26,4 +26,5 @@ class HistoryChunkPlanner:
             cursor = chunk_end
 
         return windows
+
 

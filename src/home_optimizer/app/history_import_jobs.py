@@ -12,7 +12,7 @@ from home_optimizer.app.history_import_requests import build_history_import_requ
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.models import DomainModel
-from home_optimizer.features.history_import.schemas import HistoryImportResult
+from home_optimizer.features.history.schemas import HistoryImportResult
 
 
 class HistoryImportRunner(Protocol):

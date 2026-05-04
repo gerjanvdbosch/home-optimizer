@@ -62,3 +62,27 @@ Index(
     HistoricalWeatherValue.timestamp_utc,
 )
 
+
+class ElectricityPriceIntervalValue(Base):
+    __tablename__ = "electricity_price_intervals"
+
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    start_time_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    end_time_utc: Mapped[str] = mapped_column(String, primary_key=True)
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    unit: Mapped[str] = mapped_column(String, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+Index(
+    "idx_electricity_price_intervals_name_start",
+    ElectricityPriceIntervalValue.name,
+    ElectricityPriceIntervalValue.start_time_utc,
+)
+Index(
+    "idx_electricity_price_intervals_source_end",
+    ElectricityPriceIntervalValue.source,
+    ElectricityPriceIntervalValue.end_time_utc,
+)
+
+

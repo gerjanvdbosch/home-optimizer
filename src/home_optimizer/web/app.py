@@ -7,6 +7,7 @@ from typing import Callable, cast
 from fastapi import FastAPI
 from fastapi.responses import Response
 from starlette.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from home_optimizer.app.container_factories import build_home_assistant_container
 from home_optimizer.app.history_import_jobs import HistoryImportJobRunner
@@ -20,7 +21,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class NoCacheStaticFiles(StaticFiles):
-    async def get_response(self, path: str, scope: dict) -> Response:
+    async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
         response.headers.update(NO_CACHE_HEADERS)
         return response
@@ -40,11 +41,13 @@ def create_app(
         )
         container.telemetry_scheduler.start()
         container.historical_weather_scheduler.start()
+        container.electricity_price_scheduler.start()
         container.forecast_scheduler.start()
         try:
             yield
         finally:
             container.forecast_scheduler.stop()
+            container.electricity_price_scheduler.stop()
             container.historical_weather_scheduler.stop()
             container.telemetry_scheduler.stop()
             app.state.history_import_jobs.shutdown()

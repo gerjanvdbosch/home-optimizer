@@ -6,7 +6,7 @@ from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.time import ensure_utc
-from home_optimizer.features.history_import.schemas import HistoryImportRequest
+from home_optimizer.features.history.schemas import HistoryImportRequest
 
 
 def build_history_import_request(

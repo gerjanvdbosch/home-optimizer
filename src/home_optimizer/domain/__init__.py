@@ -57,10 +57,13 @@ from .sensor_factory import build_sensor_specs
 from .pricing import (
     DynamicPricing,
     FixedPricing,
+    PriceInterval,
     build_daily_price_series,
+    build_fixed_price_intervals,
     electricity_price_series,
     electricity_price_unit,
     empty_electricity_price_series,
+    price_intervals_from_series,
     resolve_daily_price_series,
 )
 from .sensors import SENSOR_DEFINITIONS, SensorDefinition, SensorSpec
@@ -122,6 +125,7 @@ __all__ = [
     "MinuteSample",
     "NumericPoint",
     "NumericSeries",
+            "PriceInterval",
     "OUTDOOR_TEMPERATURE",
     "P1_EXPORT_TOTAL_KWH",
     "P1_IMPORT_TOTAL_KWH",
@@ -148,6 +152,7 @@ __all__ = [
     "TemperatureTargetWindow",
     "adjusted_gti_with_shutter",
     "build_daily_price_series",
+    "build_fixed_price_intervals",
     "build_daily_target_band_series",
     "build_floor_heat_state_series",
     "build_space_heating_thermal_output_series",
@@ -160,6 +165,7 @@ __all__ = [
     "latest_value_at",
     "normalize_utc_timestamp",
     "parse_location",
+    "price_intervals_from_series",
     "resolve_daily_price_series",
     "shutter_open_fraction_at",
     "upsample_series_forward_fill",

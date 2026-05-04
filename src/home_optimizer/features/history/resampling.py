@@ -281,3 +281,4 @@ class MinuteResampler:
     @staticmethod
     def _floor_minute(value: datetime) -> datetime:
         return value.replace(second=0, microsecond=0)
+

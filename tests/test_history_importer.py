@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from home_optimizer.app.history_import_requests import build_history_import_request
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain.sensors import ResampleMethod, SensorDefinition, SensorSpec
-from home_optimizer.features.history_import.history_import_service import (
+from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
 from home_optimizer.infrastructure.database.orm_models import Sample1m

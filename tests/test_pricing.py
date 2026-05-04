@@ -9,8 +9,10 @@ from home_optimizer.domain import ELECTRICITY_PRICE, NumericPoint, NumericSeries
 from home_optimizer.domain.pricing import (
     DynamicPricing,
     FixedPricing,
+    build_fixed_price_intervals,
     build_daily_price_series,
     electricity_price_series,
+    price_intervals_from_series,
     resolve_daily_price_series,
 )
 
@@ -65,6 +67,47 @@ def test_build_daily_price_series_returns_empty_when_range_invalid() -> None:
     series = build_daily_price_series(pricing, start_time=start, end_time=start)
 
     assert series == electricity_price_series(currency="EUR")
+
+
+def test_price_intervals_from_series_merges_adjacent_equal_values() -> None:
+    series = NumericSeries(
+        name=ELECTRICITY_PRICE,
+        unit="EUR/kWh",
+        points=[
+            NumericPoint(timestamp="2026-05-04T00:00:00+00:00", value=0.21),
+            NumericPoint(timestamp="2026-05-04T00:15:00+00:00", value=0.21),
+            NumericPoint(timestamp="2026-05-04T00:30:00+00:00", value=0.32),
+        ],
+    )
+
+    intervals = price_intervals_from_series(series, source="nordpool")
+
+    assert len(intervals) == 2
+    assert intervals[0].start_time_utc == datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    assert intervals[0].end_time_utc == datetime(2026, 5, 4, 0, 30, tzinfo=timezone.utc)
+    assert intervals[0].value == 0.21
+    assert intervals[1].start_time_utc == datetime(2026, 5, 4, 0, 30, tzinfo=timezone.utc)
+    assert intervals[1].end_time_utc == datetime(2026, 5, 4, 0, 45, tzinfo=timezone.utc)
+    assert intervals[1].value == 0.32
+
+
+def test_build_fixed_price_intervals_compresses_repeating_quarters() -> None:
+    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
+
+    intervals = build_fixed_price_intervals(
+        pricing,
+        start_time=datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc),
+        source="fixed_pricing",
+    )
+
+    assert [interval.value for interval in intervals] == [0.21, 0.32, 0.21]
+    assert intervals[0].start_time_utc == datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    assert intervals[0].end_time_utc == datetime(2026, 5, 4, 7, 0, tzinfo=timezone.utc)
+    assert intervals[1].start_time_utc == datetime(2026, 5, 4, 7, 0, tzinfo=timezone.utc)
+    assert intervals[1].end_time_utc == datetime(2026, 5, 4, 23, 0, tzinfo=timezone.utc)
+    assert intervals[2].start_time_utc == datetime(2026, 5, 4, 23, 0, tzinfo=timezone.utc)
+    assert intervals[2].end_time_utc == datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.mark.parametrize("interval_minutes", [0, -15])

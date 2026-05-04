@@ -14,3 +14,4 @@ class HistoryImportRequest(DomainModel):
 
 class HistoryImportResult(DomainModel):
     imported_rows: dict[str, int]
+

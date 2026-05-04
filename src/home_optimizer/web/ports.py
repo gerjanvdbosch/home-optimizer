@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Protocol
 
 from home_optimizer.domain import NumericSeries, TextSeries
-from home_optimizer.features.history_import.schemas import HistoryImportRequest, HistoryImportResult
+from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 
 
 class ClosableGateway(Protocol):
@@ -73,6 +73,10 @@ class WebAppContainer(Protocol):
 
     @property
     def historical_weather_scheduler(self) -> TelemetrySchedulerRunner: ...
+
+
+    @property
+    def electricity_price_scheduler(self) -> TelemetrySchedulerRunner: ...
 
 
     @property

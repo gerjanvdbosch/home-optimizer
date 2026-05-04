@@ -1,5 +1,6 @@
+from .pricing import ElectricityPriceService
 from .forecast import OpenMeteoForecastService
-from .history_import import (
+from .history import (
     HistoricalWeatherImportService,
     HistoryImportRequest,
     HistoryImportResult,
@@ -13,6 +14,7 @@ __all__ = [
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",
+    "ElectricityPriceService",
     "WeatherImportService",
     "LiveMeasurement",
     "OpenMeteoForecastService",

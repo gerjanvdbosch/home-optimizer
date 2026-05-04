@@ -29,3 +29,4 @@ def map_history_points(
         points.append(SensorPoint(timestamp=ensure_utc(ts_raw), value=parsed))
 
     return sorted(points, key=lambda point: point.timestamp)
+

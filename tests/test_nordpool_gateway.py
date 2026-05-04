@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from home_optimizer.domain.names import ELECTRICITY_PRICE
-from home_optimizer.infrastructure.prices.nordpool import NordpoolGateway
+from home_optimizer.infrastructure.pricing.nordpool import NordpoolGateway
 
 
 def _make_entry(delivery_start: str, delivery_end: str, price: float) -> dict:
