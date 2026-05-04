@@ -52,6 +52,8 @@ COP = "cop"
 BASELOAD = "baseload"
 HP_DELTA_T = "hp_delta_t"
 
+ELECTRICITY_PRICE = "electricity_price"
+
 __all__ = [
     "BASELOAD",
     "BOILER_AMBIENT_TEMPERATURE",
@@ -74,6 +76,7 @@ __all__ = [
     "GTI_LIVING_ROOM_WINDOWS",
     "GTI_LIVING_ROOM_WINDOWS_ADJUSTED",
     "GTI_PV",
+    "ELECTRICITY_PRICE",
     "FLOOR_HEAT_STATE",
     "HP_DELTA_T",
     "HP_ELECTRIC_POWER",

@@ -25,6 +25,8 @@ class AppSettings(DomainModel):
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
+    electricity_delivery_area: str = Field(default="NL")
+    electricity_currency: str = Field(default="EUR")
     room_target: list[TemperatureTargetWindow] = Field(default=None)
     dhw_target: list[TemperatureTargetWindow] = Field(default=None)
 
