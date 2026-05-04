@@ -203,12 +203,12 @@ def test_dashboard_charts_service_includes_configured_room_and_dhw_targets() -> 
     assert response.room_target_min_temperature.points[0].timestamp == normalize_utc_timestamp(start_time)
     assert response.room_target_min_temperature.points[0].value == 18.5
     assert response.room_target_max_temperature.points[-1].timestamp == normalize_utc_timestamp(
-        end_time - timedelta(seconds=1)
+        end_time - timedelta(minutes=15)
     )
     assert response.room_target_max_temperature.points[-1].value == 20.5
-    assert response.dhw_target_temperature.points[3].timestamp == normalize_utc_timestamp(
+    assert response.dhw_target_temperature.points[80].timestamp == normalize_utc_timestamp(
         datetime.combine(date(2026, 4, 25), time(20, 0), tzinfo=local_timezone)
     )
-    assert response.dhw_target_temperature.points[3].value == 50.0
+    assert response.dhw_target_temperature.points[80].value == 50.0
 
 

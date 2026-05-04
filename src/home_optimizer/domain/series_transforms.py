@@ -92,6 +92,7 @@ def build_daily_target_band_series(
     minimum_name: str,
     maximum_name: str,
     unit: str = "degC",
+    interval_minutes: int | None = None,
 ) -> tuple[NumericSeries, NumericSeries, NumericSeries]:
     empty_target = NumericSeries(name=target_name, unit=unit, points=[])
     empty_minimum = NumericSeries(name=minimum_name, unit=unit, points=[])
@@ -131,11 +132,16 @@ def build_daily_target_band_series(
     if final_timestamp > start_time:
         append_points(final_timestamp, active_window)
 
-    return (
-        NumericSeries(name=target_name, unit=unit, points=target_points),
-        NumericSeries(name=minimum_name, unit=unit, points=minimum_points),
-        NumericSeries(name=maximum_name, unit=unit, points=maximum_points),
-    )
+    target = NumericSeries(name=target_name, unit=unit, points=target_points)
+    minimum = NumericSeries(name=minimum_name, unit=unit, points=minimum_points)
+    maximum = NumericSeries(name=maximum_name, unit=unit, points=maximum_points)
+
+    if interval_minutes is not None:
+        target = upsample_series_forward_fill(target, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
+        minimum = upsample_series_forward_fill(minimum, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
+        maximum = upsample_series_forward_fill(maximum, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
+
+    return target, minimum, maximum
 
 
 def build_thermal_output_series(

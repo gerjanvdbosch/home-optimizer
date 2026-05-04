@@ -372,7 +372,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "value": 19.0,
         },
         {
-            "timestamp": datetime.combine(chart_date, time(8, 0), tzinfo=local_timezone)
+            "timestamp": (expected_day_start + timedelta(minutes=15))
             .astimezone(ZoneInfo("UTC"))
             .isoformat(timespec="seconds"),
             "value": 19.0,
@@ -380,7 +380,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     ]
     assert payload["room_target_min_temperature"]["points"][0]["value"] == 18.5
     assert payload["room_target_max_temperature"]["points"][-1] == {
-        "timestamp": (expected_day_end - timedelta(seconds=1))
+        "timestamp": (expected_day_end - timedelta(minutes=15))
         .astimezone(ZoneInfo("UTC"))
         .isoformat(timespec="seconds"),
         "value": 20.5,
@@ -389,14 +389,14 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "dhw_top_temperature",
         "dhw_bottom_temperature",
     ]
-    assert payload["dhw_target_temperature"]["points"][3] == {
+    assert payload["dhw_target_temperature"]["points"][80] == {
         "timestamp": datetime.combine(chart_date, time(20, 0), tzinfo=local_timezone)
         .astimezone(ZoneInfo("UTC"))
         .isoformat(timespec="seconds"),
         "value": 50.0,
     }
-    assert payload["dhw_target_min_temperature"]["points"][3]["value"] == 48.0
-    assert payload["dhw_target_max_temperature"]["points"][3]["value"] == 55.0
+    assert payload["dhw_target_min_temperature"]["points"][80]["value"] == 48.0
+    assert payload["dhw_target_max_temperature"]["points"][80]["value"] == 55.0
     assert payload["forecast_temperature"] == {
         "name": "temperature",
         "unit": "degC",

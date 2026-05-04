@@ -276,6 +276,7 @@ class DashboardChartsService:
                 target_name=ROOM_TARGET_TEMPERATURE,
                 minimum_name=ROOM_TARGET_MIN_TEMPERATURE,
                 maximum_name=ROOM_TARGET_MAX_TEMPERATURE,
+                interval_minutes=15,
             )
         )
         dhw_target_series, dhw_target_min_series, dhw_target_max_series = (
@@ -286,6 +287,7 @@ class DashboardChartsService:
                 target_name=DHW_TARGET_TEMPERATURE,
                 minimum_name=DHW_TARGET_MIN_TEMPERATURE,
                 maximum_name=DHW_TARGET_MAX_TEMPERATURE,
+                interval_minutes=15,
             )
         )
 
