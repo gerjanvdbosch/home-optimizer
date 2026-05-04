@@ -22,12 +22,12 @@ class FakeDashboardDataReader:
         self._series = series or [
             NumericSeries(
                 name="hp_supply_temperature",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=30.0)],
             ),
             NumericSeries(
                 name="hp_return_temperature",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=32.5)],
             ),
         ]
@@ -72,7 +72,7 @@ def build_settings() -> AppSettings:
 def test_adjusted_gti_with_shutter_uses_latest_known_open_percentage() -> None:
     window_gti = NumericSeries(
         name="gti_living_room_windows",
-        unit="Wm2",
+        unit="W/m2",
         points=[
             NumericPoint(timestamp="2026-04-25T09:00:00+00:00", value=100.0),
             NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=200.0),
@@ -91,7 +91,7 @@ def test_adjusted_gti_with_shutter_uses_latest_known_open_percentage() -> None:
     adjusted = adjusted_gti_with_shutter(window_gti, shutter_position)
 
     assert adjusted.name == "gti_living_room_windows_adjusted"
-    assert adjusted.unit == "Wm2"
+    assert adjusted.unit == "W/m2"
     assert adjusted.points == [
         NumericPoint(timestamp="2026-04-25T09:00:00+00:00", value=25.0),
         NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=50.0),
@@ -102,7 +102,7 @@ def test_adjusted_gti_with_shutter_uses_latest_known_open_percentage() -> None:
 def test_adjusted_gti_with_shutter_defaults_to_fully_open_when_no_position_is_known() -> None:
     window_gti = NumericSeries(
         name="gti_living_room_windows",
-        unit="Wm2",
+        unit="W/m2",
         points=[NumericPoint(timestamp="2026-04-25T09:00:00+00:00", value=150.0)],
     )
     shutter_position = NumericSeries(
@@ -119,7 +119,7 @@ def test_adjusted_gti_with_shutter_defaults_to_fully_open_when_no_position_is_kn
 def test_upsample_series_forward_fill_expands_hourly_points_to_quarters() -> None:
     hourly_series = NumericSeries(
         name="gti_living_room_windows",
-        unit="Wm2",
+        unit="W/m2",
         points=[
             NumericPoint(timestamp="2026-04-25T10:00:00+00:00", value=100.0),
             NumericPoint(timestamp="2026-04-25T11:00:00+00:00", value=200.0),
@@ -134,7 +134,7 @@ def test_upsample_series_forward_fill_expands_hourly_points_to_quarters() -> Non
     )
 
     assert upsampled.name == "gti_living_room_windows"
-    assert upsampled.unit == "Wm2"
+    assert upsampled.unit == "W/m2"
     assert upsampled.points == [
         NumericPoint(timestamp="2026-04-25T10:00:00+00:00", value=100.0),
         NumericPoint(timestamp="2026-04-25T10:15:00+00:00", value=100.0),
@@ -161,12 +161,12 @@ def test_dashboard_charts_service_clamps_cop_to_ten() -> None:
             series=[
                 NumericSeries(
                     name="hp_supply_temperature",
-                    unit="degC",
+                    unit="°C",
                     points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=40.0)],
                 ),
                 NumericSeries(
                     name="hp_return_temperature",
-                    unit="degC",
+                    unit="°C",
                     points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=35.0)],
                 ),
                 NumericSeries(

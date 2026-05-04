@@ -23,7 +23,7 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
                     forecast_time_utc="2026-04-26T12:00:00+00:00",
                     name="temperature",
                     source="openmeteo",
-                    unit="degC",
+                    unit="°C",
                     value=9.0,
                 ),
                 ForecastValue(
@@ -31,7 +31,7 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
                     forecast_time_utc="2026-04-26T12:00:00+00:00",
                     name="temperature",
                     source="openmeteo",
-                    unit="degC",
+                    unit="°C",
                     value=12.5,
                 ),
                 ForecastValue(
@@ -39,7 +39,7 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
                     forecast_time_utc="2026-04-26T12:00:00+00:00",
                     name="gti_pv",
                     source="openmeteo",
-                    unit="Wm2",
+                    unit="W/m2",
                     value=500.0,
                 ),
                 ForecastValue(
@@ -47,7 +47,7 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
                     forecast_time_utc="2026-04-26T12:00:00+00:00",
                     name="gti_living_room_windows",
                     source="openmeteo",
-                    unit="Wm2",
+                    unit="W/m2",
                     value=220.0,
                 ),
                 ForecastValue(
@@ -55,7 +55,7 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
                     forecast_time_utc="2026-04-27T00:00:00+00:00",
                     name="temperature",
                     source="openmeteo",
-                    unit="degC",
+                    unit="°C",
                     value=8.0,
                 ),
             ]
@@ -73,11 +73,11 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
         "gti_pv",
         "gti_living_room_windows",
     ]
-    assert series[0].unit == "degC"
+    assert series[0].unit == "°C"
     assert series[0].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=12.5)]
-    assert series[1].unit == "Wm2"
+    assert series[1].unit == "W/m2"
     assert series[1].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=500.0)]
-    assert series[2].unit == "Wm2"
+    assert series[2].unit == "W/m2"
     assert series[2].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=220.0)]
 
 
@@ -95,7 +95,7 @@ def test_time_series_read_repository_returns_sample_time_range(tmp_path) -> None
                     source="home_assistant",
                     entity_id="sensor.room_temperature",
                     category="building",
-                    unit="degC",
+                    unit="°C",
                     mean_real=20.0,
                     min_real=20.0,
                     max_real=20.0,
@@ -110,7 +110,7 @@ def test_time_series_read_repository_returns_sample_time_range(tmp_path) -> None
                     source="home_assistant",
                     entity_id="sensor.room_temperature",
                     category="building",
-                    unit="degC",
+                    unit="°C",
                     mean_real=21.0,
                     min_real=21.0,
                     max_real=21.0,

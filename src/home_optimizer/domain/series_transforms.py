@@ -91,7 +91,7 @@ def build_daily_target_band_series(
     target_name: str,
     minimum_name: str,
     maximum_name: str,
-    unit: str = "degC",
+    unit: str = "°C",
     interval_minutes: int | None = None,
 ) -> tuple[NumericSeries, NumericSeries, NumericSeries]:
     empty_target = NumericSeries(name=target_name, unit=unit, points=[])

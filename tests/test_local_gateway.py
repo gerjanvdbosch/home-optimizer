@@ -17,7 +17,7 @@ def test_local_json_gateway_reads_sensor_state_by_entity_id(tmp_path) -> None:
         definition=SensorDefinition(
             name="room_temperature",
             category="building",
-            unit="degC",
+            unit="°C",
             method="mean",
         ),
         entity_id="sensor.local_room",
@@ -38,7 +38,7 @@ def test_local_json_gateway_treats_missing_sensor_as_unavailable(tmp_path) -> No
         definition=SensorDefinition(
             name="room_temperature",
             category="building",
-            unit="degC",
+            unit="°C",
             method="mean",
         ),
         entity_id="sensor.local_room",

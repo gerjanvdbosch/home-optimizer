@@ -55,7 +55,7 @@ def telemetry_spec(name: str = "room_temperature", poll_interval_seconds: int = 
         definition=SensorDefinition(
             name=name,
             category="building",
-            unit="degC",
+            unit="°C",
             method="mean",
             poll_interval_seconds=poll_interval_seconds,
         ),

@@ -63,7 +63,7 @@ def build_delta_series(
     return_s: NumericSeries | None,
     name: str,
 ) -> NumericSeries:
-    unit = supply.unit if supply else "degC"
+    unit = supply.unit if supply else "°C"
     delta = NumericSeries(name=name, unit=unit, points=[])
     if not supply or not return_s:
         return delta
@@ -231,7 +231,7 @@ class DashboardChartsService:
         adjusted_living_room_gti = adjusted_gti_with_shutter(
             forecast_series_by_name.get(
                 GTI_LIVING_ROOM_WINDOWS,
-                empty_series(GTI_LIVING_ROOM_WINDOWS, unit="Wm2"),
+                empty_series(GTI_LIVING_ROOM_WINDOWS, unit="W/m2"),
             ),
             shutter_by_name.get(
                 SHUTTER_LIVING_ROOM,
@@ -241,7 +241,7 @@ class DashboardChartsService:
         adjusted_historical_living_room_gti = adjusted_gti_with_shutter(
             historical_weather_series_by_name.get(
                 GTI_LIVING_ROOM_WINDOWS,
-                empty_series(GTI_LIVING_ROOM_WINDOWS, unit="Wm2"),
+                empty_series(GTI_LIVING_ROOM_WINDOWS, unit="W/m2"),
             ),
             shutter_by_name.get(
                 SHUTTER_LIVING_ROOM,

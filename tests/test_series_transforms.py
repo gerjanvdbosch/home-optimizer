@@ -39,7 +39,7 @@ def test_build_space_heating_thermal_output_series_filters_dhw_defrost_and_boost
         ),
         NumericSeries(
             name=HP_SUPPLY_TEMPERATURE,
-            unit="degC",
+            unit="°C",
             points=[
                 NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=35.0),
                 NumericPoint(timestamp="2026-04-25T00:15:00+00:00", value=35.0),
@@ -49,7 +49,7 @@ def test_build_space_heating_thermal_output_series_filters_dhw_defrost_and_boost
         ),
         NumericSeries(
             name=HP_RETURN_TEMPERATURE,
-            unit="degC",
+            unit="°C",
             points=[
                 NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=30.0),
                 NumericPoint(timestamp="2026-04-25T00:15:00+00:00", value=30.0),

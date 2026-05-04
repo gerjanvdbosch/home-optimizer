@@ -96,19 +96,19 @@ SENSOR_DEFINITIONS = [
     _sensor_definition(
         ROOM_TEMPERATURE,
         "building",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         OUTDOOR_TEMPERATURE,
         "building",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         THERMOSTAT_SETPOINT,
         "building",
-        "degC",
+        "°C",
         "ffill",
     ),
     _sensor_definition(
@@ -120,19 +120,19 @@ SENSOR_DEFINITIONS = [
     _sensor_definition(
         HP_SUPPLY_TEMPERATURE,
         "heatpump",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         HP_SUPPLY_TARGET_TEMPERATURE,
         "heatpump",
-        "degC",
+        "°C",
         "ffill",
     ),
     _sensor_definition(
         HP_RETURN_TEMPERATURE,
         "heatpump",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
@@ -163,37 +163,37 @@ SENSOR_DEFINITIONS = [
     _sensor_definition(
         REFRIGERANT_CONDENSATION_TEMPERATURE,
         "heatpump",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         REFRIGERANT_LIQUID_LINE_TEMPERATURE,
         "heatpump",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         DISCHARGE_TEMPERATURE,
         "heatpump",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         DHW_TOP_TEMPERATURE,
         "dhw",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         DHW_BOTTOM_TEMPERATURE,
         "dhw",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(
         BOILER_AMBIENT_TEMPERATURE,
         "dhw",
-        "degC",
+        "°C",
         "interpolate",
     ),
     _sensor_definition(

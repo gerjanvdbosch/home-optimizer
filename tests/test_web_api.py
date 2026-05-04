@@ -78,22 +78,22 @@ class FakeTimeSeriesReadRepository:
         return [
             NumericSeries(
                 name="room_temperature",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
             ),
             NumericSeries(
                 name="thermostat_setpoint",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
             ),
             NumericSeries(
                 name="dhw_top_temperature",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
             ),
             NumericSeries(
                 name="dhw_bottom_temperature",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=42.0)],
             ),
             NumericSeries(
@@ -127,17 +127,17 @@ class FakeTimeSeriesReadRepository:
         return [
             NumericSeries(
                 name="temperature",
-                unit="degC",
+                unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=12.5)],
             ),
             NumericSeries(
                 name="gti_pv",
-                unit="Wm2",
+                unit="W/m2",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=500.0)],
             ),
             NumericSeries(
                 name="gti_living_room_windows",
-                unit="Wm2",
+                unit="W/m2",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=220.0)],
             ),
         ]
@@ -149,7 +149,7 @@ class FakeTimeSeriesReadRepository:
         return [
             NumericSeries(
                 name="gti_living_room_windows",
-                unit="Wm2",
+                unit="W/m2",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=210.0)],
             )
         ]
@@ -362,7 +362,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     ]
     assert payload["thermostat_setpoint"] == {
         "name": "thermostat_setpoint",
-        "unit": "degC",
+        "unit": "°C",
         "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 21.0}],
     }
     local_timezone = dashboard_charts_module.current_timezone()
@@ -401,7 +401,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert payload["dhw_target_max_temperature"]["points"][80]["value"] == 55.0
     assert payload["forecast_temperature"] == {
         "name": "temperature",
-        "unit": "degC",
+        "unit": "°C",
         "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 12.5}],
     }
     assert payload["historical_weather_gti"][1]["points"][:3] == [

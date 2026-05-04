@@ -119,7 +119,7 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     ]
     assert rows[0].created_at_utc == "2026-04-25T11:45:00+00:00"
     assert rows[0].forecast_time_utc == "2026-04-25T12:00:00+00:00"
-    assert rows[0].unit == "degC"
+    assert rows[0].unit == "°C"
     assert rows[0].source == "openmeteo"
 
 
@@ -239,7 +239,7 @@ def test_weather_import_service_imports_only_missing_historical_rows(tmp_path) -
                 forecast_time_utc="2026-04-25T12:00:00+00:00",
                 name="temperature",
                 value=12.5,
-                unit="degC",
+                unit="°C",
                 source="openmeteo",
             )
         )
@@ -297,7 +297,7 @@ def test_forecast_repository_write_new_entries_chunks_large_insert(tmp_path) -> 
             ),
             name=f"temperature_{index}",
             source="openmeteo",
-            unit="degC",
+            unit="°C",
             value=float(index),
         )
         for index in range(220)
