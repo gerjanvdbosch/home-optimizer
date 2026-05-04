@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from .heatpump_state import SpaceHeatingStateFilter
 from .names import FLOOR_HEAT_STATE, GTI_LIVING_ROOM_WINDOWS_ADJUSTED, THERMAL_OUTPUT
 from .series import NumericPoint, NumericSeries, TextSeries
+from .target_schedule import TemperatureTargetWindow
 from .time import normalize_utc_timestamp, parse_datetime
 
 DEFAULT_FLOOR_HEAT_STATE_ALPHA = 0.97
@@ -63,8 +64,11 @@ def upsample_series_forward_fill(
     cursor = start_time
 
     while cursor < end_time:
-        while point_index < len(source_points) and source_points[point_index][0] <= cursor:
-            latest_value = source_points[point_index][1]
+        while point_index < len(source_points):
+            point_time, point_value = source_points[point_index]
+            if point_time > cursor:
+                break
+            latest_value = point_value
             point_index += 1
 
         if latest_value is not None:
@@ -77,6 +81,61 @@ def upsample_series_forward_fill(
         cursor += interval
 
     return NumericSeries(name=series.name, unit=series.unit, points=upsampled_points)
+
+
+def build_daily_target_band_series(
+    schedule: list[TemperatureTargetWindow],
+    *,
+    start_time: datetime,
+    end_time: datetime,
+    target_name: str,
+    minimum_name: str,
+    maximum_name: str,
+    unit: str = "degC",
+) -> tuple[NumericSeries, NumericSeries, NumericSeries]:
+    empty_target = NumericSeries(name=target_name, unit=unit, points=[])
+    empty_minimum = NumericSeries(name=minimum_name, unit=unit, points=[])
+    empty_maximum = NumericSeries(name=maximum_name, unit=unit, points=[])
+    if end_time <= start_time or not schedule:
+        return empty_target, empty_minimum, empty_maximum
+
+    ordered_schedule = sorted(schedule, key=lambda window: window.time)
+    active_window = ordered_schedule[-1]
+    for window in ordered_schedule:
+        change_time = datetime.combine(start_time.date(), window.time, tzinfo=start_time.tzinfo)
+        if change_time <= start_time:
+            active_window = window
+            continue
+        break
+
+    target_points: list[NumericPoint] = []
+    minimum_points: list[NumericPoint] = []
+    maximum_points: list[NumericPoint] = []
+
+    def append_points(timestamp: datetime, window: TemperatureTargetWindow) -> None:
+        normalized_timestamp = normalize_utc_timestamp(timestamp)
+        target_points.append(NumericPoint(timestamp=normalized_timestamp, value=window.target))
+        minimum_points.append(NumericPoint(timestamp=normalized_timestamp, value=window.minimum))
+        maximum_points.append(NumericPoint(timestamp=normalized_timestamp, value=window.maximum))
+
+    append_points(start_time, active_window)
+
+    for window in ordered_schedule:
+        change_time = datetime.combine(start_time.date(), window.time, tzinfo=start_time.tzinfo)
+        if not start_time < change_time < end_time:
+            continue
+        active_window = window
+        append_points(change_time, active_window)
+
+    final_timestamp = end_time - timedelta(seconds=1)
+    if final_timestamp > start_time:
+        append_points(final_timestamp, active_window)
+
+    return (
+        NumericSeries(name=target_name, unit=unit, points=target_points),
+        NumericSeries(name=minimum_name, unit=unit, points=minimum_points),
+        NumericSeries(name=maximum_name, unit=unit, points=maximum_points),
+    )
 
 
 def build_thermal_output_series(

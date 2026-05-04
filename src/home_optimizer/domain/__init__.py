@@ -13,6 +13,9 @@ from .names import (
     COP,
     DEFROST_ACTIVE,
     DHW_BOTTOM_TEMPERATURE,
+    DHW_TARGET_MAX_TEMPERATURE,
+    DHW_TARGET_MIN_TEMPERATURE,
+    DHW_TARGET_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
     DISCHARGE_TEMPERATURE,
     FORECAST_DEW_POINT,
@@ -42,6 +45,9 @@ from .names import (
     REFRIGERANT_CONDENSATION_TEMPERATURE,
     REFRIGERANT_LIQUID_LINE_TEMPERATURE,
     ROOM_TEMPERATURE,
+    ROOM_TARGET_MAX_TEMPERATURE,
+    ROOM_TARGET_MIN_TEMPERATURE,
+    ROOM_TARGET_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
     THERMAL_OUTPUT,
     THERMOSTAT_SETPOINT,
@@ -52,6 +58,7 @@ from .series import NumericPoint, NumericSeries, TextPoint, TextSeries
 from .series_transforms import (
     DEFAULT_FLOOR_HEAT_STATE_ALPHA,
     adjusted_gti_with_shutter,
+    build_daily_target_band_series,
     build_floor_heat_state_series,
     build_space_heating_thermal_output_series,
     build_thermal_output_series,
@@ -59,6 +66,7 @@ from .series_transforms import (
     shutter_open_fraction_at,
     upsample_series_forward_fill,
 )
+from .target_schedule import TemperatureTargetWindow
 from .time import ensure_utc, normalize_utc_timestamp
 from .timeseries import MinuteSample
 
@@ -71,6 +79,9 @@ __all__ = [
     "DEFAULT_FLOOR_HEAT_STATE_ALPHA",
     "DEFROST_ACTIVE",
     "DHW_BOTTOM_TEMPERATURE",
+    "DHW_TARGET_MAX_TEMPERATURE",
+    "DHW_TARGET_MIN_TEMPERATURE",
+    "DHW_TARGET_TEMPERATURE",
     "DHW_TOP_TEMPERATURE",
     "DomainModel",
     "DISCHARGE_TEMPERATURE",
@@ -107,6 +118,9 @@ __all__ = [
     "REFRIGERANT_CONDENSATION_TEMPERATURE",
     "REFRIGERANT_LIQUID_LINE_TEMPERATURE",
     "ROOM_TEMPERATURE",
+    "ROOM_TARGET_MAX_TEMPERATURE",
+    "ROOM_TARGET_MIN_TEMPERATURE",
+    "ROOM_TARGET_TEMPERATURE",
     "SENSOR_DEFINITIONS",
     "SensorDefinition",
     "SensorSpec",
@@ -118,7 +132,9 @@ __all__ = [
     "THERMOSTAT_SETPOINT",
     "TextPoint",
     "TextSeries",
+    "TemperatureTargetWindow",
     "adjusted_gti_with_shutter",
+    "build_daily_target_band_series",
     "build_floor_heat_state_series",
     "build_space_heating_thermal_output_series",
     "build_sensor_specs",

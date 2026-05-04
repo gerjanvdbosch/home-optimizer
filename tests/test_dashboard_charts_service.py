@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
+from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     NumericPoint,
     NumericSeries,
     TextSeries,
+    normalize_utc_timestamp,
     upsample_series_forward_fill,
 )
 from home_optimizer.web.services.dashboard_charts import (
     DashboardChartsService,
     adjusted_gti_with_shutter,
+    current_timezone,
 )
 
 
@@ -43,6 +46,10 @@ class FakeDashboardDataReader:
 
     def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return []
+
+
+def build_settings() -> AppSettings:
+    return AppSettings.from_options({"database_path": "/tmp/home-optimizer-test.db"})
 
 
 def test_adjusted_gti_with_shutter_uses_latest_known_open_percentage() -> None:
@@ -122,7 +129,7 @@ def test_upsample_series_forward_fill_expands_hourly_points_to_quarters() -> Non
 
 
 def test_dashboard_charts_service_clamps_negative_delta_t_to_zero() -> None:
-    service = DashboardChartsService(FakeDashboardDataReader())
+    service = DashboardChartsService(FakeDashboardDataReader(), build_settings())
 
     response = service.get_day_charts(date(2026, 4, 25))
 
@@ -156,7 +163,8 @@ def test_dashboard_charts_service_clamps_cop_to_ten() -> None:
                     points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.1)],
                 ),
             ]
-        )
+        ),
+        build_settings(),
     )
 
     response = service.get_day_charts(date(2026, 4, 25))
@@ -164,5 +172,26 @@ def test_dashboard_charts_service_clamps_cop_to_ten() -> None:
     assert len(response.cop.points) == 1
     assert response.cop.points[0].timestamp == "2026-04-25T12:00:00+00:00"
     assert response.cop.points[0].value == 10.0
+
+
+def test_dashboard_charts_service_includes_configured_room_and_dhw_targets() -> None:
+    service = DashboardChartsService(FakeDashboardDataReader(series=[]), build_settings())
+
+    response = service.get_day_charts(date(2026, 4, 25))
+    local_timezone = current_timezone()
+    start_time = datetime.combine(date(2026, 4, 25), time.min, tzinfo=local_timezone)
+    end_time = start_time + timedelta(days=1)
+
+    assert response.room_target_temperature.name == "room_target_temperature"
+    assert response.room_target_min_temperature.points[0].timestamp == normalize_utc_timestamp(start_time)
+    assert response.room_target_min_temperature.points[0].value == 18.5
+    assert response.room_target_max_temperature.points[-1].timestamp == normalize_utc_timestamp(
+        end_time - timedelta(seconds=1)
+    )
+    assert response.room_target_max_temperature.points[-1].value == 20.5
+    assert response.dhw_target_temperature.points[3].timestamp == normalize_utc_timestamp(
+        datetime.combine(date(2026, 4, 25), time(20, 0), tzinfo=local_timezone)
+    )
+    assert response.dhw_target_temperature.points[3].value == 50.0
 
 

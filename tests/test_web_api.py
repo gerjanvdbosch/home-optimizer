@@ -348,10 +348,40 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "unit": "degC",
         "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 21.0}],
     }
+    local_timezone = dashboard_charts_module.current_timezone()
+    expected_day_start = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
+    expected_day_end = expected_day_start + timedelta(days=1)
+    assert payload["room_target_temperature"]["points"][:2] == [
+        {
+            "timestamp": expected_day_start.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds"),
+            "value": 19.0,
+        },
+        {
+            "timestamp": datetime.combine(chart_date, time(8, 0), tzinfo=local_timezone)
+            .astimezone(ZoneInfo("UTC"))
+            .isoformat(timespec="seconds"),
+            "value": 19.0,
+        },
+    ]
+    assert payload["room_target_min_temperature"]["points"][0]["value"] == 18.5
+    assert payload["room_target_max_temperature"]["points"][-1] == {
+        "timestamp": (expected_day_end - timedelta(seconds=1))
+        .astimezone(ZoneInfo("UTC"))
+        .isoformat(timespec="seconds"),
+        "value": 20.5,
+    }
     assert [series["name"] for series in payload["dhw_temperatures"]] == [
         "dhw_top_temperature",
         "dhw_bottom_temperature",
     ]
+    assert payload["dhw_target_temperature"]["points"][3] == {
+        "timestamp": datetime.combine(chart_date, time(20, 0), tzinfo=local_timezone)
+        .astimezone(ZoneInfo("UTC"))
+        .isoformat(timespec="seconds"),
+        "value": 50.0,
+    }
+    assert payload["dhw_target_min_temperature"]["points"][3]["value"] == 48.0
+    assert payload["dhw_target_max_temperature"]["points"][3]["value"] == 55.0
     assert payload["forecast_temperature"] == {
         "name": "temperature",
         "unit": "degC",

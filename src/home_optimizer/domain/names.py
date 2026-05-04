@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 ROOM_TEMPERATURE = "room_temperature"
+ROOM_TARGET_TEMPERATURE = "room_target_temperature"
+ROOM_TARGET_MIN_TEMPERATURE = "room_target_min_temperature"
+ROOM_TARGET_MAX_TEMPERATURE = "room_target_max_temperature"
 OUTDOOR_TEMPERATURE = "outdoor_temperature"
 THERMOSTAT_SETPOINT = "thermostat_setpoint"
 SHUTTER_LIVING_ROOM = "shutter_living_room"
@@ -20,6 +23,9 @@ DISCHARGE_TEMPERATURE = "discharge_temperature"
 
 DHW_TOP_TEMPERATURE = "dhw_top_temperature"
 DHW_BOTTOM_TEMPERATURE = "dhw_bottom_temperature"
+DHW_TARGET_TEMPERATURE = "dhw_target_temperature"
+DHW_TARGET_MIN_TEMPERATURE = "dhw_target_min_temperature"
+DHW_TARGET_MAX_TEMPERATURE = "dhw_target_max_temperature"
 BOILER_AMBIENT_TEMPERATURE = "boiler_ambient_temperature"
 
 HP_ELECTRIC_POWER = "hp_electric_power"
@@ -54,6 +60,9 @@ __all__ = [
     "COP",
     "DEFROST_ACTIVE",
     "DHW_BOTTOM_TEMPERATURE",
+    "DHW_TARGET_MAX_TEMPERATURE",
+    "DHW_TARGET_MIN_TEMPERATURE",
+    "DHW_TARGET_TEMPERATURE",
     "DHW_TOP_TEMPERATURE",
     "DISCHARGE_TEMPERATURE",
     "FORECAST_DEW_POINT",
@@ -83,6 +92,9 @@ __all__ = [
     "REFRIGERANT_CONDENSATION_TEMPERATURE",
     "REFRIGERANT_LIQUID_LINE_TEMPERATURE",
     "ROOM_TEMPERATURE",
+    "ROOM_TARGET_MAX_TEMPERATURE",
+    "ROOM_TARGET_MIN_TEMPERATURE",
+    "ROOM_TARGET_TEMPERATURE",
     "SHUTTER_LIVING_ROOM",
     "THERMAL_OUTPUT",
     "THERMOSTAT_SETPOINT",

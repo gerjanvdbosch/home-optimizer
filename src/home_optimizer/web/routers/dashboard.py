@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import plotly
 from fastapi import APIRouter, Depends, Query
@@ -16,7 +16,7 @@ from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import DashboardChartsResponse
 from home_optimizer.web.services import DashboardChartsService
 
-PLOTLY_JS_PATH = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
+PLOTLY_JS_PATH = Path(cast(str, plotly.__file__)).resolve().parent / "package_data" / "plotly.min.js"
 ChartDateQuery = Annotated[date, Query(alias="date")]
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 
@@ -45,6 +45,9 @@ def create_dashboard_router(settings: AppSettings) -> APIRouter:
         chart_date: ChartDateQuery,
         container: ContainerDependency,
     ) -> DashboardChartsResponse:
-        return DashboardChartsService(container.time_series_read_repository).get_day_charts(chart_date)
+        return DashboardChartsService(
+            container.time_series_read_repository,
+            settings,
+        ).get_day_charts(chart_date)
 
     return router

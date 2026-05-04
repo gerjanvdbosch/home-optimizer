@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
+from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     BASELOAD,
     BOOSTER_HEATER_ACTIVE,
@@ -9,6 +10,9 @@ from home_optimizer.domain import (
     COP,
     DEFROST_ACTIVE,
     DHW_BOTTOM_TEMPERATURE,
+    DHW_TARGET_MAX_TEMPERATURE,
+    DHW_TARGET_MIN_TEMPERATURE,
+    DHW_TARGET_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
     FORECAST_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
@@ -23,6 +27,9 @@ from home_optimizer.domain import (
     P1_NET_POWER,
     PV_OUTPUT_POWER,
     ROOM_TEMPERATURE,
+    ROOM_TARGET_MAX_TEMPERATURE,
+    ROOM_TARGET_MIN_TEMPERATURE,
+    ROOM_TARGET_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
     THERMAL_OUTPUT,
     THERMOSTAT_SETPOINT,
@@ -30,6 +37,7 @@ from home_optimizer.domain import (
     NumericSeries,
     TextSeries,
     adjusted_gti_with_shutter,
+    build_daily_target_band_series,
     latest_value_at,
     upsample_series_forward_fill,
 )
@@ -161,8 +169,9 @@ def build_thermal_and_cop_series(
 
 
 class DashboardChartsService:
-    def __init__(self, reader: DashboardDataReader) -> None:
+    def __init__(self, reader: DashboardDataReader, settings: AppSettings) -> None:
         self.reader = reader
+        self.settings = settings
 
     def get_day_charts(
         self,
@@ -259,6 +268,26 @@ class DashboardChartsService:
             hp_power_series,
             name=BASELOAD,
         )
+        room_target_series, room_target_min_series, room_target_max_series = (
+            build_daily_target_band_series(
+                self.settings.room_target,
+                start_time=start_time,
+                end_time=end_time,
+                target_name=ROOM_TARGET_TEMPERATURE,
+                minimum_name=ROOM_TARGET_MIN_TEMPERATURE,
+                maximum_name=ROOM_TARGET_MAX_TEMPERATURE,
+            )
+        )
+        dhw_target_series, dhw_target_min_series, dhw_target_max_series = (
+            build_daily_target_band_series(
+                self.settings.dhw_target,
+                start_time=start_time,
+                end_time=end_time,
+                target_name=DHW_TARGET_TEMPERATURE,
+                minimum_name=DHW_TARGET_MIN_TEMPERATURE,
+                maximum_name=DHW_TARGET_MAX_TEMPERATURE,
+            )
+        )
 
         flow_series = series_by_name.get(HP_FLOW, empty_series(HP_FLOW, unit="Lmin"))
         thermal_series, cop_series = build_thermal_and_cop_series(
@@ -279,6 +308,9 @@ class DashboardChartsService:
             thermostat_setpoint=series_response(
                 series_by_name.get(THERMOSTAT_SETPOINT, empty_series(THERMOSTAT_SETPOINT))
             ),
+            room_target_temperature=series_response(room_target_series),
+            room_target_min_temperature=series_response(room_target_min_series),
+            room_target_max_temperature=series_response(room_target_max_series),
             shutter_position=series_response(
                 shutter_by_name.get(
                     SHUTTER_LIVING_ROOM,
@@ -293,6 +325,9 @@ class DashboardChartsService:
                     series_by_name.get(DHW_BOTTOM_TEMPERATURE, empty_series(DHW_BOTTOM_TEMPERATURE))
                 ),
             ],
+            dhw_target_temperature=series_response(dhw_target_series),
+            dhw_target_min_temperature=series_response(dhw_target_min_series),
+            dhw_target_max_temperature=series_response(dhw_target_max_series),
             heatpump_power=series_response(
                 series_by_name.get(HP_ELECTRIC_POWER, empty_series(HP_ELECTRIC_POWER))
             ),

@@ -357,27 +357,53 @@ async function loadCharts() {
     .toISOString()
     .slice(0, 19);
 
-  renderPlot(roomChart, [payload.room_temperature, payload.thermostat_setpoint], {
-    colors: ["#03a9f4", "#8e24aa"],
-    emptyText: "Geen kamertemperatuur voor deze dag",
-    yTitle: payload.room_temperature.unit || "",
-    traceOptions: [
-      { label: "Woonkamer", precision: 2 },
-      { label: "Setpoint", precision: 2 },
+  renderPlot(
+    roomChart,
+    [
+      payload.room_temperature,
+      payload.room_target_min_temperature,
+      payload.room_target_max_temperature,
+      payload.room_target_temperature,
+      payload.thermostat_setpoint,
     ],
-    xRange: [startIso, endIso],
-  });
+    {
+      colors: ["#03a9f4", "#66bb6a", "#ef5350", "#8e24aa", "#5e35b1"],
+      emptyText: "Geen kamertemperatuur voor deze dag",
+      yTitle: payload.room_temperature.unit || "",
+      traceOptions: [
+        { label: "Woonkamer", precision: 2 },
+        { label: "Comfort min", precision: 2, dash: "dot", shape: "hv" },
+        { label: "Comfort max", precision: 2, dash: "dot", shape: "hv" },
+        { label: "Target", precision: 2, shape: "hv" },
+        { label: "Thermostaat", precision: 2, dash: "dash", shape: "hv" },
+      ],
+      xRange: [startIso, endIso],
+    },
+  );
 
-  renderPlot(dhwChart, payload.dhw_temperatures, {
-    colors: ["#ff9800", "#7e57c2"],
-    emptyText: "Geen boilerdata voor deze dag",
-    yTitle: payload.dhw_temperatures[0]?.unit || "",
-    traceOptions: [
-      { label: "Boiler (boven)", precision: 2 },
-      { label: "Boiler (onder)", precision: 2 },
+  renderPlot(
+    dhwChart,
+    [
+      payload.dhw_temperatures[0],
+      payload.dhw_temperatures[1],
+      payload.dhw_target_min_temperature,
+      payload.dhw_target_max_temperature,
+      payload.dhw_target_temperature,
     ],
-    xRange: [startIso, endIso],
-  });
+    {
+      colors: ["#ff9800", "#7e57c2", "#66bb6a", "#ef5350", "#ef6c00"],
+      emptyText: "Geen boilerdata voor deze dag",
+      yTitle: payload.dhw_temperatures[0]?.unit || "",
+      traceOptions: [
+        { label: "Boiler (boven)", precision: 2 },
+        { label: "Boiler (onder)", precision: 2 },
+        { label: "Comfort min", precision: 2, dash: "dot", shape: "hv" },
+        { label: "Comfort max", precision: 2, dash: "dot", shape: "hv" },
+        { label: "Target", precision: 2, shape: "hv" },
+      ],
+      xRange: [startIso, endIso],
+    },
+  );
 
   renderHeatpumpPowerPlot(
     heatpumpChart,

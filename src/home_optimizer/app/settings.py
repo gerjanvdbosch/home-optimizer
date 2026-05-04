@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import ConfigDict, Field, field_validator
 
 from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.types import JsonDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -24,6 +25,8 @@ class AppSettings(DomainModel):
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
+    room_target: list[TemperatureTargetWindow] = Field()
+    dhw_target: list[TemperatureTargetWindow] = Field()
 
     @field_validator("database_path", mode="before")
     @classmethod
@@ -56,6 +59,23 @@ class AppSettings(DomainModel):
             sensors[str(name)] = entity_id
 
         return sensors
+
+    @field_validator("room_target", "dhw_target")
+    @classmethod
+    def _normalize_temperature_target_schedule(
+        cls,
+        value: list[TemperatureTargetWindow],
+    ) -> list[TemperatureTargetWindow]:
+        if not value:
+            raise ValueError("temperature target schedule must contain at least one entry")
+
+        ordered_schedule = sorted(value, key=lambda window: window.time)
+        seen_times: set[object] = set()
+        for window in ordered_schedule:
+            if window.time in seen_times:
+                raise ValueError("temperature target schedule cannot contain duplicate times")
+            seen_times.add(window.time)
+        return ordered_schedule
 
     @field_validator("history_import_max_days_back", mode="before")
     @classmethod
