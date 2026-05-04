@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from home_optimizer.domain.names import ELECTRICITY_PRICE
+from home_optimizer.domain.pricing import DEFAULT_CURRENCY
 from home_optimizer.domain.series import NumericPoint, NumericSeries
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 
@@ -30,7 +31,7 @@ class NordpoolGateway:
         *,
         delivery_date: date,
         delivery_area: str,
-        currency: str = "EUR",
+        currency: str = DEFAULT_CURRENCY,
         market: str = "DayAhead",
     ) -> NumericSeries:
         """Fetch day-ahead electricity prices for a CET calendar date.

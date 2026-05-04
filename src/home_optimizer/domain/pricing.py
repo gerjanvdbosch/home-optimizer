@@ -7,17 +7,19 @@ from pydantic import Field
 
 from home_optimizer.domain.models import DomainModel
 
+DEFAULT_CURRENCY = "EUR"
+DEFAULT_DELIVERY_AREA = "NL"
 
 
 class DynamicPricing(DomainModel):
     mode: Literal["dynamic"] = "dynamic"
-    delivery_area: str = "NL"
-    currency: str = "EUR"
+    delivery_area: str = DEFAULT_DELIVERY_AREA
+    currency: str = DEFAULT_CURRENCY
 
 
 class FixedPricing(DomainModel):
     mode: Literal["fixed"] = "fixed"
-    currency: str = "EUR"
+    currency: str = DEFAULT_CURRENCY
     peak_price: float = Field(gt=0)
     off_peak_price: float = Field(gt=0)
     feed_in_tariff: float = Field(ge=0)
@@ -49,4 +51,3 @@ ElectricityPricingConfig = Annotated[
     Union[DynamicPricing, FixedPricing],
     Field(discriminator="mode"),
 ]
-
