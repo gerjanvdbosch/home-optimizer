@@ -25,8 +25,8 @@ class AppSettings(DomainModel):
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
-    room_target: list[TemperatureTargetWindow] = Field()
-    dhw_target: list[TemperatureTargetWindow] = Field()
+    room_target: list[TemperatureTargetWindow] = Field(default=None)
+    dhw_target: list[TemperatureTargetWindow] = Field(default=None)
 
     @field_validator("database_path", mode="before")
     @classmethod
