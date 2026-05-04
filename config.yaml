@@ -43,13 +43,13 @@ options:
 
   boiler_tank_liters: 200
 
-  room_schedule:
+  room_target:
     - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "08:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "14:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
     - { time: "18:00", target: 20.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "22:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
-  dhw_schedule:
+  dhw_target:
     - { time: "00:00", target: 20.0, low_margin: 5.0, high_margin: 30.0 }
     - { time: "19:59", target: 20.0, low_margin: 5.0, high_margin: 30.0 }
     - { time: "20:00", target: 50.0, low_margin: 2.0, high_margin: 5.0 }
