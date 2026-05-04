@@ -46,7 +46,7 @@ options:
   electricity_pricing:
     mode: "dynamic"
 
-  room_schedule:
+  room_target:
     - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "08:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "14:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
