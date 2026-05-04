@@ -104,7 +104,7 @@ def test_nordpool_gateway_skips_entry_when_area_missing() -> None:
     )
 
     assert len(series.points) == 1
-    assert series.points[0].value == 115.0
+    assert series.points[0].value == pytest.approx(115.0 / 1000)
 
 
 def test_nordpool_gateway_raises_on_http_error() -> None:

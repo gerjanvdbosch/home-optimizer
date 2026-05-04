@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import ConfigDict, Field, field_validator
 
 from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.pricing import DynamicPricing, ElectricityPricingConfig
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.types import JsonDict
 
@@ -25,8 +26,7 @@ class AppSettings(DomainModel):
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
-    electricity_delivery_area: str = Field(default="NL")
-    electricity_currency: str = Field(default="EUR")
+    electricity_pricing: ElectricityPricingConfig = Field(default=None)
     room_target: list[TemperatureTargetWindow] = Field(default=None)
     dhw_target: list[TemperatureTargetWindow] = Field(default=None)
 

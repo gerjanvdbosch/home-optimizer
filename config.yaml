@@ -43,7 +43,10 @@ options:
 
   boiler_tank_liters: 200
 
-  room_target:
+  electricity_pricing:
+    mode: "dynamic"
+
+  room_schedule:
     - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "08:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
     - { time: "14:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
@@ -97,6 +100,23 @@ schema:
   living_room_window_azimuth: float?
 
   boiler_tank_liters: int
+
+  electricity_pricing:
+    mode: str
+    delivery_area: str?
+    currency: str?
+    peak_price: float?
+    off_peak_price: float?
+    feed_in_tariff: float?
+    peak_start: str?
+    peak_end: str?
+    peak_monday: bool?
+    peak_tuesday: bool?
+    peak_wednesday: bool?
+    peak_thursday: bool?
+    peak_friday: bool?
+    peak_saturday: bool?
+    peak_sunday: bool?
 
   room_target:
     - { time: str, target: float, low_margin: float, high_margin: float }
