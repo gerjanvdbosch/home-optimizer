@@ -186,6 +186,21 @@ def build_test_app(
             "database_path": "/tmp/home-optimizer-test.db",
             "history_import_max_days_back": 14,
             "sensors": sensors or {"room_temperature": "sensor.room_temperature"},
+            "room_target": [
+                {"time": "00:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+                {"time": "08:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+                {"time": "14:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+                {"time": "18:00", "target": 20.0, "low_margin": 0.5, "high_margin": 1.5},
+                {"time": "22:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+            ],
+            "dhw_target": [
+                {"time": "00:00", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
+                {"time": "10:00", "target": 20.0, "low_margin": 5.0, "high_margin": 35.0},
+                {"time": "19:59", "target": 20.0, "low_margin": 5.0, "high_margin": 35.0},
+                {"time": "20:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
+                {"time": "21:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
+                {"time": "21:01", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
+            ],
         }
     )
     app = create_app(
