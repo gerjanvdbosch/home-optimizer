@@ -132,11 +132,6 @@ def build_thermal_and_cop_series(
     thermal_name: str,
     cop_name: str,
 ) -> tuple[NumericSeries, NumericSeries]:
-    """Compute thermal output (kW) and COP series aligned to flow timestamps.
-
-    Formula: Q_kW = flow_Lmin * (supply - return) * 4186 / 60000
-    COP = Q_kW / electrical_input_kW when electrical_input_kW is available and non-zero.
-    """
     thermal_points: list[NumericPoint] = []
     cop_points: list[NumericPoint] = []
     factor = 4186.0 / 60000.0

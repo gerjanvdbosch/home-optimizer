@@ -34,12 +34,6 @@ class NordpoolGateway:
         currency: str = DEFAULT_CURRENCY,
         market: str = "DayAhead",
     ) -> NumericSeries:
-        """Fetch day-ahead electricity prices for a CET calendar date.
-
-        Returns a NumericSeries with one point per quarter-hour interval.
-        The price unit is EUR/kWh (or the requested currency per kWh).
-        Returns an empty series when no data is available for the requested date.
-        """
         params: dict[str, Any] = {
             "market": market,
             "deliveryArea": delivery_area,
