@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from home_optimizer.app import AppSettings
 from home_optimizer.app.settings_loader import deep_merge, parse_dot_overrides
+from home_optimizer.domain.pricing import DynamicPricing
 
 
 def test_parse_dot_overrides_builds_nested_options() -> None:
@@ -74,4 +75,15 @@ def test_app_settings_temperature_target_schedule() -> None:
                 ],
             }
         )
+
+
+def test_app_settings_defaults_to_dynamic_pricing() -> None:
+    settings = AppSettings.from_options(
+        {
+            "database_path": "/tmp/home-optimizer-test.db",
+        }
+    )
+
+    assert settings.electricity_pricing == DynamicPricing()
+
 

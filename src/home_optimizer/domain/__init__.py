@@ -54,6 +54,15 @@ from .names import (
     THERMOSTAT_SETPOINT,
 )
 from .sensor_factory import build_sensor_specs
+from .pricing import (
+    DynamicPricing,
+    FixedPricing,
+    build_daily_price_series,
+    electricity_price_series,
+    electricity_price_unit,
+    empty_electricity_price_series,
+    resolve_daily_price_series,
+)
 from .sensors import SENSOR_DEFINITIONS, SensorDefinition, SensorSpec
 from .series import NumericPoint, NumericSeries, TextPoint, TextSeries
 from .series_transforms import (
@@ -86,6 +95,7 @@ __all__ = [
     "DHW_TOP_TEMPERATURE",
     "DomainModel",
     "DISCHARGE_TEMPERATURE",
+    "DynamicPricing",
     "FORECAST_DEW_POINT",
     "FORECAST_DIFFUSE_RADIATION",
     "FORECAST_DIRECT_RADIATION",
@@ -95,6 +105,7 @@ __all__ = [
     "FORECAST_WIND",
     "ELECTRICITY_PRICE",
     "FLOOR_HEAT_STATE",
+    "FixedPricing",
     "GTI_LIVING_ROOM_WINDOWS",
     "GTI_LIVING_ROOM_WINDOWS_ADJUSTED",
     "GTI_PV",
@@ -136,15 +147,20 @@ __all__ = [
     "TextSeries",
     "TemperatureTargetWindow",
     "adjusted_gti_with_shutter",
+    "build_daily_price_series",
     "build_daily_target_band_series",
     "build_floor_heat_state_series",
     "build_space_heating_thermal_output_series",
     "build_sensor_specs",
     "build_thermal_output_series",
+    "electricity_price_series",
+    "electricity_price_unit",
+    "empty_electricity_price_series",
     "ensure_utc",
     "latest_value_at",
     "normalize_utc_timestamp",
     "parse_location",
+    "resolve_daily_price_series",
     "shutter_open_fraction_at",
     "upsample_series_forward_fill",
     "utc_now",

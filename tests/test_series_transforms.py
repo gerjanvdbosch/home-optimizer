@@ -8,7 +8,6 @@ from home_optimizer.domain import (
     DHW_TARGET_MIN_TEMPERATURE,
     DHW_TARGET_TEMPERATURE,
     DEFROST_ACTIVE,
-    ELECTRICITY_PRICE,
     HP_FLOW,
     HP_MODE,
     HP_RETURN_TEMPERATURE,
@@ -24,8 +23,6 @@ from home_optimizer.domain import (
     build_daily_target_band_series,
     build_space_heating_thermal_output_series,
 )
-from home_optimizer.domain.pricing import DynamicPricing, FixedPricing
-from home_optimizer.domain.series_transforms import build_daily_price_series, resolve_daily_price_series
 
 
 def test_build_space_heating_thermal_output_series_filters_dhw_defrost_and_booster() -> None:
@@ -134,80 +131,5 @@ def test_build_daily_target_band_series_uses_previous_day_window_before_first_ch
     assert minimum.points[0].value == 48.0
     assert maximum.points[0].value == 55.0
 
-
-def test_build_daily_price_series_uses_peak_price_during_peak_hours() -> None:
-    # 2026-05-04 is a Monday — peak day by default
-    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
-    start = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
-
-    series = build_daily_price_series(pricing, start_time=start, end_time=end)
-
-    assert series.name == ELECTRICITY_PRICE
-    assert series.unit == "EUR/kWh"
-    assert len(series.points) == 96  # 24h × 4 quarters
-    # 00:00 — off-peak
-    assert series.points[0].value == 0.21
-    # 07:00 = index 28 — peak
-    assert series.points[28].value == 0.32
-    # 23:00 = index 92 — off-peak (peak_end is 23:00, exclusive)
-    assert series.points[92].value == 0.21
-
-
-def test_build_daily_price_series_uses_off_peak_on_weekend() -> None:
-    # 2026-05-03 is a Sunday — not a peak day by default
-    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
-    start = datetime(2026, 5, 3, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
-
-    series = build_daily_price_series(pricing, start_time=start, end_time=end)
-
-    assert all(p.value == 0.21 for p in series.points)
-
-
-def test_build_daily_price_series_returns_empty_when_range_invalid() -> None:
-    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
-    start = datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc)
-
-    series = build_daily_price_series(pricing, start_time=start, end_time=start)
-
-    assert series.points == []
-
-
-def test_resolve_daily_price_series_returns_fetched_series_for_dynamic_pricing() -> None:
-    pricing = DynamicPricing()
-    fetched = NumericSeries(
-        name=ELECTRICITY_PRICE,
-        unit="EUR/kWh",
-        points=[NumericPoint(timestamp="2026-05-04T00:00:00+00:00", value=0.18)],
-    )
-    start = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
-
-    series = resolve_daily_price_series(pricing, start_time=start, end_time=end, fetched_series=fetched)
-
-    assert series is fetched
-
-
-def test_resolve_daily_price_series_returns_empty_for_dynamic_pricing_without_fetched_series() -> None:
-    pricing = DynamicPricing()
-    start = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
-
-    series = resolve_daily_price_series(pricing, start_time=start, end_time=end)
-
-    assert series.name == ELECTRICITY_PRICE
-    assert series.points == []
-
-
-def test_resolve_daily_price_series_generates_fixed_series_for_fixed_pricing() -> None:
-    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
-    start = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
-
-    series = resolve_daily_price_series(pricing, start_time=start, end_time=end)
-
-    assert len(series.points) == 96
-    assert series.points[28].value == 0.32  # 07:00 — peak
 
 

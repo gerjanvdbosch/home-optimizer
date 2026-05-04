@@ -5,10 +5,48 @@ from typing import Any
 
 import httpx
 
-from home_optimizer.domain.names import ELECTRICITY_PRICE
-from home_optimizer.domain.pricing import DEFAULT_CURRENCY
+from home_optimizer.domain.pricing import (
+    DEFAULT_CURRENCY,
+    electricity_price_series,
+    empty_electricity_price_series,
+)
 from home_optimizer.domain.series import NumericPoint, NumericSeries
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
+
+
+def _extract_price_points(payload: object, *, delivery_area: str) -> list[NumericPoint]:
+    if not isinstance(payload, dict):
+        raise ValueError(f"Unexpected Nordpool response payload: {type(payload)}")
+
+    entries = payload.get("multiAreaEntries", [])
+    if not isinstance(entries, list):
+        raise ValueError("Unexpected Nordpool response payload: multiAreaEntries must be a list")
+
+    points: list[NumericPoint] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        price_by_area = entry.get("entryPerArea")
+        if not isinstance(price_by_area, dict):
+            continue
+
+        price = price_by_area.get(delivery_area)
+        if not isinstance(price, int | float):
+            continue
+
+        delivery_start = entry.get("deliveryStart")
+        if not isinstance(delivery_start, str):
+            continue
+
+        points.append(
+            NumericPoint(
+                timestamp=normalize_utc_timestamp(parse_datetime(delivery_start)),
+                value=float(price) / 1000.0,
+            )
+        )
+
+    return points
 
 
 class NordpoolGateway:
@@ -44,30 +82,8 @@ class NordpoolGateway:
         response.raise_for_status()
 
         if response.status_code == 204 or not response.content:
-            return NumericSeries(
-                name=ELECTRICITY_PRICE,
-                unit=f"{currency}/kWh",
-                points=[],
-            )
+            return empty_electricity_price_series(currency)
 
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError(f"Unexpected Nordpool response payload: {type(payload)}")
+        points = _extract_price_points(response.json(), delivery_area=delivery_area)
 
-        entries: list[dict[str, Any]] = payload.get("multiAreaEntries", [])
-        points: list[NumericPoint] = []
-        for entry in entries:
-            price = entry.get("entryPerArea", {}).get(delivery_area)
-            if price is None:
-                continue
-            delivery_start = entry.get("deliveryStart")
-            if delivery_start is None:
-                continue
-            timestamp = normalize_utc_timestamp(parse_datetime(delivery_start))
-            points.append(NumericPoint(timestamp=timestamp, value=float(price) / 1000.0))
-
-        return NumericSeries(
-            name=ELECTRICITY_PRICE,
-            unit=f"{currency}/kWh",
-            points=points,
-        )
+        return electricity_price_series(currency=currency, points=points)

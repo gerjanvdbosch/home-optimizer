@@ -26,9 +26,9 @@ class AppSettings(DomainModel):
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
-    electricity_pricing: ElectricityPricingConfig = Field(default=None)
-    room_target: list[TemperatureTargetWindow] = Field(default=None)
-    dhw_target: list[TemperatureTargetWindow] = Field(default=None)
+    electricity_pricing: ElectricityPricingConfig = Field(default=DynamicPricing())
+    room_target: list[TemperatureTargetWindow] = Field(default_factory=list)
+    dhw_target: list[TemperatureTargetWindow] = Field(default_factory=list)
 
     @field_validator("database_path", mode="before")
     @classmethod
@@ -69,7 +69,7 @@ class AppSettings(DomainModel):
         value: list[TemperatureTargetWindow],
     ) -> list[TemperatureTargetWindow]:
         if not value:
-            raise ValueError("temperature target schedule must contain at least one entry")
+            return []
 
         ordered_schedule = sorted(value, key=lambda window: window.time)
         seen_times: set[object] = set()

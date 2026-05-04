@@ -3,8 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from .heatpump_state import SpaceHeatingStateFilter
-from .names import ELECTRICITY_PRICE, FLOOR_HEAT_STATE, GTI_LIVING_ROOM_WINDOWS_ADJUSTED, THERMAL_OUTPUT
-from .pricing import DynamicPricing, ElectricityPricingConfig, FixedPricing
+from .names import FLOOR_HEAT_STATE, GTI_LIVING_ROOM_WINDOWS_ADJUSTED, THERMAL_OUTPUT
 from .series import NumericPoint, NumericSeries, TextSeries
 from .target_schedule import TemperatureTargetWindow
 from .time import normalize_utc_timestamp, parse_datetime
@@ -143,59 +142,6 @@ def build_daily_target_band_series(
         maximum = upsample_series_forward_fill(maximum, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
 
     return target, minimum, maximum
-
-
-def build_daily_price_series(
-    pricing: FixedPricing,
-    *,
-    start_time: datetime,
-    end_time: datetime,
-    interval_minutes: int = 15,
-) -> NumericSeries:
-    unit = f"{pricing.currency}/kWh"
-    if end_time <= start_time:
-        return NumericSeries(name=ELECTRICITY_PRICE, unit=unit, points=[])
-
-    interval = timedelta(minutes=interval_minutes)
-    peak_days = pricing.peak_days
-    points: list[NumericPoint] = []
-    cursor = start_time
-
-    while cursor < end_time:
-        local_time = cursor.timetz() if cursor.tzinfo else cursor.time()
-        is_peak_day = cursor.weekday() in peak_days
-        is_peak_hour = pricing.peak_start <= local_time.replace(tzinfo=None) < pricing.peak_end
-        price = pricing.peak_price if (is_peak_day and is_peak_hour) else pricing.off_peak_price
-        points.append(NumericPoint(timestamp=normalize_utc_timestamp(cursor), value=price))
-        cursor += interval
-
-    return NumericSeries(name=ELECTRICITY_PRICE, unit=unit, points=points)
-
-
-def resolve_daily_price_series(
-    pricing: ElectricityPricingConfig,
-    *,
-    start_time: datetime,
-    end_time: datetime,
-    fetched_series: NumericSeries | None = None,
-    interval_minutes: int = 15,
-) -> NumericSeries:
-    if isinstance(pricing, DynamicPricing):
-        if fetched_series is not None:
-            return fetched_series
-        return NumericSeries(
-            name=ELECTRICITY_PRICE,
-            unit=f"{pricing.currency}/kWh",
-            points=[],
-        )
-
-    return build_daily_price_series(
-        pricing,
-        start_time=start_time,
-        end_time=end_time,
-        interval_minutes=interval_minutes,
-    )
-
 
 def build_thermal_output_series(
     flow: NumericSeries | None,
