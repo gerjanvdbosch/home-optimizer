@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from home_optimizer.domain import ELECTRICITY_PRICE, NumericPoint, NumericSeries
 from home_optimizer.domain.pricing import DynamicPricing, FixedPricing
+from home_optimizer.features.pricing import service as pricing_service_module
 from home_optimizer.features.pricing.service import ElectricityPriceService
 
 
@@ -76,9 +77,12 @@ def test_electricity_price_service_stores_known_dynamic_prices_for_today_and_tom
     assert [interval.value for intervals in repository.upserted for interval in intervals] == [0.21, 0.22, 0.31]
 
 
-def test_electricity_price_service_replaces_future_fixed_prices_with_compressed_intervals() -> None:
+def test_electricity_price_service_replaces_future_fixed_prices_with_compressed_intervals(
+    monkeypatch,
+) -> None:
     repository = FakePriceRepository()
     pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
+    monkeypatch.setattr(pricing_service_module, "current_local_timezone", lambda: timezone.utc)
     service = ElectricityPriceService(pricing, repository, fixed_horizon_days=2)
 
     written_rows = service.refresh_prices(datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc))
@@ -93,4 +97,26 @@ def test_electricity_price_service_replaces_future_fixed_prices_with_compressed_
     assert intervals[1].value == 0.32
     assert intervals[2].start_time_utc == datetime(2026, 5, 4, 23, 0, tzinfo=timezone.utc)
     assert intervals[2].end_time_utc == datetime(2026, 5, 5, 7, 0, tzinfo=timezone.utc)
+
+
+def test_electricity_price_service_uses_local_midnight_for_fixed_pricing(monkeypatch) -> None:
+    repository = FakePriceRepository()
+    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
+    local_timezone = timezone(timedelta(hours=2))
+    monkeypatch.setattr(pricing_service_module, "current_local_timezone", lambda: local_timezone)
+    service = ElectricityPriceService(pricing, repository)
+
+    written_rows = service.refresh_prices(datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc))
+
+    assert written_rows == 3
+    assert repository.replaced[0][0] == "fixed_pricing"
+    assert repository.replaced[0][1] == datetime(2026, 5, 4, 0, 0, tzinfo=local_timezone)
+    intervals = repository.replaced[0][2]
+    assert intervals[0].start_time_utc == datetime(2026, 5, 3, 22, 0, tzinfo=timezone.utc)
+    assert intervals[0].end_time_utc == datetime(2026, 5, 4, 5, 0, tzinfo=timezone.utc)
+    assert intervals[1].start_time_utc == datetime(2026, 5, 4, 5, 0, tzinfo=timezone.utc)
+    assert intervals[1].end_time_utc == datetime(2026, 5, 4, 21, 0, tzinfo=timezone.utc)
+    assert intervals[2].start_time_utc == datetime(2026, 5, 4, 21, 0, tzinfo=timezone.utc)
+    assert intervals[2].end_time_utc == datetime(2026, 5, 4, 22, 0, tzinfo=timezone.utc)
+
 

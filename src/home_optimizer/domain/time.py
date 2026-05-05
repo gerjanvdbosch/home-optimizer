@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
+
+
+def current_local_timezone() -> tzinfo:
+    return datetime.now().astimezone().tzinfo or timezone.utc
 
 
 def parse_datetime(value: str) -> datetime:

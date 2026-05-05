@@ -13,7 +13,7 @@ from home_optimizer.domain.pricing import (
     build_fixed_price_intervals,
     price_intervals_from_series,
 )
-from home_optimizer.domain.time import ensure_utc
+from home_optimizer.domain.time import current_local_timezone, ensure_utc
 from home_optimizer.features.pricing.ports import (
     DynamicElectricityPriceGatewayPort,
     ElectricityPriceRepositoryPort,
@@ -50,7 +50,6 @@ class ElectricityPriceService:
         self.fixed_source = fixed_source
 
     def refresh_prices(self, created_at: datetime | None = None) -> int:
-
         refresh_time = ensure_utc(created_at or utc_now())
         if isinstance(self.pricing, DynamicPricing):
             return self._refresh_dynamic_prices(self.pricing, refresh_time)
@@ -77,7 +76,9 @@ class ElectricityPriceService:
         return written_rows
 
     def _refresh_fixed_prices(self, pricing: FixedPricing, refresh_time: datetime) -> int:
-        start_time = datetime.combine(refresh_time.date(), time.min, tzinfo=refresh_time.tzinfo)
+        local_timezone = current_local_timezone()
+        local_refresh_time = refresh_time.astimezone(local_timezone)
+        start_time = datetime.combine(local_refresh_time.date(), time.min, tzinfo=local_timezone)
         end_time = start_time + timedelta(days=self.fixed_horizon_days)
         intervals = build_fixed_price_intervals(
             pricing,

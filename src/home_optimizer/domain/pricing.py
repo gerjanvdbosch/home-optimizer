@@ -9,7 +9,12 @@ from pydantic import Field, model_validator
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.domain.names import ELECTRICITY_PRICE
 from home_optimizer.domain.series import NumericPoint, NumericSeries
-from home_optimizer.domain.time import ensure_utc, normalize_utc_timestamp, parse_datetime
+from home_optimizer.domain.time import (
+    current_local_timezone,
+    ensure_utc,
+    normalize_utc_timestamp,
+    parse_datetime,
+)
 
 DEFAULT_CURRENCY = "EUR"
 DEFAULT_DELIVERY_AREA = "NL"
@@ -58,17 +63,29 @@ class FixedPricing(DomainModel):
         }
         return frozenset(day for day, active in mapping.items() if active)
 
-    def is_peak_time(self, timestamp: datetime) -> bool:
-        local_time = timestamp.timetz() if timestamp.tzinfo else timestamp.time()
+    def is_peak_time(
+        self,
+        timestamp: datetime,
+    ) -> bool:
+        local_timestamp = (
+            timestamp.replace(tzinfo=current_local_timezone())
+            if timestamp.tzinfo is None
+            else timestamp
+        )
+        local_time = local_timestamp.timetz()
         candidate_time = local_time.replace(tzinfo=None)
 
         if self.peak_start < self.peak_end:
             return (
-                timestamp.weekday() in self.peak_days
+                local_timestamp.weekday() in self.peak_days
                 and self.peak_start <= candidate_time < self.peak_end
             )
 
-        active_day = timestamp.weekday() if candidate_time >= self.peak_start else (timestamp.weekday() - 1) % 7
+        active_day = (
+            local_timestamp.weekday()
+            if candidate_time >= self.peak_start
+            else (local_timestamp.weekday() - 1) % 7
+        )
         return active_day in self.peak_days and (
             candidate_time >= self.peak_start or candidate_time < self.peak_end
         )

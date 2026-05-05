@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
@@ -46,13 +46,14 @@ from home_optimizer.domain.pricing import (
     DEFAULT_FIXED_PRICE_SOURCE,
     resolve_daily_price_series,
 )
+from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
 
 
 def current_timezone() -> tzinfo:
-    return datetime.now().astimezone().tzinfo or timezone.utc
+    return current_local_timezone()
 
 
 def empty_series(name: str, unit: str | None = None) -> NumericSeries:
