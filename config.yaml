@@ -104,6 +104,11 @@ schema:
 
   boiler_tank_liters: int
 
+  room_target:
+    - { time: str, target: float, low_margin: float, high_margin: float }
+  dhw_target:
+    - { time: str, target: float, low_margin: float, high_margin: float }
+
   electricity_pricing:
     mode: str
     peak_price: float?
@@ -118,11 +123,6 @@ schema:
     peak_friday: bool?
     peak_saturday: bool?
     peak_sunday: bool?
-
-  room_target:
-    - { time: str, target: float, low_margin: float, high_margin: float }
-  dhw_target:
-    - { time: str, target: float, low_margin: float, high_margin: float }
 
   sensors:
     room_temperature: str
