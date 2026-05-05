@@ -45,9 +45,11 @@ options:
 
   electricity_pricing:
     mode: "fixed"
-    peak_price: 0.21
-    off_peak_price: 0.22
-    feed_in_tariff: 0.08
+    peak_price: 0.213
+    off_peak_price: 0.225
+    feed_in_tariff: 0.077
+    peak_saturday: true
+    peak_sunday: true
 
   room_target:
     - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
@@ -106,8 +108,6 @@ schema:
 
   electricity_pricing:
     mode: str
-    delivery_area: str?
-    currency: str?
     peak_price: float?
     off_peak_price: float?
     feed_in_tariff: float?
