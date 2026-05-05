@@ -34,6 +34,17 @@ class FakeDynamicGateway:
         return self.responses[delivery_date]
 
 
+def test_electricity_price_service_requires_gateway_for_dynamic_pricing() -> None:
+    repository = FakePriceRepository()
+
+    try:
+        ElectricityPriceService(DynamicPricing(), repository)
+    except ValueError as error:
+        assert str(error) == "gateway is required for dynamic pricing"
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_electricity_price_service_stores_known_dynamic_prices_for_today_and_tomorrow() -> None:
     repository = FakePriceRepository()
     gateway = FakeDynamicGateway(

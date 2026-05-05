@@ -38,6 +38,8 @@ class ElectricityPriceService:
             raise ValueError("interval_minutes must be greater than zero")
         if fixed_horizon_days <= 0:
             raise ValueError("fixed_horizon_days must be greater than zero")
+        if isinstance(pricing, DynamicPricing) and gateway is None:
+            raise ValueError("gateway is required for dynamic pricing")
 
         self.pricing = pricing
         self.repository = repository
@@ -47,14 +49,7 @@ class ElectricityPriceService:
         self.dynamic_source = dynamic_source
         self.fixed_source = fixed_source
 
-    @property
-    def enabled(self) -> bool:
-        return not isinstance(self.pricing, DynamicPricing) or self.gateway is not None
-
     def refresh_prices(self, created_at: datetime | None = None) -> int:
-        if not self.enabled:
-            LOGGER.info("Electricity price refresh skipped: dynamic pricing gateway unavailable")
-            return 0
 
         refresh_time = ensure_utc(created_at or utc_now())
         if isinstance(self.pricing, DynamicPricing):

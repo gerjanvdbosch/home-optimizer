@@ -9,9 +9,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ElectricityPriceRunner(Protocol):
-    @property
-    def enabled(self) -> bool: ...
-
     def refresh_prices(self) -> int: ...
 
 
@@ -29,9 +26,6 @@ class ElectricityPriceScheduler:
         self.scheduler = BackgroundScheduler()
 
     def start(self) -> None:
-        if not self.runner.enabled:
-            LOGGER.info("Electricity price scheduler not started: pricing configuration incomplete")
-            return
 
         if self.scheduler.running:
             return
