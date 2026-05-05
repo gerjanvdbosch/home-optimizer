@@ -48,8 +48,6 @@ options:
     peak_price: 0.213
     off_peak_price: 0.225
     feed_in_tariff: 0.077
-    peak_saturday: true
-    peak_sunday: true
 
   room_target:
     - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
