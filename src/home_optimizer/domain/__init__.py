@@ -2,7 +2,6 @@ from .clock import utc_now
 from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
 from .heatpump_state import SpaceHeatingStateFilter
-from .historical_weather import HistoricalWeatherEntry
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -112,7 +111,6 @@ __all__ = [
     "GTI_LIVING_ROOM_WINDOWS",
     "GTI_LIVING_ROOM_WINDOWS_ADJUSTED",
     "GTI_PV",
-    "HistoricalWeatherEntry",
     "HP_DELTA_T",
     "HP_ELECTRIC_POWER",
     "HP_ELECTRIC_TOTAL_KWH",

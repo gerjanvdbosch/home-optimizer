@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from home_optimizer.app.forecast_scheduler import ForecastScheduler
-from home_optimizer.app.historical_weather_scheduler import HistoricalWeatherScheduler
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.sensors import SensorDefinition, SensorSpec
 from home_optimizer.domain.timeseries import MinuteSample
@@ -37,15 +36,6 @@ class FakeForecastRunner:
         self.calls = 0
 
     def refresh_forecast(self) -> int:
-        self.calls += 1
-        return 1
-
-
-class FakeHistoricalWeatherRunner:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def import_historical_weather(self) -> int:
         self.calls += 1
         return 1
 
@@ -189,17 +179,4 @@ def test_forecast_scheduler_skips_start_when_disabled() -> None:
     assert runner.calls == 0
     assert scheduler.scheduler.running is False
 
-
-def test_historical_weather_scheduler_registers_daily_cron_job_at_1am() -> None:
-    runner = FakeHistoricalWeatherRunner()
-    scheduler = HistoricalWeatherScheduler(runner)
-
-    scheduler.start()
-    try:
-        jobs = {job.id: job for job in scheduler.scheduler.get_jobs()}
-        assert runner.calls == 0
-        assert set(jobs) == {"historical-weather:import"}
-        assert str(jobs["historical-weather:import"].trigger) == "cron[hour='1', minute='0']"
-    finally:
-        scheduler.stop()
 

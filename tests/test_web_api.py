@@ -52,15 +52,6 @@ class FakeScheduler:
         self.stopped = True
 
 
-class FakeWeatherImportService:
-    def __init__(self) -> None:
-        self.import_calls = 0
-
-    def import_weather_data(self, created_at: datetime | None = None) -> int:
-        self.import_calls += 1
-        return 12
-
-
 class FakeTimeSeriesReadRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str], str, str]] = []
@@ -142,18 +133,6 @@ class FakeTimeSeriesReadRepository:
             ),
         ]
 
-    def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        self.calls.append(
-            ("historical_weather", names, start_time.isoformat(), end_time.isoformat())
-        )
-        return [
-            NumericSeries(
-                name="gti_living_room_windows",
-                unit="W/m2",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=210.0)],
-            )
-        ]
-
     def read_electricity_price_series(
         self,
         start_time,
@@ -181,9 +160,7 @@ class FakeContainer:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
         self.time_series_read_repository = FakeTimeSeriesReadRepository()
-        self.weather_import_service = FakeWeatherImportService()
         self.telemetry_scheduler = FakeScheduler()
-        self.historical_weather_scheduler = FakeScheduler()
         self.electricity_price_scheduler = FakeScheduler()
         self.forecast_scheduler = FakeScheduler()
 
@@ -251,14 +228,12 @@ def test_dashboard_shows_import_button_without_simulation_link() -> None:
 
     assert response.status_code == 200
     assert "Importeer geschiedenis" in response.text
-    assert "Importeer weerdata" in response.text
     assert 'static/shared.css' not in response.text
     assert 'static/shared.js' not in response.text
     assert 'static/dashboard.css' in response.text
     assert 'static/dashboard.js' in response.text
     assert 'href="simulation"' not in response.text
     assert app.state.container.telemetry_scheduler.started is True
-    assert app.state.container.historical_weather_scheduler.started is True
     assert app.state.container.electricity_price_scheduler.started is True
     assert app.state.container.forecast_scheduler.started is True
     assert gateway.closed is True
@@ -272,18 +247,6 @@ def test_removed_routes_return_404() -> None:
         assert client.get("/api/identification").status_code == 404
         assert client.post("/api/prediction", json={}).status_code == 404
         assert client.post("/api/mpc/thermostat-setpoint", json={}).status_code == 404
-
-
-def test_weather_import_endpoint_runs_forecast_backfill() -> None:
-    app, _ = build_test_app(imported_rows={"room_temperature": 3})
-
-    with TestClient(app) as client:
-        response = client.post("/api/weather-import")
-
-    assert response.status_code == 200
-    assert response.json() == {"imported_rows": 12}
-    assert app.state.container.weather_import_service.import_calls == 1
-
 
 def test_settings_reject_legacy_sensor_fields() -> None:
     with pytest.raises(ValidationError):
@@ -426,11 +389,6 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "unit": "°C",
         "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 12.5}],
     }
-    assert payload["historical_weather_gti"][1]["points"][:3] == [
-        {"timestamp": "2026-04-25T12:00:00+00:00", "value": 210.0},
-        {"timestamp": "2026-04-25T12:15:00+00:00", "value": 210.0},
-        {"timestamp": "2026-04-25T12:30:00+00:00", "value": 210.0},
-    ]
     local_timezone = dashboard_charts_module.current_timezone()
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
@@ -464,12 +422,6 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             ["temperature", "gti_pv", "gti_living_room_windows"],
             start_time.isoformat(),
             forecast_end_time.isoformat(),
-        ),
-        (
-            "historical_weather",
-            ["temperature", "gti_pv", "gti_living_room_windows"],
-            start_time.isoformat(),
-            end_time.isoformat(),
         ),
         (
             "electricity_price",

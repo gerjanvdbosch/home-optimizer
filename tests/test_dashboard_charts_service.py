@@ -9,8 +9,8 @@ from home_optimizer.domain import (
     NumericSeries,
     TextSeries,
     normalize_utc_timestamp,
-    upsample_series_forward_fill,
 )
+from home_optimizer.domain.series_transforms import upsample_series_forward_fill
 from home_optimizer.domain.types import JsonDict
 from home_optimizer.web.services.dashboard_charts import (
     DashboardChartsService,
@@ -54,9 +54,6 @@ class FakeDashboardDataReader:
         return []
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        return []
-
-    def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return []
 
     def read_electricity_price_series(

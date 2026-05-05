@@ -40,7 +40,6 @@ def create_app(
             importer=container.history_import_service,
         )
         container.telemetry_scheduler.start()
-        container.historical_weather_scheduler.start()
         container.electricity_price_scheduler.start()
         container.forecast_scheduler.start()
         try:
@@ -48,7 +47,6 @@ def create_app(
         finally:
             container.forecast_scheduler.stop()
             container.electricity_price_scheduler.stop()
-            container.historical_weather_scheduler.stop()
             container.telemetry_scheduler.stop()
             app.state.history_import_jobs.shutdown()
             container.close()

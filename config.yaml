@@ -65,7 +65,7 @@ options:
   sensors:
     room_temperature: "sensor.danfoss_15_temperature"
     thermostat_setpoint: "sensor.danfoss_15_setpoint"
-    outdoor_temperature: "sensor.ecodan_heatpump_ca09ec_buiten_temp"
+    outdoor_temperature: "sensor.buiten_temperatuur"
     hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
     hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
     hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"

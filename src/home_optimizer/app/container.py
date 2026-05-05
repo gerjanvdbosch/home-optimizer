@@ -5,7 +5,6 @@ from typing import Callable
 
 from home_optimizer.app.electricity_price_scheduler import ElectricityPriceScheduler
 from home_optimizer.app.forecast_scheduler import ForecastScheduler
-from home_optimizer.app.historical_weather_scheduler import HistoricalWeatherScheduler
 from home_optimizer.app.ports import SensorGateway
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
@@ -20,18 +19,11 @@ from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
-from home_optimizer.features.history.historical_weather_import_service import (
-    HistoricalWeatherImportService,
-)
-from home_optimizer.features.history.weather_import_service import WeatherImportService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.electricity_price_repository import (
     ElectricityPriceRepository,
 )
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
-from home_optimizer.infrastructure.database.historical_weather_repository import (
-    HistoricalWeatherRepository,
-)
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.time_series_read_repository import (
     TimeSeriesReadRepository,
@@ -55,14 +47,10 @@ class AppContainer:
     nordpool: NordpoolGateway | None
     history_import_repository: TimeSeriesWriteRepository
     history_import_service: HistoryImportService
-    weather_import_service: WeatherImportService
-    historical_weather_repository: HistoricalWeatherRepository
-    historical_weather_import_service: HistoricalWeatherImportService
     telemetry_repository: TimeSeriesWriteRepository
     time_series_read_repository: TimeSeriesReadRepository
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
-    historical_weather_scheduler: HistoricalWeatherScheduler
     electricity_price_repository: ElectricityPriceRepository
     electricity_price_service: ElectricityPriceService
     electricity_price_scheduler: ElectricityPriceScheduler
@@ -96,29 +84,10 @@ def build_container(
     time_series_read_repository = TimeSeriesReadRepository(database)
     electricity_price_repository = ElectricityPriceRepository(database)
     forecast_repository = ForecastRepository(database)
-    historical_weather_repository = HistoricalWeatherRepository(database)
     history_import_service = HistoryImportService(
         gateway=gateway,
         repository=history_import_repository,
         chunk_days=settings.history_import_chunk_days,
-    )
-    weather_import_service = WeatherImportService(
-        gateway=open_meteo,
-        location=location,
-        repository=forecast_repository,
-        pv_tilt=settings.pv_tilt,
-        pv_azimuth=settings.pv_azimuth,
-        living_room_window_azimuth=settings.living_room_window_azimuth,
-        history_days_back=settings.history_import_max_days_back,
-    )
-    historical_weather_import_service = HistoricalWeatherImportService(
-        gateway=open_meteo,
-        location=location,
-        repository=historical_weather_repository,
-        pv_tilt=settings.pv_tilt,
-        pv_azimuth=settings.pv_azimuth,
-        living_room_window_azimuth=settings.living_room_window_azimuth,
-        history_days_back=settings.history_import_max_days_back,
     )
     telemetry_service = TelemetryService(
         gateway=gateway,
@@ -126,9 +95,6 @@ def build_container(
         specs=sensor_specs,
     )
     telemetry_scheduler = TelemetryScheduler(telemetry_service)
-    historical_weather_scheduler = HistoricalWeatherScheduler(
-        historical_weather_import_service,
-    )
     electricity_price_service = ElectricityPriceService(
         pricing=settings.electricity_pricing,
         repository=electricity_price_repository,
@@ -160,14 +126,10 @@ def build_container(
         nordpool=nordpool,
         history_import_repository=history_import_repository,
         history_import_service=history_import_service,
-        weather_import_service=weather_import_service,
-        historical_weather_repository=historical_weather_repository,
-        historical_weather_import_service=historical_weather_import_service,
         telemetry_repository=telemetry_repository,
         time_series_read_repository=time_series_read_repository,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,
-        historical_weather_scheduler=historical_weather_scheduler,
         electricity_price_repository=electricity_price_repository,
         electricity_price_service=electricity_price_service,
         electricity_price_scheduler=electricity_price_scheduler,

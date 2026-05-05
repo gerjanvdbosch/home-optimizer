@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Protocol
 
 from home_optimizer.domain.forecast import ForecastEntry
-from home_optimizer.domain.historical_weather import HistoricalWeatherEntry
 
 
 class ForecastRepositoryPort(Protocol):
@@ -15,12 +14,6 @@ class ForecastRepositoryPort(Protocol):
     def write_entries(self, entries: list[ForecastEntry]) -> None: ...
 
     def write_new_entries(self, entries: list[ForecastEntry]) -> int: ...
-
-
-class HistoricalWeatherRepositoryPort(Protocol):
-    source: str
-
-    def write_new_entries(self, entries: list[HistoricalWeatherEntry]) -> int: ...
 
 
 class OpenMeteoGatewayPort(Protocol):
@@ -36,14 +29,3 @@ class OpenMeteoGatewayPort(Protocol):
         azimuth: float | None = None,
     ) -> dict[str, Any]: ...
 
-    def fetch_hourly_historical_weather(
-        self,
-        *,
-        latitude: float,
-        longitude: float,
-        variables: list[str],
-        start_date: date,
-        end_date: date,
-        tilt: float | None = None,
-        azimuth: float | None = None,
-    ) -> dict[str, Any]: ...

@@ -79,11 +79,6 @@ def build_entries_from_payload(
     return entries
 
 
-def parse_hourly_open_meteo_timestamp(value: object) -> datetime:
-    if not isinstance(value, str):
-        raise ValueError("Open-Meteo timestamp must be a string")
-    return ensure_utc(datetime.fromisoformat(f"{value}+00:00"))
-
 
 def parse_minutely_open_meteo_timestamp(value: object) -> datetime:
     if not isinstance(value, str):

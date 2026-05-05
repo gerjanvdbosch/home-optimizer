@@ -2,7 +2,6 @@ from .container import AppContainer, build_container
 from .container_factories import build_home_assistant_container, build_local_container
 from .electricity_price_scheduler import ElectricityPriceScheduler
 from .forecast_scheduler import ForecastScheduler
-from .historical_weather_scheduler import HistoricalWeatherScheduler
 from .history_import_jobs import HistoryImportJob, HistoryImportJobRunner
 from .history_import_requests import build_history_import_request
 from .logging import configure_logging
@@ -15,7 +14,6 @@ __all__ = [
     "AppSettings",
     "ElectricityPriceScheduler",
     "ForecastScheduler",
-    "HistoricalWeatherScheduler",
     "HistoryImportJob",
     "HistoryImportJobRunner",
     "TelemetryScheduler",

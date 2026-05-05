@@ -12,9 +12,6 @@ class HistoryImportRunResponse(BaseModel):
     sensor_count: int
 
 
-class WeatherImportResponse(BaseModel):
-    imported_rows: int
-
 
 class HistoryImportJobResponse(BaseModel):
     job_id: str
@@ -73,8 +70,6 @@ class DashboardChartsResponse(BaseModel):
     heatpump_statuses: list[ChartSeriesResponse]
     forecast_temperature: ChartSeriesResponse
     forecast_gti: list[ChartSeriesResponse]
-    historical_weather_temperature: ChartSeriesResponse
-    historical_weather_gti: list[ChartSeriesResponse]
     pv_output_power: ChartSeriesResponse
     baseload: ChartSeriesResponse
     thermal_output: ChartSeriesResponse

@@ -138,7 +138,6 @@ function renderPlot(element, seriesList, options) {
 }
 
 const button = document.getElementById("import-button");
-const weatherImportButton = document.getElementById("weather-import-button");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
 const selectedDateLabel = document.getElementById("selected-date");
@@ -149,14 +148,12 @@ const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
 const priceSummary = document.getElementById("price-summary");
 const forecastSummary = document.getElementById("forecast-summary");
-const historicalWeatherSummary = document.getElementById("historical-weather-summary");
 const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
 const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const priceChart = document.getElementById("price-chart");
 const forecastChart = document.getElementById("forecast-chart");
-const historicalWeatherChart = document.getElementById("historical-weather-chart");
 const shutterChart = document.getElementById("shutter-chart");
 const compressorSummary = document.getElementById("compressor-summary");
 const compressorChart = document.getElementById("compressor-chart");
@@ -168,7 +165,6 @@ const chartElements = [
   heatpumpChart,
   priceChart,
   forecastChart,
-  historicalWeatherChart,
   shutterChart,
   compressorChart,
   supplyChart,
@@ -208,9 +204,6 @@ function setImportButtonsDisabled(disabled) {
   if (button) {
     button.disabled = disabled;
   }
-  if (weatherImportButton) {
-    weatherImportButton.disabled = disabled;
-  }
 }
 
 function shiftDate(days) {
@@ -226,7 +219,6 @@ function handleChartLoadError(error) {
     heatpumpSummary,
     priceSummary,
     forecastSummary,
-    historicalWeatherSummary,
     shutterSummary,
     compressorSummary,
   ]
@@ -271,42 +263,6 @@ async function runImport() {
   }
 }
 
-async function runWeatherImport() {
-  if (!weatherImportButton) {
-    return;
-  }
-
-  setImportButtonsDisabled(true);
-  status.className = "status";
-  status.textContent = "Weerdata wordt geïmporteerd...";
-
-  try {
-    const response = await fetch(apiUrl("api/weather-import"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const payload = await response.json();
-
-    if (!response.ok) {
-      throw new Error(payload.detail || "Weerdata import mislukt.");
-    }
-
-    status.className = "status success";
-    status.textContent = `Weerdata bijgewerkt: ${payload.imported_rows} rijen toegevoegd.`;
-    result.hidden = false;
-    result.textContent = JSON.stringify(payload, null, 2);
-    await loadCharts();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Weerdata import mislukt.";
-    status.className = "status error";
-    status.textContent = message;
-    result.hidden = false;
-    result.textContent = "De weerdata import kon niet worden uitgevoerd.";
-  } finally {
-    setImportButtonsDisabled(false);
-  }
-}
-
 async function pollImportJob(jobId) {
   while (true) {
     const response = await fetch(apiUrl(`api/history-import/jobs/${jobId}`));
@@ -337,7 +293,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !historicalWeatherChart || !shutterChart || !compressorChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !shutterChart || !compressorChart || !selectedDateLabel) {
     return;
   }
 
@@ -456,29 +412,6 @@ async function loadCharts() {
     },
   );
 
-  renderPlot(
-    historicalWeatherChart,
-    [
-      payload.historical_weather_gti[0],
-      payload.historical_weather_gti[1],
-      payload.historical_weather_gti[2],
-      payload.historical_weather_temperature,
-    ],
-    {
-      colors: ["#f9a825", "#6d4c41", "#6d4c41", "#1e88e5"],
-      emptyText: "Geen historische weerdata voor deze dag",
-      yTitle: payload.historical_weather_gti[0]?.unit || "",
-      y2Title: payload.historical_weather_temperature.unit || "",
-      traceOptions: [
-        { label: "GTI PV", color: "#f9a825" },
-        { label: "GTI ramen", color: "#6d4c41" },
-        { label: "Instraling", color: "#6d4c41", dash: "dot" },
-        { label: "Buitentemperatuur", yaxis: "y2", color: "#1e88e5", dash: "dot", precision: 1 },
-      ],
-      xRange: [startIso, endIso],
-    },
-  );
-
   renderPlot(thermalChart, [payload.thermal_output, payload.cop], {
     colors: ["#ff7043", "#4caf50"],
     emptyText: "Geen thermische output voor deze dag",
@@ -556,12 +489,6 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
-  if (historicalWeatherSummary) {
-    historicalWeatherSummary.textContent = summarizeForecast(
-      payload.historical_weather_temperature,
-      payload.historical_weather_gti,
-    );
-  }
 }
 
 function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesList, options = {}) {
@@ -831,7 +758,6 @@ function statusAtTimestamp(points, timestamp) {
 }
 
 button?.addEventListener("click", runImport);
-weatherImportButton?.addEventListener("click", runWeatherImport);
 previousDayButton?.addEventListener("click", () => shiftDate(-1));
 nextDayButton?.addEventListener("click", () => shiftDate(1));
 window.addEventListener("resize", () => {

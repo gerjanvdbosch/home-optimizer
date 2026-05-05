@@ -37,13 +37,6 @@ class DashboardDataReader(Protocol):
         end_time: datetime,
     ) -> list[NumericSeries]: ...
 
-    def read_historical_weather_series(
-        self,
-        names: list[str],
-        start_time: datetime,
-        end_time: datetime,
-    ) -> list[NumericSeries]: ...
-
     def read_electricity_price_series(
         self,
         start_time: datetime,
@@ -60,13 +53,6 @@ class TelemetrySchedulerRunner(Protocol):
     def stop(self) -> None: ...
 
 
-class WeatherImportRunner(Protocol):
-    def import_weather_data(
-        self,
-        created_at: datetime | None = None,
-    ) -> int: ...
-
-
 class WebAppContainer(Protocol):
     @property
     def home_assistant(self) -> ClosableGateway: ...
@@ -80,8 +66,6 @@ class WebAppContainer(Protocol):
     @property
     def telemetry_scheduler(self) -> TelemetrySchedulerRunner: ...
 
-    @property
-    def historical_weather_scheduler(self) -> TelemetrySchedulerRunner: ...
 
 
     @property
@@ -91,7 +75,5 @@ class WebAppContainer(Protocol):
     @property
     def forecast_scheduler(self) -> TelemetrySchedulerRunner: ...
 
-    @property
-    def weather_import_service(self) -> WeatherImportRunner: ...
 
     def close(self) -> None: ...
