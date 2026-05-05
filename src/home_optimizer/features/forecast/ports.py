@@ -29,3 +29,4 @@ class OpenMeteoGatewayPort(Protocol):
         azimuth: float | None = None,
     ) -> dict[str, Any]: ...
 
+

@@ -246,3 +246,4 @@ def _compass_to_open_meteo_azimuth(compass_degrees: float) -> float:
         converted += 360.0
     return converted
 
+

@@ -6,10 +6,10 @@ from datetime import datetime, timedelta
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.location import Location
 from home_optimizer.domain.time import ensure_utc
-from home_optimizer.infrastructure.forecast.openmeteo_forecast_builder import (
+from home_optimizer.features.forecast.openmeteo_forecast_builder import (
     OpenMeteoForecastEntryBuilder,
 )
-from home_optimizer.infrastructure.forecast.ports import (
+from home_optimizer.features.forecast.ports import (
     ForecastRepositoryPort,
     OpenMeteoGatewayPort,
 )
