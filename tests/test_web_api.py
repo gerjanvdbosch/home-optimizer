@@ -82,6 +82,11 @@ class FakeTimeSeriesReadRepository:
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
             ),
             NumericSeries(
+                name="outdoor_temperature",
+                unit="°C",
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=12.1)],
+            ),
+            NumericSeries(
                 name="thermostat_setpoint",
                 unit="°C",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
@@ -367,6 +372,11 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert payload["room_temperature"]["points"] == [
         {"timestamp": "2026-04-25T12:00:00+00:00", "value": 20.5}
     ]
+    assert payload["outdoor_temperature"] == {
+        "name": "outdoor_temperature",
+        "unit": "°C",
+        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 12.1}],
+    }
     assert payload["thermostat_setpoint"] == {
         "name": "thermostat_setpoint",
         "unit": "°C",
@@ -421,6 +431,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "numeric",
             [
                 "room_temperature",
+                "outdoor_temperature",
                 "thermostat_setpoint",
                 "hp_flow",
                 "p1_net_power",

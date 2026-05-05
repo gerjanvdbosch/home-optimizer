@@ -145,12 +145,14 @@ const selectedDateLabel = document.getElementById("selected-date");
 const previousDayButton = document.getElementById("previous-day");
 const nextDayButton = document.getElementById("next-day");
 const roomSummary = document.getElementById("room-summary");
+const outdoorSummary = document.getElementById("outdoor-summary");
 const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
 const priceSummary = document.getElementById("price-summary");
 const forecastSummary = document.getElementById("forecast-summary");
 const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
+const outdoorChart = document.getElementById("outdoor-chart");
 const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const priceChart = document.getElementById("price-chart");
@@ -162,6 +164,7 @@ const supplyChart = document.getElementById("supply-chart");
 const thermalChart = document.getElementById("thermal-chart");
 const chartElements = [
   roomChart,
+  outdoorChart,
   dhwChart,
   heatpumpChart,
   priceChart,
@@ -219,6 +222,7 @@ function shiftDate(days) {
 function handleChartLoadError(error) {
   [
     roomSummary,
+    outdoorSummary,
     dhwSummary,
     heatpumpSummary,
     priceSummary,
@@ -333,7 +337,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !shutterChart || !compressorChart || !selectedDateLabel) {
+  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !shutterChart || !compressorChart || !selectedDateLabel) {
     return;
   }
 
@@ -380,6 +384,14 @@ async function loadCharts() {
       xRange: [startIso, endIso],
     },
   );
+
+  renderPlot(outdoorChart, [payload.outdoor_temperature], {
+    colors: ["#1e88e5"],
+    emptyText: "Geen buitentemperatuur voor deze dag",
+    yTitle: payload.outdoor_temperature.unit || "",
+    traceOptions: [{ label: "Buiten", precision: 1 }],
+    xRange: [startIso, endIso],
+  });
 
   renderPlot(
     dhwChart,
@@ -516,6 +528,9 @@ async function loadCharts() {
   }
 
   roomSummary.textContent = summarizeSeries(payload.room_temperature);
+  if (outdoorSummary) {
+    outdoorSummary.textContent = summarizeSeries(payload.outdoor_temperature);
+  }
   dhwSummary.textContent = summarizeSeries(payload.dhw_temperatures[0]);
   heatpumpSummary.textContent = summarizeHeatpump(
     payload.heatpump_power,

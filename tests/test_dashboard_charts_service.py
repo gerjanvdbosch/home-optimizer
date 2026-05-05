@@ -7,6 +7,7 @@ from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     NumericPoint,
     NumericSeries,
+    OUTDOOR_TEMPERATURE,
     TextSeries,
     normalize_utc_timestamp,
 )
@@ -43,8 +44,10 @@ class FakeDashboardDataReader:
             unit="EUR/kWh",
             points=[],
         )
+        self.read_series_calls: list[list[str]] = []
 
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
+        self.read_series_calls.append(list(names))
         if names == ["shutter_living_room"]:
             return []
 
@@ -174,6 +177,28 @@ def test_dashboard_charts_service_clamps_negative_delta_t_to_zero() -> None:
     assert len(response.hp_delta_t.points) == 1
     assert response.hp_delta_t.points[0].timestamp == "2026-04-25T12:00:00+00:00"
     assert response.hp_delta_t.points[0].value == 0.0
+
+
+def test_dashboard_charts_service_includes_outdoor_temperature_chart() -> None:
+    reader = FakeDashboardDataReader(
+        series=[
+            NumericSeries(
+                name=OUTDOOR_TEMPERATURE,
+                unit="°C",
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=11.4)],
+            )
+        ]
+    )
+    service = DashboardChartsService(reader, build_settings())
+
+    response = service.get_day_charts(date(2026, 4, 25))
+
+    assert any(OUTDOOR_TEMPERATURE in names for names in reader.read_series_calls)
+    assert response.outdoor_temperature.name == OUTDOOR_TEMPERATURE
+    assert response.outdoor_temperature.unit == "°C"
+    assert len(response.outdoor_temperature.points) == 1
+    assert response.outdoor_temperature.points[0].timestamp == "2026-04-25T12:00:00+00:00"
+    assert response.outdoor_temperature.points[0].value == 11.4
 
 
 def test_dashboard_charts_service_clamps_cop_to_ten() -> None:

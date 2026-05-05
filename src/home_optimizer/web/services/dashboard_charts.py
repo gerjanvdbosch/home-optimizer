@@ -24,6 +24,7 @@ from home_optimizer.domain import (
     HP_RETURN_TEMPERATURE,
     HP_SUPPLY_TARGET_TEMPERATURE,
     HP_SUPPLY_TEMPERATURE,
+    OUTDOOR_TEMPERATURE,
     P1_NET_POWER,
     PV_OUTPUT_POWER,
     ROOM_TEMPERATURE,
@@ -188,6 +189,7 @@ class DashboardChartsService:
         series = self.reader.read_series(
             names=[
                 ROOM_TEMPERATURE,
+                OUTDOOR_TEMPERATURE,
                 THERMOSTAT_SETPOINT,
                 HP_FLOW,
                 P1_NET_POWER,
@@ -293,84 +295,92 @@ class DashboardChartsService:
             fetched_series=electricity_price_series if electricity_price_series.points else None,
         )
 
-        return DashboardChartsResponse(
-            date=chart_date.isoformat(),
-            room_temperature=series_response(
-                series_by_name.get(ROOM_TEMPERATURE, empty_series(ROOM_TEMPERATURE))
-            ),
-            thermostat_setpoint=series_response(
-                series_by_name.get(THERMOSTAT_SETPOINT, empty_series(THERMOSTAT_SETPOINT))
-            ),
-            room_target_temperature=series_response(room_target_series),
-            room_target_min_temperature=series_response(room_target_min_series),
-            room_target_max_temperature=series_response(room_target_max_series),
-            shutter_position=series_response(
-                shutter_by_name.get(
-                    SHUTTER_LIVING_ROOM,
-                    empty_series(SHUTTER_LIVING_ROOM, unit="%"),
-                )
-            ),
-            dhw_temperatures=[
-                series_response(
-                    series_by_name.get(DHW_TOP_TEMPERATURE, empty_series(DHW_TOP_TEMPERATURE))
+        return DashboardChartsResponse.model_validate(
+            {
+                "date": chart_date.isoformat(),
+                "room_temperature": series_response(
+                    series_by_name.get(ROOM_TEMPERATURE, empty_series(ROOM_TEMPERATURE))
                 ),
-                series_response(
-                    series_by_name.get(DHW_BOTTOM_TEMPERATURE, empty_series(DHW_BOTTOM_TEMPERATURE))
+                "outdoor_temperature": series_response(
+                    series_by_name.get(OUTDOOR_TEMPERATURE, empty_series(OUTDOOR_TEMPERATURE))
                 ),
-            ],
-            dhw_target_temperature=series_response(dhw_target_series),
-            dhw_target_min_temperature=series_response(dhw_target_min_series),
-            dhw_target_max_temperature=series_response(dhw_target_max_series),
-            heatpump_power=series_response(
-                series_by_name.get(HP_ELECTRIC_POWER, empty_series(HP_ELECTRIC_POWER))
-            ),
-            heatpump_mode=text_series_response(
-                text_series_by_name.get(HP_MODE, empty_text_series(HP_MODE))
-            ),
-            heatpump_statuses=[
-                series_response(series_by_name.get(DEFROST_ACTIVE, empty_series(DEFROST_ACTIVE))),
-                series_response(
-                    series_by_name.get(BOOSTER_HEATER_ACTIVE, empty_series(BOOSTER_HEATER_ACTIVE))
+                "thermostat_setpoint": series_response(
+                    series_by_name.get(THERMOSTAT_SETPOINT, empty_series(THERMOSTAT_SETPOINT))
                 ),
-            ],
-            forecast_temperature=series_response(
-                forecast_series_by_name.get(
-                    FORECAST_TEMPERATURE,
-                    empty_series(FORECAST_TEMPERATURE),
-                )
-            ),
-            forecast_gti=[
-                series_response(forecast_series_by_name.get(GTI_PV, empty_series(GTI_PV))),
-                series_response(
-                    forecast_series_by_name.get(
-                        GTI_LIVING_ROOM_WINDOWS,
-                        empty_series(GTI_LIVING_ROOM_WINDOWS),
+                "room_target_temperature": series_response(room_target_series),
+                "room_target_min_temperature": series_response(room_target_min_series),
+                "room_target_max_temperature": series_response(room_target_max_series),
+                "shutter_position": series_response(
+                    shutter_by_name.get(
+                        SHUTTER_LIVING_ROOM,
+                        empty_series(SHUTTER_LIVING_ROOM, unit="%"),
                     )
                 ),
-                series_response(adjusted_living_room_gti),
-            ],
-            hp_supply_temperature=series_response(
-                series_by_name.get(HP_SUPPLY_TEMPERATURE, empty_series(HP_SUPPLY_TEMPERATURE))
-            ),
-            hp_supply_target_temperature=series_response(
-                series_by_name.get(
-                    HP_SUPPLY_TARGET_TEMPERATURE,
-                    empty_series(HP_SUPPLY_TARGET_TEMPERATURE),
-                )
-            ),
-            hp_return_temperature=series_response(
-                series_by_name.get(HP_RETURN_TEMPERATURE, empty_series(HP_RETURN_TEMPERATURE))
-            ),
-            pv_output_power=series_response(
-                series_by_name.get(PV_OUTPUT_POWER, empty_series(PV_OUTPUT_POWER))
-            ),
-            baseload=series_response(baseload_series),
-            hp_delta_t=series_response(clamped_delta_series),
-            thermal_output=series_response(thermal_series),
-            cop=series_response(clamped_cop_series),
-            hp_flow=series_response(flow_series),
-            compressor_frequency=series_response(
-                series_by_name.get(COMPRESSOR_FREQUENCY, empty_series(COMPRESSOR_FREQUENCY))
-            ),
-            electricity_price=series_response(resolved_electricity_price_series),
+                "dhw_temperatures": [
+                    series_response(
+                        series_by_name.get(DHW_TOP_TEMPERATURE, empty_series(DHW_TOP_TEMPERATURE))
+                    ),
+                    series_response(
+                        series_by_name.get(DHW_BOTTOM_TEMPERATURE, empty_series(DHW_BOTTOM_TEMPERATURE))
+                    ),
+                ],
+                "dhw_target_temperature": series_response(dhw_target_series),
+                "dhw_target_min_temperature": series_response(dhw_target_min_series),
+                "dhw_target_max_temperature": series_response(dhw_target_max_series),
+                "heatpump_power": series_response(
+                    series_by_name.get(HP_ELECTRIC_POWER, empty_series(HP_ELECTRIC_POWER))
+                ),
+                "heatpump_mode": text_series_response(
+                    text_series_by_name.get(HP_MODE, empty_text_series(HP_MODE))
+                ),
+                "heatpump_statuses": [
+                    series_response(series_by_name.get(DEFROST_ACTIVE, empty_series(DEFROST_ACTIVE))),
+                    series_response(
+                        series_by_name.get(
+                            BOOSTER_HEATER_ACTIVE,
+                            empty_series(BOOSTER_HEATER_ACTIVE),
+                        )
+                    ),
+                ],
+                "forecast_temperature": series_response(
+                    forecast_series_by_name.get(
+                        FORECAST_TEMPERATURE,
+                        empty_series(FORECAST_TEMPERATURE),
+                    )
+                ),
+                "forecast_gti": [
+                    series_response(forecast_series_by_name.get(GTI_PV, empty_series(GTI_PV))),
+                    series_response(
+                        forecast_series_by_name.get(
+                            GTI_LIVING_ROOM_WINDOWS,
+                            empty_series(GTI_LIVING_ROOM_WINDOWS),
+                        )
+                    ),
+                    series_response(adjusted_living_room_gti),
+                ],
+                "hp_supply_temperature": series_response(
+                    series_by_name.get(HP_SUPPLY_TEMPERATURE, empty_series(HP_SUPPLY_TEMPERATURE))
+                ),
+                "hp_supply_target_temperature": series_response(
+                    series_by_name.get(
+                        HP_SUPPLY_TARGET_TEMPERATURE,
+                        empty_series(HP_SUPPLY_TARGET_TEMPERATURE),
+                    )
+                ),
+                "hp_return_temperature": series_response(
+                    series_by_name.get(HP_RETURN_TEMPERATURE, empty_series(HP_RETURN_TEMPERATURE))
+                ),
+                "pv_output_power": series_response(
+                    series_by_name.get(PV_OUTPUT_POWER, empty_series(PV_OUTPUT_POWER))
+                ),
+                "baseload": series_response(baseload_series),
+                "hp_delta_t": series_response(clamped_delta_series),
+                "thermal_output": series_response(thermal_series),
+                "cop": series_response(clamped_cop_series),
+                "hp_flow": series_response(flow_series),
+                "compressor_frequency": series_response(
+                    series_by_name.get(COMPRESSOR_FREQUENCY, empty_series(COMPRESSOR_FREQUENCY))
+                ),
+                "electricity_price": series_response(resolved_electricity_price_series),
+            }
         )
