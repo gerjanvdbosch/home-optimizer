@@ -154,6 +154,23 @@ class FakeTimeSeriesReadRepository:
             )
         ]
 
+    def read_electricity_price_series(
+        self,
+        start_time,
+        end_time,
+        *,
+        source,
+        interval_minutes=15,
+    ) -> NumericSeries:
+        self.calls.append(
+            ("electricity_price", [source], start_time.isoformat(), end_time.isoformat())
+        )
+        return NumericSeries(
+            name="electricity_price",
+            unit="EUR/kWh",
+            points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.245)],
+        )
+
 
 class FakeContainer:
     def __init__(
@@ -357,6 +374,11 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["date"] == "2026-04-25"
+    assert payload["electricity_price"] == {
+        "name": "electricity_price",
+        "unit": "EUR/kWh",
+        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 0.245}],
+    }
     assert payload["room_temperature"]["points"] == [
         {"timestamp": "2026-04-25T12:00:00+00:00", "value": 20.5}
     ]
@@ -446,6 +468,12 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         (
             "historical_weather",
             ["temperature", "gti_pv", "gti_living_room_windows"],
+            start_time.isoformat(),
+            end_time.isoformat(),
+        ),
+        (
+            "electricity_price",
+            ["nordpool"],
             start_time.isoformat(),
             end_time.isoformat(),
         ),

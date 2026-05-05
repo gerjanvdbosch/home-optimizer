@@ -6,7 +6,11 @@ from home_optimizer.domain import NumericPoint
 from home_optimizer.infrastructure.database.time_series_read_repository import (
     TimeSeriesReadRepository,
 )
-from home_optimizer.infrastructure.database.orm_models import ForecastValue, Sample1m
+from home_optimizer.infrastructure.database.orm_models import (
+    ElectricityPriceIntervalValue,
+    ForecastValue,
+    Sample1m,
+)
 from home_optimizer.infrastructure.database.session import Database
 
 
@@ -127,3 +131,58 @@ def test_time_series_read_repository_returns_sample_time_range(tmp_path) -> None
         datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
         datetime(2026, 4, 28, 23, 59, tzinfo=timezone.utc),
     )
+
+
+def test_time_series_read_repository_reads_electricity_price_intervals_as_quarter_hour_series(
+    tmp_path,
+) -> None:
+    database = Database(str(tmp_path / "dashboard.sqlite"))
+    database.init_schema()
+    repository = TimeSeriesReadRepository(database)
+
+    with database.session() as session:
+        session.add_all(
+            [
+                ElectricityPriceIntervalValue(
+                    name="electricity_price",
+                    start_time_utc="2026-04-25T00:00:00+00:00",
+                    end_time_utc="2026-04-25T00:30:00+00:00",
+                    source="nordpool",
+                    unit="EUR/kWh",
+                    value=0.21,
+                ),
+                ElectricityPriceIntervalValue(
+                    name="electricity_price",
+                    start_time_utc="2026-04-25T00:30:00+00:00",
+                    end_time_utc="2026-04-25T01:00:00+00:00",
+                    source="nordpool",
+                    unit="EUR/kWh",
+                    value=0.32,
+                ),
+                ElectricityPriceIntervalValue(
+                    name="electricity_price",
+                    start_time_utc="2026-04-25T00:00:00+00:00",
+                    end_time_utc="2026-04-25T00:15:00+00:00",
+                    source="fixed_pricing",
+                    unit="EUR/kWh",
+                    value=0.99,
+                ),
+            ]
+        )
+        session.commit()
+
+    series = repository.read_electricity_price_series(
+        start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 25, 1, 0, tzinfo=timezone.utc),
+        source="nordpool",
+    )
+
+    assert series.name == "electricity_price"
+    assert series.unit == "EUR/kWh"
+    assert series.points == [
+        NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=0.21),
+        NumericPoint(timestamp="2026-04-25T00:15:00+00:00", value=0.21),
+        NumericPoint(timestamp="2026-04-25T00:30:00+00:00", value=0.32),
+        NumericPoint(timestamp="2026-04-25T00:45:00+00:00", value=0.32),
+    ]
+

@@ -44,6 +44,15 @@ class DashboardDataReader(Protocol):
         end_time: datetime,
     ) -> list[NumericSeries]: ...
 
+    def read_electricity_price_series(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        source: str,
+        interval_minutes: int = 15,
+    ) -> NumericSeries: ...
+
 
 class TelemetrySchedulerRunner(Protocol):
     def start(self) -> None: ...

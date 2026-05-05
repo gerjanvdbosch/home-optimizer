@@ -5,6 +5,8 @@ from datetime import date, datetime, time, timedelta
 
 from home_optimizer.domain.clock import utc_now
 from home_optimizer.domain.pricing import (
+    DEFAULT_DYNAMIC_PRICE_SOURCE,
+    DEFAULT_FIXED_PRICE_SOURCE,
     DynamicPricing,
     ElectricityPricingConfig,
     FixedPricing,
@@ -18,8 +20,6 @@ from home_optimizer.features.pricing.ports import (
 )
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_DYNAMIC_PRICE_SOURCE = "nordpool"
-DEFAULT_FIXED_PRICE_SOURCE = "fixed_pricing"
 
 
 class ElectricityPriceService:

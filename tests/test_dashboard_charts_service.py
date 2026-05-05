@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any, cast
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
@@ -10,6 +11,7 @@ from home_optimizer.domain import (
     normalize_utc_timestamp,
     upsample_series_forward_fill,
 )
+from home_optimizer.domain.types import JsonDict
 from home_optimizer.web.services.dashboard_charts import (
     DashboardChartsService,
     adjusted_gti_with_shutter,
@@ -18,7 +20,12 @@ from home_optimizer.web.services.dashboard_charts import (
 
 
 class FakeDashboardDataReader:
-    def __init__(self, *, series: list[NumericSeries] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        series: list[NumericSeries] | None = None,
+        electricity_price_series: NumericSeries | None = None,
+    ) -> None:
         self._series = series or [
             NumericSeries(
                 name="hp_supply_temperature",
@@ -31,6 +38,11 @@ class FakeDashboardDataReader:
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=32.5)],
             ),
         ]
+        self._electricity_price_series = electricity_price_series or NumericSeries(
+            name="electricity_price",
+            unit="EUR/kWh",
+            points=[],
+        )
 
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         if names == ["shutter_living_room"]:
@@ -47,26 +59,38 @@ class FakeDashboardDataReader:
     def read_historical_weather_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return []
 
+    def read_electricity_price_series(
+        self,
+        start_time,
+        end_time,
+        *,
+        source,
+        interval_minutes=15,
+    ) -> NumericSeries:
+        return self._electricity_price_series
 
-def build_settings() -> AppSettings:
-    return AppSettings.from_options({
-        "database_path": "/tmp/home-optimizer-test.db",
-        "room_target": [
-            {"time": "00:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
-            {"time": "08:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
-            {"time": "14:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
-            {"time": "18:00", "target": 20.0, "low_margin": 0.5, "high_margin": 1.5},
-            {"time": "22:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
-        ],
-        "dhw_target": [
-            {"time": "00:00", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
-            {"time": "10:00", "target": 20.0, "low_margin": 5.0, "high_margin": 35.0},
-            {"time": "19:59", "target": 20.0, "low_margin": 5.0, "high_margin": 35.0},
-            {"time": "20:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
-            {"time": "21:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
-            {"time": "21:01", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
-        ],
-    })
+
+def build_settings(*, electricity_pricing: dict | None = None) -> AppSettings:
+    options: JsonDict = {}
+    options["database_path"] = "/tmp/home-optimizer-test.db"
+    options["room_target"] = [
+        {"time": "00:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+        {"time": "08:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+        {"time": "14:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+        {"time": "18:00", "target": 20.0, "low_margin": 0.5, "high_margin": 1.5},
+        {"time": "22:00", "target": 19.0, "low_margin": 0.5, "high_margin": 1.5},
+    ]
+    options["dhw_target"] = [
+        {"time": "00:00", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
+        {"time": "10:00", "target": 20.0, "low_margin": 5.0, "high_margin": 35.0},
+        {"time": "19:59", "target": 20.0, "low_margin": 5.0, "high_margin": 35.0},
+        {"time": "20:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
+        {"time": "21:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
+        {"time": "21:01", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
+    ]
+    if electricity_pricing is not None:
+        options["electricity_pricing"] = cast(Any, electricity_pricing)
+    return AppSettings.from_options(options)
 
 
 def test_adjusted_gti_with_shutter_uses_latest_known_open_percentage() -> None:
@@ -210,5 +234,45 @@ def test_dashboard_charts_service_includes_configured_room_and_dhw_targets() -> 
         datetime.combine(date(2026, 4, 25), time(20, 0), tzinfo=local_timezone)
     )
     assert response.dhw_target_temperature.points[80].value == 50.0
+
+
+def test_dashboard_charts_service_includes_stored_dynamic_electricity_prices() -> None:
+    service = DashboardChartsService(
+        FakeDashboardDataReader(
+            series=[],
+            electricity_price_series=NumericSeries(
+                name="electricity_price",
+                unit="EUR/kWh",
+                points=[NumericPoint(timestamp="2026-04-25T00:15:00+00:00", value=0.247)],
+            ),
+        ),
+        build_settings(),
+    )
+
+    response = service.get_day_charts(date(2026, 4, 25))
+
+    assert response.electricity_price.name == "electricity_price"
+    assert len(response.electricity_price.points) == 1
+    assert response.electricity_price.points[0].timestamp == "2026-04-25T00:15:00+00:00"
+    assert response.electricity_price.points[0].value == 0.247
+
+
+def test_dashboard_charts_service_generates_fixed_electricity_price_chart_when_store_is_empty() -> None:
+    service = DashboardChartsService(
+        FakeDashboardDataReader(series=[]),
+        build_settings(
+            electricity_pricing={
+                "mode": "fixed",
+                "peak_price": 0.32,
+                "off_peak_price": 0.21,
+                "feed_in_tariff": 0.09,
+            }
+        ),
+    )
+
+    response = service.get_day_charts(date(2026, 4, 25))
+
+    assert len(response.electricity_price.points) == 96
+    assert response.electricity_price.points[0].value == 0.21
 
 

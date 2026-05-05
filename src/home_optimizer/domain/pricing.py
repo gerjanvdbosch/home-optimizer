@@ -13,6 +13,8 @@ from home_optimizer.domain.time import ensure_utc, normalize_utc_timestamp, pars
 
 DEFAULT_CURRENCY = "EUR"
 DEFAULT_DELIVERY_AREA = "NL"
+DEFAULT_DYNAMIC_PRICE_SOURCE = "nordpool"
+DEFAULT_FIXED_PRICE_SOURCE = "fixed_pricing"
 
 
 class DynamicPricing(DomainModel):
@@ -189,6 +191,56 @@ def build_fixed_price_intervals(
     )
 
 
+def price_series_from_intervals(
+    intervals: Sequence[PriceInterval],
+    *,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    interval_minutes: int = 15,
+    currency: str = DEFAULT_CURRENCY,
+) -> NumericSeries:
+    if interval_minutes <= 0:
+        raise ValueError("interval_minutes must be greater than zero")
+    if not intervals:
+        return empty_electricity_price_series(currency)
+
+    ordered_intervals = sorted(intervals, key=lambda interval: interval.start_time_utc)
+    range_start = ensure_utc(start_time) if start_time is not None else ordered_intervals[0].start_time_utc
+    range_end = (
+        ensure_utc(end_time)
+        if end_time is not None
+        else max(interval.end_time_utc for interval in ordered_intervals)
+    )
+    if range_end <= range_start:
+        return electricity_price_series(currency=currency)
+
+    unit = ordered_intervals[0].unit or electricity_price_unit(currency)
+    step = timedelta(minutes=interval_minutes)
+    points: list[NumericPoint] = []
+
+    for interval in ordered_intervals:
+        interval_start = max(interval.start_time_utc, range_start)
+        interval_end = min(interval.end_time_utc, range_end)
+        if interval_end <= interval_start:
+            continue
+
+        cursor = interval_start
+        while cursor < interval_end:
+            points.append(
+                NumericPoint(
+                    timestamp=normalize_utc_timestamp(cursor),
+                    value=interval.value,
+                )
+            )
+            cursor += step
+
+    return NumericSeries(
+        name=ordered_intervals[0].name,
+        unit=unit,
+        points=points,
+    )
+
+
 def build_daily_price_series(
     pricing: FixedPricing,
     *,
@@ -221,9 +273,10 @@ def resolve_daily_price_series(
     fetched_series: NumericSeries | None = None,
     interval_minutes: int = 15,
 ) -> NumericSeries:
+    if fetched_series is not None:
+        return fetched_series
+
     if isinstance(pricing, DynamicPricing):
-        if fetched_series is not None:
-            return fetched_series
         return empty_electricity_price_series(pricing.currency)
 
     return build_daily_price_series(

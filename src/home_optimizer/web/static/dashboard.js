@@ -26,14 +26,14 @@ function latestPoint(series) {
   return series.points[series.points.length - 1];
 }
 
-function summarizeSeries(series) {
+function summarizeSeries(series, precision = 1) {
   const values = series.points.map((point) => point.value);
   if (values.length === 0) {
     return "-";
   }
   const latest = values[values.length - 1];
   const unit = series.unit || "";
-  return `${latest.toFixed(1)} ${unit}`.trim();
+  return `${latest.toFixed(precision)} ${unit}`.trim();
 }
 
 function chartTimestamp(timestamp) {
@@ -147,12 +147,14 @@ const nextDayButton = document.getElementById("next-day");
 const roomSummary = document.getElementById("room-summary");
 const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
+const priceSummary = document.getElementById("price-summary");
 const forecastSummary = document.getElementById("forecast-summary");
 const historicalWeatherSummary = document.getElementById("historical-weather-summary");
 const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
 const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
+const priceChart = document.getElementById("price-chart");
 const forecastChart = document.getElementById("forecast-chart");
 const historicalWeatherChart = document.getElementById("historical-weather-chart");
 const shutterChart = document.getElementById("shutter-chart");
@@ -164,6 +166,7 @@ const chartElements = [
   roomChart,
   dhwChart,
   heatpumpChart,
+  priceChart,
   forecastChart,
   historicalWeatherChart,
   shutterChart,
@@ -221,6 +224,7 @@ function handleChartLoadError(error) {
     roomSummary,
     dhwSummary,
     heatpumpSummary,
+    priceSummary,
     forecastSummary,
     historicalWeatherSummary,
     shutterSummary,
@@ -333,7 +337,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !dhwChart || !heatpumpChart || !forecastChart || !historicalWeatherChart || !shutterChart || !compressorChart || !selectedDateLabel) {
+  if (!roomChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !historicalWeatherChart || !shutterChart || !compressorChart || !selectedDateLabel) {
     return;
   }
 
@@ -420,6 +424,14 @@ async function loadCharts() {
       loadColors: ["#d32f2f", "#f9a825"],
     },
   );
+
+  renderPlot(priceChart, [payload.electricity_price], {
+    colors: ["#00897b"],
+    emptyText: "Geen elektriciteitsprijzen voor deze dag",
+    yTitle: payload.electricity_price.unit || "",
+    traceOptions: [{ label: "Elektriciteitsprijs", precision: 3, shape: "hv" }],
+    xRange: [startIso, endIso],
+  });
 
   renderPlot(
     forecastChart,
@@ -537,6 +549,9 @@ async function loadCharts() {
     payload.heatpump_mode,
     payload.heatpump_statuses,
   );
+  if (priceSummary) {
+    priceSummary.textContent = summarizeSeries(payload.electricity_price, 3);
+  }
   forecastSummary.textContent = summarizeForecast(
     payload.forecast_temperature,
     payload.forecast_gti,

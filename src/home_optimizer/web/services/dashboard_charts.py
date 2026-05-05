@@ -41,6 +41,11 @@ from home_optimizer.domain import (
     latest_value_at,
     upsample_series_forward_fill,
 )
+from home_optimizer.domain.pricing import (
+    DEFAULT_DYNAMIC_PRICE_SOURCE,
+    DEFAULT_FIXED_PRICE_SOURCE,
+    resolve_daily_price_series,
+)
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
@@ -215,6 +220,15 @@ class DashboardChartsService:
             start_time=start_time,
             end_time=end_time,
         )
+        electricity_price_series = self.reader.read_electricity_price_series(
+            start_time=start_time,
+            end_time=end_time,
+            source=(
+                DEFAULT_DYNAMIC_PRICE_SOURCE
+                if self.settings.electricity_pricing.mode == "dynamic"
+                else DEFAULT_FIXED_PRICE_SOURCE
+            ),
+        )
         series_by_name = {item.name: item for item in series}
         shutter_by_name = {item.name: item for item in shutter_series}
         text_series_by_name = {item.name: item for item in text_series}
@@ -296,6 +310,12 @@ class DashboardChartsService:
             cop_name=COP,
         )
         clamped_cop_series = clamp_series(cop_series, maximum=10.0)
+        resolved_electricity_price_series = resolve_daily_price_series(
+            self.settings.electricity_pricing,
+            start_time=start_time,
+            end_time=end_time,
+            fetched_series=electricity_price_series if electricity_price_series.points else None,
+        )
 
         return DashboardChartsResponse(
             date=chart_date.isoformat(),
@@ -394,4 +414,5 @@ class DashboardChartsService:
             compressor_frequency=series_response(
                 series_by_name.get(COMPRESSOR_FREQUENCY, empty_series(COMPRESSOR_FREQUENCY))
             ),
+            electricity_price=series_response(resolved_electricity_price_series),
         )

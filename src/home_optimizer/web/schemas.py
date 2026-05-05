@@ -57,6 +57,7 @@ class ChartTextSeriesResponse(BaseModel):
 
 class DashboardChartsResponse(BaseModel):
     date: str
+    electricity_price: ChartSeriesResponse
     room_temperature: ChartSeriesResponse
     thermostat_setpoint: ChartSeriesResponse
     room_target_temperature: ChartSeriesResponse

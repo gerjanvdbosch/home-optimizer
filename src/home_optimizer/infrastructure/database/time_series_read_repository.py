@@ -4,9 +4,15 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 
-from home_optimizer.domain import NumericPoint, NumericSeries, TextPoint, TextSeries
+from home_optimizer.domain import ELECTRICITY_PRICE, NumericPoint, NumericSeries, TextPoint, TextSeries
+from home_optimizer.domain.pricing import (
+    PriceInterval,
+    empty_electricity_price_series,
+    price_series_from_intervals,
+)
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.infrastructure.database.orm_models import (
+    ElectricityPriceIntervalValue,
     ForecastValue,
     HistoricalWeatherValue,
     Sample1m,
@@ -224,3 +230,52 @@ class TimeSeriesReadRepository:
             NumericSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
             for name in names
         ]
+
+    def read_electricity_price_series(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        *,
+        source: str,
+        interval_minutes: int = 15,
+    ) -> NumericSeries:
+        with self.database.session() as session:
+            rows = session.execute(
+                select(
+                    ElectricityPriceIntervalValue.name,
+                    ElectricityPriceIntervalValue.start_time_utc,
+                    ElectricityPriceIntervalValue.end_time_utc,
+                    ElectricityPriceIntervalValue.source,
+                    ElectricityPriceIntervalValue.unit,
+                    ElectricityPriceIntervalValue.value,
+                )
+                .where(
+                    ElectricityPriceIntervalValue.name == ELECTRICITY_PRICE,
+                    ElectricityPriceIntervalValue.source == source,
+                    ElectricityPriceIntervalValue.end_time_utc > normalize_utc_timestamp(start_time),
+                    ElectricityPriceIntervalValue.start_time_utc < normalize_utc_timestamp(end_time),
+                )
+                .order_by(ElectricityPriceIntervalValue.start_time_utc)
+            ).all()
+
+        if not rows:
+            return empty_electricity_price_series()
+
+        intervals = [
+            PriceInterval(
+                name=name,
+                start_time_utc=parse_datetime(start_timestamp),
+                end_time_utc=parse_datetime(end_timestamp),
+                source=interval_source,
+                unit=unit,
+                value=float(value),
+            )
+            for name, start_timestamp, end_timestamp, interval_source, unit, value in rows
+        ]
+        return price_series_from_intervals(
+            intervals,
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+        )
+

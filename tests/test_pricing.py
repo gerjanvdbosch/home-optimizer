@@ -7,12 +7,14 @@ from pydantic import ValidationError
 
 from home_optimizer.domain import ELECTRICITY_PRICE, NumericPoint, NumericSeries
 from home_optimizer.domain.pricing import (
+    PriceInterval,
     DynamicPricing,
     FixedPricing,
     build_fixed_price_intervals,
     build_daily_price_series,
     electricity_price_series,
     price_intervals_from_series,
+    price_series_from_intervals,
     resolve_daily_price_series,
 )
 
@@ -110,6 +112,42 @@ def test_build_fixed_price_intervals_compresses_repeating_quarters() -> None:
     assert intervals[2].end_time_utc == datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
 
 
+def test_price_series_from_intervals_expands_compressed_intervals_to_quarters() -> None:
+    intervals = [
+        PriceInterval(
+            start_time_utc=datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc),
+            end_time_utc=datetime(2026, 5, 4, 0, 30, tzinfo=timezone.utc),
+            source="nordpool",
+            value=0.21,
+            unit="EUR/kWh",
+        ),
+        PriceInterval(
+            start_time_utc=datetime(2026, 5, 4, 0, 30, tzinfo=timezone.utc),
+            end_time_utc=datetime(2026, 5, 4, 1, 0, tzinfo=timezone.utc),
+            source="nordpool",
+            value=0.32,
+            unit="EUR/kWh",
+        ),
+    ]
+
+    series = price_series_from_intervals(
+        intervals,
+        start_time=datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 5, 4, 1, 0, tzinfo=timezone.utc),
+    )
+
+    assert series == NumericSeries(
+        name=ELECTRICITY_PRICE,
+        unit="EUR/kWh",
+        points=[
+            NumericPoint(timestamp="2026-05-04T00:00:00+00:00", value=0.21),
+            NumericPoint(timestamp="2026-05-04T00:15:00+00:00", value=0.21),
+            NumericPoint(timestamp="2026-05-04T00:30:00+00:00", value=0.32),
+            NumericPoint(timestamp="2026-05-04T00:45:00+00:00", value=0.32),
+        ],
+    )
+
+
 @pytest.mark.parametrize("interval_minutes", [0, -15])
 def test_build_daily_price_series_rejects_invalid_interval(interval_minutes: int) -> None:
     pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
@@ -170,4 +208,20 @@ def test_resolve_daily_price_series_generates_fixed_series_for_fixed_pricing() -
 
     assert len(series.points) == 96
     assert series.points[28].value == 0.32
+
+
+def test_resolve_daily_price_series_prefers_fetched_series_for_fixed_pricing() -> None:
+    pricing = FixedPricing(peak_price=0.32, off_peak_price=0.21, feed_in_tariff=0.09)
+    fetched = NumericSeries(
+        name=ELECTRICITY_PRICE,
+        unit="EUR/kWh",
+        points=[NumericPoint(timestamp="2026-05-04T00:00:00+00:00", value=0.18)],
+    )
+    start = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 5, 5, 0, 0, tzinfo=timezone.utc)
+
+    series = resolve_daily_price_series(pricing, start_time=start, end_time=end, fetched_series=fetched)
+
+    assert series is fetched
+
 
