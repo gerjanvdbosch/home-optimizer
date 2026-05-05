@@ -19,6 +19,7 @@ from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
+from home_optimizer.features.history.weather_import_service import WeatherImportService
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.electricity_price_repository import (
     ElectricityPriceRepository,
@@ -47,6 +48,7 @@ class AppContainer:
     nordpool: NordpoolGateway | None
     history_import_repository: TimeSeriesWriteRepository
     history_import_service: HistoryImportService
+    weather_import_service: WeatherImportService
     telemetry_repository: TimeSeriesWriteRepository
     time_series_read_repository: TimeSeriesReadRepository
     telemetry_service: TelemetryService
@@ -89,6 +91,15 @@ def build_container(
         repository=history_import_repository,
         chunk_days=settings.history_import_chunk_days,
     )
+    weather_import_service = WeatherImportService(
+        gateway=open_meteo,
+        location=location,
+        repository=forecast_repository,
+        pv_tilt=settings.pv_tilt,
+        pv_azimuth=settings.pv_azimuth,
+        living_room_window_azimuth=settings.living_room_window_azimuth,
+        history_days_back=settings.history_import_max_days_back,
+    )
     telemetry_service = TelemetryService(
         gateway=gateway,
         repository=telemetry_repository,
@@ -126,6 +137,7 @@ def build_container(
         nordpool=nordpool,
         history_import_repository=history_import_repository,
         history_import_service=history_import_service,
+        weather_import_service=weather_import_service,
         telemetry_repository=telemetry_repository,
         time_series_read_repository=time_series_read_repository,
         telemetry_service=telemetry_service,

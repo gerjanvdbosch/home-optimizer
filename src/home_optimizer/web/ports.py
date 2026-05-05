@@ -53,6 +53,13 @@ class TelemetrySchedulerRunner(Protocol):
     def stop(self) -> None: ...
 
 
+class WeatherImportRunner(Protocol):
+    def import_weather_data(
+        self,
+        created_at: datetime | None = None,
+    ) -> int: ...
+
+
 class WebAppContainer(Protocol):
     @property
     def home_assistant(self) -> ClosableGateway: ...
@@ -75,5 +82,7 @@ class WebAppContainer(Protocol):
     @property
     def forecast_scheduler(self) -> TelemetrySchedulerRunner: ...
 
+    @property
+    def weather_import_service(self) -> WeatherImportRunner: ...
 
     def close(self) -> None: ...

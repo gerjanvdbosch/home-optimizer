@@ -8,11 +8,11 @@ import httpx
 class OpenMeteoGateway:
     def __init__(
         self,
-        forecast_base_url: str = "https://api.open-meteo.com/v1/forecast",
+        base_url: str = "https://api.open-meteo.com/v1/forecast",
         timeout: float = 30.0,
         client: httpx.Client | None = None,
     ) -> None:
-        self.forecast_base_url = forecast_base_url
+        self.base_url = base_url
         self.client = client or httpx.Client(timeout=httpx.Timeout(timeout))
         self._owns_client = client is None
 
@@ -47,7 +47,7 @@ class OpenMeteoGateway:
         if azimuth is not None:
             params["azimuth"] = azimuth
 
-        response = self.client.get(self.forecast_base_url, params=params)
+        response = self.client.get(self.base_url, params=params)
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
