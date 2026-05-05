@@ -114,7 +114,7 @@ SENSOR_DEFINITIONS = [
     _sensor_definition(
         SHUTTER_LIVING_ROOM,
         "building",
-        "percent",
+        "%",
         "ffill",
     ),
     _sensor_definition(
@@ -138,7 +138,7 @@ SENSOR_DEFINITIONS = [
     _sensor_definition(
         HP_FLOW,
         "heatpump",
-        "Lmin",
+        "L/min",
         "time_weighted_mean",
     ),
     _sensor_definition(HP_MODE, "heatpump", None, "ffill"),

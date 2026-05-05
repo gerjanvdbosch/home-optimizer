@@ -235,7 +235,7 @@ class DashboardChartsService:
             ),
             shutter_by_name.get(
                 SHUTTER_LIVING_ROOM,
-                empty_series(SHUTTER_LIVING_ROOM, unit="percent"),
+                empty_series(SHUTTER_LIVING_ROOM, unit="%"),
             ),
         )
 
@@ -276,7 +276,7 @@ class DashboardChartsService:
             )
         )
 
-        flow_series = series_by_name.get(HP_FLOW, empty_series(HP_FLOW, unit="Lmin"))
+        flow_series = series_by_name.get(HP_FLOW, empty_series(HP_FLOW, unit="L/min"))
         thermal_series, cop_series = build_thermal_and_cop_series(
             flow_series,
             series_by_name.get(HP_SUPPLY_TEMPERATURE),
@@ -307,7 +307,7 @@ class DashboardChartsService:
             shutter_position=series_response(
                 shutter_by_name.get(
                     SHUTTER_LIVING_ROOM,
-                    empty_series(SHUTTER_LIVING_ROOM, unit="percent"),
+                    empty_series(SHUTTER_LIVING_ROOM, unit="%"),
                 )
             ),
             dhw_temperatures=[
