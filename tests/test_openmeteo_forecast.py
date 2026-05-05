@@ -20,7 +20,7 @@ from home_optimizer.infrastructure.database.historical_weather_repository import
 )
 from home_optimizer.infrastructure.database.orm_models import ForecastValue, HistoricalWeatherValue
 from home_optimizer.infrastructure.database.session import Database
-from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
+from home_optimizer.infrastructure.forecast.openmeteo import OpenMeteoGateway
 
 
 def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:

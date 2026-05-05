@@ -40,8 +40,8 @@ from home_optimizer.infrastructure.database.time_series_write_repository import 
     TimeSeriesWriteRepository,
 )
 from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
+from home_optimizer.infrastructure.forecast.openmeteo import OpenMeteoGateway
 from home_optimizer.infrastructure.pricing.nordpool import NordpoolGateway
-from home_optimizer.infrastructure.weather.openmeteo import OpenMeteoGateway
 
 GatewayFactory = Callable[[list[SensorSpec]], SensorGateway]
 

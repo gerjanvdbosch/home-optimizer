@@ -7,8 +7,8 @@ from .database import (
 )
 from .home_assistant import HomeAssistantGateway
 from .local import LocalJsonGateway
+from .forecast import OpenMeteoGateway
 from .pricing import NordpoolGateway
-from .weather import OpenMeteoGateway
 
 __all__ = [
     "Database",
