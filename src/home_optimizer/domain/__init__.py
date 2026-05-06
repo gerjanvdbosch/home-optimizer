@@ -64,7 +64,7 @@ from .pricing import (
     resolve_daily_price_series,
 )
 from .sensor_factory import build_sensor_specs
-from .sensors import SENSOR_DEFINITIONS, SensorDefinition, SensorSpec
+from .sensors import SENSOR_DEFINITIONS, SensorDefinition, SensorSpec, SignalRole
 from .series import NumericPoint, NumericSeries, TextPoint, TextSeries
 from .series_transforms import (
     adjusted_gti_with_shutter,
@@ -136,6 +136,7 @@ __all__ = [
     "SensorDefinition",
     "SensorSpec",
     "SHUTTER_LIVING_ROOM",
+    "SignalRole",
     "ShutterPositionControl",
     "ThermostatSetpointControl",
     "THERMAL_OUTPUT",
