@@ -19,7 +19,7 @@ class AppSettings(DomainModel):
     log_level: LogLevel = "INFO"
     api_port: int = Field(default=8099, ge=1, le=65535)
     history_import_chunk_days: int = Field(default=3, gt=0)
-    history_import_max_days_back: int = Field(default=19, gt=0)
+    history_import_max_days_back: int = Field(default=10, gt=0)
     forecast_poll_interval_seconds: int = Field(default=3600, gt=0)
     pv_tilt: float | None = Field(default=None, ge=0, le=90)
     pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
