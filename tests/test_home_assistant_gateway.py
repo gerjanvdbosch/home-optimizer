@@ -22,6 +22,7 @@ def test_home_assistant_gateway_reads_location_from_zone_home() -> None:
 
     gateway = HomeAssistantGateway(
         base_url="http://homeassistant.local",
+        websocket_url="ws://homeassistant.local/api/websocket",
         token="token",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
@@ -33,6 +34,7 @@ def test_home_assistant_gateway_reads_location_from_zone_home() -> None:
 def test_home_assistant_gateway_returns_none_for_missing_location() -> None:
     gateway = HomeAssistantGateway(
         base_url="http://homeassistant.local",
+        websocket_url="ws://homeassistant.local/api/websocket",
         token="token",
         client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
     )
@@ -59,11 +61,12 @@ def test_home_assistant_gateway_get_statistics_calls_correct_endpoint() -> None:
 
     gateway = HomeAssistantGateway(
         base_url="http://homeassistant.local",
+        websocket_url="ws://homeassistant.local/api/websocket",
         token="token",
         client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
     )
 
-    with patch("home_optimizer.infrastructure.home_assistant.gateway.websocket.create_connection", return_value=mock_ws):
+    with patch("home_optimizer.infrastructure.home_assistant.gateway.websocket.create_connection", return_value=mock_ws) as create_connection:
         result = gateway.get_statistics(
             statistic_id="sensor.room",
             start_time=datetime(2026, 4, 14, tzinfo=timezone.utc),
@@ -72,6 +75,7 @@ def test_home_assistant_gateway_get_statistics_calls_correct_endpoint() -> None:
 
     assert len(result) == 1
     assert result[0]["mean"] == 20.5
+    create_connection.assert_called_once_with("ws://homeassistant.local/api/websocket", timeout=60.0)
     auth_payload = json.loads(sent[0])
     assert auth_payload == {"type": "auth", "access_token": "token"}
     cmd_payload = json.loads(sent[1])
@@ -92,6 +96,7 @@ def test_home_assistant_gateway_get_statistics_returns_empty_for_unknown_entity(
 
     gateway = HomeAssistantGateway(
         base_url="http://homeassistant.local",
+        websocket_url="ws://homeassistant.local/api/websocket",
         token="token",
         client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
     )
@@ -104,3 +109,31 @@ def test_home_assistant_gateway_get_statistics_returns_empty_for_unknown_entity(
         )
 
     assert result == []
+
+
+def test_home_assistant_gateway_get_statistics_supports_secure_websocket_url() -> None:
+    messages = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"}),
+        json.dumps({"id": 1, "type": "result", "success": True, "result": {}}),
+    ]
+
+    mock_ws = MagicMock()
+    mock_ws.recv.side_effect = messages
+
+    gateway = HomeAssistantGateway(
+        base_url="https://homeassistant.local/core",
+        websocket_url="wss://homeassistant.local/core/api/websocket",
+        token="token",
+        client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
+    )
+
+    with patch("home_optimizer.infrastructure.home_assistant.gateway.websocket.create_connection", return_value=mock_ws) as create_connection:
+        gateway.get_statistics(
+            statistic_id="sensor.room",
+            start_time=datetime(2026, 4, 14, tzinfo=timezone.utc),
+            end_time=datetime(2026, 4, 15, tzinfo=timezone.utc),
+        )
+
+    create_connection.assert_called_once_with("wss://homeassistant.local/core/api/websocket", timeout=60.0)
+

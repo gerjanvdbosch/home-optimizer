@@ -10,19 +10,20 @@ import websocket
 
 from home_optimizer.domain.location import Location, parse_location
 
-_WS_TIMEOUT = 60.0
-
 
 class HomeAssistantGateway:
     def __init__(
         self,
         base_url: str = "http://supervisor/core",
+        websocket_url: str = "ws://supervisor/core/api/websocket",
         token: str | None = None,
         timeout: float = 30.0,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.websocket_url = websocket_url.rstrip("/")
         self.token = token or os.getenv("SUPERVISOR_TOKEN")
+        self.timeout = timeout
         if not self.token:
             raise ValueError("SUPERVISOR_TOKEN not found.")
 
@@ -85,10 +86,7 @@ class HomeAssistantGateway:
         end_time: datetime,
         period: str = "hour",
     ) -> list[dict[str, Any]]:
-        ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
-        ws_url = f"{ws_url}/api/websocket"
-
-        ws = websocket.create_connection(ws_url, timeout=_WS_TIMEOUT)
+        ws = websocket.create_connection(self.websocket_url, timeout=self.timeout)
         try:
             _ws_recv(ws)  # auth_required
             ws.send(json.dumps({"type": "auth", "access_token": self.token}))
