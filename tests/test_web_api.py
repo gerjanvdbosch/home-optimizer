@@ -108,7 +108,11 @@ class FakeTimeSeriesReadRepository:
             NumericSeries(
                 name="outdoor_temperature",
                 unit="°C",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=12.1)],
+                points=build_half_hourly_series(
+                    name="outdoor_temperature",
+                    unit="°C",
+                    start_value=12.1,
+                ).points,
             ),
             build_half_hourly_series(
                 name="thermostat_setpoint",
@@ -435,8 +439,9 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert payload["outdoor_temperature"] == {
         "name": "outdoor_temperature",
         "unit": "°C",
-        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 12.1}],
+        "points": payload["outdoor_temperature"]["points"],
     }
+    assert payload["outdoor_temperature"]["points"][24]["value"] == 12.1
     assert payload["thermostat_setpoint"]["name"] == "thermostat_setpoint"
     assert payload["thermostat_setpoint"]["unit"] == "°C"
     assert payload["thermostat_setpoint"]["points"][0] == {
@@ -541,10 +546,13 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
     payload = response.json()
     assert payload["is_valid_for_control_evaluation"] is True
     assert payload["validity_reasons"] == []
+    assert payload["data_coverage_pct"] == 100.0
+    assert payload["largest_data_gap_minutes"] == 30.0
     assert payload["hp_electric_kwh"] is not None
     assert payload["total_import_kwh"] is not None
     assert payload["total_export_kwh"] is not None
     assert payload["pv_generation_kwh"] is not None
+    assert payload["outdoor_temperature_mean_c"] == pytest.approx(12.1)
     assert payload["self_consumption_ratio"] is not None
     assert payload["electricity_cost_eur"] is not None
     assert payload["thermostat_setpoint_changes"] == 1

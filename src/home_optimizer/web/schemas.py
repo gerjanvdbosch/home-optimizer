@@ -89,10 +89,13 @@ class DashboardChartsResponse(BaseModel):
 class DailyKpiResponse(BaseModel):
     is_valid_for_control_evaluation: bool
     validity_reasons: list[str]
+    data_coverage_pct: float | None
+    largest_data_gap_minutes: float | None
     hp_electric_kwh: float | None
     total_import_kwh: float | None
     total_export_kwh: float | None
     pv_generation_kwh: float | None
+    outdoor_temperature_mean_c: float | None
     self_consumption_ratio: float | None
     electricity_cost_eur: float | None
     room_temperature_mae_c: float | None

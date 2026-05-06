@@ -13,10 +13,13 @@ from .time import parse_datetime
 class DailyKpis(DomainModel):
     is_valid_for_control_evaluation: bool = True
     validity_reasons: list[str] = Field(default_factory=list)
+    data_coverage_pct: float | None = None
+    largest_data_gap_minutes: float | None = None
     hp_electric_kwh: float | None = None
     total_import_kwh: float | None = None
     total_export_kwh: float | None = None
     pv_generation_kwh: float | None = None
+    outdoor_temperature_mean_c: float | None = None
     self_consumption_ratio: float | None = None
     electricity_cost_eur: float | None = None
     room_temperature_mae_c: float | None = None
@@ -59,6 +62,64 @@ def _has_gap_longer_than(
         previous_time = point_time
 
     return end_time - previous_time > max_gap
+
+
+def _largest_gap_duration(
+    series: NumericSeries | None,
+    *,
+    start_time: datetime,
+    end_time: datetime,
+) -> timedelta | None:
+    points = _sorted_points(series)
+    if not points:
+        return None
+
+    largest_gap = timedelta(0)
+    previous_time = start_time
+    for point in points:
+        point_time = parse_datetime(point.timestamp)
+        if point_time < start_time:
+            continue
+        if point_time > end_time:
+            break
+        largest_gap = max(largest_gap, point_time - previous_time)
+        previous_time = point_time
+
+    largest_gap = max(largest_gap, end_time - previous_time)
+    return largest_gap
+
+
+def coverage_pct(
+    series: NumericSeries | None,
+    *,
+    start_time: datetime,
+    end_time: datetime,
+    max_gap: timedelta,
+) -> float | None:
+    points = _sorted_points(series)
+    total_seconds = (end_time - start_time).total_seconds()
+    if not points or total_seconds <= 0.0:
+        return None
+
+    covered_seconds = 0.0
+    previous_time = start_time
+    for point in points:
+        point_time = parse_datetime(point.timestamp)
+        if point_time < start_time:
+            continue
+        if point_time > end_time:
+            break
+        covered_seconds += min(
+            max((point_time - previous_time).total_seconds(), 0.0),
+            max_gap.total_seconds(),
+        )
+        previous_time = point_time
+
+    covered_seconds += min(
+        max((end_time - previous_time).total_seconds(), 0.0),
+        max_gap.total_seconds(),
+    )
+    return max(0.0, min((covered_seconds / total_seconds) * 100.0, 100.0))
 
 
 def integrate_power_series(
@@ -303,6 +364,40 @@ def cost_from_net_power(
     return total_cost
 
 
+def weighted_mean(
+    series: NumericSeries | None,
+    *,
+    start_time: datetime,
+    end_time: datetime,
+) -> float | None:
+    points = _sorted_points(series)
+    if not points:
+        return None
+
+    weighted_total = 0.0
+    total_hours = 0.0
+    for index, point in enumerate(points):
+        point_time = parse_datetime(point.timestamp)
+        if point_time >= end_time:
+            break
+        next_time = (
+            parse_datetime(points[index + 1].timestamp)
+            if index + 1 < len(points)
+            else end_time
+        )
+        segment_start = max(point_time, start_time)
+        segment_end = min(next_time, end_time)
+        if segment_end <= segment_start:
+            continue
+        duration_hours = _duration_hours(segment_start, segment_end)
+        weighted_total += point.value * duration_hours
+        total_hours += duration_hours
+
+    if total_hours <= 0.0:
+        return None
+    return weighted_total / total_hours
+
+
 def compute_daily_kpis(
     *,
     room_temperature: NumericSeries | None,
@@ -318,6 +413,7 @@ def compute_daily_kpis(
     export_total_kwh: NumericSeries | None,
     pv_output_power: NumericSeries | None,
     pv_total_kwh: NumericSeries | None,
+    outdoor_temperature: NumericSeries | None,
     dhw_top_temperature: NumericSeries | None,
     dhw_target_min: NumericSeries,
     electricity_price: NumericSeries,
@@ -327,6 +423,26 @@ def compute_daily_kpis(
 ) -> DailyKpis:
     validity_reasons: list[str] = []
     max_gap = timedelta(minutes=30)
+    coverage_values: list[float] = []
+    largest_gap_minutes = 0.0
+
+    def record_series_quality(series: NumericSeries | None) -> None:
+        nonlocal largest_gap_minutes
+        coverage = coverage_pct(
+            series,
+            start_time=start_time,
+            end_time=end_time,
+            max_gap=max_gap,
+        )
+        if coverage is not None:
+            coverage_values.append(coverage)
+        largest_gap = _largest_gap_duration(
+            series,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        if largest_gap is not None:
+            largest_gap_minutes = max(largest_gap_minutes, largest_gap.total_seconds() / 60.0)
 
     if not room_temperature or not room_temperature.points:
         validity_reasons.append("missing_room_temperature")
@@ -337,6 +453,7 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("room_temperature_gap_too_large")
+    record_series_quality(room_temperature)
 
     if not thermostat_setpoint or not thermostat_setpoint.points:
         validity_reasons.append("missing_thermostat_setpoint")
@@ -347,6 +464,7 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("thermostat_setpoint_gap_too_large")
+    record_series_quality(thermostat_setpoint)
 
     if not compressor_frequency or not compressor_frequency.points:
         validity_reasons.append("missing_compressor_frequency")
@@ -357,12 +475,15 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("compressor_frequency_gap_too_large")
+    record_series_quality(compressor_frequency)
 
     if (
         (not hp_electric_total_kwh or not hp_electric_total_kwh.points)
         and (not hp_electric_power or not hp_electric_power.points)
     ):
         validity_reasons.append("missing_heatpump_electricity")
+        record_series_quality(hp_electric_power)
+        record_series_quality(hp_electric_total_kwh)
     elif (
         hp_electric_total_kwh
         and hp_electric_total_kwh.points
@@ -374,6 +495,7 @@ def compute_daily_kpis(
         )
     ):
         validity_reasons.append("hp_electric_total_kwh_gap_too_large")
+        record_series_quality(hp_electric_total_kwh)
     elif (
         hp_electric_power
         and hp_electric_power.points
@@ -385,6 +507,9 @@ def compute_daily_kpis(
         )
     ):
         validity_reasons.append("hp_electric_power_gap_too_large")
+        record_series_quality(hp_electric_power)
+    else:
+        record_series_quality(hp_electric_total_kwh or hp_electric_power)
 
     if (
         (not import_total_kwh or not import_total_kwh.points)
@@ -392,6 +517,9 @@ def compute_daily_kpis(
         and (not net_power or not net_power.points)
     ):
         validity_reasons.append("missing_grid_energy")
+        record_series_quality(net_power)
+        record_series_quality(import_total_kwh)
+        record_series_quality(export_total_kwh)
     elif net_power and net_power.points and _has_gap_longer_than(
         net_power,
         start_time=start_time,
@@ -399,6 +527,7 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("net_power_gap_too_large")
+        record_series_quality(net_power)
     elif import_total_kwh and import_total_kwh.points and _has_gap_longer_than(
         import_total_kwh,
         start_time=start_time,
@@ -406,6 +535,7 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("import_total_kwh_gap_too_large")
+        record_series_quality(import_total_kwh)
     elif export_total_kwh and export_total_kwh.points and _has_gap_longer_than(
         export_total_kwh,
         start_time=start_time,
@@ -413,12 +543,17 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("export_total_kwh_gap_too_large")
+        record_series_quality(export_total_kwh)
+    else:
+        record_series_quality(net_power or import_total_kwh or export_total_kwh)
 
     if (
         (not pv_total_kwh or not pv_total_kwh.points)
         and (not pv_output_power or not pv_output_power.points)
     ):
         validity_reasons.append("missing_pv_generation")
+        record_series_quality(pv_output_power)
+        record_series_quality(pv_total_kwh)
     elif pv_total_kwh and pv_total_kwh.points and _has_gap_longer_than(
         pv_total_kwh,
         start_time=start_time,
@@ -426,6 +561,7 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("pv_total_kwh_gap_too_large")
+        record_series_quality(pv_total_kwh)
     elif pv_output_power and pv_output_power.points and _has_gap_longer_than(
         pv_output_power,
         start_time=start_time,
@@ -433,6 +569,20 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("pv_output_power_gap_too_large")
+        record_series_quality(pv_output_power)
+    else:
+        record_series_quality(pv_total_kwh or pv_output_power)
+
+    if not outdoor_temperature or not outdoor_temperature.points:
+        validity_reasons.append("missing_outdoor_temperature")
+    elif _has_gap_longer_than(
+        outdoor_temperature,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("outdoor_temperature_gap_too_large")
+    record_series_quality(outdoor_temperature)
 
     if not dhw_top_temperature or not dhw_top_temperature.points:
         validity_reasons.append("missing_dhw_temperature")
@@ -443,6 +593,7 @@ def compute_daily_kpis(
         max_gap=max_gap,
     ):
         validity_reasons.append("dhw_top_temperature_gap_too_large")
+    record_series_quality(dhw_top_temperature)
 
     hp_electric_kwh = delta_kwh(hp_electric_total_kwh)
     if hp_electric_kwh is None:
@@ -492,10 +643,17 @@ def compute_daily_kpis(
     return DailyKpis(
         is_valid_for_control_evaluation=not validity_reasons,
         validity_reasons=validity_reasons,
+        data_coverage_pct=min(coverage_values) if coverage_values else None,
+        largest_data_gap_minutes=largest_gap_minutes if coverage_values else None,
         hp_electric_kwh=hp_electric_kwh,
         total_import_kwh=total_import_kwh,
         total_export_kwh=total_export_kwh,
         pv_generation_kwh=pv_generation_kwh,
+        outdoor_temperature_mean_c=weighted_mean(
+            outdoor_temperature,
+            start_time=start_time,
+            end_time=end_time,
+        ),
         self_consumption_ratio=self_consumption_ratio,
         electricity_cost_eur=cost_from_net_power(
             net_power,

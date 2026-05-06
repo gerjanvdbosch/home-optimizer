@@ -9,6 +9,7 @@ from home_optimizer.domain import (
     COMPRESSOR_FREQUENCY,
     DHW_TOP_TEMPERATURE,
     HP_ELECTRIC_POWER,
+    OUTDOOR_TEMPERATURE,
     P1_NET_POWER,
     PV_OUTPUT_POWER,
     ROOM_TEMPERATURE,
@@ -88,6 +89,7 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     pv_values = [0.0] * 24 + [2.0] * 12 + [0.0] * 12
     compressor_values = [0.0] * 4 + [35.0] * 8 + [0.0] * 8 + [42.0] * 28
     room_values = [18.0] * 48
+    outdoor_values = [8.0] * 24 + [10.0] * 24
     dhw_values = [45.0] * 48
     setpoint_values = [19.0] * 16 + [20.0] * 24 + [18.0] * 8
 
@@ -125,6 +127,12 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
                     values=room_values,
                 ),
                 build_half_hourly_series(
+                    name=OUTDOOR_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=outdoor_values,
+                ),
+                build_half_hourly_series(
                     name=DHW_TOP_TEMPERATURE,
                     unit="°C",
                     start_time=start_time,
@@ -145,10 +153,13 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
 
     assert kpis.is_valid_for_control_evaluation is True
     assert kpis.validity_reasons == []
+    assert kpis.data_coverage_pct == 100.0
+    assert kpis.largest_data_gap_minutes == 30.0
     assert kpis.hp_electric_kwh == 24.0
     assert kpis.total_import_kwh == 36.0
     assert kpis.total_export_kwh == 6.0
     assert kpis.pv_generation_kwh == 12.0
+    assert kpis.outdoor_temperature_mean_c == 9.0
     assert kpis.self_consumption_ratio == 0.5
     assert kpis.electricity_cost_eur == pytest.approx(8.4)
     assert kpis.room_temperature_mae_c == 1.0
@@ -174,6 +185,7 @@ def test_daily_kpi_service_marks_day_invalid_when_required_series_are_missing() 
         "missing_heatpump_electricity",
         "missing_grid_energy",
         "missing_pv_generation",
+        "missing_outdoor_temperature",
         "missing_dhw_temperature",
     ]
 
@@ -232,6 +244,12 @@ def test_daily_kpi_service_marks_day_invalid_when_gap_exceeds_thirty_minutes() -
                     unit="°C",
                     start_time=start_time,
                     values=[45.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=OUTDOOR_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[10.0] * 48,
                 ),
             ]
         ),
