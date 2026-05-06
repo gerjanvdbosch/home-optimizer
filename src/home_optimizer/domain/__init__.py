@@ -1,7 +1,7 @@
 from .clock import utc_now
 from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
-from .kpis import DailyKpis, compute_daily_kpis
+from .kpis import BaselineKpiSummary, DailyKpis, compute_baseline_kpi_summary, compute_daily_kpis
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -82,6 +82,7 @@ __all__ = [
     "BASELOAD",
     "BOILER_AMBIENT_TEMPERATURE",
     "BOOSTER_HEATER_ACTIVE",
+    "BaselineKpiSummary",
     "COMPRESSOR_FREQUENCY",
     "COP",
     "DEFROST_ACTIVE",
@@ -145,6 +146,7 @@ __all__ = [
     "adjusted_gti_with_shutter",
     "build_daily_price_series",
     "build_fixed_price_intervals",
+    "compute_baseline_kpi_summary",
     "compute_daily_kpis",
     "build_daily_target_band_series",
     "build_sensor_specs",

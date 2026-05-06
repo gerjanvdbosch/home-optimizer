@@ -69,10 +69,16 @@ def build_half_hourly_series(
     start_value: float,
     changed_value: float | None = None,
     change_index: int | None = None,
+    start_time: datetime | None = None,
 ) -> NumericSeries:
-    start_time = datetime(2026, 4, 25, 0, 0, tzinfo=current_local_timezone()).astimezone(
-        ZoneInfo("UTC")
-    )
+    start_time = start_time or datetime(
+        2026,
+        4,
+        25,
+        0,
+        0,
+        tzinfo=current_local_timezone(),
+    ).astimezone(ZoneInfo("UTC"))
     points: list[NumericPoint] = []
     for index in range(48):
         value = start_value
@@ -104,7 +110,12 @@ class FakeTimeSeriesReadRepository:
                 )
             ]
         return [
-            build_half_hourly_series(name="room_temperature", unit="°C", start_value=20.5),
+            build_half_hourly_series(
+                name="room_temperature",
+                unit="°C",
+                start_value=20.5,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
+            ),
             NumericSeries(
                 name="outdoor_temperature",
                 unit="°C",
@@ -112,6 +123,7 @@ class FakeTimeSeriesReadRepository:
                     name="outdoor_temperature",
                     unit="°C",
                     start_value=12.1,
+                    start_time=start_time.astimezone(ZoneInfo("UTC")),
                 ).points,
             ),
             build_half_hourly_series(
@@ -120,8 +132,14 @@ class FakeTimeSeriesReadRepository:
                 start_value=20.0,
                 changed_value=21.0,
                 change_index=24,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
             ),
-            build_half_hourly_series(name="dhw_top_temperature", unit="°C", start_value=48.0),
+            build_half_hourly_series(
+                name="dhw_top_temperature",
+                unit="°C",
+                start_value=48.0,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
+            ),
             NumericSeries(
                 name="dhw_bottom_temperature",
                 unit="°C",
@@ -133,6 +151,7 @@ class FakeTimeSeriesReadRepository:
                 start_value=1.5,
                 changed_value=0.0,
                 change_index=24,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
             ),
             build_half_hourly_series(
                 name="compressor_frequency",
@@ -140,6 +159,7 @@ class FakeTimeSeriesReadRepository:
                 start_value=0.0,
                 changed_value=40.0,
                 change_index=12,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
             ),
             NumericSeries(
                 name="defrost_active",
@@ -157,6 +177,7 @@ class FakeTimeSeriesReadRepository:
                 start_value=2.0,
                 changed_value=-0.5,
                 change_index=24,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
             ),
             build_half_hourly_series(
                 name="pv_output_power",
@@ -164,6 +185,7 @@ class FakeTimeSeriesReadRepository:
                 start_value=0.0,
                 changed_value=1.0,
                 change_index=24,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
             ),
         ]
 
@@ -210,8 +232,16 @@ class FakeTimeSeriesReadRepository:
             name="electricity_price",
             unit="EUR/kWh",
             points=[
-                NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=0.245),
-                NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.245),
+                NumericPoint(
+                    timestamp=start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds"),
+                    value=0.245,
+                ),
+                NumericPoint(
+                    timestamp=(
+                        start_time.astimezone(ZoneInfo("UTC")) + timedelta(hours=12)
+                    ).isoformat(timespec="seconds"),
+                    value=0.245,
+                ),
             ],
         )
 
@@ -415,17 +445,27 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["date"] == "2026-04-25"
+    local_timezone = dashboard_charts_module.current_timezone()
+    expected_day_start = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
+    expected_day_end = expected_day_start + timedelta(days=1)
     assert payload["electricity_price"] == {
         "name": "electricity_price",
         "unit": "EUR/kWh",
         "points": [
-            {"timestamp": "2026-04-25T00:00:00+00:00", "value": 0.245},
-            {"timestamp": "2026-04-25T12:00:00+00:00", "value": 0.245},
+            {
+                "timestamp": expected_day_start.astimezone(ZoneInfo("UTC")).isoformat(
+                    timespec="seconds"
+                ),
+                "value": 0.245,
+            },
+            {
+                "timestamp": (expected_day_start + timedelta(hours=12))
+                .astimezone(ZoneInfo("UTC"))
+                .isoformat(timespec="seconds"),
+                "value": 0.245,
+            },
         ],
     }
-    local_timezone = dashboard_charts_module.current_timezone()
-    expected_day_start = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
-    expected_day_end = expected_day_start + timedelta(days=1)
     assert payload["room_temperature"]["points"][0] == {
         "timestamp": expected_day_start.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds"),
         "value": 20.5,
@@ -540,7 +580,7 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
     app, _ = build_test_app(imported_rows={})
 
     with TestClient(app) as client:
-        response = client.get("/api/dashboard/kpis?date=2026-04-25")
+        response = client.get("/api/baseline/kpis?date=2026-04-25")
 
     assert response.status_code == 200
     payload = response.json()
@@ -557,6 +597,25 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
     assert payload["electricity_cost_eur"] is not None
     assert payload["thermostat_setpoint_changes"] == 1
     assert payload["compressor_starts"] == 1
+
+
+def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get("/api/baseline/kpi-summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["number_of_days"] == 20
+    assert payload["number_of_valid_days"] == 20
+    assert payload["mean_hp_electric_kwh_per_day"] is not None
+    assert payload["mean_electricity_cost_eur_per_day"] is not None
+    assert payload["mean_room_temperature_mae_c"] is not None
+    assert payload["total_comfort_violation_degree_hours"] >= 0.0
+    assert payload["total_dhw_violation_minutes"] >= 0.0
+    assert payload["mean_compressor_starts_per_day"] is not None
+    assert payload["mean_self_consumption_ratio"] is not None
 
 
 def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.MonkeyPatch) -> None:

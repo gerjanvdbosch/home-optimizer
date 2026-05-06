@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from home_optimizer.app.history_import_jobs import HistoryImportJob
 from home_optimizer.domain import (
+    BaselineKpiSummary,
     DailyKpis,
     NumericSeries,
     TextSeries,
 )
 from home_optimizer.web.schemas import (
+    BaselineKpiSummaryResponse,
     ChartPointResponse,
     ChartSeriesResponse,
     ChartTextPointResponse,
@@ -53,3 +55,7 @@ def text_series_response(series: TextSeries) -> ChartTextSeriesResponse:
 
 def daily_kpi_response(kpis: DailyKpis) -> DailyKpiResponse:
     return DailyKpiResponse(**kpis.model_dump())
+
+
+def baseline_kpi_summary_response(summary: BaselineKpiSummary) -> BaselineKpiSummaryResponse:
+    return BaselineKpiSummaryResponse(**summary.model_dump())

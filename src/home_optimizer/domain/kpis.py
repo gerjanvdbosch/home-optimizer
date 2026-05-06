@@ -29,6 +29,18 @@ class DailyKpis(DomainModel):
     compressor_starts: int = 0
 
 
+class BaselineKpiSummary(DomainModel):
+    number_of_days: int
+    number_of_valid_days: int
+    mean_hp_electric_kwh_per_day: float | None = None
+    mean_electricity_cost_eur_per_day: float | None = None
+    mean_room_temperature_mae_c: float | None = None
+    total_comfort_violation_degree_hours: float = 0.0
+    total_dhw_violation_minutes: float = 0.0
+    mean_compressor_starts_per_day: float | None = None
+    mean_self_consumption_ratio: float | None = None
+
+
 def _sorted_points(series: NumericSeries | None) -> list[NumericPoint]:
     if series is None:
         return []
@@ -683,4 +695,44 @@ def compute_daily_kpis(
         ),
         thermostat_setpoint_changes=count_setpoint_changes(thermostat_setpoint),
         compressor_starts=count_compressor_starts(compressor_frequency),
+    )
+
+
+def compute_baseline_kpi_summary(daily_kpis: list[DailyKpis]) -> BaselineKpiSummary:
+    valid_days = [
+        day_kpis for day_kpis in daily_kpis if day_kpis.is_valid_for_control_evaluation
+    ]
+
+    def mean(values: list[float | None]) -> float | None:
+        filtered = [value for value in values if value is not None]
+        if not filtered:
+            return None
+        return sum(filtered) / len(filtered)
+
+    return BaselineKpiSummary(
+        number_of_days=len(daily_kpis),
+        number_of_valid_days=len(valid_days),
+        mean_hp_electric_kwh_per_day=mean(
+            [day_kpis.hp_electric_kwh for day_kpis in valid_days]
+        ),
+        mean_electricity_cost_eur_per_day=mean(
+            [day_kpis.electricity_cost_eur for day_kpis in valid_days]
+        ),
+        mean_room_temperature_mae_c=mean(
+            [day_kpis.room_temperature_mae_c for day_kpis in valid_days]
+        ),
+        total_comfort_violation_degree_hours=sum(
+            day_kpis.room_comfort_violation_degree_hours or 0.0
+            for day_kpis in valid_days
+        ),
+        total_dhw_violation_minutes=sum(
+            day_kpis.dhw_comfort_violation_minutes or 0.0
+            for day_kpis in valid_days
+        ),
+        mean_compressor_starts_per_day=mean(
+            [float(day_kpis.compressor_starts) for day_kpis in valid_days]
+        ),
+        mean_self_consumption_ratio=mean(
+            [day_kpis.self_consumption_ratio for day_kpis in valid_days]
+        ),
     )

@@ -18,7 +18,7 @@ from home_optimizer.domain import (
     NumericSeries,
     normalize_utc_timestamp,
 )
-from home_optimizer.domain.time import current_local_timezone
+from home_optimizer.domain.time import current_local_timezone, parse_datetime
 from home_optimizer.features.kpi.service import DailyKpiService
 
 
@@ -27,7 +27,11 @@ class FakeKpiDataReader:
         self._series = series
 
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        return [series for series in self._series if series.name in names]
+        return [
+            shift_series_to_day_boundary(series, start_time)
+            for series in self._series
+            if series.name in names
+        ]
 
     def read_electricity_price_series(
         self,
@@ -56,6 +60,24 @@ def build_half_hourly_series(
                 value=value,
             )
             for index, value in enumerate(values)
+        ],
+    )
+
+
+def shift_series_to_day_boundary(series: NumericSeries, start_time: datetime) -> NumericSeries:
+    if not series.points:
+        return series
+
+    delta = start_time - parse_datetime(series.points[0].timestamp)
+    return NumericSeries(
+        name=series.name,
+        unit=series.unit,
+        points=[
+            NumericPoint(
+                timestamp=normalize_utc_timestamp(parse_datetime(point.timestamp) + delta),
+                value=point.value,
+            )
+            for point in series.points
         ],
     )
 
@@ -260,3 +282,77 @@ def test_daily_kpi_service_marks_day_invalid_when_gap_exceeds_thirty_minutes() -
 
     assert kpis.is_valid_for_control_evaluation is False
     assert "room_temperature_gap_too_large" in kpis.validity_reasons
+
+
+def test_daily_kpi_service_builds_baseline_summary_from_valid_days() -> None:
+    local_timezone = current_local_timezone()
+    start_time = datetime.combine(date(2026, 4, 25), time.min, tzinfo=local_timezone)
+    valid_values = [19.0] * 48
+
+    service = DailyKpiService(
+        FakeKpiDataReader(
+            [
+                build_half_hourly_series(
+                    name=ROOM_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=valid_values,
+                ),
+                build_half_hourly_series(
+                    name=THERMOSTAT_SETPOINT,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[19.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=COMPRESSOR_FREQUENCY,
+                    unit="Hz",
+                    start_time=start_time,
+                    values=[0.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=HP_ELECTRIC_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[2.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=P1_NET_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[3.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=PV_OUTPUT_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[1.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=OUTDOOR_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[10.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=DHW_TOP_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[45.0] * 48,
+                ),
+            ]
+        ),
+        build_settings(),
+    )
+
+    summary = service.get_baseline_summary(date(2026, 4, 25), date(2026, 4, 27))
+
+    assert summary.number_of_days == 3
+    assert summary.number_of_valid_days == 3
+    assert summary.mean_hp_electric_kwh_per_day == 48.0
+    assert summary.mean_electricity_cost_eur_per_day == pytest.approx(18.0)
+    assert summary.mean_room_temperature_mae_c == 0.0
+    assert summary.total_comfort_violation_degree_hours == 0.0
+    assert summary.total_dhw_violation_minutes == 4320.0
+    assert summary.mean_compressor_starts_per_day == 0.0
+    assert summary.mean_self_consumption_ratio == 1.0

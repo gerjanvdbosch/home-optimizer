@@ -103,3 +103,15 @@ class DailyKpiResponse(BaseModel):
     dhw_comfort_violation_minutes: float | None
     thermostat_setpoint_changes: int
     compressor_starts: int
+
+
+class BaselineKpiSummaryResponse(BaseModel):
+    number_of_days: int
+    number_of_valid_days: int
+    mean_hp_electric_kwh_per_day: float | None
+    mean_electricity_cost_eur_per_day: float | None
+    mean_room_temperature_mae_c: float | None
+    total_comfort_violation_degree_hours: float
+    total_dhw_violation_minutes: float
+    mean_compressor_starts_per_day: float | None
+    mean_self_consumption_ratio: float | None

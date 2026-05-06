@@ -22,11 +22,13 @@ from home_optimizer.domain import (
     ROOM_TARGET_TEMPERATURE,
     ROOM_TEMPERATURE,
     THERMOSTAT_SETPOINT,
+    BaselineKpiSummary,
     DailyKpis,
     FixedPricing,
     NumericSeries,
     build_daily_price_series,
     build_daily_target_band_series,
+    compute_baseline_kpi_summary,
     compute_daily_kpis,
 )
 from home_optimizer.domain.pricing import (
@@ -154,3 +156,18 @@ class DailyKpiService:
             end_time=end_time,
             feed_in_tariff=feed_in_tariff,
         )
+
+    def get_baseline_summary(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> BaselineKpiSummary:
+        if end_date < start_date:
+            raise ValueError("end_date must be on or after start_date")
+
+        day_count = (end_date - start_date).days + 1
+        daily_kpis = [
+            self.get_day_kpis(start_date + timedelta(days=day_offset))
+            for day_offset in range(day_count)
+        ]
+        return compute_baseline_kpi_summary(daily_kpis)
