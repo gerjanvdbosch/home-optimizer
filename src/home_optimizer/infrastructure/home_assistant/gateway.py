@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime
 from typing import Any
 
 import httpx
+import websocket
 
 from home_optimizer.domain.location import Location, parse_location
+
+_WS_TIMEOUT = 60.0
 
 
 class HomeAssistantGateway:
@@ -81,18 +85,35 @@ class HomeAssistantGateway:
         end_time: datetime,
         period: str = "hour",
     ) -> list[dict[str, Any]]:
-        body = {
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat(),
-            "statistic_ids": [statistic_id],
-            "period": period,
-            "types": ["mean", "min", "max", "state", "sum"],
-        }
-        response = self.client.post(
-            f"{self.base_url}/api/recorder/statistics_during_period",
-            json=body,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data.get(statistic_id, [])
+        ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/api/websocket"
 
+        ws = websocket.create_connection(ws_url, timeout=_WS_TIMEOUT)
+        try:
+            _ws_recv(ws)  # auth_required
+            ws.send(json.dumps({"type": "auth", "access_token": self.token}))
+            auth_msg = _ws_recv(ws)
+            if auth_msg.get("type") != "auth_ok":
+                raise RuntimeError(f"WebSocket auth failed: {auth_msg}")
+
+            request_id = 1
+            ws.send(json.dumps({
+                "id": request_id,
+                "type": "recorder/statistics_during_period",
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "statistic_ids": [statistic_id],
+                "period": period,
+                "types": ["mean", "min", "max", "state", "sum"],
+            }))
+            result_msg = _ws_recv(ws)
+            if not result_msg.get("success"):
+                raise RuntimeError(f"statistics_during_period failed: {result_msg}")
+
+            return result_msg.get("result", {}).get(statistic_id, [])
+        finally:
+            ws.close()
+
+
+def _ws_recv(ws: websocket.WebSocket) -> dict[str, Any]:
+    return json.loads(ws.recv())

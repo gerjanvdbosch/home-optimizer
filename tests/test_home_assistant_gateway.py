@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
 import httpx
 
 from home_optimizer.domain.location import Location
@@ -37,47 +41,66 @@ def test_home_assistant_gateway_returns_none_for_missing_location() -> None:
 
 
 def test_home_assistant_gateway_get_statistics_calls_correct_endpoint() -> None:
-    requested: list[tuple[str, bytes]] = []
+    messages = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"}),
+        json.dumps({
+            "id": 1,
+            "type": "result",
+            "success": True,
+            "result": {"sensor.room": [{"start": "2026-04-14T00:00:00+00:00", "mean": 20.5}]},
+        }),
+    ]
+    sent: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requested.append((str(request.url), request.content))
-        return httpx.Response(
-            200,
-            json={"sensor.room": [{"start": "2026-04-14T00:00:00+00:00", "mean": 20.5}]},
-        )
+    mock_ws = MagicMock()
+    mock_ws.recv.side_effect = messages
+    mock_ws.send.side_effect = lambda msg: sent.append(msg)
 
     gateway = HomeAssistantGateway(
         base_url="http://homeassistant.local",
         token="token",
-        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
     )
 
-    from datetime import datetime, timezone
-
-    start = datetime(2026, 4, 14, tzinfo=timezone.utc)
-    end = datetime(2026, 4, 15, tzinfo=timezone.utc)
-    result = gateway.get_statistics(statistic_id="sensor.room", start_time=start, end_time=end)
+    with patch("home_optimizer.infrastructure.home_assistant.gateway.websocket.create_connection", return_value=mock_ws):
+        result = gateway.get_statistics(
+            statistic_id="sensor.room",
+            start_time=datetime(2026, 4, 14, tzinfo=timezone.utc),
+            end_time=datetime(2026, 4, 15, tzinfo=timezone.utc),
+        )
 
     assert len(result) == 1
     assert result[0]["mean"] == 20.5
-    assert requested[0][0] == "http://homeassistant.local/api/recorder/statistics_during_period"
+    auth_payload = json.loads(sent[0])
+    assert auth_payload == {"type": "auth", "access_token": "token"}
+    cmd_payload = json.loads(sent[1])
+    assert cmd_payload["type"] == "recorder/statistics_during_period"
+    assert cmd_payload["statistic_ids"] == ["sensor.room"]
+    mock_ws.close.assert_called_once()
 
 
 def test_home_assistant_gateway_get_statistics_returns_empty_for_unknown_entity() -> None:
+    messages = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"}),
+        json.dumps({"id": 1, "type": "result", "success": True, "result": {}}),
+    ]
+
+    mock_ws = MagicMock()
+    mock_ws.recv.side_effect = messages
+
     gateway = HomeAssistantGateway(
         base_url="http://homeassistant.local",
         token="token",
-        client=httpx.Client(
-            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))
-        ),
+        client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
     )
 
-    from datetime import datetime, timezone
-
-    result = gateway.get_statistics(
-        statistic_id="sensor.unknown",
-        start_time=datetime(2026, 4, 14, tzinfo=timezone.utc),
-        end_time=datetime(2026, 4, 15, tzinfo=timezone.utc),
-    )
+    with patch("home_optimizer.infrastructure.home_assistant.gateway.websocket.create_connection", return_value=mock_ws):
+        result = gateway.get_statistics(
+            statistic_id="sensor.unknown",
+            start_time=datetime(2026, 4, 14, tzinfo=timezone.utc),
+            end_time=datetime(2026, 4, 15, tzinfo=timezone.utc),
+        )
 
     assert result == []
