@@ -6,9 +6,11 @@ from .history import (
     HistoryImportService,
     WeatherImportService,
 )
+from .kpi import DailyKpiService
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
+    "DailyKpiService",
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",

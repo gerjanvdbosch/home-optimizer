@@ -16,7 +16,9 @@ from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import DashboardChartsResponse
 from home_optimizer.web.services import DashboardChartsService
 
-PLOTLY_JS_PATH = Path(cast(str, plotly.__file__)).resolve().parent / "package_data" / "plotly.min.js"
+PLOTLY_JS_PATH = (
+    Path(cast(str, plotly.__file__)).resolve().parent / "package_data" / "plotly.min.js"
+)
 ChartDateQuery = Annotated[date, Query(alias="date")]
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 

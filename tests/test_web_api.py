@@ -79,7 +79,10 @@ class FakeTimeSeriesReadRepository:
             NumericSeries(
                 name="room_temperature",
                 unit="°C",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5)],
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=20.5),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=20.5),
+                ],
             ),
             NumericSeries(
                 name="outdoor_temperature",
@@ -89,12 +92,18 @@ class FakeTimeSeriesReadRepository:
             NumericSeries(
                 name="thermostat_setpoint",
                 unit="°C",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0)],
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=20.0),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=21.0),
+                ],
             ),
             NumericSeries(
                 name="dhw_top_temperature",
                 unit="°C",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0)],
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=48.0),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=48.0),
+                ],
             ),
             NumericSeries(
                 name="dhw_bottom_temperature",
@@ -103,8 +112,21 @@ class FakeTimeSeriesReadRepository:
             ),
             NumericSeries(
                 name="hp_electric_power",
-                unit="W",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=1500.0)],
+                unit="kW",
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=1.5),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0),
+                ],
+            ),
+            NumericSeries(
+                name="compressor_frequency",
+                unit="Hz",
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=0.0),
+                    NumericPoint(timestamp="2026-04-25T06:00:00+00:00", value=40.0),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0),
+                    NumericPoint(timestamp="2026-04-25T18:00:00+00:00", value=35.0),
+                ],
             ),
             NumericSeries(
                 name="defrost_active",
@@ -115,6 +137,22 @@ class FakeTimeSeriesReadRepository:
                 name="booster_heater_active",
                 unit="bool",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=1.0)],
+            ),
+            NumericSeries(
+                name="p1_net_power",
+                unit="kW",
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=2.0),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=-0.5),
+                ],
+            ),
+            NumericSeries(
+                name="pv_output_power",
+                unit="kW",
+                points=[
+                    NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=0.0),
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=1.0),
+                ],
             ),
         ]
 
@@ -160,7 +198,10 @@ class FakeTimeSeriesReadRepository:
         return NumericSeries(
             name="electricity_price",
             unit="EUR/kWh",
-            points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.245)],
+            points=[
+                NumericPoint(timestamp="2026-04-25T00:00:00+00:00", value=0.245),
+                NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.245),
+            ],
         )
 
 
@@ -366,9 +407,13 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert payload["electricity_price"] == {
         "name": "electricity_price",
         "unit": "EUR/kWh",
-        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 0.245}],
+        "points": [
+            {"timestamp": "2026-04-25T00:00:00+00:00", "value": 0.245},
+            {"timestamp": "2026-04-25T12:00:00+00:00", "value": 0.245},
+        ],
     }
     assert payload["room_temperature"]["points"] == [
+        {"timestamp": "2026-04-25T00:00:00+00:00", "value": 20.5},
         {"timestamp": "2026-04-25T12:00:00+00:00", "value": 20.5}
     ]
     assert payload["outdoor_temperature"] == {
@@ -379,14 +424,19 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
     assert payload["thermostat_setpoint"] == {
         "name": "thermostat_setpoint",
         "unit": "°C",
-        "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 21.0}],
+        "points": [
+            {"timestamp": "2026-04-25T00:00:00+00:00", "value": 20.0},
+            {"timestamp": "2026-04-25T12:00:00+00:00", "value": 21.0},
+        ],
     }
     local_timezone = dashboard_charts_module.current_timezone()
     expected_day_start = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     expected_day_end = expected_day_start + timedelta(days=1)
     assert payload["room_target_temperature"]["points"][:2] == [
         {
-            "timestamp": expected_day_start.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds"),
+            "timestamp": expected_day_start.astimezone(ZoneInfo("UTC")).isoformat(
+                timespec="seconds"
+            ),
             "value": 19.0,
         },
         {
@@ -462,6 +512,24 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             end_time.isoformat(),
         ),
     ]
+
+
+def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/kpis?date=2026-04-25")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hp_electric_kwh"] is not None
+    assert payload["total_import_kwh"] is not None
+    assert payload["total_export_kwh"] is not None
+    assert payload["pv_generation_kwh"] is not None
+    assert payload["self_consumption_ratio"] is not None
+    assert payload["electricity_cost_eur"] is not None
+    assert payload["thermostat_setpoint_changes"] == 1
+    assert payload["compressor_starts"] == 2
 
 
 def test_dashboard_charts_endpoint_uses_current_timezone(monkeypatch: pytest.MonkeyPatch) -> None:

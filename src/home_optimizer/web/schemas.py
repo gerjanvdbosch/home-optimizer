@@ -85,3 +85,16 @@ class DashboardChartsResponse(BaseModel):
     hp_flow: ChartSeriesResponse
     compressor_frequency: ChartSeriesResponse
 
+
+class DailyKpiResponse(BaseModel):
+    hp_electric_kwh: float | None
+    total_import_kwh: float | None
+    total_export_kwh: float | None
+    pv_generation_kwh: float | None
+    self_consumption_ratio: float | None
+    electricity_cost_eur: float | None
+    room_temperature_mae_c: float | None
+    room_comfort_violation_degree_hours: float | None
+    dhw_comfort_violation_minutes: float | None
+    thermostat_setpoint_changes: int
+    compressor_starts: int

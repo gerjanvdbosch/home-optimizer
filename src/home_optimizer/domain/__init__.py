@@ -2,6 +2,7 @@ from .clock import utc_now
 from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
 from .heatpump_state import SpaceHeatingStateFilter
+from .kpis import DailyKpis
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -86,6 +87,7 @@ __all__ = [
     "COMPRESSOR_FREQUENCY",
     "COP",
     "DEFROST_ACTIVE",
+    "DailyKpis",
     "DHW_BOTTOM_TEMPERATURE",
     "DHW_TARGET_MAX_TEMPERATURE",
     "DHW_TARGET_MIN_TEMPERATURE",

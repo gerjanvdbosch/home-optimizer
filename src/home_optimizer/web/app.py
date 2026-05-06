@@ -16,6 +16,7 @@ from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.routers.dashboard import create_dashboard_router
 from home_optimizer.web.routers.history_import import create_history_import_router
+from home_optimizer.web.routers.kpis import create_kpi_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -64,5 +65,6 @@ def create_app(
 
     app.include_router(create_dashboard_router(settings))
     app.include_router(create_history_import_router(settings))
+    app.include_router(create_kpi_router(settings))
 
     return app
