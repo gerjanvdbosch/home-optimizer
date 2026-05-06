@@ -34,7 +34,11 @@ def adjusted_gti_with_shutter(
         points=[
             NumericPoint(
                 timestamp=point.timestamp,
-                value=point.value * shutter_open_fraction_at(shutter_position.points, point.timestamp),
+                value=point.value
+                * shutter_open_fraction_at(
+                    shutter_position.points,
+                    point.timestamp,
+                ),
             )
             for point in window_gti.points
         ],
@@ -134,11 +138,27 @@ def build_daily_target_band_series(
     maximum = NumericSeries(name=maximum_name, unit=unit, points=maximum_points)
 
     if interval_minutes is not None:
-        target = upsample_series_forward_fill(target, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
-        minimum = upsample_series_forward_fill(minimum, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
-        maximum = upsample_series_forward_fill(maximum, start_time=start_time, end_time=end_time, interval_minutes=interval_minutes)
+        target = upsample_series_forward_fill(
+            target,
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+        )
+        minimum = upsample_series_forward_fill(
+            minimum,
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+        )
+        maximum = upsample_series_forward_fill(
+            maximum,
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+        )
 
     return target, minimum, maximum
+
 
 def build_thermal_output_series(
     flow: NumericSeries | None,
@@ -162,5 +182,3 @@ def build_thermal_output_series(
         thermal_points.append(NumericPoint(timestamp=flow_point.timestamp, value=thermal_output))
 
     return NumericSeries(name=name, unit="kW", points=thermal_points)
-
-

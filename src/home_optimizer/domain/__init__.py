@@ -69,7 +69,6 @@ from .series import NumericPoint, NumericSeries, TextPoint, TextSeries
 from .series_transforms import (
     adjusted_gti_with_shutter,
     build_daily_target_band_series,
-    build_space_heating_thermal_output_series,
     build_thermal_output_series,
     latest_value_at,
     shutter_open_fraction_at,
@@ -136,7 +135,6 @@ __all__ = [
     "SensorDefinition",
     "SensorSpec",
     "SHUTTER_LIVING_ROOM",
-    "SpaceHeatingStateFilter",
     "ShutterPositionControl",
     "ThermostatSetpointControl",
     "THERMAL_OUTPUT",
@@ -149,7 +147,6 @@ __all__ = [
     "build_fixed_price_intervals",
     "compute_daily_kpis",
     "build_daily_target_band_series",
-    "build_space_heating_thermal_output_series",
     "build_sensor_specs",
     "build_thermal_output_series",
     "electricity_price_series",

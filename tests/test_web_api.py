@@ -522,6 +522,8 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["is_valid_for_control_evaluation"] is True
+    assert payload["validity_reasons"] == []
     assert payload["hp_electric_kwh"] is not None
     assert payload["total_import_kwh"] is not None
     assert payload["total_export_kwh"] is not None

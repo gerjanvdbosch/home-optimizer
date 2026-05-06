@@ -87,6 +87,8 @@ class DashboardChartsResponse(BaseModel):
 
 
 class DailyKpiResponse(BaseModel):
+    is_valid_for_control_evaluation: bool
+    validity_reasons: list[str]
     hp_electric_kwh: float | None
     total_import_kwh: float | None
     total_export_kwh: float | None

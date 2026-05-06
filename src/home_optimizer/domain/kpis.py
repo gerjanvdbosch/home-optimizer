@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from .models import DomainModel
 from .series import NumericPoint, NumericSeries
 from .series_transforms import latest_value_at
@@ -9,6 +11,8 @@ from .time import parse_datetime
 
 
 class DailyKpis(DomainModel):
+    is_valid_for_control_evaluation: bool = True
+    validity_reasons: list[str] = Field(default_factory=list)
     hp_electric_kwh: float | None = None
     total_import_kwh: float | None = None
     total_export_kwh: float | None = None
@@ -296,6 +300,32 @@ def compute_daily_kpis(
     end_time: datetime,
     feed_in_tariff: float,
 ) -> DailyKpis:
+    validity_reasons: list[str] = []
+    if not room_temperature or not room_temperature.points:
+        validity_reasons.append("missing_room_temperature")
+    if not thermostat_setpoint or not thermostat_setpoint.points:
+        validity_reasons.append("missing_thermostat_setpoint")
+    if not compressor_frequency or not compressor_frequency.points:
+        validity_reasons.append("missing_compressor_frequency")
+    if (
+        (not hp_electric_total_kwh or len(hp_electric_total_kwh.points) < 2)
+        and (not hp_electric_power or not hp_electric_power.points)
+    ):
+        validity_reasons.append("missing_heatpump_electricity")
+    if (
+        (not import_total_kwh or len(import_total_kwh.points) < 2)
+        and (not export_total_kwh or len(export_total_kwh.points) < 2)
+        and (not net_power or not net_power.points)
+    ):
+        validity_reasons.append("missing_grid_energy")
+    if (
+        (not pv_total_kwh or len(pv_total_kwh.points) < 2)
+        and (not pv_output_power or not pv_output_power.points)
+    ):
+        validity_reasons.append("missing_pv_generation")
+    if not dhw_top_temperature or not dhw_top_temperature.points:
+        validity_reasons.append("missing_dhw_temperature")
+
     hp_electric_kwh = delta_kwh(hp_electric_total_kwh)
     if hp_electric_kwh is None:
         hp_electric_kwh = integrate_power_series(
@@ -342,6 +372,8 @@ def compute_daily_kpis(
         )
 
     return DailyKpis(
+        is_valid_for_control_evaluation=not validity_reasons,
+        validity_reasons=validity_reasons,
         hp_electric_kwh=hp_electric_kwh,
         total_import_kwh=total_import_kwh,
         total_export_kwh=total_export_kwh,

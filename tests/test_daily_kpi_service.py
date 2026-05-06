@@ -151,6 +151,8 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
 
     kpis = service.get_day_kpis(day)
 
+    assert kpis.is_valid_for_control_evaluation is True
+    assert kpis.validity_reasons == []
     assert kpis.hp_electric_kwh == 24.0
     assert kpis.total_import_kwh == 36.0
     assert kpis.total_export_kwh == 6.0
@@ -162,3 +164,23 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     assert kpis.dhw_comfort_violation_minutes == 1440.0
     assert kpis.thermostat_setpoint_changes == 2
     assert kpis.compressor_starts == 2
+
+
+def test_daily_kpi_service_marks_day_invalid_when_required_series_are_missing() -> None:
+    service = DailyKpiService(
+        FakeKpiDataReader([]),
+        build_settings(),
+    )
+
+    kpis = service.get_day_kpis(date(2026, 4, 25))
+
+    assert kpis.is_valid_for_control_evaluation is False
+    assert kpis.validity_reasons == [
+        "missing_room_temperature",
+        "missing_thermostat_setpoint",
+        "missing_compressor_frequency",
+        "missing_heatpump_electricity",
+        "missing_grid_energy",
+        "missing_pv_generation",
+        "missing_dhw_temperature",
+    ]
