@@ -211,10 +211,11 @@ class FakeTimeSeriesReadRepository:
                 unit="W/m2",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=500.0)],
             ),
-            NumericSeries(
+            build_half_hourly_series(
                 name="gti_living_room_windows",
                 unit="W/m2",
-                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=220.0)],
+                start_value=220.0,
+                start_time=start_time.astimezone(ZoneInfo("UTC")),
             ),
         ]
 
@@ -592,6 +593,8 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
     assert payload["total_import_kwh"] is not None
     assert payload["total_export_kwh"] is not None
     assert payload["pv_generation_kwh"] is not None
+    assert payload["solar_irradiance_mean_w_m2"] == 220.0
+    assert payload["shutter_open_pct_mean"] == 50.0
     assert payload["outdoor_temperature_mean_c"] == pytest.approx(12.1)
     assert payload["self_consumption_ratio"] is not None
     assert payload["electricity_cost_eur"] is not None
@@ -612,6 +615,8 @@ def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
     assert payload["mean_hp_electric_kwh_per_day"] is not None
     assert payload["mean_electricity_cost_eur_per_day"] is not None
     assert payload["mean_room_temperature_mae_c"] is not None
+    assert payload["mean_solar_irradiance_w_m2"] == 220.0
+    assert payload["mean_shutter_open_pct"] == 50.0
     assert payload["total_comfort_violation_degree_hours"] >= 0.0
     assert payload["total_dhw_violation_minutes"] >= 0.0
     assert payload["mean_compressor_starts_per_day"] is not None

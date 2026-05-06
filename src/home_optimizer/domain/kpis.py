@@ -19,6 +19,8 @@ class DailyKpis(DomainModel):
     total_import_kwh: float | None = None
     total_export_kwh: float | None = None
     pv_generation_kwh: float | None = None
+    solar_irradiance_mean_w_m2: float | None = None
+    shutter_open_pct_mean: float | None = None
     outdoor_temperature_mean_c: float | None = None
     self_consumption_ratio: float | None = None
     electricity_cost_eur: float | None = None
@@ -35,6 +37,8 @@ class BaselineKpiSummary(DomainModel):
     mean_hp_electric_kwh_per_day: float | None = None
     mean_electricity_cost_eur_per_day: float | None = None
     mean_room_temperature_mae_c: float | None = None
+    mean_solar_irradiance_w_m2: float | None = None
+    mean_shutter_open_pct: float | None = None
     total_comfort_violation_degree_hours: float = 0.0
     total_dhw_violation_minutes: float = 0.0
     mean_compressor_starts_per_day: float | None = None
@@ -425,6 +429,8 @@ def compute_daily_kpis(
     export_total_kwh: NumericSeries | None,
     pv_output_power: NumericSeries | None,
     pv_total_kwh: NumericSeries | None,
+    solar_irradiance: NumericSeries | None,
+    shutter_open_pct: NumericSeries | None,
     outdoor_temperature: NumericSeries | None,
     dhw_top_temperature: NumericSeries | None,
     dhw_target_min: NumericSeries,
@@ -661,6 +667,16 @@ def compute_daily_kpis(
         total_import_kwh=total_import_kwh,
         total_export_kwh=total_export_kwh,
         pv_generation_kwh=pv_generation_kwh,
+        solar_irradiance_mean_w_m2=weighted_mean(
+            solar_irradiance,
+            start_time=start_time,
+            end_time=end_time,
+        ),
+        shutter_open_pct_mean=weighted_mean(
+            shutter_open_pct,
+            start_time=start_time,
+            end_time=end_time,
+        ),
         outdoor_temperature_mean_c=weighted_mean(
             outdoor_temperature,
             start_time=start_time,
@@ -720,6 +736,12 @@ def compute_baseline_kpi_summary(daily_kpis: list[DailyKpis]) -> BaselineKpiSumm
         ),
         mean_room_temperature_mae_c=mean(
             [day_kpis.room_temperature_mae_c for day_kpis in valid_days]
+        ),
+        mean_solar_irradiance_w_m2=mean(
+            [day_kpis.solar_irradiance_mean_w_m2 for day_kpis in valid_days]
+        ),
+        mean_shutter_open_pct=mean(
+            [day_kpis.shutter_open_pct_mean for day_kpis in valid_days]
         ),
         total_comfort_violation_degree_hours=sum(
             day_kpis.room_comfort_violation_degree_hours or 0.0

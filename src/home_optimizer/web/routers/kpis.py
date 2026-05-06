@@ -28,7 +28,7 @@ def create_kpi_router(settings: AppSettings) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/kpis", response_model=DailyKpiResponse)
-    def get_baseline_kpis(
+    def get_dashboard_kpis(
         chart_date: ChartDateQuery,
         container: ContainerDependency,
     ) -> DailyKpiResponse:

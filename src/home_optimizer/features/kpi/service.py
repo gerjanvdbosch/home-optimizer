@@ -9,6 +9,7 @@ from home_optimizer.domain import (
     DHW_TARGET_MIN_TEMPERATURE,
     DHW_TARGET_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
+    GTI_LIVING_ROOM_WINDOWS,
     HP_ELECTRIC_POWER,
     HP_ELECTRIC_TOTAL_KWH,
     OUTDOOR_TEMPERATURE,
@@ -21,6 +22,7 @@ from home_optimizer.domain import (
     ROOM_TARGET_MIN_TEMPERATURE,
     ROOM_TARGET_TEMPERATURE,
     ROOM_TEMPERATURE,
+    SHUTTER_LIVING_ROOM,
     THERMOSTAT_SETPOINT,
     BaselineKpiSummary,
     DailyKpis,
@@ -101,7 +103,19 @@ class DailyKpiService:
             start_time=start_time,
             end_time=end_time,
         )
+        shutter_series = self.reader.read_series(
+            names=[SHUTTER_LIVING_ROOM],
+            start_time=start_time,
+            end_time=end_time,
+        )
+        forecast_series = self.reader.read_forecast_series(
+            names=[GTI_LIVING_ROOM_WINDOWS],
+            start_time=start_time,
+            end_time=end_time,
+        )
         series_by_name = _series_by_name(series)
+        shutter_by_name = _series_by_name(shutter_series)
+        forecast_by_name = _series_by_name(forecast_series)
 
         room_target, room_target_min, room_target_max = build_daily_target_band_series(
             self.settings.room_target,
@@ -148,6 +162,8 @@ class DailyKpiService:
             export_total_kwh=series_by_name.get(P1_EXPORT_TOTAL_KWH),
             pv_output_power=series_by_name.get(PV_OUTPUT_POWER),
             pv_total_kwh=series_by_name.get(PV_TOTAL_KWH),
+            solar_irradiance=forecast_by_name.get(GTI_LIVING_ROOM_WINDOWS),
+            shutter_open_pct=shutter_by_name.get(SHUTTER_LIVING_ROOM),
             outdoor_temperature=series_by_name.get(OUTDOOR_TEMPERATURE),
             dhw_top_temperature=series_by_name.get(DHW_TOP_TEMPERATURE),
             dhw_target_min=dhw_target_min,

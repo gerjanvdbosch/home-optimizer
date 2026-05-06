@@ -14,6 +14,13 @@ class KpiDataReader(Protocol):
         end_time: datetime,
     ) -> list[NumericSeries]: ...
 
+    def read_forecast_series(
+        self,
+        names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[NumericSeries]: ...
+
     def read_electricity_price_series(
         self,
         start_time: datetime,

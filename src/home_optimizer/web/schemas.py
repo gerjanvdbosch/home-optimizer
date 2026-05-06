@@ -95,6 +95,8 @@ class DailyKpiResponse(BaseModel):
     total_import_kwh: float | None
     total_export_kwh: float | None
     pv_generation_kwh: float | None
+    solar_irradiance_mean_w_m2: float | None
+    shutter_open_pct_mean: float | None
     outdoor_temperature_mean_c: float | None
     self_consumption_ratio: float | None
     electricity_cost_eur: float | None
@@ -111,6 +113,8 @@ class BaselineKpiSummaryResponse(BaseModel):
     mean_hp_electric_kwh_per_day: float | None
     mean_electricity_cost_eur_per_day: float | None
     mean_room_temperature_mae_c: float | None
+    mean_solar_irradiance_w_m2: float | None
+    mean_shutter_open_pct: float | None
     total_comfort_violation_degree_hours: float
     total_dhw_violation_minutes: float
     mean_compressor_starts_per_day: float | None

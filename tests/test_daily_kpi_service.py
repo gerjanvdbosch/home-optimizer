@@ -8,11 +8,13 @@ from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     COMPRESSOR_FREQUENCY,
     DHW_TOP_TEMPERATURE,
+    GTI_LIVING_ROOM_WINDOWS,
     HP_ELECTRIC_POWER,
     OUTDOOR_TEMPERATURE,
     P1_NET_POWER,
     PV_OUTPUT_POWER,
     ROOM_TEMPERATURE,
+    SHUTTER_LIVING_ROOM,
     THERMOSTAT_SETPOINT,
     NumericPoint,
     NumericSeries,
@@ -27,6 +29,13 @@ class FakeKpiDataReader:
         self._series = series
 
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
+        return [
+            shift_series_to_day_boundary(series, start_time)
+            for series in self._series
+            if series.name in names
+        ]
+
+    def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [
             shift_series_to_day_boundary(series, start_time)
             for series in self._series
@@ -112,6 +121,8 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     compressor_values = [0.0] * 4 + [35.0] * 8 + [0.0] * 8 + [42.0] * 28
     room_values = [18.0] * 48
     outdoor_values = [8.0] * 24 + [10.0] * 24
+    solar_values = [100.0] * 24 + [300.0] * 24
+    shutter_values = [50.0] * 48
     dhw_values = [45.0] * 48
     setpoint_values = [19.0] * 16 + [20.0] * 24 + [18.0] * 8
 
@@ -155,6 +166,18 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
                     values=outdoor_values,
                 ),
                 build_half_hourly_series(
+                    name=GTI_LIVING_ROOM_WINDOWS,
+                    unit="W/m2",
+                    start_time=start_time,
+                    values=solar_values,
+                ),
+                build_half_hourly_series(
+                    name=SHUTTER_LIVING_ROOM,
+                    unit="percent",
+                    start_time=start_time,
+                    values=shutter_values,
+                ),
+                build_half_hourly_series(
                     name=DHW_TOP_TEMPERATURE,
                     unit="°C",
                     start_time=start_time,
@@ -181,6 +204,8 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     assert kpis.total_import_kwh == 36.0
     assert kpis.total_export_kwh == 6.0
     assert kpis.pv_generation_kwh == 12.0
+    assert kpis.solar_irradiance_mean_w_m2 == 200.0
+    assert kpis.shutter_open_pct_mean == 50.0
     assert kpis.outdoor_temperature_mean_c == 9.0
     assert kpis.self_consumption_ratio == 0.5
     assert kpis.electricity_cost_eur == pytest.approx(8.4)
@@ -273,6 +298,18 @@ def test_daily_kpi_service_marks_day_invalid_when_gap_exceeds_thirty_minutes() -
                     start_time=start_time,
                     values=[10.0] * 48,
                 ),
+                build_half_hourly_series(
+                    name=GTI_LIVING_ROOM_WINDOWS,
+                    unit="W/m2",
+                    start_time=start_time,
+                    values=[200.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=SHUTTER_LIVING_ROOM,
+                    unit="percent",
+                    start_time=start_time,
+                    values=[60.0] * 48,
+                ),
             ]
         ),
         build_settings(),
@@ -335,6 +372,18 @@ def test_daily_kpi_service_builds_baseline_summary_from_valid_days() -> None:
                     values=[10.0] * 48,
                 ),
                 build_half_hourly_series(
+                    name=GTI_LIVING_ROOM_WINDOWS,
+                    unit="W/m2",
+                    start_time=start_time,
+                    values=[200.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=SHUTTER_LIVING_ROOM,
+                    unit="percent",
+                    start_time=start_time,
+                    values=[60.0] * 48,
+                ),
+                build_half_hourly_series(
                     name=DHW_TOP_TEMPERATURE,
                     unit="°C",
                     start_time=start_time,
@@ -352,6 +401,8 @@ def test_daily_kpi_service_builds_baseline_summary_from_valid_days() -> None:
     assert summary.mean_hp_electric_kwh_per_day == 48.0
     assert summary.mean_electricity_cost_eur_per_day == pytest.approx(18.0)
     assert summary.mean_room_temperature_mae_c == 0.0
+    assert summary.mean_solar_irradiance_w_m2 == 200.0
+    assert summary.mean_shutter_open_pct == 60.0
     assert summary.total_comfort_violation_degree_hours == 0.0
     assert summary.total_dhw_violation_minutes == 4320.0
     assert summary.mean_compressor_starts_per_day == 0.0
