@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
+import pytest
+
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     COMPRESSOR_FREQUENCY,
@@ -37,6 +39,26 @@ class FakeKpiDataReader:
         return NumericSeries(name="electricity_price", unit="EUR/kWh", points=[])
 
 
+def build_half_hourly_series(
+    *,
+    name: str,
+    unit: str,
+    start_time: datetime,
+    values: list[float],
+) -> NumericSeries:
+    return NumericSeries(
+        name=name,
+        unit=unit,
+        points=[
+            NumericPoint(
+                timestamp=normalize_utc_timestamp(start_time + timedelta(minutes=30 * index)),
+                value=value,
+            )
+            for index, value in enumerate(values)
+        ],
+    )
+
+
 def build_settings() -> AppSettings:
     return AppSettings.from_options(
         {
@@ -61,88 +83,58 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     local_timezone = current_local_timezone()
     day = date(2026, 4, 25)
     start_time = datetime.combine(day, time.min, tzinfo=local_timezone)
-    midday = start_time + timedelta(hours=12)
-    evening = start_time + timedelta(hours=18)
+    hp_values = [2.0] * 24 + [0.0] * 24
+    net_values = [3.0] * 24 + [-0.5] * 24
+    pv_values = [0.0] * 24 + [2.0] * 12 + [0.0] * 12
+    compressor_values = [0.0] * 4 + [35.0] * 8 + [0.0] * 8 + [42.0] * 28
+    room_values = [18.0] * 48
+    dhw_values = [45.0] * 48
+    setpoint_values = [19.0] * 16 + [20.0] * 24 + [18.0] * 8
 
     service = DailyKpiService(
         FakeKpiDataReader(
             [
-                NumericSeries(
+                build_half_hourly_series(
                     name=HP_ELECTRIC_POWER,
                     unit="kW",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=2.0),
-                        NumericPoint(timestamp=normalize_utc_timestamp(midday), value=0.0),
-                    ],
+                    start_time=start_time,
+                    values=hp_values,
                 ),
-                NumericSeries(
+                build_half_hourly_series(
                     name=P1_NET_POWER,
                     unit="kW",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=3.0),
-                        NumericPoint(timestamp=normalize_utc_timestamp(midday), value=-0.5),
-                    ],
+                    start_time=start_time,
+                    values=net_values,
                 ),
-                NumericSeries(
+                build_half_hourly_series(
                     name=PV_OUTPUT_POWER,
                     unit="kW",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=0.0),
-                        NumericPoint(timestamp=normalize_utc_timestamp(midday), value=2.0),
-                        NumericPoint(timestamp=normalize_utc_timestamp(evening), value=0.0),
-                    ],
+                    start_time=start_time,
+                    values=pv_values,
                 ),
-                NumericSeries(
+                build_half_hourly_series(
                     name=COMPRESSOR_FREQUENCY,
                     unit="Hz",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=0.0),
-                        NumericPoint(
-                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=2)),
-                            value=35.0,
-                        ),
-                        NumericPoint(
-                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=6)),
-                            value=0.0,
-                        ),
-                        NumericPoint(
-                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=10)),
-                            value=42.0,
-                        ),
-                    ],
+                    start_time=start_time,
+                    values=compressor_values,
                 ),
-                NumericSeries(
+                build_half_hourly_series(
                     name=ROOM_TEMPERATURE,
                     unit="°C",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=18.0),
-                    ],
+                    start_time=start_time,
+                    values=room_values,
                 ),
-                NumericSeries(
+                build_half_hourly_series(
                     name=DHW_TOP_TEMPERATURE,
                     unit="°C",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=45.0),
-                    ],
+                    start_time=start_time,
+                    values=dhw_values,
                 ),
-                NumericSeries(
+                build_half_hourly_series(
                     name=THERMOSTAT_SETPOINT,
                     unit="°C",
-                    points=[
-                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=19.0),
-                        NumericPoint(
-                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=8)),
-                            value=20.0,
-                        ),
-                        NumericPoint(
-                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=16)),
-                            value=20.0,
-                        ),
-                        NumericPoint(
-                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=20)),
-                            value=18.0,
-                        ),
-                    ],
+                    start_time=start_time,
+                    values=setpoint_values,
                 ),
             ]
         ),
@@ -158,7 +150,7 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     assert kpis.total_export_kwh == 6.0
     assert kpis.pv_generation_kwh == 12.0
     assert kpis.self_consumption_ratio == 0.5
-    assert kpis.electricity_cost_eur == 8.4
+    assert kpis.electricity_cost_eur == pytest.approx(8.4)
     assert kpis.room_temperature_mae_c == 1.0
     assert kpis.room_comfort_violation_degree_hours == 12.0
     assert kpis.dhw_comfort_violation_minutes == 1440.0
@@ -184,3 +176,69 @@ def test_daily_kpi_service_marks_day_invalid_when_required_series_are_missing() 
         "missing_pv_generation",
         "missing_dhw_temperature",
     ]
+
+
+def test_daily_kpi_service_marks_day_invalid_when_gap_exceeds_thirty_minutes() -> None:
+    local_timezone = current_local_timezone()
+    day = date(2026, 4, 25)
+    start_time = datetime.combine(day, time.min, tzinfo=local_timezone)
+
+    service = DailyKpiService(
+        FakeKpiDataReader(
+            [
+                NumericSeries(
+                    name=ROOM_TEMPERATURE,
+                    unit="°C",
+                    points=[
+                        NumericPoint(timestamp=normalize_utc_timestamp(start_time), value=19.0),
+                        NumericPoint(
+                            timestamp=normalize_utc_timestamp(start_time + timedelta(hours=1)),
+                            value=19.0,
+                        ),
+                    ],
+                ),
+                build_half_hourly_series(
+                    name=THERMOSTAT_SETPOINT,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[19.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=COMPRESSOR_FREQUENCY,
+                    unit="Hz",
+                    start_time=start_time,
+                    values=[0.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=HP_ELECTRIC_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[1.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=P1_NET_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[1.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=PV_OUTPUT_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[0.0] * 48,
+                ),
+                build_half_hourly_series(
+                    name=DHW_TOP_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[45.0] * 48,
+                ),
+            ]
+        ),
+        build_settings(),
+    )
+
+    kpis = service.get_day_kpis(day)
+
+    assert kpis.is_valid_for_control_evaluation is False
+    assert "room_temperature_gap_too_large" in kpis.validity_reasons

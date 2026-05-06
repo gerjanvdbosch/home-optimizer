@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pydantic import Field
 
@@ -34,6 +34,31 @@ def _sorted_points(series: NumericSeries | None) -> list[NumericPoint]:
 
 def _duration_hours(start_time: datetime, end_time: datetime) -> float:
     return (end_time - start_time).total_seconds() / 3600.0
+
+
+def _has_gap_longer_than(
+    series: NumericSeries | None,
+    *,
+    start_time: datetime,
+    end_time: datetime,
+    max_gap: timedelta,
+) -> bool:
+    points = _sorted_points(series)
+    if not points:
+        return True
+
+    previous_time = start_time
+    for point in points:
+        point_time = parse_datetime(point.timestamp)
+        if point_time < start_time:
+            continue
+        if point_time > end_time:
+            break
+        if point_time - previous_time > max_gap:
+            return True
+        previous_time = point_time
+
+    return end_time - previous_time > max_gap
 
 
 def integrate_power_series(
@@ -301,30 +326,123 @@ def compute_daily_kpis(
     feed_in_tariff: float,
 ) -> DailyKpis:
     validity_reasons: list[str] = []
+    max_gap = timedelta(minutes=30)
+
     if not room_temperature or not room_temperature.points:
         validity_reasons.append("missing_room_temperature")
+    elif _has_gap_longer_than(
+        room_temperature,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("room_temperature_gap_too_large")
+
     if not thermostat_setpoint or not thermostat_setpoint.points:
         validity_reasons.append("missing_thermostat_setpoint")
+    elif _has_gap_longer_than(
+        thermostat_setpoint,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("thermostat_setpoint_gap_too_large")
+
     if not compressor_frequency or not compressor_frequency.points:
         validity_reasons.append("missing_compressor_frequency")
+    elif _has_gap_longer_than(
+        compressor_frequency,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("compressor_frequency_gap_too_large")
+
     if (
-        (not hp_electric_total_kwh or len(hp_electric_total_kwh.points) < 2)
+        (not hp_electric_total_kwh or not hp_electric_total_kwh.points)
         and (not hp_electric_power or not hp_electric_power.points)
     ):
         validity_reasons.append("missing_heatpump_electricity")
+    elif (
+        hp_electric_total_kwh
+        and hp_electric_total_kwh.points
+        and _has_gap_longer_than(
+            hp_electric_total_kwh,
+            start_time=start_time,
+            end_time=end_time,
+            max_gap=max_gap,
+        )
+    ):
+        validity_reasons.append("hp_electric_total_kwh_gap_too_large")
+    elif (
+        hp_electric_power
+        and hp_electric_power.points
+        and _has_gap_longer_than(
+            hp_electric_power,
+            start_time=start_time,
+            end_time=end_time,
+            max_gap=max_gap,
+        )
+    ):
+        validity_reasons.append("hp_electric_power_gap_too_large")
+
     if (
-        (not import_total_kwh or len(import_total_kwh.points) < 2)
-        and (not export_total_kwh or len(export_total_kwh.points) < 2)
+        (not import_total_kwh or not import_total_kwh.points)
+        and (not export_total_kwh or not export_total_kwh.points)
         and (not net_power or not net_power.points)
     ):
         validity_reasons.append("missing_grid_energy")
+    elif net_power and net_power.points and _has_gap_longer_than(
+        net_power,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("net_power_gap_too_large")
+    elif import_total_kwh and import_total_kwh.points and _has_gap_longer_than(
+        import_total_kwh,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("import_total_kwh_gap_too_large")
+    elif export_total_kwh and export_total_kwh.points and _has_gap_longer_than(
+        export_total_kwh,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("export_total_kwh_gap_too_large")
+
     if (
-        (not pv_total_kwh or len(pv_total_kwh.points) < 2)
+        (not pv_total_kwh or not pv_total_kwh.points)
         and (not pv_output_power or not pv_output_power.points)
     ):
         validity_reasons.append("missing_pv_generation")
+    elif pv_total_kwh and pv_total_kwh.points and _has_gap_longer_than(
+        pv_total_kwh,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("pv_total_kwh_gap_too_large")
+    elif pv_output_power and pv_output_power.points and _has_gap_longer_than(
+        pv_output_power,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("pv_output_power_gap_too_large")
+
     if not dhw_top_temperature or not dhw_top_temperature.points:
         validity_reasons.append("missing_dhw_temperature")
+    elif _has_gap_longer_than(
+        dhw_top_temperature,
+        start_time=start_time,
+        end_time=end_time,
+        max_gap=max_gap,
+    ):
+        validity_reasons.append("dhw_top_temperature_gap_too_large")
 
     hp_electric_kwh = delta_kwh(hp_electric_total_kwh)
     if hp_electric_kwh is None:
