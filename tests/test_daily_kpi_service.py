@@ -210,8 +210,9 @@ def test_daily_kpi_service_computes_baseline_metrics() -> None:
     assert kpis.self_consumption_ratio == 0.5
     assert kpis.electricity_cost_eur == pytest.approx(8.4)
     assert kpis.room_temperature_mae_c == 1.0
-    assert kpis.room_comfort_violation_degree_hours == 12.0
-    assert kpis.dhw_comfort_violation_minutes == 1440.0
+    assert kpis.room_comfort_undershoot_degree_hours == 12.0
+    assert kpis.room_comfort_overshoot_degree_hours == 0.0
+    assert kpis.dhw_comfort_undershoot_minutes == 1440.0
     assert kpis.thermostat_setpoint_changes == 2
     assert kpis.compressor_starts == 2
 
@@ -403,7 +404,8 @@ def test_daily_kpi_service_builds_baseline_summary_from_valid_days() -> None:
     assert summary.mean_room_temperature_mae_c == 0.0
     assert summary.mean_solar_irradiance_w_m2 == 200.0
     assert summary.mean_shutter_open_pct == 60.0
-    assert summary.total_comfort_violation_degree_hours == 0.0
-    assert summary.total_dhw_violation_minutes == 4320.0
+    assert summary.total_comfort_undershoot_degree_hours == 0.0
+    assert summary.total_comfort_overshoot_degree_hours == 0.0
+    assert summary.total_dhw_undershoot_minutes == 4320.0
     assert summary.mean_compressor_starts_per_day == 0.0
     assert summary.mean_self_consumption_ratio == 1.0

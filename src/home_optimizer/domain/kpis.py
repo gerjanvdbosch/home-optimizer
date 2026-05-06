@@ -25,8 +25,9 @@ class DailyKpis(DomainModel):
     self_consumption_ratio: float | None = None
     electricity_cost_eur: float | None = None
     room_temperature_mae_c: float | None = None
-    room_comfort_violation_degree_hours: float | None = None
-    dhw_comfort_violation_minutes: float | None = None
+    room_comfort_undershoot_degree_hours: float | None = None
+    room_comfort_overshoot_degree_hours: float | None = None
+    dhw_comfort_undershoot_minutes: float | None = None
     thermostat_setpoint_changes: int = 0
     compressor_starts: int = 0
 
@@ -39,8 +40,9 @@ class BaselineKpiSummary(DomainModel):
     mean_room_temperature_mae_c: float | None = None
     mean_solar_irradiance_w_m2: float | None = None
     mean_shutter_open_pct: float | None = None
-    total_comfort_violation_degree_hours: float = 0.0
-    total_dhw_violation_minutes: float = 0.0
+    total_comfort_undershoot_degree_hours: float = 0.0
+    total_comfort_overshoot_degree_hours: float = 0.0
+    total_dhw_undershoot_minutes: float = 0.0
     mean_compressor_starts_per_day: float | None = None
     mean_self_consumption_ratio: float | None = None
 
@@ -224,10 +226,9 @@ def weighted_absolute_error(
     return total_error / total_hours
 
 
-def weighted_band_violation_degree_hours(
+def weighted_band_undershoot_degree_hours(
     measured: NumericSeries | None,
     minimum: NumericSeries,
-    maximum: NumericSeries,
     *,
     start_time: datetime,
     end_time: datetime,
@@ -236,7 +237,7 @@ def weighted_band_violation_degree_hours(
     if not points:
         return None
 
-    violation_degree_hours = 0.0
+    undershoot_degree_hours = 0.0
     total_hours = 0.0
     for index, point in enumerate(points):
         point_time = parse_datetime(point.timestamp)
@@ -253,23 +254,64 @@ def weighted_band_violation_degree_hours(
             continue
 
         minimum_value = latest_value_at(minimum.points, point.timestamp)
-        maximum_value = latest_value_at(maximum.points, point.timestamp)
-        if minimum_value is None or maximum_value is None:
+        if minimum_value is None:
             continue
 
-        violation = 0.0
+        undershoot = 0.0
         if point.value < minimum_value:
-            violation = minimum_value - point.value
-        elif point.value > maximum_value:
-            violation = point.value - maximum_value
+            undershoot = minimum_value - point.value
 
         duration_hours = _duration_hours(segment_start, segment_end)
-        violation_degree_hours += violation * duration_hours
+        undershoot_degree_hours += undershoot * duration_hours
         total_hours += duration_hours
 
     if total_hours <= 0.0:
         return None
-    return violation_degree_hours
+    return undershoot_degree_hours
+
+
+def weighted_band_overshoot_degree_hours(
+    measured: NumericSeries | None,
+    maximum: NumericSeries,
+    *,
+    start_time: datetime,
+    end_time: datetime,
+) -> float | None:
+    points = _sorted_points(measured)
+    if not points:
+        return None
+
+    overshoot_degree_hours = 0.0
+    total_hours = 0.0
+    for index, point in enumerate(points):
+        point_time = parse_datetime(point.timestamp)
+        if point_time >= end_time:
+            break
+        next_time = (
+            parse_datetime(points[index + 1].timestamp)
+            if index + 1 < len(points)
+            else end_time
+        )
+        segment_start = max(point_time, start_time)
+        segment_end = min(next_time, end_time)
+        if segment_end <= segment_start:
+            continue
+
+        maximum_value = latest_value_at(maximum.points, point.timestamp)
+        if maximum_value is None:
+            continue
+
+        overshoot = 0.0
+        if point.value > maximum_value:
+            overshoot = point.value - maximum_value
+
+        duration_hours = _duration_hours(segment_start, segment_end)
+        overshoot_degree_hours += overshoot * duration_hours
+        total_hours += duration_hours
+
+    if total_hours <= 0.0:
+        return None
+    return overshoot_degree_hours
 
 
 def weighted_below_minimum_minutes(
@@ -696,14 +738,19 @@ def compute_daily_kpis(
             start_time=start_time,
             end_time=end_time,
         ),
-        room_comfort_violation_degree_hours=weighted_band_violation_degree_hours(
+        room_comfort_undershoot_degree_hours=weighted_band_undershoot_degree_hours(
             room_temperature,
             room_target_min,
+            start_time=start_time,
+            end_time=end_time,
+        ),
+        room_comfort_overshoot_degree_hours=weighted_band_overshoot_degree_hours(
+            room_temperature,
             room_target_max,
             start_time=start_time,
             end_time=end_time,
         ),
-        dhw_comfort_violation_minutes=weighted_below_minimum_minutes(
+        dhw_comfort_undershoot_minutes=weighted_below_minimum_minutes(
             dhw_top_temperature,
             dhw_target_min,
             start_time=start_time,
@@ -743,12 +790,16 @@ def compute_baseline_kpi_summary(daily_kpis: list[DailyKpis]) -> BaselineKpiSumm
         mean_shutter_open_pct=mean(
             [day_kpis.shutter_open_pct_mean for day_kpis in valid_days]
         ),
-        total_comfort_violation_degree_hours=sum(
-            day_kpis.room_comfort_violation_degree_hours or 0.0
+        total_comfort_undershoot_degree_hours=sum(
+            day_kpis.room_comfort_undershoot_degree_hours or 0.0
             for day_kpis in valid_days
         ),
-        total_dhw_violation_minutes=sum(
-            day_kpis.dhw_comfort_violation_minutes or 0.0
+        total_comfort_overshoot_degree_hours=sum(
+            day_kpis.room_comfort_overshoot_degree_hours or 0.0
+            for day_kpis in valid_days
+        ),
+        total_dhw_undershoot_minutes=sum(
+            day_kpis.dhw_comfort_undershoot_minutes or 0.0
             for day_kpis in valid_days
         ),
         mean_compressor_starts_per_day=mean(

@@ -51,10 +51,10 @@ options:
     - { time: "22:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
   dhw_target:
     - { time: "00:00", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
-    - { time: "19:59", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
+    - { time: "18:59", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
+    - { time: "19:00", target: 49.0, low_margin: 2.0, high_margin: 2.0 }
     - { time: "20:00", target: 49.0, low_margin: 2.0, high_margin: 2.0 }
-    - { time: "21:00", target: 49.0, low_margin: 2.0, high_margin: 2.0 }
-    - { time: "21:01", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
+    - { time: "20:01", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
 
   electricity_pricing:
     mode: "fixed"
