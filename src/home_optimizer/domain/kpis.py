@@ -26,7 +26,8 @@ class DailyKpis(DomainModel):
     electricity_cost_eur: float | None = None
     room_temperature_mae_c: float | None = None
     room_comfort_undershoot_degree_hours: float | None = None
-    room_comfort_overshoot_degree_hours: float | None = None
+    comfort_overshoot_while_heating_degree_hours: float | None = None
+    comfort_overshoot_passive_degree_hours: float | None = None
     dhw_comfort_undershoot_minutes: float | None = None
     thermostat_setpoint_changes: int = 0
     compressor_starts: int = 0
@@ -41,7 +42,8 @@ class BaselineKpiSummary(DomainModel):
     mean_solar_irradiance_w_m2: float | None = None
     mean_shutter_open_pct: float | None = None
     total_comfort_undershoot_degree_hours: float = 0.0
-    total_comfort_overshoot_degree_hours: float = 0.0
+    total_comfort_overshoot_while_heating_degree_hours: float = 0.0
+    total_comfort_overshoot_passive_degree_hours: float = 0.0
     total_dhw_undershoot_minutes: float = 0.0
     mean_compressor_starts_per_day: float | None = None
     mean_self_consumption_ratio: float | None = None
@@ -270,18 +272,20 @@ def weighted_band_undershoot_degree_hours(
     return undershoot_degree_hours
 
 
-def weighted_band_overshoot_degree_hours(
+def weighted_band_overshoot_split_degree_hours(
     measured: NumericSeries | None,
     maximum: NumericSeries,
+    heating_active: NumericSeries | None,
     *,
     start_time: datetime,
     end_time: datetime,
-) -> float | None:
+) -> tuple[float | None, float | None]:
     points = _sorted_points(measured)
     if not points:
-        return None
+        return None, None
 
-    overshoot_degree_hours = 0.0
+    overshoot_while_heating_degree_hours = 0.0
+    overshoot_passive_degree_hours = 0.0
     total_hours = 0.0
     for index, point in enumerate(points):
         point_time = parse_datetime(point.timestamp)
@@ -306,12 +310,20 @@ def weighted_band_overshoot_degree_hours(
             overshoot = point.value - maximum_value
 
         duration_hours = _duration_hours(segment_start, segment_end)
-        overshoot_degree_hours += overshoot * duration_hours
+        heating_value = (
+            latest_value_at(heating_active.points, point.timestamp)
+            if heating_active is not None
+            else None
+        )
+        if heating_value is not None and heating_value > 0.0:
+            overshoot_while_heating_degree_hours += overshoot * duration_hours
+        else:
+            overshoot_passive_degree_hours += overshoot * duration_hours
         total_hours += duration_hours
 
     if total_hours <= 0.0:
-        return None
-    return overshoot_degree_hours
+        return None, None
+    return overshoot_while_heating_degree_hours, overshoot_passive_degree_hours
 
 
 def weighted_below_minimum_minutes(
@@ -700,6 +712,17 @@ def compute_daily_kpis(
             (pv_generation_kwh - total_export_kwh) / pv_generation_kwh
         )
 
+    (
+        comfort_overshoot_while_heating_degree_hours,
+        comfort_overshoot_passive_degree_hours,
+    ) = weighted_band_overshoot_split_degree_hours(
+        room_temperature,
+        room_target_max,
+        compressor_frequency,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
     return DailyKpis(
         is_valid_for_control_evaluation=not validity_reasons,
         validity_reasons=validity_reasons,
@@ -744,12 +767,10 @@ def compute_daily_kpis(
             start_time=start_time,
             end_time=end_time,
         ),
-        room_comfort_overshoot_degree_hours=weighted_band_overshoot_degree_hours(
-            room_temperature,
-            room_target_max,
-            start_time=start_time,
-            end_time=end_time,
+        comfort_overshoot_while_heating_degree_hours=(
+            comfort_overshoot_while_heating_degree_hours
         ),
+        comfort_overshoot_passive_degree_hours=comfort_overshoot_passive_degree_hours,
         dhw_comfort_undershoot_minutes=weighted_below_minimum_minutes(
             dhw_top_temperature,
             dhw_target_min,
@@ -794,8 +815,12 @@ def compute_baseline_kpi_summary(daily_kpis: list[DailyKpis]) -> BaselineKpiSumm
             day_kpis.room_comfort_undershoot_degree_hours or 0.0
             for day_kpis in valid_days
         ),
-        total_comfort_overshoot_degree_hours=sum(
-            day_kpis.room_comfort_overshoot_degree_hours or 0.0
+        total_comfort_overshoot_while_heating_degree_hours=sum(
+            day_kpis.comfort_overshoot_while_heating_degree_hours or 0.0
+            for day_kpis in valid_days
+        ),
+        total_comfort_overshoot_passive_degree_hours=sum(
+            day_kpis.comfort_overshoot_passive_degree_hours or 0.0
             for day_kpis in valid_days
         ),
         total_dhw_undershoot_minutes=sum(

@@ -102,7 +102,8 @@ class DailyKpiResponse(BaseModel):
     electricity_cost_eur: float | None
     room_temperature_mae_c: float | None
     room_comfort_undershoot_degree_hours: float | None
-    room_comfort_overshoot_degree_hours: float | None
+    comfort_overshoot_while_heating_degree_hours: float | None
+    comfort_overshoot_passive_degree_hours: float | None
     dhw_comfort_undershoot_minutes: float | None
     thermostat_setpoint_changes: int
     compressor_starts: int
@@ -117,7 +118,8 @@ class BaselineKpiSummaryResponse(BaseModel):
     mean_solar_irradiance_w_m2: float | None
     mean_shutter_open_pct: float | None
     total_comfort_undershoot_degree_hours: float
-    total_comfort_overshoot_degree_hours: float
+    total_comfort_overshoot_while_heating_degree_hours: float
+    total_comfort_overshoot_passive_degree_hours: float
     total_dhw_undershoot_minutes: float
     mean_compressor_starts_per_day: float | None
     mean_self_consumption_ratio: float | None

@@ -599,7 +599,8 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
     assert payload["self_consumption_ratio"] is not None
     assert payload["electricity_cost_eur"] is not None
     assert payload["room_comfort_undershoot_degree_hours"] is not None
-    assert payload["room_comfort_overshoot_degree_hours"] is not None
+    assert payload["comfort_overshoot_while_heating_degree_hours"] is not None
+    assert payload["comfort_overshoot_passive_degree_hours"] is not None
     assert payload["dhw_comfort_undershoot_minutes"] is not None
     assert payload["thermostat_setpoint_changes"] == 1
     assert payload["compressor_starts"] == 1
@@ -621,7 +622,8 @@ def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
     assert payload["mean_solar_irradiance_w_m2"] == 220.0
     assert payload["mean_shutter_open_pct"] == 50.0
     assert payload["total_comfort_undershoot_degree_hours"] >= 0.0
-    assert payload["total_comfort_overshoot_degree_hours"] >= 0.0
+    assert payload["total_comfort_overshoot_while_heating_degree_hours"] >= 0.0
+    assert payload["total_comfort_overshoot_passive_degree_hours"] >= 0.0
     assert payload["total_dhw_undershoot_minutes"] >= 0.0
     assert payload["mean_compressor_starts_per_day"] is not None
     assert payload["mean_self_consumption_ratio"] is not None
