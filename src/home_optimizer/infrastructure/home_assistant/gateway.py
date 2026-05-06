@@ -89,7 +89,7 @@ class HomeAssistantGateway:
             "types": ["mean", "min", "max", "state", "sum"],
         }
         response = self.client.post(
-            f"{self.base_url}/api/statistics_during_period",
+            f"{self.base_url}/api/recorder/statistics_during_period",
             json=body,
         )
         response.raise_for_status()

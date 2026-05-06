@@ -60,7 +60,7 @@ def test_home_assistant_gateway_get_statistics_calls_correct_endpoint() -> None:
 
     assert len(result) == 1
     assert result[0]["mean"] == 20.5
-    assert requested[0][0] == "http://homeassistant.local/api/statistics_during_period"
+    assert requested[0][0] == "http://homeassistant.local/api/recorder/statistics_during_period"
 
 
 def test_home_assistant_gateway_get_statistics_returns_empty_for_unknown_entity() -> None:
