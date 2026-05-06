@@ -30,3 +30,35 @@ def map_history_points(
 
     return sorted(points, key=lambda point: point.timestamp)
 
+
+def map_statistics_points(
+    statistics: list[dict[str, Any]],
+    spec: SensorSpec,
+) -> list[SensorPoint]:
+    points: list[SensorPoint] = []
+
+    for entry in statistics:
+        ts_raw = entry.get("start")
+        if not ts_raw:
+            continue
+
+        if spec.unit == "bool":
+            raw_value = entry.get("state")
+            parsed = parse_sensor_value(raw_value, spec.unit)
+        else:
+            raw_value = entry.get("mean")
+            if raw_value is None:
+                raw_value = entry.get("state")
+            parsed = parse_sensor_value(raw_value, spec.unit)
+
+        if parsed is None:
+            continue
+
+        if isinstance(parsed, (int, float)) and not isinstance(parsed, bool):
+            parsed *= spec.conversion_factor
+
+        points.append(SensorPoint(timestamp=ensure_utc(ts_raw), value=parsed))
+
+    return sorted(points, key=lambda point: point.timestamp)
+
+

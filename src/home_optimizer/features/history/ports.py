@@ -17,6 +17,15 @@ class HistorySourceGateway(Protocol):
         minimal_response: bool = True,
     ) -> list[dict[str, Any]]: ...
 
+    def get_statistics(
+        self,
+        *,
+        statistic_id: str,
+        start_time: datetime,
+        end_time: datetime,
+        period: str = "hour",
+    ) -> list[dict[str, Any]]: ...
+
 
 class HistoryRepository(Protocol):
     @property

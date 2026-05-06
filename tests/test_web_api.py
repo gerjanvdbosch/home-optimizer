@@ -147,8 +147,7 @@ class FakeTimeSeriesReadRepository:
             ),
         ]
 
-    def read_electricity_price_series(
-        self,
+    def read_electricity_price_series(        self,
         start_time,
         end_time,
         *,

@@ -16,9 +16,15 @@ from home_optimizer.infrastructure.database.time_series_write_repository import 
 
 
 class FakeHomeAssistantClient:
-    def __init__(self, history: list[dict[str, str]]) -> None:
+    def __init__(
+        self,
+        history: list[dict[str, str]],
+        statistics: list[dict[str, object]] | None = None,
+    ) -> None:
         self.history = history
+        self.statistics = statistics or []
         self.calls = 0
+        self.statistics_calls = 0
 
     def get_history(self, **kwargs) -> list[dict[str, str]]:
         self.calls += 1
@@ -40,6 +46,25 @@ class FakeHomeAssistantClient:
                 continue
 
             rows.append(item)
+
+        return rows
+
+    def get_statistics(self, **kwargs) -> list[dict[str, object]]:
+        self.statistics_calls += 1
+        start_time = kwargs.get("start_time")
+        end_time = kwargs.get("end_time")
+        rows: list[dict[str, object]] = []
+
+        for entry in self.statistics:
+            ts_raw = entry.get("start")
+            if ts_raw is None:
+                continue
+            ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            if start_time is not None and ts < start_time:
+                continue
+            if end_time is not None and ts >= end_time:
+                continue
+            rows.append(entry)
 
         return rows
 
@@ -345,3 +370,92 @@ def test_history_import_request_uses_max_days_back_when_configured() -> None:
     assert request.end_time == datetime(2026, 4, 25, 16, 6, 54, tzinfo=timezone.utc)
     assert request.start_time == datetime(2026, 4, 15, 16, 6, 54, tzinfo=timezone.utc)
     assert request.end_time - request.start_time == timedelta(days=10)
+
+
+def test_statistics_fallback_used_when_history_returns_no_points(tmp_path) -> None:
+    db = Database(str(tmp_path / "history.db"))
+    db.init_schema()
+    ha = FakeHomeAssistantClient(
+        history=[],
+        statistics=[
+            {"start": "2026-04-14T00:00:00+00:00", "mean": 20.5},
+            {"start": "2026-04-14T01:00:00+00:00", "mean": 21.0},
+        ],
+    )
+    spec = sensor_spec(
+        name="room_temperature",
+        entity_id="sensor.room",
+        category="building",
+        unit="°C",
+        method="ffill",
+    )
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
+    start = datetime(2026, 4, 14, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 14, 2, tzinfo=timezone.utc)
+
+    written = importer.import_sensor(spec, start, end)
+
+    assert ha.calls == 1
+    assert ha.statistics_calls == 1
+    assert written == 120  # ffill creates one row per minute: 2 hours × 60
+
+    with db.session() as session:
+        rows = session.query(Sample1m).order_by(Sample1m.timestamp_minute_utc).all()
+
+    assert rows[0].timestamp_minute_utc == "2026-04-14T00:00:00+00:00"
+    assert rows[0].last_real == 20.5
+    assert rows[60].timestamp_minute_utc == "2026-04-14T01:00:00+00:00"
+    assert rows[60].last_real == 21.0
+
+
+def test_statistics_not_called_when_history_has_points(tmp_path) -> None:
+    db = Database(str(tmp_path / "history.db"))
+    db.init_schema()
+    ha = FakeHomeAssistantClient(
+        history=[{"state": "19.5", "last_changed": "2026-04-14T00:00:10+00:00"}],
+        statistics=[{"start": "2026-04-14T00:00:00+00:00", "mean": 99.0}],
+    )
+    spec = sensor_spec(
+        name="room_temperature",
+        entity_id="sensor.room",
+        category="building",
+        unit="°C",
+        method="ffill",
+    )
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
+    start = datetime(2026, 4, 14, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 14, 0, 2, tzinfo=timezone.utc)
+
+    importer.import_sensor(spec, start, end)
+
+    assert ha.statistics_calls == 0
+    with db.session() as session:
+        rows = session.query(Sample1m).all()
+    assert rows[0].last_real == 19.5
+
+
+def test_statistics_fallback_applies_conversion_factor(tmp_path) -> None:
+    db = Database(str(tmp_path / "history.db"))
+    db.init_schema()
+    ha = FakeHomeAssistantClient(
+        history=[],
+        statistics=[{"start": "2026-04-14T00:00:00+00:00", "mean": 1500.0}],
+    )
+    spec = sensor_spec(
+        name="hp_electric_power",
+        entity_id="sensor.hp_power",
+        category="energy",
+        unit="kW",
+        method="ffill",
+        conversion_factor=0.001,
+    )
+    importer = HistoryImportService(ha, TimeSeriesWriteRepository(db), chunk_days=1)
+    start = datetime(2026, 4, 14, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 14, 0, 1, tzinfo=timezone.utc)
+
+    importer.import_sensor(spec, start, end)
+
+    with db.session() as session:
+        rows = session.query(Sample1m).all()
+    assert abs(rows[0].last_real - 1.5) < 1e-9
+

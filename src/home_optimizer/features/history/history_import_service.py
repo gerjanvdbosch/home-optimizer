@@ -5,7 +5,7 @@ from datetime import datetime
 from home_optimizer.domain.sensors import SensorSpec
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.history.chunking import HistoryChunkPlanner
-from home_optimizer.features.history.history_mapping import map_history_points
+from home_optimizer.features.history.history_mapping import map_history_points, map_statistics_points
 from home_optimizer.features.history.ports import HistoryRepository, HistorySourceGateway
 from home_optimizer.features.history.resampling import MinuteResampler
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
@@ -55,6 +55,15 @@ class HistoryImportService:
                 minimal_response=True,
             )
             points = map_history_points(history, spec)
+
+            if not points:
+                statistics = self.gateway.get_statistics(
+                    statistic_id=spec.entity_id,
+                    start_time=window.start_time,
+                    end_time=window.end_time,
+                )
+                points = map_statistics_points(statistics, spec)
+
             samples = self.resampler.resample(
                 points=points,
                 spec=spec,

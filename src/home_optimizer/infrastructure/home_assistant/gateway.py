@@ -73,3 +73,26 @@ class HomeAssistantGateway:
         if not result:
             return []
         return result[0]
+
+    def get_statistics(
+        self,
+        statistic_id: str,
+        start_time: datetime,
+        end_time: datetime,
+        period: str = "hour",
+    ) -> list[dict[str, Any]]:
+        body = {
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "statistic_ids": [statistic_id],
+            "period": period,
+            "types": ["mean", "min", "max", "state", "sum"],
+        }
+        response = self.client.post(
+            f"{self.base_url}/api/statistics_during_period",
+            json=body,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get(statistic_id, [])
+
