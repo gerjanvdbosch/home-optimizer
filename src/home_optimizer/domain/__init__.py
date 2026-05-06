@@ -1,8 +1,7 @@
 from .clock import utc_now
 from .control import ShutterPositionControl, ThermostatSetpointControl
 from .forecast import ForecastEntry
-from .heatpump_state import SpaceHeatingStateFilter
-from .kpis import DailyKpis
+from .kpis import DailyKpis, compute_daily_kpis
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -44,15 +43,14 @@ from .names import (
     PV_TOTAL_KWH,
     REFRIGERANT_CONDENSATION_TEMPERATURE,
     REFRIGERANT_LIQUID_LINE_TEMPERATURE,
-    ROOM_TEMPERATURE,
     ROOM_TARGET_MAX_TEMPERATURE,
     ROOM_TARGET_MIN_TEMPERATURE,
     ROOM_TARGET_TEMPERATURE,
+    ROOM_TEMPERATURE,
     SHUTTER_LIVING_ROOM,
     THERMAL_OUTPUT,
     THERMOSTAT_SETPOINT,
 )
-from .sensor_factory import build_sensor_specs
 from .pricing import (
     DynamicPricing,
     FixedPricing,
@@ -65,6 +63,7 @@ from .pricing import (
     price_intervals_from_series,
     resolve_daily_price_series,
 )
+from .sensor_factory import build_sensor_specs
 from .sensors import SENSOR_DEFINITIONS, SensorDefinition, SensorSpec
 from .series import NumericPoint, NumericSeries, TextPoint, TextSeries
 from .series_transforms import (
@@ -148,6 +147,7 @@ __all__ = [
     "adjusted_gti_with_shutter",
     "build_daily_price_series",
     "build_fixed_price_intervals",
+    "compute_daily_kpis",
     "build_daily_target_band_series",
     "build_space_heating_thermal_output_series",
     "build_sensor_specs",

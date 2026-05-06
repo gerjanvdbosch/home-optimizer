@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from .heatpump_state import SpaceHeatingStateFilter
 from .names import GTI_LIVING_ROOM_WINDOWS_ADJUSTED, THERMAL_OUTPUT
-from .series import NumericPoint, NumericSeries, TextSeries
+from .series import NumericPoint, NumericSeries
 from .target_schedule import TemperatureTargetWindow
 from .time import normalize_utc_timestamp, parse_datetime
 
@@ -163,38 +162,5 @@ def build_thermal_output_series(
         thermal_points.append(NumericPoint(timestamp=flow_point.timestamp, value=thermal_output))
 
     return NumericSeries(name=name, unit="kW", points=thermal_points)
-
-
-def build_space_heating_thermal_output_series(
-    flow: NumericSeries | None,
-    supply: NumericSeries | None,
-    return_s: NumericSeries | None,
-    *,
-    defrost_active: NumericSeries | None = None,
-    booster_heater_active: NumericSeries | None = None,
-    hp_mode: TextSeries | None = None,
-    name: str = THERMAL_OUTPUT,
-) -> NumericSeries:
-    thermal_output = build_thermal_output_series(
-        flow,
-        supply,
-        return_s,
-        name=name,
-    )
-    state_filter = SpaceHeatingStateFilter(
-        defrost_active=defrost_active,
-        booster_heater_active=booster_heater_active,
-        hp_mode=hp_mode,
-    )
-    return NumericSeries(
-        name=thermal_output.name,
-        unit=thermal_output.unit,
-        points=[
-            point
-            for point in thermal_output.points
-            if state_filter.is_valid(parse_datetime(point.timestamp))
-        ],
-    )
-
 
 
