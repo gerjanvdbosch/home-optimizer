@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from home_optimizer.domain.sensors import SensorSpec
@@ -42,6 +43,11 @@ def map_statistics_points(
         if not ts_raw:
             continue
 
+        if isinstance(ts_raw, (int, float)):
+            ts = datetime.fromtimestamp(ts_raw, tz=timezone.utc)
+        else:
+            ts = ensure_utc(ts_raw)
+
         if spec.unit == "bool":
             raw_value = entry.get("state")
             parsed = parse_sensor_value(raw_value, spec.unit)
@@ -57,7 +63,7 @@ def map_statistics_points(
         if isinstance(parsed, (int, float)) and not isinstance(parsed, bool):
             parsed *= spec.conversion_factor
 
-        points.append(SensorPoint(timestamp=ensure_utc(ts_raw), value=parsed))
+        points.append(SensorPoint(timestamp=ts, value=parsed))
 
     return sorted(points, key=lambda point: point.timestamp)
 
