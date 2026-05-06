@@ -43,10 +43,7 @@ def map_statistics_points(
         if not ts_raw:
             continue
 
-        if isinstance(ts_raw, (int, float)):
-            ts = datetime.fromtimestamp(ts_raw, tz=timezone.utc)
-        else:
-            ts = ensure_utc(ts_raw)
+        ts = datetime.fromtimestamp(ts_raw / 1000, tz=timezone.utc)
 
         if spec.unit == "bool":
             raw_value = entry.get("state")
