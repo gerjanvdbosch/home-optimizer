@@ -27,7 +27,7 @@ ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 def create_kpi_router(settings: AppSettings) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/api/baseline/kpis", response_model=DailyKpiResponse)
+    @router.get("/api/kpis", response_model=DailyKpiResponse)
     def get_baseline_kpis(
         chart_date: ChartDateQuery,
         container: ContainerDependency,
@@ -40,7 +40,7 @@ def create_kpi_router(settings: AppSettings) -> APIRouter:
         )
 
     @router.get(
-        "/api/baseline/kpi-summary",
+        "/api/kpi-summary",
         response_model=BaselineKpiSummaryResponse,
     )
     def get_baseline_kpi_summary(

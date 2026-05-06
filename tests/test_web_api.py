@@ -580,7 +580,7 @@ def test_dashboard_kpis_endpoint_returns_daily_metrics() -> None:
     app, _ = build_test_app(imported_rows={})
 
     with TestClient(app) as client:
-        response = client.get("/api/baseline/kpis?date=2026-04-25")
+        response = client.get("/api/kpis?date=2026-04-25")
 
     assert response.status_code == 200
     payload = response.json()
@@ -603,7 +603,7 @@ def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
     app, _ = build_test_app(imported_rows={})
 
     with TestClient(app) as client:
-        response = client.get("/api/baseline/kpi-summary")
+        response = client.get("/api/kpi-summary")
 
     assert response.status_code == 200
     payload = response.json()
