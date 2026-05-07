@@ -40,6 +40,7 @@ from home_optimizer.domain.pricing import (
     DEFAULT_DYNAMIC_PRICE_SOURCE,
     DEFAULT_FIXED_PRICE_SOURCE,
 )
+from home_optimizer.domain.time import parse_datetime
 from home_optimizer.features.identification.models import (
     IdentificationDataset,
     IdentificationDatasetRow,
@@ -209,8 +210,27 @@ def _latest_numeric_value(
     return latest_value_at(series_by_name.get(name, _empty_numeric_series()).points, timestamp)
 
 
-def _binary_flag(value: float | None) -> int:
-    return int(bool(value and value > 0))
+def _window_has_positive_value(
+    series_by_name: dict[str, NumericSeries],
+    name: str,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> int:
+    series = series_by_name.get(name)
+    if series is None:
+        return 0
+
+    for point in series.points:
+        point_time = parse_datetime(point.timestamp)
+        if point_time < window_start:
+            continue
+        if point_time >= window_end:
+            break
+        if point.value > 0:
+            return 1
+
+    return 0
 
 
 def _validate_row(
@@ -358,6 +378,7 @@ class IdentificationDatasetService:
 
         while cursor < end_time_utc:
             timestamp = normalize_utc_timestamp(cursor)
+            next_cursor = min(cursor + interval, end_time_utc)
             room_temperature = _latest_numeric_value(
                 numeric_series, ROOM_TEMPERATURE, timestamp
             )
@@ -373,11 +394,17 @@ class IdentificationDatasetService:
             hp_electric_power = _latest_numeric_value(numeric_series, HP_ELECTRIC_POWER, timestamp)
             pv_output_power = _latest_numeric_value(numeric_series, PV_OUTPUT_POWER, timestamp)
             net_power = _latest_numeric_value(numeric_series, P1_NET_POWER, timestamp)
-            defrost_active = _binary_flag(
-                _latest_numeric_value(numeric_series, DEFROST_ACTIVE, timestamp)
+            defrost_active = _window_has_positive_value(
+                numeric_series,
+                DEFROST_ACTIVE,
+                window_start=cursor,
+                window_end=next_cursor,
             )
-            booster_heater_active = _binary_flag(
-                _latest_numeric_value(numeric_series, BOOSTER_HEATER_ACTIVE, timestamp)
+            booster_heater_active = _window_has_positive_value(
+                numeric_series,
+                BOOSTER_HEATER_ACTIVE,
+                window_start=cursor,
+                window_end=next_cursor,
             )
             shutter_position = _latest_numeric_value(numeric_series, SHUTTER_LIVING_ROOM, timestamp)
             thermostat_setpoint = _latest_numeric_value(

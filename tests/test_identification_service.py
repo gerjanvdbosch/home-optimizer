@@ -289,3 +289,72 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert third_row.is_valid_for_dhw_identification is False
     assert third_row.is_valid_for_cop_identification is False
     assert "booster_heater_active" in third_row.exclusion_reasons
+
+
+def test_identification_dataset_marks_defrost_and_booster_when_they_occur_within_window() -> None:
+    start_time = datetime(2026, 4, 25, 7, 0, tzinfo=timezone.utc)
+    end_time = start_time + timedelta(minutes=30)
+    service = IdentificationDatasetService(
+        FakeIdentificationDataReader(
+            numeric_series=[
+                build_numeric_series(
+                    name=ROOM_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[20.1, 20.2],
+                ),
+                build_numeric_series(
+                    name=OUTDOOR_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[8.0, 8.1],
+                ),
+                NumericSeries(
+                    name=DEFROST_ACTIVE,
+                    unit="bool",
+                    points=[
+                        NumericPoint(
+                            timestamp=normalize_utc_timestamp(start_time + timedelta(minutes=8)),
+                            value=1.0,
+                        )
+                    ],
+                ),
+                NumericSeries(
+                    name=BOOSTER_HEATER_ACTIVE,
+                    unit="bool",
+                    points=[
+                        NumericPoint(
+                            timestamp=normalize_utc_timestamp(start_time + timedelta(minutes=22)),
+                            value=1.0,
+                        )
+                    ],
+                ),
+            ],
+            text_series=[
+                build_text_series(
+                    name=HP_MODE,
+                    start_time=start_time,
+                    values=["off", "off"],
+                )
+            ],
+            forecast_series=[],
+            price_series=build_numeric_series(
+                name="electricity_price",
+                unit="EUR/kWh",
+                start_time=start_time,
+                values=[0.25, 0.25],
+            ),
+        ),
+        build_settings(),
+    )
+
+    dataset = service.build_dataset(
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    assert len(dataset.rows) == 2
+    assert dataset.rows[0].defrost_active == 1
+    assert dataset.rows[0].booster_heater_active == 0
+    assert dataset.rows[1].defrost_active == 0
+    assert dataset.rows[1].booster_heater_active == 1
