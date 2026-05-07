@@ -43,6 +43,7 @@ from home_optimizer.domain.pricing import (
 from home_optimizer.features.identification.models import (
     IdentificationDataset,
     IdentificationDatasetRow,
+    IdentificationDatasetSummary,
 )
 from home_optimizer.features.identification.ports import IdentificationDataReader
 
@@ -186,7 +187,11 @@ def _occupied_flag(
 def _detect_dhw_draw(
     current_value: float | None,
     previous_value: float | None,
+    *,
+    mode_dhw: int,
 ) -> int:
+    if mode_dhw:
+        return 0
     if current_value is None or previous_value is None:
         return 0
     return int((previous_value - current_value) >= _DHW_DRAW_DROP_THRESHOLD_C)
@@ -472,6 +477,7 @@ class IdentificationDatasetService:
                     dhw_draw_detected=_detect_dhw_draw(
                         dhw_top_temperature,
                         previous_dhw_top,
+                        mode_dhw=mode_dhw,
                     ),
                     is_valid_for_room_identification=room_valid,
                     is_valid_for_dhw_identification=dhw_valid,
@@ -487,4 +493,26 @@ class IdentificationDatasetService:
             start_time_utc=start_time_utc,
             end_time_utc=end_time_utc,
             rows=rows,
+        )
+
+    def summarize_dataset(
+        self,
+        dataset: IdentificationDataset,
+    ) -> IdentificationDatasetSummary:
+        exclusion_reason_counts: dict[str, int] = {}
+        for row in dataset.rows:
+            for reason in row.exclusion_reasons:
+                exclusion_reason_counts[reason] = exclusion_reason_counts.get(reason, 0) + 1
+
+        return IdentificationDatasetSummary(
+            total_rows=len(dataset.rows),
+            mode_space_rows=sum(row.mode_space for row in dataset.rows),
+            mode_dhw_rows=sum(row.mode_dhw for row in dataset.rows),
+            mode_off_rows=sum(row.mode_off for row in dataset.rows),
+            defrost_rows=sum(row.defrost_active for row in dataset.rows),
+            booster_rows=sum(row.booster_heater_active for row in dataset.rows),
+            valid_room_rows=sum(int(row.is_valid_for_room_identification) for row in dataset.rows),
+            valid_dhw_rows=sum(int(row.is_valid_for_dhw_identification) for row in dataset.rows),
+            valid_cop_rows=sum(int(row.is_valid_for_cop_identification) for row in dataset.rows),
+            exclusion_reason_counts=exclusion_reason_counts,
         )

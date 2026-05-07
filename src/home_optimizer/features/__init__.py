@@ -6,7 +6,12 @@ from .history import (
     HistoryImportService,
     WeatherImportService,
 )
-from .identification import IdentificationDataset, IdentificationDatasetRow, IdentificationDatasetService
+from .identification import (
+    IdentificationDataset,
+    IdentificationDatasetRow,
+    IdentificationDatasetService,
+    IdentificationDatasetSummary,
+)
 from .kpi import DailyKpiService
 from .telemetry import LiveMeasurement, TelemetryService
 
@@ -18,6 +23,7 @@ __all__ = [
     "IdentificationDataset",
     "IdentificationDatasetRow",
     "IdentificationDatasetService",
+    "IdentificationDatasetSummary",
     "WeatherImportService",
     "ElectricityPriceService",
     "LiveMeasurement",

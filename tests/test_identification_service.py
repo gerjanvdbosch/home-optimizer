@@ -273,7 +273,7 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert second_row.mode_dhw == 1
     assert second_row.mode_off == 0
     assert second_row.defrost_active == 1
-    assert second_row.dhw_draw_detected == 1
+    assert second_row.dhw_draw_detected == 0
     assert second_row.solar_gain_proxy_w_m2 == 100.0
     assert second_row.is_valid_for_room_identification is False
     assert second_row.is_valid_for_dhw_identification is False

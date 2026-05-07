@@ -342,9 +342,43 @@ def test_removed_routes_return_404() -> None:
 
     with TestClient(app) as client:
         assert client.get("/simulation").status_code == 404
-        assert client.get("/api/identification").status_code == 404
         assert client.post("/api/prediction", json={}).status_code == 404
         assert client.post("/api/mpc/thermostat-setpoint", json={}).status_code == 404
+
+
+def test_identification_endpoint_returns_dataset_and_summary() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/identification",
+            params={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-25T01:00:00+00:00",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["interval_minutes"] == 15
+    assert payload["summary"]["total_rows"] == 4
+    assert payload["summary"]["mode_space_rows"] == 0
+    assert payload["summary"]["mode_off_rows"] == 4
+    assert payload["summary"]["defrost_rows"] == 0
+    assert payload["summary"]["booster_rows"] == 0
+    assert payload["summary"]["valid_room_rows"] == 4
+    assert payload["summary"]["valid_dhw_rows"] == 4
+    assert payload["summary"]["valid_cop_rows"] == 0
+    assert (
+        payload["summary"]["exclusion_reason_counts"]["missing_or_nonpositive_thermal_output"]
+        == 4
+    )
+    assert len(payload["rows"]) == 4
+    assert payload["rows"][0]["mode_space"] == 0
+    assert payload["rows"][0]["mode_dhw"] == 0
+    assert payload["rows"][0]["mode_off"] == 1
+    assert payload["rows"][0]["booster_heater_active"] == 0
+    assert payload["rows"][0]["is_valid_for_room_identification"] is True
 
 
 def test_weather_import_endpoint_runs_forecast_backfill() -> None:

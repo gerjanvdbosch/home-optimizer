@@ -48,3 +48,16 @@ class IdentificationDataset(DomainModel):
     start_time_utc: datetime
     end_time_utc: datetime
     rows: list[IdentificationDatasetRow]
+
+
+class IdentificationDatasetSummary(DomainModel):
+    total_rows: int
+    mode_space_rows: int
+    mode_dhw_rows: int
+    mode_off_rows: int
+    defrost_rows: int
+    booster_rows: int
+    valid_room_rows: int
+    valid_dhw_rows: int
+    valid_cop_rows: int
+    exclusion_reason_counts: dict[str, int]

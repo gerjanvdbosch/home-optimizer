@@ -7,6 +7,10 @@ from home_optimizer.domain import (
     NumericSeries,
     TextSeries,
 )
+from home_optimizer.features.identification import (
+    IdentificationDataset,
+    IdentificationDatasetSummary,
+)
 from home_optimizer.web.schemas import (
     BaselineKpiSummaryResponse,
     ChartPointResponse,
@@ -15,6 +19,9 @@ from home_optimizer.web.schemas import (
     ChartTextSeriesResponse,
     DailyKpiResponse,
     HistoryImportJobResponse,
+    IdentificationDatasetResponse,
+    IdentificationDatasetRowResponse,
+    IdentificationDatasetSummaryResponse,
 )
 
 
@@ -59,3 +66,25 @@ def daily_kpi_response(kpis: DailyKpis) -> DailyKpiResponse:
 
 def baseline_kpi_summary_response(summary: BaselineKpiSummary) -> BaselineKpiSummaryResponse:
     return BaselineKpiSummaryResponse(**summary.model_dump())
+
+
+def identification_dataset_summary_response(
+    summary: IdentificationDatasetSummary,
+) -> IdentificationDatasetSummaryResponse:
+    return IdentificationDatasetSummaryResponse(**summary.model_dump())
+
+
+def identification_dataset_response(
+    dataset: IdentificationDataset,
+    summary: IdentificationDatasetSummary,
+) -> IdentificationDatasetResponse:
+    return IdentificationDatasetResponse(
+        interval_minutes=dataset.interval_minutes,
+        start_time_utc=dataset.start_time_utc,
+        end_time_utc=dataset.end_time_utc,
+        summary=identification_dataset_summary_response(summary),
+        rows=[
+            IdentificationDatasetRowResponse(**row.model_dump())
+            for row in dataset.rows
+        ],
+    )

@@ -123,3 +123,62 @@ class BaselineKpiSummaryResponse(BaseModel):
     total_dhw_undershoot_minutes: float
     mean_compressor_starts_per_day: float | None
     mean_self_consumption_ratio: float | None
+
+
+class IdentificationDatasetRowResponse(BaseModel):
+    timestamp_utc: datetime
+    room_temperature_c: float | None = None
+    outdoor_temperature_c: float | None = None
+    dhw_top_temperature_c: float | None = None
+    dhw_bottom_temperature_c: float | None = None
+    hp_electric_power_kw: float | None = None
+    hp_mode_raw: str | None = None
+    mode_space: int
+    mode_dhw: int
+    mode_off: int
+    defrost_active: int
+    booster_heater_active: int
+    pv_output_power_kw: float | None = None
+    net_power_kw: float | None = None
+    shutter_position_pct: float | None = None
+    thermostat_setpoint_c: float | None = None
+    room_target_temperature_c: float | None = None
+    room_target_min_temperature_c: float | None = None
+    room_target_max_temperature_c: float | None = None
+    supply_temperature_c: float | None = None
+    return_temperature_c: float | None = None
+    flow_l_min: float | None = None
+    hp_delta_t_c: float | None = None
+    thermal_output_estimate_kw: float | None = None
+    cop_estimate: float | None = None
+    solar_irradiance_w_m2: float | None = None
+    solar_gain_proxy_w_m2: float | None = None
+    price_import_eur_kwh: float | None = None
+    price_export_eur_kwh: float | None = None
+    occupied_flag: int
+    dhw_draw_detected: int
+    is_valid_for_room_identification: bool
+    is_valid_for_dhw_identification: bool
+    is_valid_for_cop_identification: bool
+    exclusion_reasons: list[str]
+
+
+class IdentificationDatasetSummaryResponse(BaseModel):
+    total_rows: int
+    mode_space_rows: int
+    mode_dhw_rows: int
+    mode_off_rows: int
+    defrost_rows: int
+    booster_rows: int
+    valid_room_rows: int
+    valid_dhw_rows: int
+    valid_cop_rows: int
+    exclusion_reason_counts: dict[str, int]
+
+
+class IdentificationDatasetResponse(BaseModel):
+    interval_minutes: int
+    start_time_utc: datetime
+    end_time_utc: datetime
+    summary: IdentificationDatasetSummaryResponse
+    rows: list[IdentificationDatasetRowResponse]
