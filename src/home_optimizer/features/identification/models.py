@@ -16,6 +16,8 @@ class IdentificationDatasetRow(DomainModel):
     mode_space: int = 0
     mode_dhw: int = 0
     mode_off: int = 1
+    defrost_active: int = 0
+    booster_heater_active: int = 0
     pv_output_power_kw: float | None = None
     net_power_kw: float | None = None
     shutter_position_pct: float | None = None
@@ -35,6 +37,10 @@ class IdentificationDatasetRow(DomainModel):
     price_export_eur_kwh: float | None = None
     occupied_flag: int = 0
     dhw_draw_detected: int = 0
+    is_valid_for_room_identification: bool = True
+    is_valid_for_dhw_identification: bool = True
+    is_valid_for_cop_identification: bool = True
+    exclusion_reasons: list[str] = []
 
 
 class IdentificationDataset(DomainModel):

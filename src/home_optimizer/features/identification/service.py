@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain import (
+    BOOSTER_HEATER_ACTIVE,
+    DEFROST_ACTIVE,
     DHW_BOTTOM_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
@@ -49,6 +51,8 @@ _DHW_DRAW_DROP_THRESHOLD_C = 0.75
 _MODE_SPACE_TOKENS = ("heat", "heating", "ufh")
 _MODE_DHW_TOKENS = ("dhw", "sww")
 _MODE_OFF_TOKENS = ("off", "idle", "standby", "none")
+_MIN_PLAUSIBLE_COP = 1.0
+_MAX_PLAUSIBLE_COP = 8.0
 
 
 def _series_by_name(series_list: list[NumericSeries]) -> dict[str, NumericSeries]:
@@ -200,6 +204,55 @@ def _latest_numeric_value(
     return latest_value_at(series_by_name.get(name, _empty_numeric_series()).points, timestamp)
 
 
+def _binary_flag(value: float | None) -> int:
+    return int(bool(value and value > 0))
+
+
+def _validate_row(
+    *,
+    mode_space: int,
+    mode_dhw: int,
+    mode_off: int,
+    defrost_active: int,
+    booster_heater_active: int,
+    flow_l_min: float | None,
+    thermal_output_estimate: float | None,
+    cop_estimate: float | None,
+) -> tuple[bool, bool, bool, list[str]]:
+    reasons: list[str] = []
+    active_mode_count = mode_space + mode_dhw + mode_off
+
+    if active_mode_count != 1:
+        reasons.append("invalid_mode_combination")
+    if defrost_active:
+        reasons.append("defrost_active")
+    if booster_heater_active:
+        reasons.append("booster_heater_active")
+    if flow_l_min is not None and flow_l_min < 0:
+        reasons.append("negative_flow")
+    if thermal_output_estimate is not None and thermal_output_estimate < 0:
+        reasons.append("negative_thermal_output")
+
+    room_valid = active_mode_count == 1 and not defrost_active and not booster_heater_active
+    dhw_valid = active_mode_count == 1 and not defrost_active and not booster_heater_active
+
+    cop_valid = (
+        active_mode_count == 1
+        and not defrost_active
+        and not booster_heater_active
+        and thermal_output_estimate is not None
+        and thermal_output_estimate > 0
+        and cop_estimate is not None
+        and _MIN_PLAUSIBLE_COP <= cop_estimate <= _MAX_PLAUSIBLE_COP
+    )
+    if cop_estimate is not None and not (_MIN_PLAUSIBLE_COP <= cop_estimate <= _MAX_PLAUSIBLE_COP):
+        reasons.append("cop_out_of_range")
+    if thermal_output_estimate is None or thermal_output_estimate <= 0:
+        reasons.append("missing_or_nonpositive_thermal_output")
+
+    return room_valid, dhw_valid, cop_valid, reasons
+
+
 class IdentificationDatasetService:
     def __init__(self, reader: IdentificationDataReader, settings: AppSettings) -> None:
         self.reader = reader
@@ -210,7 +263,7 @@ class IdentificationDatasetService:
         *,
         start_time: datetime,
         end_time: datetime,
-        interval_minutes: int = 10,
+        interval_minutes: int = 15,
     ) -> IdentificationDataset:
         start_time_utc = ensure_utc(start_time)
         end_time_utc = ensure_utc(end_time)
@@ -229,6 +282,8 @@ class IdentificationDatasetService:
                     HP_ELECTRIC_POWER,
                     PV_OUTPUT_POWER,
                     P1_NET_POWER,
+                    DEFROST_ACTIVE,
+                    BOOSTER_HEATER_ACTIVE,
                     SHUTTER_LIVING_ROOM,
                     THERMOSTAT_SETPOINT,
                     HP_SUPPLY_TEMPERATURE,
@@ -313,6 +368,12 @@ class IdentificationDatasetService:
             hp_electric_power = _latest_numeric_value(numeric_series, HP_ELECTRIC_POWER, timestamp)
             pv_output_power = _latest_numeric_value(numeric_series, PV_OUTPUT_POWER, timestamp)
             net_power = _latest_numeric_value(numeric_series, P1_NET_POWER, timestamp)
+            defrost_active = _binary_flag(
+                _latest_numeric_value(numeric_series, DEFROST_ACTIVE, timestamp)
+            )
+            booster_heater_active = _binary_flag(
+                _latest_numeric_value(numeric_series, BOOSTER_HEATER_ACTIVE, timestamp)
+            )
             shutter_position = _latest_numeric_value(numeric_series, SHUTTER_LIVING_ROOM, timestamp)
             thermostat_setpoint = _latest_numeric_value(
                 numeric_series, THERMOSTAT_SETPOINT, timestamp
@@ -362,6 +423,17 @@ class IdentificationDatasetService:
             if solar_irradiance is not None:
                 solar_gain_proxy = solar_irradiance * shutter_fraction
 
+            room_valid, dhw_valid, cop_valid, exclusion_reasons = _validate_row(
+                mode_space=mode_space,
+                mode_dhw=mode_dhw,
+                mode_off=mode_off,
+                defrost_active=defrost_active,
+                booster_heater_active=booster_heater_active,
+                flow_l_min=flow_l_min,
+                thermal_output_estimate=thermal_output_estimate,
+                cop_estimate=cop_estimate,
+            )
+
             rows.append(
                 IdentificationDatasetRow(
                     timestamp_utc=cursor,
@@ -374,6 +446,8 @@ class IdentificationDatasetService:
                     mode_space=mode_space,
                     mode_dhw=mode_dhw,
                     mode_off=mode_off,
+                    defrost_active=defrost_active,
+                    booster_heater_active=booster_heater_active,
                     pv_output_power_kw=pv_output_power,
                     net_power_kw=net_power,
                     shutter_position_pct=shutter_position,
@@ -399,6 +473,10 @@ class IdentificationDatasetService:
                         dhw_top_temperature,
                         previous_dhw_top,
                     ),
+                    is_valid_for_room_identification=room_valid,
+                    is_valid_for_dhw_identification=dhw_valid,
+                    is_valid_for_cop_identification=cop_valid,
+                    exclusion_reasons=exclusion_reasons,
                 )
             )
             previous_dhw_top = dhw_top_temperature

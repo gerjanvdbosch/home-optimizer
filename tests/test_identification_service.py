@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
+    BOOSTER_HEATER_ACTIVE,
+    DEFROST_ACTIVE,
     DHW_BOTTOM_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
@@ -67,7 +69,7 @@ def build_numeric_series(
     unit: str,
     start_time: datetime,
     values: list[float],
-    interval_minutes: int = 10,
+    interval_minutes: int = 15,
 ) -> NumericSeries:
     return NumericSeries(
         name=name,
@@ -89,7 +91,7 @@ def build_text_series(
     name: str,
     start_time: datetime,
     values: list[str],
-    interval_minutes: int = 10,
+    interval_minutes: int = 15,
 ) -> TextSeries:
     return TextSeries(
         name=name,
@@ -123,9 +125,9 @@ def build_settings() -> AppSettings:
     )
 
 
-def test_identification_dataset_service_builds_ten_minute_rows_with_derived_fields() -> None:
+def test_identification_dataset_service_builds_fifteen_minute_rows_with_validation_flags() -> None:
     start_time = datetime(2026, 4, 25, 7, 0, tzinfo=timezone.utc)
-    end_time = start_time + timedelta(minutes=30)
+    end_time = start_time + timedelta(minutes=45)
     service = IdentificationDatasetService(
         FakeIdentificationDataReader(
             numeric_series=[
@@ -158,6 +160,18 @@ def test_identification_dataset_service_builds_ten_minute_rows_with_derived_fiel
                     unit="kW",
                     start_time=start_time,
                     values=[1.5, 1.6, 1.4],
+                ),
+                build_numeric_series(
+                    name=DEFROST_ACTIVE,
+                    unit="bool",
+                    start_time=start_time,
+                    values=[0.0, 1.0, 0.0],
+                ),
+                build_numeric_series(
+                    name=BOOSTER_HEATER_ACTIVE,
+                    unit="bool",
+                    start_time=start_time,
+                    values=[0.0, 0.0, 1.0],
                 ),
                 build_numeric_series(
                     name=PV_OUTPUT_POWER,
@@ -230,10 +244,9 @@ def test_identification_dataset_service_builds_ten_minute_rows_with_derived_fiel
     dataset = service.build_dataset(
         start_time=start_time,
         end_time=end_time,
-        interval_minutes=10,
     )
 
-    assert dataset.interval_minutes == 10
+    assert dataset.interval_minutes == 15
     assert len(dataset.rows) == 3
 
     first_row = dataset.rows[0]
@@ -248,15 +261,31 @@ def test_identification_dataset_service_builds_ten_minute_rows_with_derived_fiel
     assert first_row.price_export_eur_kwh == 0.08
     assert first_row.occupied_flag == 1
     assert first_row.dhw_draw_detected == 0
+    assert first_row.defrost_active == 0
+    assert first_row.booster_heater_active == 0
+    assert first_row.is_valid_for_room_identification is True
+    assert first_row.is_valid_for_dhw_identification is True
+    assert first_row.is_valid_for_cop_identification is True
+    assert first_row.exclusion_reasons == []
 
     second_row = dataset.rows[1]
     assert second_row.mode_space == 0
     assert second_row.mode_dhw == 1
     assert second_row.mode_off == 0
+    assert second_row.defrost_active == 1
     assert second_row.dhw_draw_detected == 1
     assert second_row.solar_gain_proxy_w_m2 == 100.0
+    assert second_row.is_valid_for_room_identification is False
+    assert second_row.is_valid_for_dhw_identification is False
+    assert second_row.is_valid_for_cop_identification is False
+    assert "defrost_active" in second_row.exclusion_reasons
 
     third_row = dataset.rows[2]
     assert third_row.mode_space == 0
     assert third_row.mode_dhw == 0
     assert third_row.mode_off == 1
+    assert third_row.booster_heater_active == 1
+    assert third_row.is_valid_for_room_identification is False
+    assert third_row.is_valid_for_dhw_identification is False
+    assert third_row.is_valid_for_cop_identification is False
+    assert "booster_heater_active" in third_row.exclusion_reasons
