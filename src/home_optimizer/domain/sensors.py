@@ -34,15 +34,6 @@ from home_optimizer.domain.names import (
 )
 
 ResampleMethod = Literal["interpolate", "ffill", "mean", "time_weighted_mean"]
-SignalRole = Literal[
-    "output",
-    "control_input",
-    "measured_disturbance",
-    "forecast_disturbance",
-    "measured_response",
-    "state_candidate",
-    "context",
-]
 
 
 class SensorDefinition(DomainModel):
@@ -50,9 +41,6 @@ class SensorDefinition(DomainModel):
     category: str
     unit: str | None
     method: ResampleMethod
-    role: SignalRole = "context"
-    forecast_required: bool = False
-    controllable: bool = False
     conversion_factor: float = 1.0
     poll_interval_seconds: int = Field(default=5, gt=0)
 
@@ -78,18 +66,6 @@ class SensorSpec(DomainModel):
         return self.definition.method
 
     @property
-    def role(self) -> SignalRole:
-        return self.definition.role
-
-    @property
-    def forecast_required(self) -> bool:
-        return self.definition.forecast_required
-
-    @property
-    def controllable(self) -> bool:
-        return self.definition.controllable
-
-    @property
     def conversion_factor(self) -> float:
         return self.definition.conversion_factor
 
@@ -103,10 +79,6 @@ def _sensor_definition(
     category: str,
     unit: str | None,
     method: ResampleMethod,
-    *,
-    role: SignalRole = "context",
-    forecast_required: bool = False,
-    controllable: bool = False,
     conversion_factor: float = 1.0,
     poll_interval_seconds: int = 5,
 ) -> SensorDefinition:
@@ -115,9 +87,6 @@ def _sensor_definition(
         category=category,
         unit=unit,
         method=method,
-        role=role,
-        forecast_required=forecast_required,
-        controllable=controllable,
         conversion_factor=conversion_factor,
         poll_interval_seconds=poll_interval_seconds,
     )
@@ -129,31 +98,24 @@ SENSOR_DEFINITIONS = [
         "building",
         "°C",
         "interpolate",
-        role="output",
     ),
     _sensor_definition(
         OUTDOOR_TEMPERATURE,
         "building",
         "°C",
         "interpolate",
-        role="forecast_disturbance",
-        forecast_required=True,
     ),
     _sensor_definition(
         THERMOSTAT_SETPOINT,
         "building",
         "°C",
         "ffill",
-        role="control_input",
-        controllable=True,
     ),
     _sensor_definition(
         SHUTTER_LIVING_ROOM,
         "building",
         "%",
         "ffill",
-        role="forecast_disturbance",
-        forecast_required=True
     ),
     _sensor_definition(
         HP_SUPPLY_TEMPERATURE,
@@ -166,7 +128,6 @@ SENSOR_DEFINITIONS = [
         "heatpump",
         "°C",
         "ffill",
-        role="measured_response",
     ),
     _sensor_definition(
         HP_RETURN_TEMPERATURE,
@@ -180,33 +141,24 @@ SENSOR_DEFINITIONS = [
         "L/min",
         "time_weighted_mean",
     ),
-    _sensor_definition(
-        HP_MODE,
-        "heatpump",
-        None,
-        "ffill",
-        role="measured_response",
-    ),
+    _sensor_definition(HP_MODE, "heatpump", None, "ffill"),
     _sensor_definition(
         COMPRESSOR_FREQUENCY,
         "heatpump",
         "Hz",
         "time_weighted_mean",
-        role="measured_response",
     ),
     _sensor_definition(
         DEFROST_ACTIVE,
         "heatpump",
         "bool",
         "ffill",
-        role="measured_response",
     ),
     _sensor_definition(
         BOOSTER_HEATER_ACTIVE,
         "heatpump",
         "bool",
         "ffill",
-        role="measured_response",
     ),
     _sensor_definition(
         REFRIGERANT_CONDENSATION_TEMPERATURE,
@@ -231,14 +183,12 @@ SENSOR_DEFINITIONS = [
         "dhw",
         "°C",
         "interpolate",
-        role="output",
     ),
     _sensor_definition(
         DHW_BOTTOM_TEMPERATURE,
         "dhw",
         "°C",
         "interpolate",
-        role="state_candidate",
     ),
     _sensor_definition(
         BOILER_AMBIENT_TEMPERATURE,
@@ -251,25 +201,21 @@ SENSOR_DEFINITIONS = [
         "energy",
         "kW",
         "time_weighted_mean",
-        role="measured_response",
-        conversion_factor=0.001,
+        0.001,
     ),
     _sensor_definition(
         P1_NET_POWER,
         "energy",
         "kW",
         "time_weighted_mean",
-        role="measured_response",
-        conversion_factor=0.001,
+        0.001,
     ),
     _sensor_definition(
         PV_OUTPUT_POWER,
         "energy",
         "kW",
         "time_weighted_mean",
-        role="forecast_disturbance",
-        forecast_required=True,
-        conversion_factor=0.001,
+        0.001,
     ),
     _sensor_definition(PV_TOTAL_KWH, "energy", "kWh", "ffill"),
     _sensor_definition(
