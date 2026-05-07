@@ -382,52 +382,6 @@ def test_identification_endpoint_returns_dataset_and_summary() -> None:
     assert payload["rows"][0]["is_valid_for_room_identification"] is True
 
 
-def test_room_rollout_evaluation_endpoint_returns_output() -> None:
-    app, _ = build_test_app(imported_rows={})
-
-    with TestClient(app) as client:
-        response = client.get(
-            "/api/rollout-evaluation/room",
-            params={
-                "start_time": "2026-04-25T00:00:00+00:00",
-                "end_time": "2026-04-25T02:00:00+00:00",
-                "horizon_hours": 1,
-            },
-        )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["variable_name"] == "room_temperature"
-    assert payload["predictor_name"] == "persistence"
-    assert payload["interval_minutes"] == 15
-    assert payload["one_step_temperature_errors"]["sample_count"] > 0
-    assert payload["horizons"][0]["horizon_label"] == "1h"
-    assert payload["horizons"][0]["temperature_errors"]["sample_count"] > 0
-
-
-def test_dhw_rollout_evaluation_endpoint_returns_output() -> None:
-    app, _ = build_test_app(imported_rows={})
-
-    with TestClient(app) as client:
-        response = client.get(
-            "/api/rollout-evaluation/dhw",
-            params={
-                "start_time": "2026-04-25T00:00:00+00:00",
-                "end_time": "2026-04-25T02:00:00+00:00",
-                "horizon_hours": 1,
-            },
-        )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["variable_name"] == "dhw_top_temperature"
-    assert payload["predictor_name"] == "persistence"
-    assert payload["interval_minutes"] == 15
-    assert payload["one_step_temperature_errors"]["sample_count"] > 0
-    assert payload["horizons"][0]["horizon_label"] == "1h"
-    assert payload["horizons"][0]["temperature_errors"]["sample_count"] > 0
-
-
 def test_weather_import_endpoint_runs_forecast_backfill() -> None:
     app, _ = build_test_app(imported_rows={"room_temperature": 3})
 

@@ -5,7 +5,6 @@ from home_optimizer.domain import (
     BaselineKpiSummary,
     DailyKpis,
     NumericSeries,
-    TemperatureRolloutEvaluation,
     TextSeries,
 )
 from home_optimizer.features.identification import (
@@ -23,7 +22,6 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetResponse,
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
-    TemperatureRolloutEvaluationResponse,
 )
 
 
@@ -89,15 +87,4 @@ def identification_dataset_response(
             IdentificationDatasetRowResponse(**row.model_dump())
             for row in dataset.rows
         ],
-    )
-
-
-def temperature_rollout_evaluation_response(
-    evaluation: TemperatureRolloutEvaluation,
-    *,
-    predictor_name: str,
-) -> TemperatureRolloutEvaluationResponse:
-    return TemperatureRolloutEvaluationResponse(
-        predictor_name=predictor_name,
-        **evaluation.model_dump(),
     )

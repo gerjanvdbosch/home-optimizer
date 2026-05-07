@@ -8,9 +8,6 @@ from home_optimizer.domain import (
     BOOSTER_HEATER_ACTIVE,
     DEFROST_ACTIVE,
     DHW_BOTTOM_TEMPERATURE,
-    DHW_TARGET_MAX_TEMPERATURE,
-    DHW_TARGET_MIN_TEMPERATURE,
-    DHW_TARGET_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
     HP_ELECTRIC_POWER,
@@ -194,14 +191,7 @@ def _detect_dhw_draw(
     *,
     mode_dhw: int,
 ) -> int:
-    return int(
-        _dhw_draw_proxy_c(
-            current_value,
-            previous_value,
-            mode_dhw=mode_dhw,
-        )
-        >= _DHW_DRAW_DROP_THRESHOLD_C
-    )
+    return int(_dhw_draw_proxy_c(current_value, previous_value, mode_dhw=mode_dhw) >= _DHW_DRAW_DROP_THRESHOLD_C)
 
 
 def _dhw_draw_proxy_c(
@@ -384,30 +374,6 @@ class IdentificationDatasetService:
             series_name=ROOM_TARGET_MAX_TEMPERATURE,
             extractor=lambda window: window.maximum,
         )
-        dhw_target = _build_target_series(
-            self.settings.dhw_target,
-            start_time=start_time_utc,
-            end_time=end_time_utc,
-            interval_minutes=interval_minutes,
-            series_name=DHW_TARGET_TEMPERATURE,
-            extractor=lambda window: window.target,
-        )
-        dhw_target_min = _build_target_series(
-            self.settings.dhw_target,
-            start_time=start_time_utc,
-            end_time=end_time_utc,
-            interval_minutes=interval_minutes,
-            series_name=DHW_TARGET_MIN_TEMPERATURE,
-            extractor=lambda window: window.minimum,
-        )
-        dhw_target_max = _build_target_series(
-            self.settings.dhw_target,
-            start_time=start_time_utc,
-            end_time=end_time_utc,
-            interval_minutes=interval_minutes,
-            series_name=DHW_TARGET_MAX_TEMPERATURE,
-            extractor=lambda window: window.maximum,
-        )
         thermal_output_series = build_thermal_output_series(
             numeric_series.get(HP_FLOW),
             numeric_series.get(HP_SUPPLY_TEMPERATURE),
@@ -468,9 +434,6 @@ class IdentificationDatasetService:
             room_target_temperature = latest_value_at(room_target.points, timestamp)
             room_target_min_temperature = latest_value_at(room_target_min.points, timestamp)
             room_target_max_temperature = latest_value_at(room_target_max.points, timestamp)
-            dhw_target_temperature = latest_value_at(dhw_target.points, timestamp)
-            dhw_target_min_temperature = latest_value_at(dhw_target_min.points, timestamp)
-            dhw_target_max_temperature = latest_value_at(dhw_target_max.points, timestamp)
 
             hp_mode_raw = None
             mode_series = text_series.get(HP_MODE)
@@ -524,9 +487,6 @@ class IdentificationDatasetService:
                     outdoor_temperature_c=outdoor_temperature,
                     dhw_top_temperature_c=dhw_top_temperature,
                     dhw_bottom_temperature_c=dhw_bottom_temperature,
-                    dhw_target_temperature_c=dhw_target_temperature,
-                    dhw_target_min_temperature_c=dhw_target_min_temperature,
-                    dhw_target_max_temperature_c=dhw_target_max_temperature,
                     hp_electric_power_kw=hp_electric_power,
                     hp_mode_raw=hp_mode_raw,
                     mode_space=mode_space,
