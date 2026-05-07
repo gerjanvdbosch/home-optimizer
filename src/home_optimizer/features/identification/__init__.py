@@ -3,6 +3,13 @@ from .models import (
     IdentificationDatasetRow,
     IdentificationDatasetSummary,
 )
+from .room_model import (
+    RoomThermalModel,
+    RoomThermalModelFitResult,
+    RoomThermalModelService,
+    RoomThermalValidationMetric,
+    RoomThermalValidationReport,
+)
 from .service import IdentificationDatasetService
 
 __all__ = [
@@ -10,4 +17,9 @@ __all__ = [
     "IdentificationDatasetRow",
     "IdentificationDatasetSummary",
     "IdentificationDatasetService",
+    "RoomThermalModel",
+    "RoomThermalModelFitResult",
+    "RoomThermalModelService",
+    "RoomThermalValidationMetric",
+    "RoomThermalValidationReport",
 ]

@@ -11,6 +11,11 @@ from .identification import (
     IdentificationDatasetRow,
     IdentificationDatasetService,
     IdentificationDatasetSummary,
+    RoomThermalModel,
+    RoomThermalModelFitResult,
+    RoomThermalModelService,
+    RoomThermalValidationMetric,
+    RoomThermalValidationReport,
 )
 from .kpi import DailyKpiService
 from .telemetry import LiveMeasurement, TelemetryService
@@ -24,6 +29,11 @@ __all__ = [
     "IdentificationDatasetRow",
     "IdentificationDatasetService",
     "IdentificationDatasetSummary",
+    "RoomThermalModel",
+    "RoomThermalModelFitResult",
+    "RoomThermalModelService",
+    "RoomThermalValidationMetric",
+    "RoomThermalValidationReport",
     "WeatherImportService",
     "ElectricityPriceService",
     "LiveMeasurement",
