@@ -36,6 +36,7 @@ class IdentificationDatasetRow(DomainModel):
     price_import_eur_kwh: float | None = None
     price_export_eur_kwh: float | None = None
     occupied_flag: int = 0
+    dhw_draw_proxy_c: float = 0.0
     dhw_draw_detected: int = 0
     is_valid_for_room_identification: bool = True
     is_valid_for_dhw_identification: bool = True

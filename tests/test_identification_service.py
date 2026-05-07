@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     BOOSTER_HEATER_ACTIVE,
@@ -260,6 +262,7 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert first_row.price_import_eur_kwh == 0.25
     assert first_row.price_export_eur_kwh == 0.08
     assert first_row.occupied_flag == 1
+    assert first_row.dhw_draw_proxy_c == 0.0
     assert first_row.dhw_draw_detected == 0
     assert first_row.defrost_active == 0
     assert first_row.booster_heater_active == 0
@@ -273,6 +276,7 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert second_row.mode_dhw == 1
     assert second_row.mode_off == 0
     assert second_row.defrost_active == 1
+    assert second_row.dhw_draw_proxy_c == 0.0
     assert second_row.dhw_draw_detected == 0
     assert second_row.solar_gain_proxy_w_m2 == 100.0
     assert second_row.is_valid_for_room_identification is False
@@ -285,10 +289,55 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert third_row.mode_dhw == 0
     assert third_row.mode_off == 1
     assert third_row.booster_heater_active == 1
+    assert third_row.dhw_draw_proxy_c == 0.0
     assert third_row.is_valid_for_room_identification is False
     assert third_row.is_valid_for_dhw_identification is False
     assert third_row.is_valid_for_cop_identification is False
     assert "booster_heater_active" in third_row.exclusion_reasons
+
+
+def test_identification_dataset_service_adds_dhw_draw_proxy_for_non_dhw_temperature_drop() -> None:
+    start_time = datetime(2026, 4, 25, 7, 0, tzinfo=timezone.utc)
+    end_time = start_time + timedelta(minutes=45)
+    service = IdentificationDatasetService(
+        FakeIdentificationDataReader(
+            numeric_series=[
+                build_numeric_series(
+                    name=DHW_TOP_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[49.0, 47.2, 46.8],
+                ),
+            ],
+            text_series=[
+                build_text_series(
+                    name=HP_MODE,
+                    start_time=start_time,
+                    values=["off", "off", "off"],
+                )
+            ],
+            forecast_series=[],
+            price_series=build_numeric_series(
+                name="electricity_price",
+                unit="EUR/kWh",
+                start_time=start_time,
+                values=[0.25, 0.25, 0.25],
+            ),
+        ),
+        build_settings(),
+    )
+
+    dataset = service.build_dataset(
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    assert dataset.rows[0].dhw_draw_proxy_c == 0.0
+    assert dataset.rows[0].dhw_draw_detected == 0
+    assert dataset.rows[1].dhw_draw_proxy_c == pytest.approx(1.8)
+    assert dataset.rows[1].dhw_draw_detected == 1
+    assert dataset.rows[2].dhw_draw_proxy_c == pytest.approx(0.4)
+    assert dataset.rows[2].dhw_draw_detected == 0
 
 
 def test_identification_dataset_marks_defrost_and_booster_when_they_occur_within_window() -> None:

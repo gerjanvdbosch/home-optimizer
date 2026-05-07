@@ -156,6 +156,7 @@ class IdentificationDatasetRowResponse(BaseModel):
     price_import_eur_kwh: float | None = None
     price_export_eur_kwh: float | None = None
     occupied_flag: int
+    dhw_draw_proxy_c: float
     dhw_draw_detected: int
     is_valid_for_room_identification: bool
     is_valid_for_dhw_identification: bool

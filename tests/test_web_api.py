@@ -378,6 +378,7 @@ def test_identification_endpoint_returns_dataset_and_summary() -> None:
     assert payload["rows"][0]["mode_dhw"] == 0
     assert payload["rows"][0]["mode_off"] == 1
     assert payload["rows"][0]["booster_heater_active"] == 0
+    assert payload["rows"][0]["dhw_draw_proxy_c"] == 0.0
     assert payload["rows"][0]["is_valid_for_room_identification"] is True
 
 

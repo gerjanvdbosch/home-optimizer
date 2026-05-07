@@ -191,11 +191,20 @@ def _detect_dhw_draw(
     *,
     mode_dhw: int,
 ) -> int:
+    return int(_dhw_draw_proxy_c(current_value, previous_value, mode_dhw=mode_dhw) >= _DHW_DRAW_DROP_THRESHOLD_C)
+
+
+def _dhw_draw_proxy_c(
+    current_value: float | None,
+    previous_value: float | None,
+    *,
+    mode_dhw: int,
+) -> float:
     if mode_dhw:
-        return 0
+        return 0.0
     if current_value is None or previous_value is None:
-        return 0
-    return int((previous_value - current_value) >= _DHW_DRAW_DROP_THRESHOLD_C)
+        return 0.0
+    return max(0.0, previous_value - current_value)
 
 
 def _empty_numeric_series() -> NumericSeries:
@@ -465,6 +474,11 @@ class IdentificationDatasetService:
                 thermal_output_estimate=thermal_output_estimate,
                 cop_estimate=cop_estimate,
             )
+            dhw_draw_proxy = _dhw_draw_proxy_c(
+                dhw_top_temperature,
+                previous_dhw_top,
+                mode_dhw=mode_dhw,
+            )
 
             rows.append(
                 IdentificationDatasetRow(
@@ -501,6 +515,7 @@ class IdentificationDatasetService:
                         room_target_temperature,
                         self.settings.room_target,
                     ),
+                    dhw_draw_proxy_c=dhw_draw_proxy,
                     dhw_draw_detected=_detect_dhw_draw(
                         dhw_top_temperature,
                         previous_dhw_top,
