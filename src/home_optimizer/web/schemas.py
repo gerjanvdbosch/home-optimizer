@@ -131,6 +131,9 @@ class IdentificationDatasetRowResponse(BaseModel):
     outdoor_temperature_c: float | None = None
     dhw_top_temperature_c: float | None = None
     dhw_bottom_temperature_c: float | None = None
+    dhw_target_temperature_c: float | None = None
+    dhw_target_min_temperature_c: float | None = None
+    dhw_target_max_temperature_c: float | None = None
     hp_electric_power_kw: float | None = None
     hp_mode_raw: str | None = None
     mode_space: int
@@ -183,3 +186,37 @@ class IdentificationDatasetResponse(BaseModel):
     end_time_utc: datetime
     summary: IdentificationDatasetSummaryResponse
     rows: list[IdentificationDatasetRowResponse]
+
+
+class PredictionErrorMetricsResponse(BaseModel):
+    sample_count: int
+    mae: float | None = None
+    rmse: float | None = None
+    bias: float | None = None
+    max_absolute_error: float | None = None
+
+
+class ComfortMetricsResponse(BaseModel):
+    sample_count: int
+    undershoot_degree_hours: float = 0.0
+    overshoot_degree_hours: float = 0.0
+    violation_minutes: float = 0.0
+    max_undershoot_c: float = 0.0
+    max_overshoot_c: float = 0.0
+
+
+class RecursiveRolloutHorizonMetricsResponse(BaseModel):
+    horizon_steps: int
+    horizon_minutes: int
+    horizon_label: str
+    temperature_errors: PredictionErrorMetricsResponse
+    predicted_comfort: ComfortMetricsResponse | None = None
+    actual_comfort: ComfortMetricsResponse | None = None
+
+
+class TemperatureRolloutEvaluationResponse(BaseModel):
+    variable_name: str
+    interval_minutes: int
+    predictor_name: str
+    one_step_temperature_errors: PredictionErrorMetricsResponse
+    horizons: list[RecursiveRolloutHorizonMetricsResponse]

@@ -11,6 +11,9 @@ class IdentificationDatasetRow(DomainModel):
     outdoor_temperature_c: float | None = None
     dhw_top_temperature_c: float | None = None
     dhw_bottom_temperature_c: float | None = None
+    dhw_target_temperature_c: float | None = None
+    dhw_target_min_temperature_c: float | None = None
+    dhw_target_max_temperature_c: float | None = None
     hp_electric_power_kw: float | None = None
     hp_mode_raw: str | None = None
     mode_space: int = 0
