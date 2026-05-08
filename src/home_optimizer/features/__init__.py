@@ -16,6 +16,7 @@ from .modeling import (
     RoomModelConfig,
     RoomModelingService,
     RoomModelValidationReport,
+    SegmentValidationReport,
     StoredRoomModelVersion,
     StoredRoomModelVersionSummary,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "IdentificationDatasetSummary",
     "RoomModelConfig",
     "RoomModelValidationReport",
+    "SegmentValidationReport",
     "RoomModelingService",
     "StoredRoomModelVersion",
     "StoredRoomModelVersionSummary",

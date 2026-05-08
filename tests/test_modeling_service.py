@@ -18,6 +18,8 @@ def build_synthetic_room_dataset(row_count: int = 80) -> MpcDataset:
         thermal_output = 0.0 if index % 8 < 4 else 2.0
         solar_gain = 0.0 if index % 24 < 10 else 80.0
         occupied_flag = 1 if 7 <= (index % 24) <= 22 else 0
+        solar_irradiance = 0.0 if index % 24 < 10 else 250.0
+        shutter_position = 100.0 if index % 16 < 8 else 0.0
 
         rows.append(
             MpcDatasetRow(
@@ -26,6 +28,8 @@ def build_synthetic_room_dataset(row_count: int = 80) -> MpcDataset:
                 outdoor_temperature_c=outdoor_temperature,
                 thermal_output_estimate_kw=thermal_output,
                 solar_gain_proxy_w_m2=solar_gain,
+                solar_irradiance_w_m2=solar_irradiance,
+                shutter_position_pct=shutter_position,
                 occupied_flag=occupied_flag,
             )
         )
@@ -99,3 +103,37 @@ def test_room_modeling_service_runs_rolling_recursive_validation() -> None:
     assert report.aggregate_metrics[0].mae_c < 1e-6
     assert report.aggregate_metrics[1].mae_c is not None
     assert report.aggregate_metrics[1].mae_c < 1e-5
+    assert [segment.segment_name for segment in report.segment_metrics] == [
+        "sunny",
+        "heating_active",
+        "shutters_open",
+        "shutters_closed",
+        "sunny_midday",
+    ]
+
+
+def test_room_modeling_service_improves_24h_sample_count_and_segment_bias_metrics() -> None:
+    dataset = build_synthetic_room_dataset(row_count=420)
+    service = RoomModelingService()
+    config = RoomModelConfig(
+        room_temperature_lags=[0],
+        outdoor_temperature_lags=[0],
+        thermal_output_lags=[0],
+        solar_gain_lags=[0],
+        occupied_flag_lags=[0],
+        ridge_alpha=0.0,
+        min_train_rows=60,
+        validation_window_rows=144,
+        validation_stride_rows=6,
+        validation_horizons_steps=[144],
+    )
+
+    report = service.rolling_validate_room_model(dataset, config=config)
+
+    assert report.aggregate_metrics[0].horizon_minutes == 1440
+    assert report.aggregate_metrics[0].sample_count > 20
+    sunny_midday = next(
+        segment for segment in report.segment_metrics if segment.segment_name == "sunny_midday"
+    )
+    assert sunny_midday.metrics[0].sample_count > 0
+    assert sunny_midday.metrics[0].bias_c is not None

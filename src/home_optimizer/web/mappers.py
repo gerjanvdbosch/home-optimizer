@@ -27,6 +27,7 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetResponse,
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
+    SegmentValidationResponse,
     TrainRoomModelResponse,
 )
 
@@ -112,5 +113,16 @@ def train_room_model_response(
         aggregate_metrics=[
             HorizonMetricResponse(**metric.model_dump())
             for metric in validation_report.aggregate_metrics
+        ],
+        segment_metrics=[
+            SegmentValidationResponse(
+                segment_name=segment.segment_name,
+                description=segment.description,
+                metrics=[
+                    HorizonMetricResponse(**metric.model_dump())
+                    for metric in segment.metrics
+                ],
+            )
+            for segment in validation_report.segment_metrics
         ],
     )

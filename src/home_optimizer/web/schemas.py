@@ -195,6 +195,12 @@ class HorizonMetricResponse(BaseModel):
     p95_abs_error_c: float | None = None
 
 
+class SegmentValidationResponse(BaseModel):
+    segment_name: str
+    description: str
+    metrics: list[HorizonMetricResponse]
+
+
 class TrainRoomModelResponse(BaseModel):
     model_id: str
     model_type: str
@@ -205,3 +211,4 @@ class TrainRoomModelResponse(BaseModel):
     sample_count: int
     is_active: bool
     aggregate_metrics: list[HorizonMetricResponse]
+    segment_metrics: list[SegmentValidationResponse]

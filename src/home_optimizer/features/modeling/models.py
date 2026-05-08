@@ -17,7 +17,14 @@ class RoomModelConfig(DomainModel):
     min_train_rows: int = Field(default=96, gt=1)
     training_window_rows: int | None = Field(default=None, gt=1)
     validation_window_rows: int = Field(default=144, gt=1)
+    validation_stride_rows: int | None = Field(default=None, gt=0)
     validation_horizons_steps: list[int] = Field(default_factory=lambda: [1, 6, 36, 72, 144])
+    sunny_irradiance_threshold_w_m2: float = Field(default=150.0, ge=0.0)
+    heating_active_threshold_kw: float = Field(default=0.1, ge=0.0)
+    shutters_open_min_pct: float = Field(default=75.0, ge=0.0, le=100.0)
+    shutters_closed_max_pct: float = Field(default=25.0, ge=0.0, le=100.0)
+    sunny_midday_start_hour: int = Field(default=11, ge=0, le=23)
+    sunny_midday_end_hour: int = Field(default=16, ge=1, le=24)
 
     @field_validator(
         "room_temperature_lags",
@@ -72,6 +79,13 @@ class RoomModelValidationReport(DomainModel):
     config: RoomModelConfig
     folds: list[ValidationFoldResult]
     aggregate_metrics: list[HorizonMetric]
+    segment_metrics: list["SegmentValidationReport"] = Field(default_factory=list)
+
+
+class SegmentValidationReport(DomainModel):
+    segment_name: str
+    description: str
+    metrics: list[HorizonMetric]
 
 
 LINEAR_ROOM_MODEL_TYPE = "linear_room"

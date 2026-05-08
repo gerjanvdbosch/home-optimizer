@@ -9,6 +9,7 @@ from home_optimizer.features.modeling.models import (
     HorizonMetric,
     RoomModelConfig,
     RoomModelValidationReport,
+    SegmentValidationReport,
     TrainedLinearRoomModel,
     ValidationFoldResult,
 )
@@ -107,6 +108,53 @@ def _default_feature_value(field_name: str) -> float | None:
     }:
         return 0.0
     return None
+
+
+def _validation_stride_rows(
+    config: RoomModelConfig,
+    *,
+    interval_minutes: int,
+) -> int:
+    if config.validation_stride_rows is not None:
+        return config.validation_stride_rows
+    return max(1, 60 // interval_minutes)
+
+
+def _segment_definitions(config: RoomModelConfig) -> list[tuple[str, str]]:
+    return [
+        ("sunny", f"solar irradiance >= {config.sunny_irradiance_threshold_w_m2:.0f} W/m2"),
+        ("heating_active", f"thermal output >= {config.heating_active_threshold_kw:.2f} kW"),
+        ("shutters_open", f"shutter position >= {config.shutters_open_min_pct:.0f}%"),
+        ("shutters_closed", f"shutter position <= {config.shutters_closed_max_pct:.0f}%"),
+        (
+            "sunny_midday",
+            (
+                "sunny and local hour in "
+                f"[{config.sunny_midday_start_hour:02d}:00, {config.sunny_midday_end_hour:02d}:00)"
+            ),
+        ),
+    ]
+
+
+def _row_segments(row: MpcDatasetRow, config: RoomModelConfig) -> set[str]:
+    segments: set[str] = set()
+    solar_irradiance = row.solar_irradiance_w_m2 or 0.0
+    thermal_output = row.thermal_output_estimate_kw or 0.0
+    shutter_position = row.shutter_position_pct
+    local_hour = row.timestamp_utc.astimezone().hour
+
+    if solar_irradiance >= config.sunny_irradiance_threshold_w_m2:
+        segments.add("sunny")
+        if config.sunny_midday_start_hour <= local_hour < config.sunny_midday_end_hour:
+            segments.add("sunny_midday")
+    if thermal_output >= config.heating_active_threshold_kw:
+        segments.add("heating_active")
+    if shutter_position is not None and shutter_position >= config.shutters_open_min_pct:
+        segments.add("shutters_open")
+    if shutter_position is not None and shutter_position <= config.shutters_closed_max_pct:
+        segments.add("shutters_closed")
+
+    return segments
 
 
 def _build_training_matrix(
@@ -276,7 +324,20 @@ class RoomModelingService:
             raise ValueError("dataset is too small for rolling validation")
 
         folds: list[ValidationFoldResult] = []
+        all_errors_by_horizon: dict[int, list[float]] = {
+            horizon_steps: [] for horizon_steps in config.validation_horizons_steps
+        }
+        segment_errors_by_horizon: dict[str, dict[int, list[float]]] = {
+            segment_name: {
+                horizon_steps: [] for horizon_steps in config.validation_horizons_steps
+            }
+            for segment_name, _ in _segment_definitions(config)
+        }
         fold_start = config.min_train_rows
+        stride_rows = _validation_stride_rows(
+            config,
+            interval_minutes=dataset.interval_minutes,
+        )
 
         while fold_start < len(rows) - 1:
             validate_end_exclusive = min(fold_start + config.validation_window_rows, len(rows))
@@ -315,7 +376,11 @@ class RoomModelingService:
                     if len(simulated) != horizon_steps:
                         continue
 
-                    errors.append(simulated[-1] - actual_room_temperature)
+                    error = simulated[-1] - actual_room_temperature
+                    errors.append(error)
+                    all_errors_by_horizon[horizon_steps].append(error)
+                    for segment_name in _row_segments(rows[origin_index], config):
+                        segment_errors_by_horizon[segment_name][horizon_steps].append(error)
 
                 metrics.append(
                     _build_metric(
@@ -335,57 +400,36 @@ class RoomModelingService:
                     metrics=metrics,
                 )
             )
-            fold_start = validate_end_exclusive
+            fold_start += stride_rows
 
-        aggregate_metrics: list[HorizonMetric] = []
-        for horizon_steps in config.validation_horizons_steps:
-            horizon_fold_metrics = [
-                metric
-                for fold in folds
-                for metric in fold.metrics
-                if metric.horizon_steps == horizon_steps and metric.sample_count > 0
-            ]
-            total_samples = sum(metric.sample_count for metric in horizon_fold_metrics)
-            if total_samples == 0:
-                aggregate_metrics.append(
-                    HorizonMetric(
-                        horizon_steps=horizon_steps,
-                        horizon_minutes=horizon_steps * dataset.interval_minutes,
-                        sample_count=0,
-                    )
-                )
-                continue
-
-            def weighted_average(
-                getter: str,
-                metrics: list[HorizonMetric] = horizon_fold_metrics,
-            ) -> float | None:
-                weighted_values = [
-                    (getattr(metric, getter), metric.sample_count)
-                    for metric in metrics
-                    if getattr(metric, getter) is not None
-                ]
-                if not weighted_values:
-                    return None
-                return sum(value * count for value, count in weighted_values) / sum(
-                    count for _, count in weighted_values
-                )
-
-            aggregate_metrics.append(
-                HorizonMetric(
-                    horizon_steps=horizon_steps,
-                    horizon_minutes=horizon_steps * dataset.interval_minutes,
-                    sample_count=total_samples,
-                    mae_c=weighted_average("mae_c"),
-                    rmse_c=weighted_average("rmse_c"),
-                    bias_c=weighted_average("bias_c"),
-                    p95_abs_error_c=weighted_average("p95_abs_error_c"),
-                )
+        aggregate_metrics = [
+            _build_metric(
+                errors=all_errors_by_horizon[horizon_steps],
+                horizon_steps=horizon_steps,
+                interval_minutes=dataset.interval_minutes,
             )
+            for horizon_steps in config.validation_horizons_steps
+        ]
+        segment_metrics = [
+            SegmentValidationReport(
+                segment_name=segment_name,
+                description=description,
+                metrics=[
+                    _build_metric(
+                        errors=segment_errors_by_horizon[segment_name][horizon_steps],
+                        horizon_steps=horizon_steps,
+                        interval_minutes=dataset.interval_minutes,
+                    )
+                    for horizon_steps in config.validation_horizons_steps
+                ],
+            )
+            for segment_name, description in _segment_definitions(config)
+        ]
 
         return RoomModelValidationReport(
             interval_minutes=dataset.interval_minutes,
             config=config,
             folds=folds,
             aggregate_metrics=aggregate_metrics,
+            segment_metrics=segment_metrics,
         )

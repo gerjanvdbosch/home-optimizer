@@ -26,6 +26,8 @@ TrainingWindowQuery = Annotated[int | None, Query(alias="training_window_rows", 
 ValidationWindowQuery = Annotated[int, Query(alias="validation_window_rows", gt=1)]
 MinTrainRowsQuery = Annotated[int, Query(alias="min_train_rows", gt=1)]
 ActivateQuery = Annotated[bool, Query(alias="activate")]
+DEFAULT_TRAIN_START_TIME = datetime(2026, 4, 16, 0, 0, 0, tzinfo=timezone.utc)
+DEFAULT_TRAIN_END_TIME = datetime(2026, 5, 7, 23, 59, 0, tzinfo=timezone.utc)
 
 
 def create_train_router(settings: AppSettings) -> APIRouter:
@@ -34,8 +36,8 @@ def create_train_router(settings: AppSettings) -> APIRouter:
     @router.get("/api/train", response_model=TrainRoomModelResponse)
     def train_room_model(
         container: ContainerDependency,
-        start_time: StartTimeQuery = datetime(2026, 4, 16, 0, 0, 0, tzinfo=datetime.now().astimezone().tzinfo),
-        end_time: EndTimeQuery = datetime(2026, 5, 7, 23, 59, 0, tzinfo=datetime.now().astimezone().tzinfo),
+        start_time: StartTimeQuery = DEFAULT_TRAIN_START_TIME,
+        end_time: EndTimeQuery = DEFAULT_TRAIN_END_TIME,
         interval_minutes: IntervalQuery = 10,
         training_window_rows: TrainingWindowQuery = None,
         validation_window_rows: ValidationWindowQuery = 144,
