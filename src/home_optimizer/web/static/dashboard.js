@@ -11,14 +11,6 @@ function formatDate(date) {
   return `${year}-${month}-${day}`;
 }
 
-function formatDisplayDate(date) {
-  return new Intl.DateTimeFormat("nl-NL", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-  }).format(date);
-}
-
 function latestPoint(series) {
   if (!series || !series.points || series.points.length === 0) {
     return null;
@@ -141,7 +133,7 @@ const button = document.getElementById("import-button");
 const weatherImportButton = document.getElementById("weather-import-button");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
-const selectedDateLabel = document.getElementById("selected-date");
+const selectedDateInput = document.getElementById("selected-date-input");
 const previousDayButton = document.getElementById("previous-day");
 const nextDayButton = document.getElementById("next-day");
 const roomSummary = document.getElementById("room-summary");
@@ -217,6 +209,12 @@ function shiftDate(days) {
   selectedDate = new Date(selectedDate);
   selectedDate.setDate(selectedDate.getDate() + days);
   loadCharts().catch(handleChartLoadError);
+}
+
+function syncSelectedDateControls() {
+  if (selectedDateInput) {
+    selectedDateInput.value = formatDate(selectedDate);
+  }
 }
 
 function handleChartLoadError(error) {
@@ -337,11 +335,11 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !shutterChart || !compressorChart || !selectedDateLabel) {
+  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !shutterChart || !compressorChart) {
     return;
   }
 
-  selectedDateLabel.textContent = formatDisplayDate(selectedDate);
+  syncSelectedDateControls();
   const params = new URLSearchParams({ date: formatDate(selectedDate) });
   const response = await fetch(apiUrl(`api/dashboard/charts?${params.toString()}`));
   const payload = await response.json();
@@ -814,6 +812,13 @@ function statusAtTimestamp(points, timestamp) {
 
 button?.addEventListener("click", runImport);
 weatherImportButton?.addEventListener("click", runWeatherImport);
+selectedDateInput?.addEventListener("change", () => {
+  if (!selectedDateInput.value) {
+    return;
+  }
+  selectedDate = new Date(`${selectedDateInput.value}T00:00:00`);
+  loadCharts().catch(handleChartLoadError);
+});
 previousDayButton?.addEventListener("click", () => shiftDate(-1));
 nextDayButton?.addEventListener("click", () => shiftDate(1));
 window.addEventListener("resize", () => {

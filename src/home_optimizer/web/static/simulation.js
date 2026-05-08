@@ -9,6 +9,14 @@ function localInputValue(date) {
   return localDate.toISOString().slice(0, 16);
 }
 
+function formatSimulationDisplayDate(date) {
+  return new Intl.DateTimeFormat("nl-NL", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
 function simulationChartTimestamp(timestamp) {
   const date = new Date(timestamp);
   const localTimestamp = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
@@ -84,6 +92,9 @@ const anchorTimeInput = document.getElementById("anchor-time");
 const horizonStepsInput = document.getElementById("horizon-steps");
 const trainButton = document.getElementById("train-button");
 const simulateButton = document.getElementById("simulate-button");
+const simulationPreviousDayButton = document.getElementById("simulation-previous-day");
+const simulationNextDayButton = document.getElementById("simulation-next-day");
+const simulationSelectedDate = document.getElementById("simulation-selected-date");
 const simulationStatus = document.getElementById("simulation-status");
 const simulationResult = document.getElementById("simulation-result");
 const simulationSummary = document.getElementById("simulation-summary");
@@ -98,6 +109,29 @@ function setSimulationButtonsDisabled(disabled) {
   if (simulateButton) {
     simulateButton.disabled = disabled;
   }
+  if (simulationPreviousDayButton) {
+    simulationPreviousDayButton.disabled = disabled;
+  }
+  if (simulationNextDayButton) {
+    simulationNextDayButton.disabled = disabled;
+  }
+}
+
+function syncSimulationDateLabel(anchorTime) {
+  if (simulationSelectedDate) {
+    simulationSelectedDate.textContent = formatSimulationDisplayDate(anchorTime);
+  }
+}
+
+function shiftSimulationDay(days) {
+  if (!anchorTimeInput?.value) {
+    return;
+  }
+  const anchorTime = new Date(anchorTimeInput.value);
+  anchorTime.setDate(anchorTime.getDate() + days);
+  anchorTimeInput.value = localInputValue(anchorTime);
+  syncSimulationDateLabel(anchorTime);
+  loadSimulation().catch(handleSimulationError);
 }
 
 async function runTrain() {
@@ -145,6 +179,7 @@ async function loadSimulation() {
 
   try {
     const anchorTime = new Date(anchorTimeInput.value);
+    syncSimulationDateLabel(anchorTime);
     const horizonSteps = Number(horizonStepsInput.value || "144");
     const params = new URLSearchParams({
       anchor_time: anchorTime.toISOString(),
@@ -202,6 +237,7 @@ function handleSimulationError(error) {
 
 if (anchorTimeInput) {
   anchorTimeInput.value = localInputValue(new Date("2026-05-07T00:00:00Z"));
+  syncSimulationDateLabel(new Date(anchorTimeInput.value));
 }
 
 if (simulateButton) {
@@ -212,6 +248,12 @@ if (simulateButton) {
 
 trainButton?.addEventListener("click", () => {
   runTrain().catch(handleSimulationError);
+});
+simulationPreviousDayButton?.addEventListener("click", () => {
+  shiftSimulationDay(-1);
+});
+simulationNextDayButton?.addEventListener("click", () => {
+  shiftSimulationDay(1);
 });
 
 loadSimulation().catch(handleSimulationError);
