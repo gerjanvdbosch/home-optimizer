@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from time import sleep
 from zoneinfo import ZoneInfo
 
@@ -19,7 +19,11 @@ from home_optimizer.domain import (
 )
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
-from home_optimizer.features.modeling import StoredRoomModelVersion
+from home_optimizer.features.modeling import (
+    RoomModelConfig,
+    StoredRoomModelVersion,
+    TrainedLinearRoomModel,
+)
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
@@ -66,9 +70,42 @@ class FakeWeatherImportService:
 class FakeModelVersionRepository:
     def __init__(self) -> None:
         self.saved_versions: list[StoredRoomModelVersion] = []
+        self.active_version = StoredRoomModelVersion(
+            model_id="room-model-active",
+            created_at_utc=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            is_active=True,
+            model=TrainedLinearRoomModel(
+                trained_from_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
+                trained_to_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
+                interval_minutes=15,
+                config=RoomModelConfig(
+                    room_temperature_lags=[0],
+                    outdoor_temperature_lags=[0],
+                    thermal_output_lags=[0],
+                    solar_gain_lags=[0],
+                    occupied_flag_lags=[0],
+                    min_train_rows=10,
+                    validation_window_rows=10,
+                ),
+                feature_names=[
+                    "room_temperature_lag_0",
+                    "outdoor_temperature_lag_0",
+                    "thermal_output_lag_0",
+                    "solar_gain_lag_0",
+                    "occupied_flag_lag_0",
+                ],
+                intercept=0.0,
+                coefficients=[1.0, 0.0, 0.0, 0.0, 0.0],
+                sample_count=100,
+            ),
+            validation_report=None,
+        )
 
     def save_room_model_version(self, version: StoredRoomModelVersion) -> None:
         self.saved_versions.append(version)
+
+    def get_active_room_model_version(self) -> StoredRoomModelVersion | None:
+        return self.active_version
 
 
 def build_half_hourly_series(
@@ -351,9 +388,31 @@ def test_removed_routes_return_404() -> None:
     app, _ = build_test_app()
 
     with TestClient(app) as client:
-        assert client.get("/simulation").status_code == 404
         assert client.post("/api/prediction", json={}).status_code == 404
         assert client.post("/api/mpc/thermostat-setpoint", json={}).status_code == 404
+
+
+def test_simulation_page_and_api_return_room_horizon() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        page_response = client.get("/simulation")
+        api_response = client.get(
+            "/api/simulate/room",
+            params={
+                "anchor_time": "2026-04-25T12:00:00+00:00",
+                "horizon_steps": 4,
+            },
+        )
+
+    assert page_response.status_code == 200
+    assert "Room temp horizon" in page_response.text
+    assert api_response.status_code == 200
+    payload = api_response.json()
+    assert payload["model_id"] == "room-model-active"
+    assert payload["horizon_steps"] == 4
+    assert len(payload["predicted_room_temperature"]["points"]) == 4
+    assert len(payload["actual_room_temperature"]["points"]) == 4
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:

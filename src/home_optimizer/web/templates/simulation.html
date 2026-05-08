@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>$title</title>
+    <link rel="stylesheet" href="static/dashboard.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-group">
+          <h1>$title</h1>
+          <span>Room temp horizon</span>
+        </div>
+        <div class="topbar-actions">
+          <nav class="page-nav" aria-label="Pagina navigatie">
+            <a class="page-link" href="./">Dashboard</a>
+            <a class="page-link is-active" href="./simulation">Simulation</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Simulatie instellingen</h2>
+          <p>$database_path</p>
+        </div>
+        <div class="actions">
+          <label>
+            Anchor time
+            <input id="anchor-time" type="datetime-local" />
+          </label>
+          <label>
+            Horizon (steps)
+            <input id="horizon-steps" type="number" min="1" max="288" value="144" />
+          </label>
+          <button id="simulate-button" type="button">Simuleer</button>
+          <div id="simulation-status" class="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="charts" aria-label="Room simulation">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Room temp horizon</h2>
+            <span id="simulation-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="simulation-room-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Drivers</h2>
+            <span id="simulation-model-id">-</span>
+          </div>
+          <div class="chart-wrap" id="simulation-driver-chart"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="plotly.js"></script>
+    <script src="static/simulation.js"></script>
+  </body>
+  </html>

@@ -15,6 +15,7 @@ from home_optimizer.features.modeling import (
     RoomModelValidationReport,
     StoredRoomModelVersion,
 )
+from home_optimizer.features.simulation import RoomSimulationResult
 from home_optimizer.web.schemas import (
     BaselineKpiSummaryResponse,
     ChartPointResponse,
@@ -27,6 +28,7 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetResponse,
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
+    RoomSimulationResponse,
     SegmentValidationResponse,
     TrainRoomModelResponse,
 )
@@ -125,4 +127,19 @@ def train_room_model_response(
             )
             for segment in validation_report.segment_metrics
         ],
+    )
+
+
+def room_simulation_response(result: RoomSimulationResult) -> RoomSimulationResponse:
+    return RoomSimulationResponse(
+        model_id=result.model_id,
+        anchor_time_utc=result.anchor_time_utc,
+        interval_minutes=result.interval_minutes,
+        horizon_steps=result.horizon_steps,
+        predicted_room_temperature=series_response(result.predicted_room_temperature),
+        actual_room_temperature=series_response(result.actual_room_temperature),
+        room_target_min_temperature=series_response(result.room_target_min_temperature),
+        room_target_max_temperature=series_response(result.room_target_max_temperature),
+        outdoor_temperature=series_response(result.outdoor_temperature),
+        solar_irradiance=series_response(result.solar_irradiance),
     )

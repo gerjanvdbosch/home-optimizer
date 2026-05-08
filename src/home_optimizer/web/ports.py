@@ -64,6 +64,8 @@ class WeatherImportRunner(Protocol):
 class ModelVersionWriter(Protocol):
     def save_room_model_version(self, version: StoredRoomModelVersion) -> None: ...
 
+    def get_active_room_model_version(self) -> StoredRoomModelVersion | None: ...
+
 
 class WebAppContainer(Protocol):
     @property

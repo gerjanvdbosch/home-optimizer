@@ -21,6 +21,7 @@ from .modeling import (
     StoredRoomModelVersionSummary,
 )
 from .pricing import ElectricityPriceService
+from .simulation import RoomSimulationResult, RoomSimulationService
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
@@ -42,5 +43,7 @@ __all__ = [
     "ElectricityPriceService",
     "LiveMeasurement",
     "OpenMeteoForecastService",
+    "RoomSimulationResult",
+    "RoomSimulationService",
     "TelemetryService",
 ]

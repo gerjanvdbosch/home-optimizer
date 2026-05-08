@@ -212,3 +212,16 @@ class TrainRoomModelResponse(BaseModel):
     is_active: bool
     aggregate_metrics: list[HorizonMetricResponse]
     segment_metrics: list[SegmentValidationResponse]
+
+
+class RoomSimulationResponse(BaseModel):
+    model_id: str
+    anchor_time_utc: datetime
+    interval_minutes: int
+    horizon_steps: int
+    predicted_room_temperature: ChartSeriesResponse
+    actual_room_temperature: ChartSeriesResponse
+    room_target_min_temperature: ChartSeriesResponse
+    room_target_max_temperature: ChartSeriesResponse
+    outdoor_temperature: ChartSeriesResponse
+    solar_irradiance: ChartSeriesResponse
