@@ -31,29 +31,6 @@ Index("idx_samples_1m_category_time", Sample1m.category, Sample1m.timestamp_minu
 Index("idx_samples_1m_time", Sample1m.timestamp_minute_utc)
 
 
-class Sample15m(Base):
-    __tablename__ = "samples_15m"
-
-    timestamp_15m_utc: Mapped[str] = mapped_column(String, primary_key=True)
-    name: Mapped[str] = mapped_column(String, primary_key=True)
-    source: Mapped[str] = mapped_column(String, primary_key=True)
-    entity_id: Mapped[str] = mapped_column(String, nullable=False)
-    category: Mapped[str | None] = mapped_column(String, nullable=True)
-    unit: Mapped[str | None] = mapped_column(String, nullable=True)
-    mean_real: Mapped[float | None] = mapped_column(Float, nullable=True)
-    min_real: Mapped[float | None] = mapped_column(Float, nullable=True)
-    max_real: Mapped[float | None] = mapped_column(Float, nullable=True)
-    last_real: Mapped[float | None] = mapped_column(Float, nullable=True)
-    last_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_bool: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
-
-
-Index("idx_samples_15m_name_time", Sample15m.name, Sample15m.timestamp_15m_utc)
-Index("idx_samples_15m_category_time", Sample15m.category, Sample15m.timestamp_15m_utc)
-Index("idx_samples_15m_time", Sample15m.timestamp_15m_utc)
-
-
 class ForecastValue(Base):
     __tablename__ = "forecast_values"
 
