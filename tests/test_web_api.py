@@ -19,6 +19,7 @@ from home_optimizer.domain import (
 )
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
+from home_optimizer.features.modeling import StoredRoomModelVersion
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
@@ -60,6 +61,14 @@ class FakeWeatherImportService:
     def import_weather_data(self, created_at: datetime | None = None) -> int:
         self.import_calls += 1
         return 12
+
+
+class FakeModelVersionRepository:
+    def __init__(self) -> None:
+        self.saved_versions: list[StoredRoomModelVersion] = []
+
+    def save_room_model_version(self, version: StoredRoomModelVersion) -> None:
+        self.saved_versions.append(version)
 
 
 def build_half_hourly_series(
@@ -257,6 +266,7 @@ class FakeContainer:
         self.home_assistant = home_assistant
         self.time_series_read_repository = FakeTimeSeriesReadRepository()
         self.weather_import_service = FakeWeatherImportService()
+        self.model_version_repository = FakeModelVersionRepository()
         self.telemetry_scheduler = FakeScheduler()
         self.electricity_price_scheduler = FakeScheduler()
         self.forecast_scheduler = FakeScheduler()
@@ -391,6 +401,34 @@ def test_weather_import_endpoint_runs_forecast_backfill() -> None:
     assert response.status_code == 200
     assert response.json() == {"imported_rows": 12}
     assert app.state.container.weather_import_service.import_calls == 1
+
+
+def test_train_endpoint_trains_and_stores_room_model_version() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/train",
+            params={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-26T00:00:00+00:00",
+                "interval_minutes": 15,
+                "min_train_rows": 20,
+                "validation_window_rows": 24,
+                "activate": "true",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_id"].startswith("room-model-")
+    assert payload["model_type"] == "linear_room"
+    assert payload["interval_minutes"] == 15
+    assert payload["sample_count"] > 0
+    assert payload["is_active"] is True
+    assert len(payload["aggregate_metrics"]) == 5
+    assert app.state.container.model_version_repository.saved_versions
+    assert app.state.container.model_version_repository.saved_versions[0].is_active is True
 
 def test_settings_reject_legacy_sensor_fields() -> None:
     with pytest.raises(ValidationError):

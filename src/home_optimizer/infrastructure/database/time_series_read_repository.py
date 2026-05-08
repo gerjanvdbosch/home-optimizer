@@ -4,7 +4,13 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 
-from home_optimizer.domain import ELECTRICITY_PRICE, NumericPoint, NumericSeries, TextPoint, TextSeries
+from home_optimizer.domain import (
+    ELECTRICITY_PRICE,
+    NumericPoint,
+    NumericSeries,
+    TextPoint,
+    TextSeries,
+)
 from home_optimizer.domain.pricing import (
     PriceInterval,
     empty_electricity_price_series,
@@ -211,8 +217,10 @@ class TimeSeriesReadRepository:
                 .where(
                     ElectricityPriceIntervalValue.name == ELECTRICITY_PRICE,
                     ElectricityPriceIntervalValue.source == source,
-                    ElectricityPriceIntervalValue.end_time_utc > normalize_utc_timestamp(start_time),
-                    ElectricityPriceIntervalValue.start_time_utc < normalize_utc_timestamp(end_time),
+                    ElectricityPriceIntervalValue.end_time_utc
+                    > normalize_utc_timestamp(start_time),
+                    ElectricityPriceIntervalValue.start_time_utc
+                    < normalize_utc_timestamp(end_time),
                 )
                 .order_by(ElectricityPriceIntervalValue.start_time_utc)
             ).all()
@@ -237,4 +245,3 @@ class TimeSeriesReadRepository:
             end_time=end_time,
             interval_minutes=interval_minutes,
         )
-

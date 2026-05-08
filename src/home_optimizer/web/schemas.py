@@ -183,3 +183,25 @@ class IdentificationDatasetResponse(BaseModel):
     end_time_utc: datetime
     summary: IdentificationDatasetSummaryResponse
     rows: list[IdentificationDatasetRowResponse]
+
+
+class HorizonMetricResponse(BaseModel):
+    horizon_steps: int
+    horizon_minutes: int
+    sample_count: int
+    mae_c: float | None = None
+    rmse_c: float | None = None
+    bias_c: float | None = None
+    p95_abs_error_c: float | None = None
+
+
+class TrainRoomModelResponse(BaseModel):
+    model_id: str
+    model_type: str
+    created_at_utc: datetime
+    trained_from_utc: datetime
+    trained_to_utc: datetime
+    interval_minutes: int
+    sample_count: int
+    is_active: bool
+    aggregate_metrics: list[HorizonMetricResponse]

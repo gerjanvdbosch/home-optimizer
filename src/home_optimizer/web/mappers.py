@@ -11,6 +11,10 @@ from home_optimizer.features.identification import (
     IdentificationDataset,
     IdentificationDatasetSummary,
 )
+from home_optimizer.features.modeling import (
+    RoomModelValidationReport,
+    StoredRoomModelVersion,
+)
 from home_optimizer.web.schemas import (
     BaselineKpiSummaryResponse,
     ChartPointResponse,
@@ -19,9 +23,11 @@ from home_optimizer.web.schemas import (
     ChartTextSeriesResponse,
     DailyKpiResponse,
     HistoryImportJobResponse,
+    HorizonMetricResponse,
     IdentificationDatasetResponse,
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
+    TrainRoomModelResponse,
 )
 
 
@@ -86,5 +92,25 @@ def identification_dataset_response(
         rows=[
             IdentificationDatasetRowResponse(**row.model_dump())
             for row in dataset.rows
+        ],
+    )
+
+
+def train_room_model_response(
+    version: StoredRoomModelVersion,
+    validation_report: RoomModelValidationReport,
+) -> TrainRoomModelResponse:
+    return TrainRoomModelResponse(
+        model_id=version.model_id,
+        model_type=version.model_type,
+        created_at_utc=version.created_at_utc,
+        trained_from_utc=version.model.trained_from_utc,
+        trained_to_utc=version.model.trained_to_utc,
+        interval_minutes=version.model.interval_minutes,
+        sample_count=version.model.sample_count,
+        is_active=version.is_active,
+        aggregate_metrics=[
+            HorizonMetricResponse(**metric.model_dump())
+            for metric in validation_report.aggregate_metrics
         ],
     )

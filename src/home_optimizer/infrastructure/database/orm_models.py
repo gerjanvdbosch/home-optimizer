@@ -70,3 +70,27 @@ Index(
 )
 
 
+class ModelVersion(Base):
+    __tablename__ = "model_versions"
+
+    model_id: Mapped[str] = mapped_column(String, primary_key=True)
+    model_type: Mapped[str] = mapped_column(String, nullable=False)
+    created_at_utc: Mapped[str] = mapped_column(String, nullable=False)
+    trained_from_utc: Mapped[str] = mapped_column(String, nullable=False)
+    trained_to_utc: Mapped[str] = mapped_column(String, nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    validation_mae_1h_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_mae_6h_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_mae_12h_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_mae_24h_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_bias_6h_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_p95_12h_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model_json: Mapped[str] = mapped_column(Text, nullable=False)
+    validation_report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index("idx_model_versions_type_created", ModelVersion.model_type, ModelVersion.created_at_utc)
+Index("idx_model_versions_type_active", ModelVersion.model_type, ModelVersion.is_active)
+

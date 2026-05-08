@@ -1,4 +1,3 @@
-from .pricing import ElectricityPriceService
 from .forecast import OpenMeteoForecastService
 from .history import (
     HistoryImportRequest,
@@ -13,6 +12,14 @@ from .identification import (
     IdentificationDatasetSummary,
 )
 from .kpi import DailyKpiService
+from .modeling import (
+    RoomModelConfig,
+    RoomModelingService,
+    RoomModelValidationReport,
+    StoredRoomModelVersion,
+    StoredRoomModelVersionSummary,
+)
+from .pricing import ElectricityPriceService
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
@@ -24,6 +31,11 @@ __all__ = [
     "IdentificationDatasetRow",
     "IdentificationDatasetService",
     "IdentificationDatasetSummary",
+    "RoomModelConfig",
+    "RoomModelValidationReport",
+    "RoomModelingService",
+    "StoredRoomModelVersion",
+    "StoredRoomModelVersionSummary",
     "WeatherImportService",
     "ElectricityPriceService",
     "LiveMeasurement",

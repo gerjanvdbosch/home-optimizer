@@ -73,9 +73,11 @@ class ElectricityPriceRepository:
                 for interval in intervals
             ]
             for start_index in range(0, len(rows), ELECTRICITY_PRICE_INTERVAL_INSERT_BATCH_SIZE):
-                batch = rows[start_index : start_index + ELECTRICITY_PRICE_INTERVAL_INSERT_BATCH_SIZE]
+                batch = rows[
+                    start_index : start_index + ELECTRICITY_PRICE_INTERVAL_INSERT_BATCH_SIZE
+                ]
                 statement = insert(ElectricityPriceIntervalValue).values(batch)
-                result = active_session.execute(
+                active_session.execute(
                     statement.on_conflict_do_update(
                         index_elements=[
                             ElectricityPriceIntervalValue.name,
@@ -97,4 +99,3 @@ class ElectricityPriceRepository:
                 active_session.close()
 
         return written_rows
-

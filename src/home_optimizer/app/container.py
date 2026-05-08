@@ -11,20 +11,23 @@ from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.pricing import DynamicPricing
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
-from home_optimizer.features.pricing import (
-    ElectricityPriceService,
-    electricity_price_refresh_interval_seconds,
-)
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
 from home_optimizer.features.history.weather_import_service import WeatherImportService
+from home_optimizer.features.pricing import (
+    ElectricityPriceService,
+    electricity_price_refresh_interval_seconds,
+)
 from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.electricity_price_repository import (
     ElectricityPriceRepository,
 )
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
+from home_optimizer.infrastructure.database.model_version_repository import (
+    ModelVersionRepository,
+)
 from home_optimizer.infrastructure.database.session import Database
 from home_optimizer.infrastructure.database.time_series_read_repository import (
     TimeSeriesReadRepository,
@@ -32,8 +35,8 @@ from home_optimizer.infrastructure.database.time_series_read_repository import (
 from home_optimizer.infrastructure.database.time_series_write_repository import (
     TimeSeriesWriteRepository,
 )
-from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
 from home_optimizer.infrastructure.forecast.openmeteo import OpenMeteoGateway
+from home_optimizer.infrastructure.home_assistant.gateway import HomeAssistantGateway
 from home_optimizer.infrastructure.pricing.nordpool import NordpoolGateway
 
 GatewayFactory = Callable[[list[SensorSpec]], SensorGateway]
@@ -59,6 +62,7 @@ class AppContainer:
     forecast_repository: ForecastRepository
     forecast_service: OpenMeteoForecastService
     forecast_scheduler: ForecastScheduler
+    model_version_repository: ModelVersionRepository
 
     def close(self) -> None:
         self.home_assistant.close()
@@ -80,12 +84,17 @@ def build_container(
     gateway = gateway_factory(sensor_specs) if gateway_factory else HomeAssistantGateway()
     location = gateway.get_location()
     open_meteo = OpenMeteoGateway()
-    nordpool = NordpoolGateway() if isinstance(settings.electricity_pricing, DynamicPricing) else None
+    nordpool = (
+        NordpoolGateway()
+        if isinstance(settings.electricity_pricing, DynamicPricing)
+        else None
+    )
     history_import_repository = TimeSeriesWriteRepository(database, source=history_source)
     telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
     time_series_read_repository = TimeSeriesReadRepository(database)
     electricity_price_repository = ElectricityPriceRepository(database)
     forecast_repository = ForecastRepository(database)
+    model_version_repository = ModelVersionRepository(database)
     history_import_service = HistoryImportService(
         gateway=gateway,
         repository=history_import_repository,
@@ -148,4 +157,5 @@ def build_container(
         forecast_repository=forecast_repository,
         forecast_service=forecast_service,
         forecast_scheduler=forecast_scheduler,
+        model_version_repository=model_version_repository,
     )

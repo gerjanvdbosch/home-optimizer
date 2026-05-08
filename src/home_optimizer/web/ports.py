@@ -5,6 +5,7 @@ from typing import Protocol
 
 from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
+from home_optimizer.features.modeling import StoredRoomModelVersion
 
 
 class ClosableGateway(Protocol):
@@ -60,6 +61,10 @@ class WeatherImportRunner(Protocol):
     ) -> int: ...
 
 
+class ModelVersionWriter(Protocol):
+    def save_room_model_version(self, version: StoredRoomModelVersion) -> None: ...
+
+
 class WebAppContainer(Protocol):
     @property
     def home_assistant(self) -> ClosableGateway: ...
@@ -84,5 +89,8 @@ class WebAppContainer(Protocol):
 
     @property
     def weather_import_service(self) -> WeatherImportRunner: ...
+
+    @property
+    def model_version_repository(self) -> ModelVersionWriter: ...
 
     def close(self) -> None: ...
