@@ -63,11 +63,22 @@ def _max_lag(config: RoomModelConfig) -> int:
         + config.outdoor_temperature_lags
         + config.thermal_output_lags
         + config.solar_gain_lags
+        + config.shutter_position_lags
+        + config.solar_shutter_interaction_lags
         + config.occupied_flag_lags
     )
 
 
 def _row_value(row: MpcDatasetRow, field_name: str) -> float | None:
+    if field_name == "solar_shutter_interaction":
+        solar_irradiance = row.solar_irradiance_w_m2
+        shutter_position = row.shutter_position_pct
+        if solar_irradiance is None and shutter_position is None:
+            return None
+        resolved_irradiance = float(solar_irradiance or 0.0)
+        resolved_shutter_fraction = max(0.0, min(float(shutter_position or 0.0), 100.0)) / 100.0
+        return resolved_irradiance * resolved_shutter_fraction
+
     value = getattr(row, field_name)
     if value is None:
         return None
@@ -93,6 +104,14 @@ def _feature_specs(config: RoomModelConfig) -> list[tuple[str, str, int]]:
         for lag in config.solar_gain_lags
     )
     specs.extend(
+        ("shutter_position_pct", f"shutter_position_lag_{lag}", lag)
+        for lag in config.shutter_position_lags
+    )
+    specs.extend(
+        ("solar_shutter_interaction", f"solar_shutter_interaction_lag_{lag}", lag)
+        for lag in config.solar_shutter_interaction_lags
+    )
+    specs.extend(
         ("occupied_flag", f"occupied_flag_lag_{lag}", lag)
         for lag in config.occupied_flag_lags
     )
@@ -104,6 +123,8 @@ def _default_feature_value(field_name: str) -> float | None:
         "outdoor_temperature_c",
         "thermal_output_estimate_kw",
         "solar_gain_proxy_w_m2",
+        "shutter_position_pct",
+        "solar_shutter_interaction",
         "occupied_flag",
     }:
         return 0.0

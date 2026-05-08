@@ -82,62 +82,117 @@ function simulationTrace(series, label, color, options = {}) {
 
 const anchorTimeInput = document.getElementById("anchor-time");
 const horizonStepsInput = document.getElementById("horizon-steps");
+const trainButton = document.getElementById("train-button");
 const simulateButton = document.getElementById("simulate-button");
 const simulationStatus = document.getElementById("simulation-status");
+const simulationResult = document.getElementById("simulation-result");
 const simulationSummary = document.getElementById("simulation-summary");
 const simulationModelId = document.getElementById("simulation-model-id");
 const roomChart = document.getElementById("simulation-room-chart");
 const driverChart = document.getElementById("simulation-driver-chart");
 
-async function loadSimulation() {
-  simulationStatus.textContent = "Simulatie laden...";
-  simulationStatus.className = "status";
-  const anchorTime = new Date(anchorTimeInput.value);
-  const horizonSteps = Number(horizonStepsInput.value || "144");
-  const params = new URLSearchParams({
-    anchor_time: anchorTime.toISOString(),
-    horizon_steps: String(horizonSteps),
-  });
+function setSimulationButtonsDisabled(disabled) {
+  if (trainButton) {
+    trainButton.disabled = disabled;
+  }
+  if (simulateButton) {
+    simulateButton.disabled = disabled;
+  }
+}
 
-  const response = await fetch(simulationApiUrl(`api/simulate/room?${params.toString()}`));
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.detail || "Simulatie mislukt.");
+async function runTrain() {
+  if (!trainButton) {
+    return;
   }
 
-  Plotly.react(
-    roomChart,
-    [
-      simulationTrace(payload.predicted_room_temperature, "Predicted", "#1e88e5"),
-      simulationTrace(payload.actual_room_temperature, "Actual", "#43a047"),
-      simulationTrace(payload.room_target_min_temperature, "Target min", "#c62828", {
-        dash: "dot",
-      }),
-      simulationTrace(payload.room_target_max_temperature, "Target max", "#ef6c00", {
-        dash: "dot",
-      }),
-    ],
-    simulationLayout("°C"),
-    { displayModeBar: false, responsive: true },
-  );
+  setSimulationButtonsDisabled(true);
+  simulationStatus.textContent = "Model wordt getraind...";
+  simulationStatus.className = "status";
 
-  Plotly.react(
-    driverChart,
-    [
-      simulationTrace(payload.outdoor_temperature, "Outdoor", "#455a64"),
-      simulationTrace(payload.solar_irradiance, "Solar", "#f9a825", {
-        yaxis: "y2",
-      }),
-    ],
-    simulationLayout("°C", "W/m2"),
-    { displayModeBar: false, responsive: true },
-  );
+  try {
+    const response = await fetch(simulationApiUrl("api/train?activate=true"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Modeltraining mislukt.");
+    }
 
-  simulationSummary.textContent =
-    `${payload.horizon_steps} stappen · ${payload.interval_minutes} min`;
-  simulationModelId.textContent = payload.model_id;
-  simulationStatus.textContent = "Simulatie geladen";
-  simulationStatus.className = "status success";
+    simulationStatus.textContent = `Model getraind: ${payload.model_id}`;
+    simulationStatus.className = "status success";
+    if (simulationResult) {
+      simulationResult.hidden = false;
+      simulationResult.textContent = JSON.stringify(payload, null, 2);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Modeltraining mislukt.";
+    simulationStatus.textContent = message;
+    simulationStatus.className = "status error";
+    if (simulationResult) {
+      simulationResult.hidden = false;
+      simulationResult.textContent = "Het model kon niet worden getraind.";
+    }
+  } finally {
+    setSimulationButtonsDisabled(false);
+  }
+}
+
+async function loadSimulation() {
+  setSimulationButtonsDisabled(true);
+  simulationStatus.textContent = "Simulatie laden...";
+  simulationStatus.className = "status";
+
+  try {
+    const anchorTime = new Date(anchorTimeInput.value);
+    const horizonSteps = Number(horizonStepsInput.value || "144");
+    const params = new URLSearchParams({
+      anchor_time: anchorTime.toISOString(),
+      horizon_steps: String(horizonSteps),
+    });
+
+    const response = await fetch(simulationApiUrl(`api/simulate/room?${params.toString()}`));
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Simulatie mislukt.");
+    }
+
+    Plotly.react(
+      roomChart,
+      [
+        simulationTrace(payload.predicted_room_temperature, "Predicted", "#1e88e5"),
+        simulationTrace(payload.actual_room_temperature, "Actual", "#43a047"),
+        simulationTrace(payload.room_target_min_temperature, "Target min", "#c62828", {
+          dash: "dot",
+        }),
+        simulationTrace(payload.room_target_max_temperature, "Target max", "#ef6c00", {
+          dash: "dot",
+        }),
+      ],
+      simulationLayout("°C"),
+      { displayModeBar: false, responsive: true },
+    );
+
+    Plotly.react(
+      driverChart,
+      [
+        simulationTrace(payload.outdoor_temperature, "Outdoor", "#455a64"),
+        simulationTrace(payload.solar_irradiance, "Solar", "#f9a825", {
+          yaxis: "y2",
+        }),
+      ],
+      simulationLayout("°C", "W/m2"),
+      { displayModeBar: false, responsive: true },
+    );
+
+    simulationSummary.textContent =
+      `${payload.horizon_steps} stappen · ${payload.interval_minutes} min`;
+    simulationModelId.textContent = payload.model_id;
+    simulationStatus.textContent = "Simulatie geladen";
+    simulationStatus.className = "status success";
+  } finally {
+    setSimulationButtonsDisabled(false);
+  }
 }
 
 function handleSimulationError(error) {
@@ -154,5 +209,9 @@ if (simulateButton) {
     loadSimulation().catch(handleSimulationError);
   });
 }
+
+trainButton?.addEventListener("click", () => {
+  runTrain().catch(handleSimulationError);
+});
 
 loadSimulation().catch(handleSimulationError);

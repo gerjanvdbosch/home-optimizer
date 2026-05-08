@@ -11,7 +11,9 @@ class RoomModelConfig(DomainModel):
     room_temperature_lags: list[int] = Field(default_factory=lambda: [0, 1])
     outdoor_temperature_lags: list[int] = Field(default_factory=lambda: [0])
     thermal_output_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6])
-    solar_gain_lags: list[int] = Field(default_factory=lambda: [0, 1])
+    solar_gain_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6, 12, 18])
+    shutter_position_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6])
+    solar_shutter_interaction_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6, 12])
     occupied_flag_lags: list[int] = Field(default_factory=lambda: [0])
     ridge_alpha: float = Field(default=0.0, ge=0.0)
     min_train_rows: int = Field(default=96, gt=1)
@@ -31,6 +33,8 @@ class RoomModelConfig(DomainModel):
         "outdoor_temperature_lags",
         "thermal_output_lags",
         "solar_gain_lags",
+        "shutter_position_lags",
+        "solar_shutter_interaction_lags",
         "occupied_flag_lags",
         "validation_horizons_steps",
     )

@@ -204,7 +204,7 @@ const forecastSeriesStyles = {
 
 let selectedDate = new Date();
 
-function setImportButtonsDisabled(disabled) {
+function setActionButtonsDisabled(disabled) {
   if (button) {
     button.disabled = disabled;
   }
@@ -242,7 +242,7 @@ async function runImport() {
     return;
   }
 
-  setImportButtonsDisabled(true);
+  setActionButtonsDisabled(true);
   status.className = "status";
   status.textContent = "Import wordt gestart...";
 
@@ -267,7 +267,7 @@ async function runImport() {
     result.hidden = false;
     result.textContent = "De import kon niet worden uitgevoerd.";
   } finally {
-    setImportButtonsDisabled(false);
+    setActionButtonsDisabled(false);
   }
 }
 
@@ -276,7 +276,7 @@ async function runWeatherImport() {
     return;
   }
 
-  setImportButtonsDisabled(true);
+  setActionButtonsDisabled(true);
   status.className = "status";
   status.textContent = "Weerdata wordt geïmporteerd...";
 
@@ -303,7 +303,7 @@ async function runWeatherImport() {
     result.hidden = false;
     result.textContent = "De weerdata import kon niet worden uitgevoerd.";
   } finally {
-    setImportButtonsDisabled(false);
+    setActionButtonsDisabled(false);
   }
 }
 
