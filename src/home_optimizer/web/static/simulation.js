@@ -100,6 +100,8 @@ const simulationResult = document.getElementById("simulation-result");
 const simulationSummary = document.getElementById("simulation-summary");
 const simulationModelId = document.getElementById("simulation-model-id");
 const roomChart = document.getElementById("simulation-room-chart");
+const errorChart = document.getElementById("simulation-error-chart");
+const solarChart = document.getElementById("simulation-solar-chart");
 const driverChart = document.getElementById("simulation-driver-chart");
 
 function setSimulationButtonsDisabled(disabled) {
@@ -209,14 +211,41 @@ async function loadSimulation() {
     );
 
     Plotly.react(
-      driverChart,
+      errorChart,
       [
-        simulationTrace(payload.outdoor_temperature, "Outdoor", "#455a64"),
+        simulationTrace(payload.prediction_error_c, "Predicted - actual", "#c62828"),
+      ],
+      simulationLayout("°C"),
+      { displayModeBar: false, responsive: true },
+    );
+
+    Plotly.react(
+      solarChart,
+      [
         simulationTrace(payload.solar_irradiance, "Solar", "#f9a825", {
+          width: 2,
+        }),
+        simulationTrace(payload.solar_gain_proxy, "Solar gain proxy", "#6d4c41", {
+          dash: "dot",
+          width: 2,
+        }),
+        simulationTrace(payload.shutter_position, "Shutter position", "#1e88e5", {
           yaxis: "y2",
         }),
       ],
-      simulationLayout("°C", "W/m2"),
+      simulationLayout("W/m2", "%"),
+      { displayModeBar: false, responsive: true },
+    );
+
+    Plotly.react(
+      driverChart,
+      [
+        simulationTrace(payload.outdoor_temperature, "Outdoor", "#455a64"),
+        simulationTrace(payload.thermal_output_estimate, "Thermal output", "#43a047", {
+          yaxis: "y2",
+        }),
+      ],
+      simulationLayout("°C", "kW"),
       { displayModeBar: false, responsive: true },
     );
 

@@ -138,8 +138,12 @@ def room_simulation_response(result: RoomSimulationResult) -> RoomSimulationResp
         horizon_steps=result.horizon_steps,
         predicted_room_temperature=series_response(result.predicted_room_temperature),
         actual_room_temperature=series_response(result.actual_room_temperature),
+        prediction_error_c=series_response(result.prediction_error_c),
         room_target_min_temperature=series_response(result.room_target_min_temperature),
         room_target_max_temperature=series_response(result.room_target_max_temperature),
         outdoor_temperature=series_response(result.outdoor_temperature),
+        thermal_output_estimate=series_response(result.thermal_output_estimate),
         solar_irradiance=series_response(result.solar_irradiance),
+        solar_gain_proxy=series_response(result.solar_gain_proxy),
+        shutter_position=series_response(result.shutter_position),
     )

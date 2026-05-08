@@ -221,7 +221,11 @@ class RoomSimulationResponse(BaseModel):
     horizon_steps: int
     predicted_room_temperature: ChartSeriesResponse
     actual_room_temperature: ChartSeriesResponse
+    prediction_error_c: ChartSeriesResponse
     room_target_min_temperature: ChartSeriesResponse
     room_target_max_temperature: ChartSeriesResponse
     outdoor_temperature: ChartSeriesResponse
+    thermal_output_estimate: ChartSeriesResponse
     solar_irradiance: ChartSeriesResponse
+    solar_gain_proxy: ChartSeriesResponse
+    shutter_position: ChartSeriesResponse

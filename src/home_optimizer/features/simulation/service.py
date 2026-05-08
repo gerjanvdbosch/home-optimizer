@@ -74,18 +74,25 @@ class RoomSimulationService:
 
         predicted_points: list[NumericPoint] = []
         actual_points: list[NumericPoint] = []
+        error_points: list[NumericPoint] = []
         target_min_points: list[NumericPoint] = []
         target_max_points: list[NumericPoint] = []
         outdoor_points: list[NumericPoint] = []
+        thermal_output_points: list[NumericPoint] = []
         solar_points: list[NumericPoint] = []
+        solar_gain_points: list[NumericPoint] = []
+        shutter_points: list[NumericPoint] = []
 
         for step in range(1, horizon_steps + 1):
             row = dataset.rows[anchor_index + step]
             timestamp = normalize_utc_timestamp(row.timestamp_utc)
-            predicted_points.append(NumericPoint(timestamp=timestamp, value=simulated[step - 1]))
+            predicted_value = simulated[step - 1]
+            predicted_points.append(NumericPoint(timestamp=timestamp, value=predicted_value))
             if row.room_temperature_c is not None:
-                actual_points.append(
-                    NumericPoint(timestamp=timestamp, value=row.room_temperature_c)
+                actual_value = row.room_temperature_c
+                actual_points.append(NumericPoint(timestamp=timestamp, value=actual_value))
+                error_points.append(
+                    NumericPoint(timestamp=timestamp, value=predicted_value - actual_value)
                 )
             if row.room_target_min_temperature_c is not None:
                 target_min_points.append(
@@ -99,9 +106,21 @@ class RoomSimulationService:
                 outdoor_points.append(
                     NumericPoint(timestamp=timestamp, value=row.outdoor_temperature_c)
                 )
+            if row.thermal_output_estimate_kw is not None:
+                thermal_output_points.append(
+                    NumericPoint(timestamp=timestamp, value=row.thermal_output_estimate_kw)
+                )
             if row.solar_irradiance_w_m2 is not None:
                 solar_points.append(
                     NumericPoint(timestamp=timestamp, value=row.solar_irradiance_w_m2)
+                )
+            if row.solar_gain_proxy_w_m2 is not None:
+                solar_gain_points.append(
+                    NumericPoint(timestamp=timestamp, value=row.solar_gain_proxy_w_m2)
+                )
+            if row.shutter_position_pct is not None:
+                shutter_points.append(
+                    NumericPoint(timestamp=timestamp, value=row.shutter_position_pct)
                 )
 
         return RoomSimulationResult(
@@ -119,6 +138,11 @@ class RoomSimulationService:
                 unit="°C",
                 points=actual_points,
             ),
+            prediction_error_c=NumericSeries(
+                name="prediction_error_c",
+                unit="°C",
+                points=error_points,
+            ),
             room_target_min_temperature=NumericSeries(
                 name="room_target_min_temperature",
                 unit="°C",
@@ -134,9 +158,24 @@ class RoomSimulationService:
                 unit="°C",
                 points=outdoor_points,
             ),
+            thermal_output_estimate=NumericSeries(
+                name="thermal_output_estimate",
+                unit="kW",
+                points=thermal_output_points,
+            ),
             solar_irradiance=NumericSeries(
                 name="solar_irradiance",
                 unit="W/m2",
                 points=solar_points,
+            ),
+            solar_gain_proxy=NumericSeries(
+                name="solar_gain_proxy",
+                unit="W/m2",
+                points=solar_gain_points,
+            ),
+            shutter_position=NumericSeries(
+                name="shutter_position",
+                unit="%",
+                points=shutter_points,
             ),
         )

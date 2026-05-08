@@ -417,6 +417,10 @@ def test_simulation_page_and_api_return_room_horizon() -> None:
     assert payload["horizon_steps"] == 4
     assert len(payload["predicted_room_temperature"]["points"]) == 4
     assert len(payload["actual_room_temperature"]["points"]) == 4
+    assert "prediction_error_c" in payload
+    assert "solar_gain_proxy" in payload
+    assert "shutter_position" in payload
+    assert "thermal_output_estimate" in payload
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:

@@ -13,7 +13,11 @@ class RoomSimulationResult(DomainModel):
     horizon_steps: int
     predicted_room_temperature: NumericSeries
     actual_room_temperature: NumericSeries
+    prediction_error_c: NumericSeries
     room_target_min_temperature: NumericSeries
     room_target_max_temperature: NumericSeries
     outdoor_temperature: NumericSeries
+    thermal_output_estimate: NumericSeries
     solar_irradiance: NumericSeries
+    solar_gain_proxy: NumericSeries
+    shutter_position: NumericSeries
