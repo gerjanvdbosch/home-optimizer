@@ -44,11 +44,9 @@
             Horizon (steps)
             <input id="horizon-steps" type="number" min="1" max="288" value="144" />
           </label>
-          <button id="train-button" type="button">Train model</button>
           <button id="simulate-button" type="button">Simuleer</button>
           <div id="simulation-status" class="status" aria-live="polite"></div>
         </div>
-        <pre id="simulation-result" hidden></pre>
       </section>
 
       <section class="charts" aria-label="Room simulation">
@@ -81,6 +79,30 @@
           </div>
           <div class="chart-wrap" id="simulation-driver-chart"></div>
         </article>
+      </section>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Model training</h2>
+          <p>Train een nieuw room-model op een gekozen datumbereik.</p>
+        </div>
+        <div class="actions">
+          <label>
+            Start date
+            <input id="train-start-date" type="date" />
+          </label>
+          <label>
+            End date
+            <input id="train-end-date" type="date" />
+          </label>
+          <label>
+            <input id="train-activate" type="checkbox" checked />
+            Activeer na training
+          </label>
+          <button id="train-button" type="button">Train model</button>
+          <div id="train-status" class="status" aria-live="polite"></div>
+        </div>
+        <pre id="train-result" hidden></pre>
       </section>
     </main>
 

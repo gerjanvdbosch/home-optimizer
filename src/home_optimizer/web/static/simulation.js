@@ -9,6 +9,11 @@ function localInputValue(date) {
   return localDate.toISOString().slice(0, 16);
 }
 
+function localDateValue(date) {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return localDate.toISOString().slice(0, 10);
+}
+
 function formatSimulationDisplayDate(date) {
   return new Intl.DateTimeFormat("nl-NL", {
     weekday: "short",
@@ -92,11 +97,15 @@ const anchorTimeInput = document.getElementById("anchor-time");
 const horizonStepsInput = document.getElementById("horizon-steps");
 const trainButton = document.getElementById("train-button");
 const simulateButton = document.getElementById("simulate-button");
+const trainStartDateInput = document.getElementById("train-start-date");
+const trainEndDateInput = document.getElementById("train-end-date");
+const trainActivateInput = document.getElementById("train-activate");
 const simulationPreviousDayButton = document.getElementById("simulation-previous-day");
 const simulationNextDayButton = document.getElementById("simulation-next-day");
 const simulationSelectedDate = document.getElementById("simulation-selected-date");
 const simulationStatus = document.getElementById("simulation-status");
-const simulationResult = document.getElementById("simulation-result");
+const trainStatus = document.getElementById("train-status");
+const trainResult = document.getElementById("train-result");
 const simulationSummary = document.getElementById("simulation-summary");
 const simulationModelId = document.getElementById("simulation-model-id");
 const roomChart = document.getElementById("simulation-room-chart");
@@ -105,9 +114,6 @@ const solarChart = document.getElementById("simulation-solar-chart");
 const driverChart = document.getElementById("simulation-driver-chart");
 
 function setSimulationButtonsDisabled(disabled) {
-  if (trainButton) {
-    trainButton.disabled = disabled;
-  }
   if (simulateButton) {
     simulateButton.disabled = disabled;
   }
@@ -116,6 +122,21 @@ function setSimulationButtonsDisabled(disabled) {
   }
   if (simulationNextDayButton) {
     simulationNextDayButton.disabled = disabled;
+  }
+}
+
+function setTrainingControlsDisabled(disabled) {
+  if (trainButton) {
+    trainButton.disabled = disabled;
+  }
+  if (trainStartDateInput) {
+    trainStartDateInput.disabled = disabled;
+  }
+  if (trainEndDateInput) {
+    trainEndDateInput.disabled = disabled;
+  }
+  if (trainActivateInput) {
+    trainActivateInput.disabled = disabled;
   }
 }
 
@@ -141,12 +162,23 @@ async function runTrain() {
     return;
   }
 
-  setSimulationButtonsDisabled(true);
-  simulationStatus.textContent = "Model wordt getraind...";
-  simulationStatus.className = "status";
+  setTrainingControlsDisabled(true);
+  if (trainStatus) {
+    trainStatus.textContent = "Model wordt getraind...";
+    trainStatus.className = "status";
+  }
 
   try {
-    const response = await fetch(simulationApiUrl("api/train?activate=true"), {
+    const params = new URLSearchParams();
+    if (trainStartDateInput?.value) {
+      params.set("start_time", `${trainStartDateInput.value}T00:00:00Z`);
+    }
+    if (trainEndDateInput?.value) {
+      params.set("end_time", `${trainEndDateInput.value}T23:59:00Z`);
+    }
+    params.set("activate", trainActivateInput?.checked ? "true" : "false");
+
+    const response = await fetch(simulationApiUrl(`api/train?${params.toString()}`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
@@ -155,22 +187,26 @@ async function runTrain() {
       throw new Error(payload.detail || "Modeltraining mislukt.");
     }
 
-    simulationStatus.textContent = `Model getraind: ${payload.model_id}`;
-    simulationStatus.className = "status success";
-    if (simulationResult) {
-      simulationResult.hidden = false;
-      simulationResult.textContent = JSON.stringify(payload, null, 2);
+    if (trainStatus) {
+      trainStatus.textContent = `Model getraind: ${payload.model_id}`;
+      trainStatus.className = "status success";
+    }
+    if (trainResult) {
+      trainResult.hidden = false;
+      trainResult.textContent = JSON.stringify(payload, null, 2);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Modeltraining mislukt.";
-    simulationStatus.textContent = message;
-    simulationStatus.className = "status error";
-    if (simulationResult) {
-      simulationResult.hidden = false;
-      simulationResult.textContent = "Het model kon niet worden getraind.";
+    if (trainStatus) {
+      trainStatus.textContent = message;
+      trainStatus.className = "status error";
+    }
+    if (trainResult) {
+      trainResult.hidden = false;
+      trainResult.textContent = "Het model kon niet worden getraind.";
     }
   } finally {
-    setSimulationButtonsDisabled(false);
+    setTrainingControlsDisabled(false);
   }
 }
 
@@ -267,6 +303,14 @@ function handleSimulationError(error) {
 if (anchorTimeInput) {
   anchorTimeInput.value = localInputValue(new Date("2026-05-07T00:00:00Z"));
   syncSimulationDateLabel(new Date(anchorTimeInput.value));
+}
+
+if (trainStartDateInput) {
+  trainStartDateInput.value = localDateValue(new Date("2026-04-16T00:00:00Z"));
+}
+
+if (trainEndDateInput) {
+  trainEndDateInput.value = localDateValue(new Date("2026-05-07T23:59:00Z"));
 }
 
 if (simulateButton) {
