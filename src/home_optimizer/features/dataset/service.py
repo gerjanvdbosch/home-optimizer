@@ -31,6 +31,10 @@ from home_optimizer.domain import (
     TextSeries,
     build_daily_price_series,
     build_thermal_output_series,
+    dataset_numeric_signal_names,
+    dataset_numeric_signal_spec,
+    dataset_text_signal_names,
+    dataset_text_signal_spec,
     ensure_utc,
     latest_value_at,
     latest_text_value_at,
@@ -53,28 +57,6 @@ _MODE_DHW_TOKENS = ("dhw", "sww")
 _MODE_OFF_TOKENS = ("off", "idle", "standby", "none")
 _MIN_PLAUSIBLE_COP = 1.0
 _MAX_PLAUSIBLE_COP = 8.0
-_SAMPLED_NUMERIC_NAMES = frozenset(
-    {
-        ROOM_TEMPERATURE,
-        OUTDOOR_TEMPERATURE,
-        DHW_TOP_TEMPERATURE,
-        DHW_BOTTOM_TEMPERATURE,
-        SHUTTER_LIVING_ROOM,
-        THERMOSTAT_SETPOINT,
-    }
-)
-_MEAN_RESAMPLED_NUMERIC_NAMES = frozenset(
-    {
-        HP_ELECTRIC_POWER,
-        PV_OUTPUT_POWER,
-        P1_NET_POWER,
-        HP_SUPPLY_TEMPERATURE,
-        HP_RETURN_TEMPERATURE,
-        HP_FLOW,
-        GTI_LIVING_ROOM_WINDOWS,
-    }
-)
-_WINDOW_FLAG_NAMES = frozenset({DEFROST_ACTIVE, BOOSTER_HEATER_ACTIVE})
 
 
 def _series_by_name(series_list: list[NumericSeries]) -> dict[str, NumericSeries]:
@@ -300,6 +282,8 @@ def _latest_text_value(
     name: str,
     timestamp: str,
 ) -> str | None:
+    if dataset_text_signal_spec(name).resample_method != "sample":
+        raise ValueError(f"Unsupported sampled text series: {name}")
     series = series_by_name.get(name)
     if series is None:
         return None
@@ -363,7 +347,7 @@ class MpcDatasetService:
         *,
         timestamp: str,
     ) -> float | None:
-        if name not in _SAMPLED_NUMERIC_NAMES:
+        if dataset_numeric_signal_spec(name).resample_method != "sample":
             raise ValueError(f"Unsupported sampled numeric series: {name}")
         return _latest_numeric_value(series_by_name, name, timestamp)
 
@@ -375,7 +359,7 @@ class MpcDatasetService:
         window_start: datetime,
         window_end: datetime,
     ) -> float | None:
-        if name not in _MEAN_RESAMPLED_NUMERIC_NAMES:
+        if dataset_numeric_signal_spec(name).resample_method != "mean":
             raise ValueError(f"Unsupported mean-resampled numeric series: {name}")
         return _mean_numeric_value(
             series_by_name,
@@ -392,7 +376,7 @@ class MpcDatasetService:
         window_start: datetime,
         window_end: datetime,
     ) -> int:
-        if name not in _WINDOW_FLAG_NAMES:
+        if dataset_numeric_signal_spec(name).resample_method != "window_flag":
             raise ValueError(f"Unsupported window-flag series: {name}")
         return _window_has_positive_value(
             series_by_name,
@@ -417,36 +401,21 @@ class MpcDatasetService:
 
         numeric_series = _series_by_name(
             self.reader.read_series(
-                names=[
-                    ROOM_TEMPERATURE,
-                    OUTDOOR_TEMPERATURE,
-                    DHW_TOP_TEMPERATURE,
-                    DHW_BOTTOM_TEMPERATURE,
-                    HP_ELECTRIC_POWER,
-                    PV_OUTPUT_POWER,
-                    P1_NET_POWER,
-                    DEFROST_ACTIVE,
-                    BOOSTER_HEATER_ACTIVE,
-                    SHUTTER_LIVING_ROOM,
-                    THERMOSTAT_SETPOINT,
-                    HP_SUPPLY_TEMPERATURE,
-                    HP_RETURN_TEMPERATURE,
-                    HP_FLOW,
-                ],
+                names=dataset_numeric_signal_names(source="measurement"),
                 start_time=start_time_utc,
                 end_time=end_time_utc,
             )
         )
         text_series = _text_series_by_name(
             self.reader.read_text_series(
-                names=[HP_MODE],
+                names=dataset_text_signal_names(source="measurement"),
                 start_time=start_time_utc,
                 end_time=end_time_utc,
             )
         )
         forecast_series = _series_by_name(
             self.reader.read_forecast_series(
-                names=[GTI_LIVING_ROOM_WINDOWS],
+                names=dataset_numeric_signal_names(source="forecast"),
                 start_time=start_time_utc,
                 end_time=end_time_utc,
             )

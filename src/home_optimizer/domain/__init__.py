@@ -1,5 +1,16 @@
 from .clock import utc_now
 from .control import ShutterPositionControl, ThermostatSetpointControl
+from .dataset_resampling import (
+    DATASET_NUMERIC_SIGNAL_SPECS,
+    DATASET_TEXT_SIGNAL_SPECS,
+    DatasetNumericSignalSpec,
+    DatasetSeriesSource,
+    DatasetTextSignalSpec,
+    dataset_numeric_signal_names,
+    dataset_numeric_signal_spec,
+    dataset_text_signal_names,
+    dataset_text_signal_spec,
+)
 from .forecast import ForecastEntry
 from .kpis import BaselineKpiSummary, DailyKpis, compute_baseline_kpi_summary, compute_daily_kpis
 from .location import Location, parse_location
@@ -89,6 +100,8 @@ __all__ = [
     "BOILER_AMBIENT_TEMPERATURE",
     "BOOSTER_HEATER_ACTIVE",
     "BaselineKpiSummary",
+    "DATASET_NUMERIC_SIGNAL_SPECS",
+    "DATASET_TEXT_SIGNAL_SPECS",
     "COMPRESSOR_FREQUENCY",
     "COP",
     "DEFROST_ACTIVE",
@@ -98,6 +111,9 @@ __all__ = [
     "DHW_TARGET_MIN_TEMPERATURE",
     "DHW_TARGET_TEMPERATURE",
     "DHW_TOP_TEMPERATURE",
+    "DatasetNumericSignalSpec",
+    "DatasetSeriesSource",
+    "DatasetTextSignalSpec",
     "DomainModel",
     "DISCHARGE_TEMPERATURE",
     "DynamicPricing",
@@ -154,6 +170,10 @@ __all__ = [
     "build_fixed_price_intervals",
     "compute_baseline_kpi_summary",
     "compute_daily_kpis",
+    "dataset_numeric_signal_names",
+    "dataset_numeric_signal_spec",
+    "dataset_text_signal_names",
+    "dataset_text_signal_spec",
     "build_daily_target_band_series",
     "build_sensor_specs",
     "build_thermal_output_series",

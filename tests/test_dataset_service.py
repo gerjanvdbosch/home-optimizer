@@ -20,6 +20,8 @@ from home_optimizer.domain import (
     NumericSeries,
     TextPoint,
     TextSeries,
+    dataset_numeric_signal_names,
+    dataset_numeric_signal_spec,
     normalize_utc_timestamp,
 )
 from home_optimizer.features.dataset import MpcDatasetService
@@ -323,3 +325,11 @@ def test_mpc_dataset_service_applies_explicit_resample_semantics() -> None:
     assert row.flow_l_min == 10.0
     assert row.solar_irradiance_w_m2 == 200.0
     assert row.defrost_active == 1
+
+
+def test_dataset_signal_specs_are_centralized() -> None:
+    assert ROOM_TEMPERATURE in dataset_numeric_signal_names(source="measurement")
+    assert GTI_LIVING_ROOM_WINDOWS in dataset_numeric_signal_names(source="forecast")
+    assert dataset_numeric_signal_spec(ROOM_TEMPERATURE).resample_method == "sample"
+    assert dataset_numeric_signal_spec(HP_ELECTRIC_POWER).resample_method == "mean"
+    assert dataset_numeric_signal_spec(DEFROST_ACTIVE).resample_method == "window_flag"
