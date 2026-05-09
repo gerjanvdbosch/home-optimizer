@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from home_optimizer.features.dataset.models import MpcDataset
 from home_optimizer.features.modeling.common.metrics import build_metric
 from home_optimizer.features.modeling.models import (
@@ -17,11 +15,7 @@ def rolling_validate_room_model(
     dataset: MpcDataset,
     *,
     config: RoomModelConfig,
-    fit_model: Callable[[MpcDataset, RoomModelConfig], TrainedLinearRoomModel],
-    simulate_horizon: Callable[[TrainedLinearRoomModel, list, int, int], list[float]],
-    row_segments: Callable,
-    segment_definitions: Callable[[RoomModelConfig], list[tuple[str, str]]],
-    validation_stride_rows: Callable[[RoomModelConfig, int], int],
+    trainer,
 ) -> RoomModelValidationReport:
     rows = dataset.rows
     if len(rows) < config.min_train_rows + 2:
@@ -35,10 +29,10 @@ def rolling_validate_room_model(
         segment_name: {
             horizon_steps: [] for horizon_steps in config.validation_horizons_steps
         }
-        for segment_name, _ in segment_definitions(config)
+        for segment_name, _ in trainer.segment_definitions(config)
     }
     fold_start = config.min_train_rows
-    stride_rows = validation_stride_rows(config, dataset.interval_minutes)
+    stride_rows = trainer.validation_stride_rows(config, dataset.interval_minutes)
 
     while fold_start < len(rows) - 1:
         validate_end_exclusive = min(fold_start + config.validation_window_rows, len(rows))
@@ -58,7 +52,7 @@ def rolling_validate_room_model(
             end_time_utc=training_rows[-1].timestamp_utc,
             rows=training_rows,
         )
-        model = fit_model(training_dataset, config)
+        model = trainer.fit(training_dataset, config)
 
         metrics = []
         for horizon_steps in config.validation_horizons_steps:
@@ -68,14 +62,19 @@ def rolling_validate_room_model(
                 if actual_room_temperature is None:
                     continue
 
-                simulated = simulate_horizon(model, rows, origin_index, horizon_steps)
+                simulated = trainer.simulate_horizon(
+                    model,
+                    rows,
+                    start_index=origin_index,
+                    horizon_steps=horizon_steps,
+                )
                 if len(simulated) != horizon_steps:
                     continue
 
                 error = simulated[-1] - actual_room_temperature
                 errors.append(error)
                 all_errors_by_horizon[horizon_steps].append(error)
-                for segment_name in row_segments(rows[origin_index], config):
+                for segment_name in trainer.row_segments(rows[origin_index], config):
                     segment_errors_by_horizon[segment_name][horizon_steps].append(error)
 
             metrics.append(
@@ -119,7 +118,7 @@ def rolling_validate_room_model(
                 for horizon_steps in config.validation_horizons_steps
             ],
         )
-        for segment_name, description in segment_definitions(config)
+        for segment_name, description in trainer.segment_definitions(config)
     ]
 
     return RoomModelValidationReport(

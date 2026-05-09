@@ -7,16 +7,18 @@ from pydantic import Field
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import RoomModelConfig, TrainedLinearRoomModel
 
+ROOM_ARX_MODEL_KIND = "room_arx"
+
 
 class RoomArxConfig(RoomModelConfig):
-    model_kind: str = "room_arx"
+    model_kind: str = ROOM_ARX_MODEL_KIND
     notes: str = Field(
         default="Autoregressive room model with exogenous thermal, solar, shutter, and occupancy inputs."
     )
 
 
 class RoomArxModel(TrainedLinearRoomModel):
-    model_kind: str = "room_arx"
+    model_kind: str = ROOM_ARX_MODEL_KIND
     notes: str = Field(
         default="Trained ARX room model with linear coefficients over lagged room and exogenous features."
     )
@@ -290,62 +292,3 @@ class RoomArxTrainer:
 
 
 ROOM_ARX_TRAINER = RoomArxTrainer()
-
-
-def feature_specs(config: RoomModelConfig) -> list[tuple[str, str, int]]:
-    return ROOM_ARX_TRAINER.feature_specs(config)
-
-
-def default_feature_value(field_name: str) -> float | None:
-    return ROOM_ARX_TRAINER.default_feature_value(field_name)
-
-
-def validation_stride_rows(config: RoomModelConfig, interval_minutes: int) -> int:
-    return ROOM_ARX_TRAINER.validation_stride_rows(config, interval_minutes)
-
-
-def segment_definitions(config: RoomModelConfig) -> list[tuple[str, str]]:
-    return ROOM_ARX_TRAINER.segment_definitions(config)
-
-
-def row_segments(row: MpcDatasetRow, config: RoomModelConfig) -> set[str]:
-    return ROOM_ARX_TRAINER.row_segments(row, config)
-
-
-def fit_room_arx_model(
-    dataset: MpcDataset,
-    config: RoomModelConfig,
-) -> RoomArxModel:
-    return ROOM_ARX_TRAINER.fit(dataset, config)
-
-
-def predict_next_room_arx_temperature(
-    model: TrainedLinearRoomModel,
-    rows: list[MpcDatasetRow],
-    *,
-    source_index: int,
-    predicted_room_temperatures: dict[int, float] | None = None,
-    prediction_origin_index: int | None = None,
-) -> float | None:
-    return ROOM_ARX_TRAINER.predict_next(
-        model,
-        rows,
-        source_index=source_index,
-        predicted_room_temperatures=predicted_room_temperatures,
-        prediction_origin_index=prediction_origin_index,
-    )
-
-
-def simulate_room_arx_horizon(
-    model: TrainedLinearRoomModel,
-    rows: list[MpcDatasetRow],
-    *,
-    start_index: int,
-    horizon_steps: int,
-) -> list[float]:
-    return ROOM_ARX_TRAINER.simulate_horizon(
-        model,
-        rows,
-        start_index=start_index,
-        horizon_steps=horizon_steps,
-    )

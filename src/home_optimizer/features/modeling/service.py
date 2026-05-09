@@ -7,17 +7,13 @@ from home_optimizer.features.modeling.models import (
     RoomModelValidationReport,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.modeling.room.arx import (
-    fit_room_arx_model,
-    predict_next_room_arx_temperature,
-    row_segments,
-    segment_definitions,
-    simulate_room_arx_horizon,
-    validation_stride_rows,
-)
+from home_optimizer.features.modeling.room.arx import ROOM_ARX_TRAINER
 
 
 class RoomModelingService:
+    def __init__(self) -> None:
+        self.trainer = ROOM_ARX_TRAINER
+
     def fit_room_model(
         self,
         dataset: MpcDataset,
@@ -25,7 +21,7 @@ class RoomModelingService:
         config: RoomModelConfig | None = None,
     ) -> TrainedLinearRoomModel:
         config = config or RoomModelConfig()
-        return fit_room_arx_model(dataset, config)
+        return self.trainer.fit(dataset, config)
 
     def predict_next_room_temperature(
         self,
@@ -36,7 +32,7 @@ class RoomModelingService:
         predicted_room_temperatures: dict[int, float] | None = None,
         prediction_origin_index: int | None = None,
     ) -> float | None:
-        return predict_next_room_arx_temperature(
+        return self.trainer.predict_next(
             model,
             rows,
             source_index=source_index,
@@ -52,7 +48,7 @@ class RoomModelingService:
         start_index: int,
         horizon_steps: int,
     ) -> list[float]:
-        return simulate_room_arx_horizon(
+        return self.trainer.simulate_horizon(
             model,
             rows,
             start_index=start_index,
@@ -69,14 +65,5 @@ class RoomModelingService:
         return rolling_validate_room_model(
             dataset,
             config=config,
-            fit_model=fit_room_arx_model,
-            simulate_horizon=lambda model, rows, start_index, horizon_steps: simulate_room_arx_horizon(
-                model,
-                rows,
-                start_index=start_index,
-                horizon_steps=horizon_steps,
-            ),
-            row_segments=row_segments,
-            segment_definitions=segment_definitions,
-            validation_stride_rows=validation_stride_rows,
+            trainer=self.trainer,
         )
