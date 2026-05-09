@@ -172,6 +172,7 @@ def test_room_modeling_service_fits_two_state_room_model_on_dataset() -> None:
         history_warmup_rows=24,
         mass_decay_candidates=[0.90, 0.97],
         thermal_to_mass_candidates=[0.0, 0.05],
+        solar_to_mass_candidates=[0.0, 0.001],
     )
 
     model = service.fit_room_model(dataset, config=config)
@@ -183,10 +184,12 @@ def test_room_modeling_service_fits_two_state_room_model_on_dataset() -> None:
         "room_temperature_c",
         "mass_temperature_c",
         "outdoor_temperature_c",
-        "solar_gain_proxy_w_m2",
+        "thermal_output_estimate_kw",
+        "solar_effective_w_m2",
         "occupied_flag",
     ]
     assert 0.0 <= model.mass_decay <= 1.0
+    assert model.solar_to_mass >= 0.0
     assert prediction is not None
     assert len(report.aggregate_metrics) == 2
     assert report.aggregate_metrics[0].mae_c is not None

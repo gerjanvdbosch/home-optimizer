@@ -119,14 +119,16 @@ def build_2r2c_model() -> Room2R2CModel:
             "room_temperature_c",
             "mass_temperature_c",
             "outdoor_temperature_c",
-            "solar_gain_proxy_w_m2",
+            "thermal_output_estimate_kw",
+            "solar_effective_w_m2",
             "occupied_flag",
         ],
         intercept=1.1,
-        coefficients=[0.8, 0.1, 0.05, 0.002, 0.03],
+        coefficients=[0.8, 0.1, 0.05, 0.04, 0.002, 0.03],
         sample_count=220,
         mass_decay=0.97,
         thermal_to_mass=0.05,
+        solar_to_mass=0.001,
     )
 
 

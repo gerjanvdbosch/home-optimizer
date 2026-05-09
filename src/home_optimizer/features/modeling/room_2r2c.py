@@ -26,6 +26,9 @@ class Room2R2CConfig(ValidationConfig):
     thermal_to_mass_candidates: list[float] = Field(
         default_factory=lambda: [0.0, 0.02, 0.05, 0.08, 0.12]
     )
+    solar_to_mass_candidates: list[float] = Field(
+        default_factory=lambda: [0.0, 0.0005, 0.001, 0.002]
+    )
     ridge_alpha: float = Field(default=0.0, ge=0.0)
     history_warmup_rows: int = Field(default=144, ge=1)
     sunny_irradiance_threshold_w_m2: float = Field(default=150.0, ge=0.0)
@@ -43,7 +46,11 @@ class Room2R2CConfig(ValidationConfig):
         default="Two-state room / mass model with fitted mass persistence and linear room dynamics."
     )
 
-    @field_validator("mass_decay_candidates", "thermal_to_mass_candidates")
+    @field_validator(
+        "mass_decay_candidates",
+        "thermal_to_mass_candidates",
+        "solar_to_mass_candidates",
+    )
     @classmethod
     def _validate_candidates(cls, value: list[float]) -> list[float]:
         ordered = sorted(set(value))
@@ -57,6 +64,7 @@ class Room2R2CModel(TrainedLinearRoomModel):
     config: Room2R2CConfig
     mass_decay: float
     thermal_to_mass: float
+    solar_to_mass: float
     notes: str = Field(
         default="Trained two-state room model with explicit room and effective thermal-mass states."
     )
@@ -67,7 +75,7 @@ class PreparedRoom2R2CData:
     common: PreparedRoomData
     target_values: np.ndarray
     valid_training_mask: np.ndarray
-    candidate_mass_states: dict[tuple[float, float], np.ndarray]
+    candidate_mass_states: dict[tuple[float, float, float], np.ndarray]
 
     @property
     def segment_masks(self) -> dict[str, np.ndarray]:
@@ -83,7 +91,8 @@ class Room2R2CTrainer:
         "room_temperature_c",
         "mass_temperature_c",
         "outdoor_temperature_c",
-        "solar_gain_proxy_w_m2",
+        "thermal_output_estimate_kw",
+        "solar_effective_w_m2",
         "occupied_flag",
     ]
 
@@ -108,14 +117,17 @@ class Room2R2CTrainer:
             valid_training_mask[-1] = False
 
         candidate_mass_states = {
-            (mass_decay, thermal_to_mass): self._build_mass_state(
+            (mass_decay, thermal_to_mass, solar_to_mass): self._build_mass_state(
                 room_temperature=room_temperature,
                 thermal_output=common.field_arrays["thermal_output_estimate_kw"],
+                solar_gain=common.field_arrays["solar_gain_proxy_w_m2"],
                 mass_decay=mass_decay,
                 thermal_to_mass=thermal_to_mass,
+                solar_to_mass=solar_to_mass,
             )
             for mass_decay in config.mass_decay_candidates
             for thermal_to_mass in config.thermal_to_mass_candidates
+            for solar_to_mass in config.solar_to_mass_candidates
         }
 
         return PreparedRoom2R2CData(
@@ -136,8 +148,10 @@ class Room2R2CTrainer:
         *,
         room_temperature: np.ndarray,
         thermal_output: np.ndarray,
+        solar_gain: np.ndarray,
         mass_decay: float,
         thermal_to_mass: float,
+        solar_to_mass: float,
     ) -> np.ndarray:
         mass_state = np.zeros(len(room_temperature), dtype=float)
         if len(room_temperature) == 0:
@@ -155,6 +169,7 @@ class Room2R2CTrainer:
                 mass_decay * mass_state[index]
                 + room_to_mass * current_room_temperature
                 + thermal_to_mass * thermal_output[index]
+                + solar_to_mass * solar_gain[index]
             )
 
         return mass_state
@@ -172,6 +187,7 @@ class Room2R2CTrainer:
                 common.field_arrays["room_temperature_c"][mask],
                 mass_state[mask],
                 common.field_arrays["outdoor_temperature_c"][mask],
+                common.field_arrays["thermal_output_estimate_kw"][mask],
                 common.field_arrays["solar_gain_proxy_w_m2"][mask],
                 common.field_arrays["occupied_flag"][mask],
             ]
@@ -244,7 +260,7 @@ class Room2R2CTrainer:
             end_exclusive=train_end_exclusive,
         )
 
-        best_candidate: tuple[float, float] | None = None
+        best_candidate: tuple[float, float, float] | None = None
         best_intercept = 0.0
         best_coefficients: list[float] = []
         best_sample_count = 0
@@ -274,7 +290,7 @@ class Room2R2CTrainer:
             len(prepared.common.timestamps_utc) if train_end_exclusive is None else train_end_exclusive
         )
         trained_to_index = max(train_start_index, resolved_train_end_exclusive - 1)
-        mass_decay, thermal_to_mass = best_candidate
+        mass_decay, thermal_to_mass, solar_to_mass = best_candidate
         return Room2R2CModel(
             trained_from_utc=prepared.common.timestamps_utc[train_start_index],
             trained_to_utc=prepared.common.timestamps_utc[trained_to_index],
@@ -286,6 +302,7 @@ class Room2R2CTrainer:
             sample_count=best_sample_count,
             mass_decay=mass_decay,
             thermal_to_mass=thermal_to_mass,
+            solar_to_mass=solar_to_mass,
         )
 
     def predict_next_prepared(
@@ -313,7 +330,9 @@ class Room2R2CTrainer:
 
         mass_state = predicted_mass_temperatures.get(source_index)
         if mass_state is None or source_index <= prediction_origin_index:
-            mass_state = prepared.candidate_mass_states[(model.mass_decay, model.thermal_to_mass)][
+            mass_state = prepared.candidate_mass_states[
+                (model.mass_decay, model.thermal_to_mass, model.solar_to_mass)
+            ][
                 source_index
             ]
 
@@ -321,17 +340,25 @@ class Room2R2CTrainer:
         if np.isnan(outdoor_temperature):
             return None
 
+        thermal_output = common.field_arrays["thermal_output_estimate_kw"][source_index]
         solar_gain = common.field_arrays["solar_gain_proxy_w_m2"][source_index]
         occupied_flag = common.field_arrays["occupied_flag"][source_index]
-        thermal_output = common.field_arrays["thermal_output_estimate_kw"][source_index]
 
         next_mass_state = (
             model.mass_decay * mass_state
             + (1.0 - model.mass_decay) * room_state
             + model.thermal_to_mass * thermal_output
+            + model.solar_to_mass * solar_gain
         )
         features = np.asarray(
-            [room_state, mass_state, outdoor_temperature, solar_gain, occupied_flag],
+            [
+                room_state,
+                mass_state,
+                outdoor_temperature,
+                thermal_output,
+                solar_gain,
+                occupied_flag,
+            ],
             dtype=float,
         )
         next_room_state = float(model.intercept + (features @ np.asarray(model.coefficients)))
@@ -373,9 +400,9 @@ class Room2R2CTrainer:
 
         predicted_room_temperatures: dict[int, float] = {}
         predicted_mass_temperatures: dict[int, float] = {}
-        initial_mass_state = prepared.candidate_mass_states[(model.mass_decay, model.thermal_to_mass)][
-            start_index
-        ]
+        initial_mass_state = prepared.candidate_mass_states[
+            (model.mass_decay, model.thermal_to_mass, model.solar_to_mass)
+        ][start_index]
         predicted_mass_temperatures[start_index] = initial_mass_state
 
         for step in range(1, horizon_steps + 1):
