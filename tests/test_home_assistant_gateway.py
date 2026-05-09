@@ -75,7 +75,7 @@ def test_home_assistant_gateway_get_statistics_calls_correct_endpoint() -> None:
 
     assert len(result) == 1
     assert result[0]["mean"] == 20.5
-    create_connection.assert_called_once_with("ws://homeassistant.local/api/websocket", timeout=60.0)
+    create_connection.assert_called_once_with("ws://homeassistant.local/api/websocket", timeout=30.0)
     auth_payload = json.loads(sent[0])
     assert auth_payload == {"type": "auth", "access_token": "token"}
     cmd_payload = json.loads(sent[1])
@@ -135,5 +135,5 @@ def test_home_assistant_gateway_get_statistics_supports_secure_websocket_url() -
             end_time=datetime(2026, 4, 15, tzinfo=timezone.utc),
         )
 
-    create_connection.assert_called_once_with("wss://homeassistant.local/core/api/websocket", timeout=60.0)
+    create_connection.assert_called_once_with("wss://homeassistant.local/core/api/websocket", timeout=30.0)
 

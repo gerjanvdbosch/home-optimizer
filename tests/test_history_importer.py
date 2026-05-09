@@ -61,7 +61,7 @@ class FakeHomeAssistantClient:
                 continue
             if isinstance(ts_raw, (int, float)):
                 from datetime import timezone as _tz
-                ts = datetime.fromtimestamp(ts_raw, tz=_tz.utc)
+                ts = datetime.fromtimestamp(ts_raw / 1000, tz=_tz.utc)
             else:
                 ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
             if start_time is not None and ts < start_time:
@@ -379,12 +379,12 @@ def test_history_import_request_uses_max_days_back_when_configured() -> None:
 def test_statistics_fallback_used_when_history_returns_no_points(tmp_path) -> None:
     db = Database(str(tmp_path / "history.db"))
     db.init_schema()
-    # HA WebSocket API returns `start` as a Unix timestamp (int)
+    # HA WebSocket API returns `start` as a Unix timestamp in milliseconds
     ha = FakeHomeAssistantClient(
         history=[],
         statistics=[
-            {"start": 1776124800, "mean": 20.5},   # 2026-04-14T00:00:00Z
-            {"start": 1776128400, "mean": 21.0},   # 2026-04-14T01:00:00Z
+            {"start": 1776124800000, "mean": 20.5},   # 2026-04-14T00:00:00Z
+            {"start": 1776128400000, "mean": 21.0},   # 2026-04-14T01:00:00Z
         ],
     )
     spec = sensor_spec(
@@ -418,7 +418,7 @@ def test_statistics_not_called_when_history_has_points(tmp_path) -> None:
     db.init_schema()
     ha = FakeHomeAssistantClient(
         history=[{"state": "19.5", "last_changed": "2026-04-14T00:00:10+00:00"}],
-        statistics=[{"start": 1776124800, "mean": 99.0}],  # 2026-04-14T00:00:00Z
+        statistics=[{"start": 1776124800000, "mean": 99.0}],  # 2026-04-14T00:00:00Z
     )
     spec = sensor_spec(
         name="room_temperature",
@@ -444,7 +444,7 @@ def test_statistics_fallback_applies_conversion_factor(tmp_path) -> None:
     db.init_schema()
     ha = FakeHomeAssistantClient(
         history=[],
-        statistics=[{"start": 1776124800, "mean": 1500.0}],  # 2026-04-14T00:00:00Z
+        statistics=[{"start": 1776124800000, "mean": 1500.0}],  # 2026-04-14T00:00:00Z
     )
     spec = sensor_spec(
         name="hp_electric_power",

@@ -1,6 +1,5 @@
 from .electricity_price_repository import ElectricityPriceRepository
 from .forecast_repository import ForecastRepository
-from .model_version_repository import ModelVersionRepository
 from .orm_models import Base, ElectricityPriceIntervalValue, ForecastValue, ModelVersion, Sample1m
 from .session import Database
 from .time_series_read_repository import TimeSeriesReadRepository
@@ -14,7 +13,6 @@ __all__ = [
     "ForecastRepository",
     "ForecastValue",
     "ModelVersion",
-    "ModelVersionRepository",
     "Sample1m",
     "TimeSeriesReadRepository",
     "TimeSeriesWriteRepository",
