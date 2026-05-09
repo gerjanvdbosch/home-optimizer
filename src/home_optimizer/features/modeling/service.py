@@ -6,12 +6,6 @@ from home_optimizer.features.modeling.models import (
     RoomModelValidationReport,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.modeling.room_2r2c import (
-    ROOM_2R2C_MODEL_KIND,
-    Room2R2CConfig,
-    Room2R2CModel,
-    Room2R2CTrainer,
-)
 from home_optimizer.features.modeling.room_greybox import (
     ROOM_GREYBOX_MODEL_KIND,
     RoomGreyBoxConfig,
@@ -30,18 +24,14 @@ class RoomModelingService:
     def __init__(
         self,
         arx_trainer: RoomArxTrainer | None = None,
-        room_2r2c_trainer: Room2R2CTrainer | None = None,
         room_greybox_trainer: RoomGreyBoxTrainer | None = None,
     ) -> None:
         self.arx_trainer = arx_trainer or RoomArxTrainer()
-        self.room_2r2c_trainer = room_2r2c_trainer or Room2R2CTrainer()
         self.room_greybox_trainer = room_greybox_trainer or RoomGreyBoxTrainer()
 
-    def trainer_for_config(self, config) -> RoomArxTrainer | Room2R2CTrainer | RoomGreyBoxTrainer:
+    def trainer_for_config(self, config) -> RoomArxTrainer | RoomGreyBoxTrainer:
         if config.model_kind == ROOM_ARX_MODEL_KIND:
             return self.arx_trainer
-        if config.model_kind == ROOM_2R2C_MODEL_KIND:
-            return self.room_2r2c_trainer
         if config.model_kind == ROOM_GREYBOX_MODEL_KIND:
             return self.room_greybox_trainer
         raise ValueError(f"unsupported room model kind: {config.model_kind}")
@@ -49,7 +39,7 @@ class RoomModelingService:
     def trainer_for_model(
         self,
         model: TrainedLinearRoomModel,
-    ) -> RoomArxTrainer | Room2R2CTrainer | RoomGreyBoxTrainer:
+    ) -> RoomArxTrainer | RoomGreyBoxTrainer:
         model_kind = getattr(model, "model_kind", None)
         if (
             isinstance(model, RoomArxModel)
@@ -57,12 +47,6 @@ class RoomModelingService:
             or isinstance(model.config, RoomArxConfig)
         ):
             return self.arx_trainer
-        if (
-            isinstance(model, Room2R2CModel)
-            or model_kind == ROOM_2R2C_MODEL_KIND
-            or isinstance(model.config, Room2R2CConfig)
-        ):
-            return self.room_2r2c_trainer
         if (
             isinstance(model, RoomGreyBoxModel)
             or model_kind == ROOM_GREYBOX_MODEL_KIND
@@ -79,7 +63,7 @@ class RoomModelingService:
         self,
         dataset: MpcDataset,
         *,
-        config: RoomArxConfig | Room2R2CConfig | RoomGreyBoxConfig | None = None,
+        config: RoomArxConfig | RoomGreyBoxConfig | None = None,
     ) -> TrainedLinearRoomModel:
         config = config or RoomArxConfig()
         return self.trainer_for_config(config).fit(dataset, config)
@@ -120,7 +104,7 @@ class RoomModelingService:
         self,
         dataset: MpcDataset,
         *,
-        config: RoomArxConfig | Room2R2CConfig | RoomGreyBoxConfig | None = None,
+        config: RoomArxConfig | RoomGreyBoxConfig | None = None,
     ) -> RoomModelValidationReport:
         config = config or RoomArxConfig()
         return rolling_validate_room_model(

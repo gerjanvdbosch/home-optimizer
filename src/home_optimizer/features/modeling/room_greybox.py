@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 from scipy.optimize import least_squares
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
@@ -11,22 +12,44 @@ from home_optimizer.features.modeling.common import (
     PreparedRoomData,
     prepare_room_data,
     row_segments,
+    room_identification_mask,
     segment_definitions,
 )
 from home_optimizer.features.modeling.models import TrainedLinearRoomModel, ValidationConfig
 
 ROOM_GREYBOX_MODEL_KIND = "room_greybox"
 
+PARAM_K_OUT = 0
+PARAM_K_MASS = 1
+PARAM_G_HEAT_AIR = 2
+PARAM_G_SOLAR_AIR = 3
+PARAM_K_AIR_MASS = 4
+PARAM_G_HEAT_MASS = 5
+PARAM_G_SOLAR_MASS = 6
+PARAM_OBSERVER_GAIN = 7
+PARAMETER_NAMES = (
+    "k_out",
+    "k_mass",
+    "g_heat_air",
+    "g_solar_air",
+    "k_air_mass",
+    "g_heat_mass",
+    "g_solar_mass",
+    "observer_gain",
+)
+
 
 class RoomGreyBoxConfig(ValidationConfig):
     model_kind: str = ROOM_GREYBOX_MODEL_KIND
     history_warmup_rows: int = Field(default=144, ge=1)
     optimization_max_nfev: int = Field(default=80, ge=10, le=1000)
-    optimization_loss: str = Field(default="soft_l1")
-    training_window_rows: int | None = Field(default=30 * 24 * 6, gt=1)
+    optimization_loss: Literal["linear", "soft_l1", "huber", "cauchy", "arctan"] = Field(
+        default="soft_l1"
+    )
+    training_window_rows: int | None = Field(default=None, gt=1)
     validation_stride_rows: int | None = Field(default=None, gt=0)
     validation_window_rows: int = Field(default=144, gt=1)
-    validation_horizons_steps: list[int] = Field(default_factory=lambda: [1, 6, 36])
+    validation_horizons_steps: list[int] = Field(default_factory=lambda: [1, 6, 36, 72])
     max_stability_radius: float = Field(default=0.999, gt=0.0, lt=1.0)
     observer_gain_initial: float = Field(default=0.1, ge=0.0, le=0.5)
     sunny_irradiance_threshold_w_m2: float = Field(default=150.0, ge=0.0)
@@ -42,8 +65,8 @@ class RoomGreyBoxConfig(ValidationConfig):
     sunny_midday_end_hour: int = Field(default=16, ge=1, le=24)
     notes: str = Field(
         default=(
-            "Bound-constrained grey-box room model with explicit air/mass state-space "
-            "dynamics and observer-corrected latent mass state."
+            "Bound-constrained grey-box room model with delta-form air/mass state "
+            "updates and observer-corrected latent mass state."
         )
     )
 
@@ -51,17 +74,77 @@ class RoomGreyBoxConfig(ValidationConfig):
 class RoomGreyBoxModel(TrainedLinearRoomModel):
     model_kind: str = ROOM_GREYBOX_MODEL_KIND
     config: RoomGreyBoxConfig
-    a21: float
-    a22: float
-    heat_to_mass: float
-    solar_to_mass: float
+    k_out: float
+    k_mass: float
+    k_air_mass: float
+    g_heat_mass: float
+    g_solar_mass: float
     observer_gain: float
     notes: str = Field(
         default=(
-            "Trained grey-box room state-space model with latent thermal mass "
-            "estimated through observer correction."
+            "Trained grey-box room state-space model with delta-form thermal "
+            "couplings and observer-estimated latent mass state."
         )
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_fields(cls, value):
+        if not isinstance(value, dict):
+            return value
+
+        coefficients = list(value.get("coefficients") or [])
+        updates: dict[str, float] = {}
+        if "k_out" not in value and len(coefficients) > 2:
+            updates["k_out"] = float(coefficients[2])
+        if "k_mass" not in value and len(coefficients) > 1:
+            updates["k_mass"] = float(coefficients[1])
+        if "k_air_mass" not in value:
+            if value.get("a21") is not None:
+                updates["k_air_mass"] = float(value["a21"])
+            elif value.get("a22") is not None:
+                updates["k_air_mass"] = max(0.0, 1.0 - float(value["a22"]))
+        if "g_heat_mass" not in value and value.get("heat_to_mass") is not None:
+            updates["g_heat_mass"] = float(value["heat_to_mass"])
+        if "g_solar_mass" not in value and value.get("solar_to_mass") is not None:
+            updates["g_solar_mass"] = float(value["solar_to_mass"])
+        return {**value, **updates}
+
+    @property
+    def a11(self) -> float:
+        return float(self.coefficients[0])
+
+    @property
+    def a12(self) -> float:
+        return float(self.coefficients[1])
+
+    @property
+    def b_out(self) -> float:
+        return float(self.coefficients[2])
+
+    @property
+    def g_heat_air(self) -> float:
+        return float(self.coefficients[3])
+
+    @property
+    def g_solar_air(self) -> float:
+        return float(self.coefficients[4])
+
+    @property
+    def a21(self) -> float:
+        return float(self.k_air_mass)
+
+    @property
+    def a22(self) -> float:
+        return float(1.0 - self.k_air_mass)
+
+    @property
+    def heat_to_mass(self) -> float:
+        return float(self.g_heat_mass)
+
+    @property
+    def solar_to_mass(self) -> float:
+        return float(self.g_solar_mass)
 
 
 @dataclass(frozen=True)
@@ -102,6 +185,7 @@ class RoomGreyBoxTrainer:
     def prepare(self, rows: list[MpcDatasetRow], config: RoomGreyBoxConfig) -> PreparedRoomGreyBoxData:
         common = prepare_room_data(rows, config)
         room_temperature = common.field_arrays["room_temperature_c"]
+        valid_identification_rows = room_identification_mask(rows)
         interval_hours = (
             (rows[1].timestamp_utc - rows[0].timestamp_utc).total_seconds() / 3600.0
             if len(rows) > 1
@@ -114,11 +198,24 @@ class RoomGreyBoxTrainer:
             common.field_arrays["thermal_output_estimate_kw"] * interval_hours
         )
         solar_effective_exposure = common.field_arrays["solar_gain_proxy_w_m2"] * interval_hours
+        thermal_output_energy_kwh = np.nan_to_num(
+            thermal_output_energy_kwh,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        solar_effective_exposure = np.nan_to_num(
+            solar_effective_exposure,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
         target_values = np.roll(room_temperature, -1)
         valid_training_mask = (
-            ~np.isnan(room_temperature)
-            & ~np.isnan(common.field_arrays["outdoor_temperature_c"])
-            & ~np.isnan(target_values)
+            valid_identification_rows
+            & np.isfinite(room_temperature)
+            & np.isfinite(common.field_arrays["outdoor_temperature_c"])
+            & np.isfinite(target_values)
         )
         if len(valid_training_mask) > 0:
             valid_training_mask[-1] = False
@@ -157,13 +254,91 @@ class RoomGreyBoxTrainer:
 
     def _initial_air_state(self, room_temperature: np.ndarray, start_index: int) -> float:
         value = room_temperature[start_index]
-        return 20.0 if np.isnan(value) else float(value)
+        return 20.0 if not np.isfinite(value) else float(value)
+
+    def _air_coefficients_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        k_out = float(parameters[PARAM_K_OUT])
+        k_mass = float(parameters[PARAM_K_MASS])
+        g_heat_air = float(parameters[PARAM_G_HEAT_AIR])
+        g_solar_air = float(parameters[PARAM_G_SOLAR_AIR])
+        return np.asarray(
+            [1.0 - k_out - k_mass, k_mass, k_out, g_heat_air, g_solar_air],
+            dtype=float,
+        )
+
+    def _mass_parameters_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        k_air_mass = float(parameters[PARAM_K_AIR_MASS])
+        g_heat_mass = float(parameters[PARAM_G_HEAT_MASS])
+        g_solar_mass = float(parameters[PARAM_G_SOLAR_MASS])
+        return np.asarray([k_air_mass, g_heat_mass, g_solar_mass], dtype=float)
+
+    def _observer_gain_from_parameters(self, parameters: np.ndarray) -> float:
+        return float(parameters[PARAM_OBSERVER_GAIN])
+
+    def _state_matrix_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        k_out = float(parameters[PARAM_K_OUT])
+        k_mass = float(parameters[PARAM_K_MASS])
+        k_air_mass = float(parameters[PARAM_K_AIR_MASS])
+        return np.asarray(
+            [
+                [1.0 - k_out - k_mass, k_mass],
+                [k_air_mass, 1.0 - k_air_mass],
+            ],
+            dtype=float,
+        )
+
+    def _optimizer_bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        lower_bounds = np.asarray([0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00])
+        upper_bounds = np.asarray([0.20, 0.40, 4.00, 0.10, 0.40, 4.00, 0.10, 0.50])
+        return lower_bounds, upper_bounds
+
+    def _bound_hits(
+        self,
+        parameters: np.ndarray,
+        *,
+        lower_bounds: np.ndarray,
+        upper_bounds: np.ndarray,
+        tolerance: float = 1e-4,
+    ) -> list[str]:
+        hits: list[str] = []
+        for index, name in enumerate(PARAMETER_NAMES):
+            value = float(parameters[index])
+            if abs(value - float(lower_bounds[index])) <= tolerance:
+                hits.append(f"{name}@lower")
+            elif abs(value - float(upper_bounds[index])) <= tolerance:
+                hits.append(f"{name}@upper")
+        return hits
+
+    def _build_model_notes(
+        self,
+        parameters: np.ndarray,
+        *,
+        lower_bounds: np.ndarray,
+        upper_bounds: np.ndarray,
+    ) -> str:
+        parameter_summary = ", ".join(
+            f"{name}={float(parameters[index]):.4f}"
+            for index, name in enumerate(PARAMETER_NAMES)
+        )
+        bound_hits = self._bound_hits(
+            parameters,
+            lower_bounds=lower_bounds,
+            upper_bounds=upper_bounds,
+        )
+        bound_summary = ", ".join(bound_hits) if bound_hits else "none"
+        return (
+            "Trained grey-box room state-space model with delta-form thermal "
+            "couplings and observer-estimated latent mass state. "
+            f"Parameters: {parameter_summary}. Bound hits: {bound_summary}."
+        )
 
     def _simulate_with_observer(
         self,
         prepared: PreparedRoomGreyBoxData,
         *,
-        parameters: np.ndarray,
+        air_coefficients: np.ndarray,
+        mass_parameters: np.ndarray,
+        observer_gain: float,
         start_index: int,
         end_exclusive: int,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -172,9 +347,8 @@ class RoomGreyBoxTrainer:
         predicted_next = np.full(len(room_temperature), np.nan, dtype=float)
         estimated_mass_state = np.zeros(len(room_temperature), dtype=float)
 
-        a11, a12, b_out, g_heat_air, g_solar_air, a21, a22, g_heat_mass, g_solar_mass, observer_gain = (
-            parameters
-        )
+        a11, a12, b_out, g_heat_air, g_solar_air = air_coefficients
+        k_air_mass, g_heat_mass, g_solar_mass = mass_parameters
 
         air_state = self._initial_air_state(room_temperature, start_index)
         mass_state = air_state
@@ -182,14 +356,14 @@ class RoomGreyBoxTrainer:
 
         for index in range(start_index, min(len(room_temperature) - 1, end_exclusive - 1)):
             outdoor_state = outdoor_temperature[index]
-            if np.isnan(outdoor_state):
+            if not np.isfinite(outdoor_state):
                 outdoor_state = air_state
 
             heat_input = prepared.thermal_output_energy_kwh[index]
             solar_input = prepared.solar_effective_exposure[index]
-            if np.isnan(heat_input):
+            if not np.isfinite(heat_input):
                 heat_input = 0.0
-            if np.isnan(solar_input):
+            if not np.isfinite(solar_input):
                 solar_input = 0.0
 
             predicted_room_next = (
@@ -200,16 +374,18 @@ class RoomGreyBoxTrainer:
                 + g_solar_air * solar_input
             )
             predicted_mass_next = (
-                a21 * air_state
-                + a22 * mass_state
+                mass_state
+                + k_air_mass * (air_state - mass_state)
                 + g_heat_mass * heat_input
                 + g_solar_mass * solar_input
             )
             predicted_next[index] = predicted_room_next
 
             measured_room_next = room_temperature[index + 1]
-            if not np.isnan(measured_room_next):
+            if np.isfinite(measured_room_next):
                 innovation = float(measured_room_next) - predicted_room_next
+                if not np.isfinite(innovation):
+                    innovation = 0.0
                 mass_state = predicted_mass_next + (observer_gain * innovation)
                 air_state = float(measured_room_next)
             else:
@@ -229,21 +405,19 @@ class RoomGreyBoxTrainer:
         end_exclusive: int,
         max_stability_radius: float,
     ) -> np.ndarray:
+        air_coefficients = self._air_coefficients_from_parameters(parameters)
+        mass_parameters = self._mass_parameters_from_parameters(parameters)
         predicted_next, _ = self._simulate_with_observer(
             prepared,
-            parameters=parameters,
+            air_coefficients=air_coefficients,
+            mass_parameters=mass_parameters,
+            observer_gain=self._observer_gain_from_parameters(parameters),
             start_index=start_index,
             end_exclusive=end_exclusive,
         )
         errors = predicted_next[mask] - prepared.target_values[mask]
         errors = np.nan_to_num(errors, nan=1e6, posinf=1e6, neginf=-1e6)
-        a_matrix = np.asarray(
-            [
-                [parameters[0], parameters[1]],
-                [parameters[5], parameters[6]],
-            ],
-            dtype=float,
-        )
+        a_matrix = self._state_matrix_from_parameters(parameters)
         spectral_radius = float(np.max(np.abs(np.linalg.eigvals(a_matrix))))
         if not np.isfinite(spectral_radius):
             spectral_radius = max_stability_radius + 10.0
@@ -256,31 +430,28 @@ class RoomGreyBoxTrainer:
         *,
         max_stability_radius: float,
     ) -> bool:
-        room_gain = float(parameters[0])
-        mass_gain = float(parameters[1])
-        outdoor_gain = float(parameters[2])
-        thermal_room_gain = float(parameters[3])
-        solar_room_gain = float(parameters[4])
-        a_matrix = np.asarray(
-            [
-                [parameters[0], parameters[1]],
-                [parameters[5], parameters[6]],
-            ],
-            dtype=float,
-        )
+        k_out = float(parameters[PARAM_K_OUT])
+        k_mass = float(parameters[PARAM_K_MASS])
+        g_heat_air = float(parameters[PARAM_G_HEAT_AIR])
+        g_solar_air = float(parameters[PARAM_G_SOLAR_AIR])
+        k_air_mass = float(parameters[PARAM_K_AIR_MASS])
+        g_heat_mass = float(parameters[PARAM_G_HEAT_MASS])
+        g_solar_mass = float(parameters[PARAM_G_SOLAR_MASS])
+        air_retention = 1.0 - k_out - k_mass
+        a_matrix = self._state_matrix_from_parameters(parameters)
         eigvals = np.linalg.eigvals(a_matrix)
         spectral_radius = float(np.max(np.abs(eigvals)))
         if not np.isfinite(spectral_radius):
             return False
-        if room_gain < 0.0:
+        if k_out < 0.0 or k_mass < 0.0 or k_air_mass < 0.0:
             return False
-        if mass_gain < 0.0:
+        if air_retention < 0.0:
             return False
-        if outdoor_gain < -1e-6:
+        if g_heat_air < -1e-6 or g_solar_air < -1e-6:
             return False
-        if thermal_room_gain < -1e-6:
+        if g_heat_mass < -1e-6 or g_solar_mass < -1e-6:
             return False
-        if solar_room_gain < -1e-6:
+        if k_air_mass >= 1.0:
             return False
         if spectral_radius >= max_stability_radius:
             return False
@@ -295,9 +466,13 @@ class RoomGreyBoxTrainer:
         start_index: int,
         end_exclusive: int,
     ) -> bool:
+        air_coefficients = self._air_coefficients_from_parameters(parameters)
+        mass_parameters = self._mass_parameters_from_parameters(parameters)
         predicted_next, estimated_mass_state = self._simulate_with_observer(
             prepared,
-            parameters=parameters,
+            air_coefficients=air_coefficients,
+            mass_parameters=mass_parameters,
+            observer_gain=self._observer_gain_from_parameters(parameters),
             start_index=start_index,
             end_exclusive=end_exclusive,
         )
@@ -315,12 +490,11 @@ class RoomGreyBoxTrainer:
         start_index: int,
         end_exclusive: int,
     ) -> np.ndarray:
-        lower_bounds = np.asarray([0.50, 0.00, 0.00, 0.00, 0.00, 0.00, 0.85, 0.00, 0.00, 0.00])
-        upper_bounds = np.asarray([1.05, 0.40, 0.20, 4.00, 0.10, 0.40, 0.999, 4.00, 0.10, 0.50])
+        lower_bounds, upper_bounds = self._optimizer_bounds()
         initial_guesses = [
-            np.asarray([0.82, 0.12, 0.03, 0.90, 0.008, 0.03, 0.96, 0.25, 0.002, config.observer_gain_initial]),
-            np.asarray([0.75, 0.18, 0.05, 1.20, 0.010, 0.05, 0.94, 0.35, 0.003, 0.05]),
-            np.asarray([0.88, 0.08, 0.02, 0.70, 0.006, 0.02, 0.98, 0.20, 0.001, 0.15]),
+            np.asarray([0.03, 0.12, 0.90, 0.008, 0.04, 0.25, 0.002, config.observer_gain_initial]),
+            np.asarray([0.05, 0.18, 1.20, 0.010, 0.06, 0.35, 0.003, 0.05]),
+            np.asarray([0.02, 0.08, 0.70, 0.006, 0.02, 0.20, 0.001, 0.15]),
         ]
 
         best_parameters = None
@@ -428,9 +602,14 @@ class RoomGreyBoxTrainer:
             start_index=train_start_index,
             end_exclusive=resolved_train_end_exclusive,
         )
+        lower_bounds, upper_bounds = self._optimizer_bounds()
+        air_coefficients = self._air_coefficients_from_parameters(parameters)
+        mass_parameters = self._mass_parameters_from_parameters(parameters)
         predicted_next, estimated_mass_state = self._simulate_with_observer(
             prepared,
-            parameters=parameters,
+            air_coefficients=air_coefficients,
+            mass_parameters=mass_parameters,
+            observer_gain=self._observer_gain_from_parameters(parameters),
             start_index=train_start_index,
             end_exclusive=resolved_train_end_exclusive,
         )
@@ -442,19 +621,19 @@ class RoomGreyBoxTrainer:
             config=config,
             feature_names=list(self.feature_names),
             intercept=0.0,
-            coefficients=[
-                float(parameters[0]),
-                float(parameters[1]),
-                float(parameters[2]),
-                float(parameters[3]),
-                float(parameters[4]),
-            ],
+            coefficients=[float(value) for value in air_coefficients],
             sample_count=len(y_values),
-            a21=float(parameters[5]),
-            a22=float(parameters[6]),
-            heat_to_mass=float(parameters[7]),
-            solar_to_mass=float(parameters[8]),
-            observer_gain=float(parameters[9]),
+            k_out=float(parameters[PARAM_K_OUT]),
+            k_mass=float(parameters[PARAM_K_MASS]),
+            k_air_mass=float(parameters[PARAM_K_AIR_MASS]),
+            g_heat_mass=float(parameters[PARAM_G_HEAT_MASS]),
+            g_solar_mass=float(parameters[PARAM_G_SOLAR_MASS]),
+            observer_gain=self._observer_gain_from_parameters(parameters),
+            notes=self._build_model_notes(
+                parameters,
+                lower_bounds=lower_bounds,
+                upper_bounds=upper_bounds,
+            ),
         )
         prepared.estimated_mass_state_cache[self._model_cache_key(model)] = estimated_mass_state
         if not np.isfinite(predicted_next[mask]).all():
@@ -466,10 +645,11 @@ class RoomGreyBoxTrainer:
             model.trained_from_utc,
             model.trained_to_utc,
             tuple(round(value, 10) for value in model.coefficients),
-            round(model.a21, 10),
-            round(model.a22, 10),
-            round(model.heat_to_mass, 10),
-            round(model.solar_to_mass, 10),
+            round(model.k_out, 10),
+            round(model.k_mass, 10),
+            round(model.k_air_mass, 10),
+            round(model.g_heat_mass, 10),
+            round(model.g_solar_mass, 10),
             round(model.observer_gain, 10),
         )
 
@@ -484,21 +664,12 @@ class RoomGreyBoxTrainer:
             return cached
         _, estimated_mass_state = self._simulate_with_observer(
             prepared,
-            parameters=np.asarray(
-                [
-                    model.coefficients[0],
-                    model.coefficients[1],
-                    model.coefficients[2],
-                    model.coefficients[3],
-                    model.coefficients[4],
-                    model.a21,
-                    model.a22,
-                    model.heat_to_mass,
-                    model.solar_to_mass,
-                    model.observer_gain,
-                ],
+            air_coefficients=np.asarray(model.coefficients, dtype=float),
+            mass_parameters=np.asarray(
+                [model.k_air_mass, model.g_heat_mass, model.g_solar_mass],
                 dtype=float,
             ),
+            observer_gain=model.observer_gain,
             start_index=0,
             end_exclusive=len(prepared.common.timestamps_utc),
         )
@@ -525,7 +696,7 @@ class RoomGreyBoxTrainer:
         room_state = predicted_room_temperatures.get(source_index)
         if room_state is None or source_index <= prediction_origin_index:
             room_state = common.field_arrays["room_temperature_c"][source_index]
-        if np.isnan(room_state):
+        if not np.isfinite(room_state):
             return None
 
         mass_state = predicted_mass_temperatures.get(source_index)
@@ -533,14 +704,14 @@ class RoomGreyBoxTrainer:
             mass_state = self._estimated_mass_state_series_for_model(prepared, model)[source_index]
 
         outdoor_temperature = common.field_arrays["outdoor_temperature_c"][source_index]
-        if np.isnan(outdoor_temperature):
+        if not np.isfinite(outdoor_temperature):
             outdoor_temperature = float(room_state)
 
         thermal_output_energy = prepared.thermal_output_energy_kwh[source_index]
         solar_effective_exposure = prepared.solar_effective_exposure[source_index]
-        if np.isnan(thermal_output_energy):
+        if not np.isfinite(thermal_output_energy):
             thermal_output_energy = 0.0
-        if np.isnan(solar_effective_exposure):
+        if not np.isfinite(solar_effective_exposure):
             solar_effective_exposure = 0.0
 
         next_room_state = (
@@ -551,10 +722,10 @@ class RoomGreyBoxTrainer:
             + model.coefficients[4] * solar_effective_exposure
         )
         next_mass_state = (
-            model.a21 * float(room_state)
-            + model.a22 * mass_state
-            + model.heat_to_mass * thermal_output_energy
-            + model.solar_to_mass * solar_effective_exposure
+            mass_state
+            + model.k_air_mass * (float(room_state) - mass_state)
+            + model.g_heat_mass * thermal_output_energy
+            + model.g_solar_mass * solar_effective_exposure
         )
         return float(next_room_state), float(next_mass_state)
 

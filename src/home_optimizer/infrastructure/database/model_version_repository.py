@@ -5,20 +5,18 @@ from sqlalchemy.dialects.sqlite import insert
 
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.features.modeling import (
-    ROOM_2R2C_MODEL_KIND,
     RoomModelValidationReport,
     ROOM_ARX_MODEL_KIND,
     ROOM_GREYBOX_MODEL_KIND,
     RoomArxModel,
     RoomGreyBoxModel,
-    Room2R2CModel,
     StoredModelVersion,
     StoredModelVersionSummary,
 )
 from home_optimizer.infrastructure.database.orm_models import ModelVersion
 from home_optimizer.infrastructure.database.session import Database
 
-ROOM_MODEL_KINDS = (ROOM_ARX_MODEL_KIND, ROOM_2R2C_MODEL_KIND, ROOM_GREYBOX_MODEL_KIND)
+ROOM_MODEL_KINDS = (ROOM_ARX_MODEL_KIND, ROOM_GREYBOX_MODEL_KIND)
 
 
 def _metric_by_minutes(
@@ -38,6 +36,9 @@ class ModelVersionRepository:
         self.database = database
 
     def save_room_model_version(self, version: StoredModelVersion) -> None:
+        if version.model_type not in ROOM_MODEL_KINDS:
+            raise ValueError(f"unsupported room model type: {version.model_type}")
+
         metric_1h = _metric_by_minutes(version.validation_report, 60)
         metric_6h = _metric_by_minutes(version.validation_report, 360)
         metric_12h = _metric_by_minutes(version.validation_report, 720)
@@ -161,8 +162,6 @@ class ModelVersionRepository:
     def _to_room_model_version(self, row: ModelVersion) -> StoredModelVersion:
         if row.model_type == ROOM_ARX_MODEL_KIND:
             model = RoomArxModel.model_validate_json(row.model_json)
-        elif row.model_type == ROOM_2R2C_MODEL_KIND:
-            model = Room2R2CModel.model_validate_json(row.model_json)
         elif row.model_type == ROOM_GREYBOX_MODEL_KIND:
             model = RoomGreyBoxModel.model_validate_json(row.model_json)
         else:

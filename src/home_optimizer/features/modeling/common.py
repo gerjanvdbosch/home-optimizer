@@ -15,6 +15,16 @@ class PreparedRoomData:
     segment_masks: dict[str, np.ndarray]
 
 
+def _sanitize_nonfinite(values: np.ndarray, *, fallback: float) -> np.ndarray:
+    sanitized = values.astype(float, copy=True)
+    sanitized[~np.isfinite(sanitized)] = fallback
+    return sanitized
+
+
+def room_identification_mask(rows: list[MpcDatasetRow]) -> np.ndarray:
+    return np.asarray([row.is_valid_for_room_identification for row in rows], dtype=bool)
+
+
 def prepare_room_data(rows: list[MpcDatasetRow], config) -> PreparedRoomData:
     timestamps_utc = [row.timestamp_utc for row in rows]
     local_hours = np.asarray(
@@ -66,6 +76,15 @@ def prepare_room_data(rows: list[MpcDatasetRow], config) -> PreparedRoomData:
         ],
         dtype=float,
     )
+
+    outdoor_temperature = _sanitize_nonfinite(outdoor_temperature, fallback=np.nan)
+    thermal_output = _sanitize_nonfinite(thermal_output, fallback=0.0)
+    solar_gain = _sanitize_nonfinite(solar_gain, fallback=0.0)
+    solar_irradiance = _sanitize_nonfinite(solar_irradiance, fallback=0.0)
+    shutter_position = _sanitize_nonfinite(shutter_position, fallback=0.0)
+    occupied_flag = _sanitize_nonfinite(occupied_flag, fallback=0.0)
+    room_temperature = _sanitize_nonfinite(room_temperature, fallback=np.nan)
+
     solar_shutter_interaction = solar_irradiance * np.clip(shutter_position, 0.0, 100.0) / 100.0
 
     is_sunny = solar_irradiance >= config.sunny_irradiance_threshold_w_m2

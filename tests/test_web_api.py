@@ -21,12 +21,10 @@ from home_optimizer.domain import (
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
-    ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
     ROOM_GREYBOX_MODEL_KIND,
     RoomGreyBoxConfig,
-    Room2R2CConfig,
-    Room2R2CModel,
+    RoomGreyBoxModel,
     RoomArxConfig,
     StoredModelVersionSummary,
     StoredModelVersion,
@@ -114,15 +112,15 @@ class FakeModelVersionRepository:
             validation_report=None,
         )
         self.secondary_version = StoredModelVersion(
-            model_id="room-model-2r2c-active",
-            model_type=ROOM_2R2C_MODEL_KIND,
+            model_id="room-model-greybox-active",
+            model_type=ROOM_GREYBOX_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 8, 13, 0, tzinfo=timezone.utc),
             is_active=True,
-            model=Room2R2CModel(
+            model=RoomGreyBoxModel(
                 trained_from_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
                 trained_to_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
                 interval_minutes=15,
-                config=Room2R2CConfig(
+                config=RoomGreyBoxConfig(
                     min_train_rows=10,
                     validation_window_rows=10,
                     history_warmup_rows=24,
@@ -135,11 +133,13 @@ class FakeModelVersionRepository:
                     "solar_effective_exposure",
                 ],
                 intercept=0.0,
-                coefficients=[1.0, 0.0, 0.0, 0.0, 0.0],
+                coefficients=[0.95, 0.0, 0.05, 0.0, 0.0],
                 sample_count=100,
-                mass_decay=0.97,
-                thermal_to_mass=0.05,
-                solar_to_mass=0.001,
+                k_out=0.05,
+                k_mass=0.0,
+                k_air_mass=0.05,
+                g_heat_mass=0.05,
+                g_solar_mass=0.001,
                 observer_gain=0.1,
             ),
             validation_report=None,
@@ -772,31 +772,6 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert len(payload["aggregate_metrics"]) == 5
     assert app.state.container.model_version_repository.saved_versions
     assert app.state.container.model_version_repository.saved_versions[0].is_active is True
-
-
-def test_train_endpoint_supports_two_state_room_model_type() -> None:
-    app, _ = build_test_app(imported_rows={})
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/train",
-            params={
-                "start_time": "2026-04-25T00:00:00+00:00",
-                "end_time": "2026-04-26T00:00:00+00:00",
-                "interval_minutes": 15,
-                "min_train_rows": 20,
-                "validation_window_rows": 24,
-                "model_type": ROOM_2R2C_MODEL_KIND,
-            },
-        )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["model_type"] == ROOM_2R2C_MODEL_KIND
-    saved_model = app.state.container.model_version_repository.saved_versions[0].model
-    assert isinstance(saved_model.config, Room2R2CConfig)
-
-
 def test_room_model_catalog_endpoint_lists_models() -> None:
     app, _ = build_test_app(imported_rows={})
 
@@ -808,7 +783,7 @@ def test_room_model_catalog_endpoint_lists_models() -> None:
     assert len(payload["models"]) >= 2
     assert {model["model_type"] for model in payload["models"]} >= {
         ROOM_ARX_MODEL_KIND,
-        ROOM_2R2C_MODEL_KIND,
+        ROOM_GREYBOX_MODEL_KIND,
     }
 
 
@@ -844,13 +819,13 @@ def test_simulate_room_endpoint_supports_explicit_model_id() -> None:
             params={
                 "anchor_time": "2026-04-25T12:00:00+00:00",
                 "horizon_steps": 4,
-                "model_id": "room-model-2r2c-active",
+                "model_id": "room-model-greybox-active",
             },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_id"] == "room-model-2r2c-active"
+    assert payload["model_id"] == "room-model-greybox-active"
 
 def test_settings_reject_legacy_sensor_fields() -> None:
     with pytest.raises(ValidationError):
