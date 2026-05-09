@@ -7,7 +7,12 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import InstrumentedAttribute
 
 from home_optimizer.domain.time import normalize_utc_timestamp
-from home_optimizer.infrastructure.database.orm_models import Sample1m, Sample15m
+from home_optimizer.infrastructure.database.orm_models import (
+    ElectricityPriceIntervalValue,
+    ForecastValue,
+    Sample1m,
+    Sample15m,
+)
 from home_optimizer.infrastructure.database.session import Database
 
 
@@ -97,6 +102,81 @@ class DatasetRepository:
             categories=categories,
             entity_ids=entity_ids,
         )
+
+    def read_forecast_values(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_at_start_time: datetime | None = None,
+        created_at_end_time: datetime | None = None,
+    ) -> pd.DataFrame:
+        statement: Select[tuple[object]] = select(ForecastValue)
+
+        if start_time is not None:
+            statement = statement.where(
+                ForecastValue.forecast_time_utc >= normalize_utc_timestamp(start_time)
+            )
+        if end_time is not None:
+            statement = statement.where(
+                ForecastValue.forecast_time_utc < normalize_utc_timestamp(end_time)
+            )
+        if created_at_start_time is not None:
+            statement = statement.where(
+                ForecastValue.created_at_utc >= normalize_utc_timestamp(created_at_start_time)
+            )
+        if created_at_end_time is not None:
+            statement = statement.where(
+                ForecastValue.created_at_utc < normalize_utc_timestamp(created_at_end_time)
+            )
+        if names:
+            statement = statement.where(ForecastValue.name.in_(names))
+        if sources:
+            statement = statement.where(ForecastValue.source.in_(sources))
+
+        statement = statement.order_by(
+            ForecastValue.forecast_time_utc,
+            ForecastValue.name,
+            ForecastValue.created_at_utc,
+            ForecastValue.source,
+        )
+
+        with self.database.session() as session:
+            return pd.read_sql(statement, session.connection())
+
+    def read_electricity_price_intervals(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+    ) -> pd.DataFrame:
+        statement: Select[tuple[object]] = select(ElectricityPriceIntervalValue)
+
+        if start_time is not None:
+            statement = statement.where(
+                ElectricityPriceIntervalValue.end_time_utc > normalize_utc_timestamp(start_time)
+            )
+        if end_time is not None:
+            statement = statement.where(
+                ElectricityPriceIntervalValue.start_time_utc < normalize_utc_timestamp(end_time)
+            )
+        if names:
+            statement = statement.where(ElectricityPriceIntervalValue.name.in_(names))
+        if sources:
+            statement = statement.where(ElectricityPriceIntervalValue.source.in_(sources))
+
+        statement = statement.order_by(
+            ElectricityPriceIntervalValue.start_time_utc,
+            ElectricityPriceIntervalValue.name,
+            ElectricityPriceIntervalValue.source,
+        )
+
+        with self.database.session() as session:
+            return pd.read_sql(statement, session.connection())
 
     def _read_table(
         self,
