@@ -71,6 +71,8 @@ from .series_transforms import (
     build_daily_target_band_series,
     build_thermal_output_series,
     latest_value_at,
+    merge_numeric_with_fallback,
+    merge_text_with_fallback,
     shutter_open_fraction_at,
     upsample_series_forward_fill,
 )
@@ -156,6 +158,8 @@ __all__ = [
     "empty_electricity_price_series",
     "ensure_utc",
     "latest_value_at",
+    "merge_numeric_with_fallback",
+    "merge_text_with_fallback",
     "normalize_utc_timestamp",
     "parse_location",
     "price_intervals_from_series",

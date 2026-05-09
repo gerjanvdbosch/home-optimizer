@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from .names import GTI_LIVING_ROOM_WINDOWS_ADJUSTED, THERMAL_OUTPUT
-from .series import NumericPoint, NumericSeries
+from .series import NumericPoint, NumericSeries, TextPoint
 from .target_schedule import TemperatureTargetWindow
 from .time import normalize_utc_timestamp, parse_datetime
 
@@ -158,6 +158,61 @@ def build_daily_target_band_series(
         )
 
     return target, minimum, maximum
+
+
+def merge_numeric_with_fallback(
+    primary: list[NumericPoint],
+    fallback: list[NumericPoint],
+    fallback_interval_minutes: int = 15,
+) -> list[NumericPoint]:
+    """Return primary points plus any fallback points for 15m windows not covered by primary.
+
+    For each fallback point at timestamp T, the window [T, T + fallback_interval_minutes)
+    is considered covered if at least one primary point falls within it.  Fallback points
+    for uncovered windows are appended and the result is sorted by timestamp.
+    """
+    if not fallback:
+        return list(primary)
+    if not primary:
+        return list(fallback)
+
+    window = timedelta(minutes=fallback_interval_minutes)
+    primary_timestamps = {parse_datetime(p.timestamp) for p in primary}
+
+    extra: list[NumericPoint] = []
+    for fb_point in fallback:
+        fb_time = parse_datetime(fb_point.timestamp)
+        window_end = fb_time + window
+        covered = any(fb_time <= t < window_end for t in primary_timestamps)
+        if not covered:
+            extra.append(fb_point)
+
+    return sorted(primary + extra, key=lambda p: p.timestamp)
+
+
+def merge_text_with_fallback(
+    primary: list[TextPoint],
+    fallback: list[TextPoint],
+    fallback_interval_minutes: int = 15,
+) -> list[TextPoint]:
+    """Same merge logic as merge_numeric_with_fallback but for TextPoint lists."""
+    if not fallback:
+        return list(primary)
+    if not primary:
+        return list(fallback)
+
+    window = timedelta(minutes=fallback_interval_minutes)
+    primary_timestamps = {parse_datetime(p.timestamp) for p in primary}
+
+    extra: list[TextPoint] = []
+    for fb_point in fallback:
+        fb_time = parse_datetime(fb_point.timestamp)
+        window_end = fb_time + window
+        covered = any(fb_time <= t < window_end for t in primary_timestamps)
+        if not covered:
+            extra.append(fb_point)
+
+    return sorted(primary + extra, key=lambda p: p.timestamp)
 
 
 def build_thermal_output_series(

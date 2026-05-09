@@ -10,6 +10,8 @@ from home_optimizer.domain import (
     NumericSeries,
     TextPoint,
     TextSeries,
+    merge_numeric_with_fallback,
+    merge_text_with_fallback,
 )
 from home_optimizer.domain.pricing import (
     PriceInterval,
@@ -21,6 +23,7 @@ from home_optimizer.infrastructure.database.orm_models import (
     ElectricityPriceIntervalValue,
     ForecastValue,
     Sample1m,
+    Sample15m,
 )
 from home_optimizer.infrastructure.database.session import Database
 
@@ -38,53 +41,100 @@ class TimeSeriesReadRepository:
         if not names:
             return []
 
-        value_expr = func.coalesce(
+        start_ts = normalize_utc_timestamp(start_time)
+        end_ts = normalize_utc_timestamp(end_time)
+
+        value_expr_1m = func.coalesce(
             Sample1m.mean_real,
             Sample1m.last_real,
             Sample1m.max_real,
             Sample1m.min_real,
             Sample1m.last_bool,
         )
+        value_expr_15m = func.coalesce(
+            Sample15m.mean_real,
+            Sample15m.last_real,
+            Sample15m.max_real,
+            Sample15m.min_real,
+            Sample15m.last_bool,
+        )
+
         with self.database.session() as session:
-            rows = session.execute(
+            rows_1m = session.execute(
                 select(
                     Sample1m.name,
                     Sample1m.timestamp_minute_utc,
                     Sample1m.unit,
-                    value_expr.label("value"),
+                    value_expr_1m.label("value"),
                 )
                 .where(
                     Sample1m.name.in_(names),
-                    Sample1m.timestamp_minute_utc >= normalize_utc_timestamp(start_time),
-                    Sample1m.timestamp_minute_utc < normalize_utc_timestamp(end_time),
-                    value_expr.is_not(None),
+                    Sample1m.timestamp_minute_utc >= start_ts,
+                    Sample1m.timestamp_minute_utc < end_ts,
+                    value_expr_1m.is_not(None),
                 )
                 .order_by(Sample1m.name, Sample1m.timestamp_minute_utc, Sample1m.source)
             ).all()
 
-        points_by_name = {name: [] for name in names}
+            rows_15m = session.execute(
+                select(
+                    Sample15m.name,
+                    Sample15m.timestamp_15m_utc,
+                    Sample15m.unit,
+                    value_expr_15m.label("value"),
+                )
+                .where(
+                    Sample15m.name.in_(names),
+                    Sample15m.timestamp_15m_utc >= start_ts,
+                    Sample15m.timestamp_15m_utc < end_ts,
+                    value_expr_15m.is_not(None),
+                )
+                .order_by(Sample15m.name, Sample15m.timestamp_15m_utc, Sample15m.source)
+            ).all()
+
+        points_1m: dict[str, list[NumericPoint]] = {name: [] for name in names}
         units_by_name: dict[str, str | None] = {name: None for name in names}
-        for name, timestamp, unit, value in rows:
-            points_by_name[name].append(NumericPoint(timestamp=timestamp, value=float(value)))
+        for name, timestamp, unit, value in rows_1m:
+            points_1m[name].append(NumericPoint(timestamp=timestamp, value=float(value)))
+            units_by_name[name] = units_by_name[name] or unit
+
+        points_15m: dict[str, list[NumericPoint]] = {name: [] for name in names}
+        for name, timestamp, unit, value in rows_15m:
+            points_15m[name].append(NumericPoint(timestamp=timestamp, value=float(value)))
             units_by_name[name] = units_by_name[name] or unit
 
         return [
-            NumericSeries(name=name, unit=units_by_name[name], points=points_by_name[name])
+            NumericSeries(
+                name=name,
+                unit=units_by_name[name],
+                points=merge_numeric_with_fallback(points_1m[name], points_15m[name]),
+            )
             for name in names
         ]
 
     def sample_time_range(self) -> tuple[datetime | None, datetime | None]:
         with self.database.session() as session:
-            earliest, latest = session.execute(
+            earliest_1m, latest_1m = session.execute(
                 select(
                     func.min(Sample1m.timestamp_minute_utc),
                     func.max(Sample1m.timestamp_minute_utc),
                 )
             ).one()
 
-        if earliest is None or latest is None:
+            earliest_15m, latest_15m = session.execute(
+                select(
+                    func.min(Sample15m.timestamp_15m_utc),
+                    func.max(Sample15m.timestamp_15m_utc),
+                )
+            ).one()
+
+        candidates_earliest = [t for t in (earliest_1m, earliest_15m) if t is not None]
+        candidates_latest = [t for t in (latest_1m, latest_15m) if t is not None]
+
+        if not candidates_earliest or not candidates_latest:
             return None, None
-        return parse_datetime(earliest), parse_datetime(latest)
+
+        return parse_datetime(min(candidates_earliest)), parse_datetime(max(candidates_latest))
 
     def read_text_series(
         self,
@@ -95,8 +145,11 @@ class TimeSeriesReadRepository:
         if not names:
             return []
 
+        start_ts = normalize_utc_timestamp(start_time)
+        end_ts = normalize_utc_timestamp(end_time)
+
         with self.database.session() as session:
-            rows = session.execute(
+            rows_1m = session.execute(
                 select(
                     Sample1m.name,
                     Sample1m.timestamp_minute_utc,
@@ -104,18 +157,43 @@ class TimeSeriesReadRepository:
                 )
                 .where(
                     Sample1m.name.in_(names),
-                    Sample1m.timestamp_minute_utc >= normalize_utc_timestamp(start_time),
-                    Sample1m.timestamp_minute_utc < normalize_utc_timestamp(end_time),
+                    Sample1m.timestamp_minute_utc >= start_ts,
+                    Sample1m.timestamp_minute_utc < end_ts,
                     Sample1m.last_text.is_not(None),
                 )
                 .order_by(Sample1m.name, Sample1m.timestamp_minute_utc, Sample1m.source)
             ).all()
 
-        points_by_name = {name: [] for name in names}
-        for name, timestamp, value in rows:
-            points_by_name[name].append(TextPoint(timestamp=timestamp, value=str(value)))
+            rows_15m = session.execute(
+                select(
+                    Sample15m.name,
+                    Sample15m.timestamp_15m_utc,
+                    Sample15m.last_text,
+                )
+                .where(
+                    Sample15m.name.in_(names),
+                    Sample15m.timestamp_15m_utc >= start_ts,
+                    Sample15m.timestamp_15m_utc < end_ts,
+                    Sample15m.last_text.is_not(None),
+                )
+                .order_by(Sample15m.name, Sample15m.timestamp_15m_utc, Sample15m.source)
+            ).all()
 
-        return [TextSeries(name=name, points=points_by_name[name]) for name in names]
+        points_1m: dict[str, list[TextPoint]] = {name: [] for name in names}
+        for name, timestamp, value in rows_1m:
+            points_1m[name].append(TextPoint(timestamp=timestamp, value=str(value)))
+
+        points_15m: dict[str, list[TextPoint]] = {name: [] for name in names}
+        for name, timestamp, value in rows_15m:
+            points_15m[name].append(TextPoint(timestamp=timestamp, value=str(value)))
+
+        return [
+            TextSeries(
+                name=name,
+                points=merge_text_with_fallback(points_1m[name], points_15m[name]),
+            )
+            for name in names
+        ]
 
     def read_forecast_series(
         self,
