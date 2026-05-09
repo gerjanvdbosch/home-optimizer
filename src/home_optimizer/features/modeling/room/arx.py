@@ -51,6 +51,7 @@ class RoomArxConfig(ValidationConfig):
 
 class RoomArxModel(TrainedLinearRoomModel):
     model_kind: str = ROOM_ARX_MODEL_KIND
+    config: RoomArxConfig
     notes: str = Field(
         default="Trained ARX room model with linear coefficients over lagged room and exogenous features."
     )
