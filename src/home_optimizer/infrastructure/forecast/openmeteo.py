@@ -5,16 +5,14 @@ from typing import Any
 
 import httpx
 
-OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-OPEN_METEO_HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 _MAX_FORECAST_PAST_DAYS = 92
 
 
 class OpenMeteoGateway:
     def __init__(
         self,
-        base_url: str = OPEN_METEO_FORECAST_URL,
-        historical_base_url: str = OPEN_METEO_HISTORICAL_FORECAST_URL,
+        base_url: str = "https://api.open-meteo.com/v1/forecast",
+        historical_base_url: str = "https://historical-forecast-api.open-meteo.com/v1/forecast",
         timeout: float = 30.0,
         client: httpx.Client | None = None,
     ) -> None:
