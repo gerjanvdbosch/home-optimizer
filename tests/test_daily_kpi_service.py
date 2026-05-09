@@ -18,6 +18,7 @@ from home_optimizer.domain import (
     THERMOSTAT_SETPOINT,
     NumericPoint,
     NumericSeries,
+    TextSeries,
     normalize_utc_timestamp,
 )
 from home_optimizer.domain.time import current_local_timezone, parse_datetime
@@ -34,6 +35,9 @@ class FakeKpiDataReader:
             for series in self._series
             if series.name in names
         ]
+
+    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
+        return []
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [

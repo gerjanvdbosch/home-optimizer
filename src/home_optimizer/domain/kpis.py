@@ -5,9 +5,27 @@ from datetime import datetime, timedelta
 from pydantic import Field
 
 from .models import DomainModel
-from .series import NumericPoint, NumericSeries
+from .series import NumericPoint, NumericSeries, TextSeries
 from .series_transforms import latest_value_at
 from .time import parse_datetime
+
+_MODE_SPACE_TOKENS = ("heat", "heating", "ufh")
+_MODE_DHW_TOKENS = ("dhw", "sww")
+_MODE_OFF_TOKENS = ("off", "idle", "standby", "none")
+
+
+def classify_hp_mode(mode: str | None) -> tuple[int, int, int]:
+    """Return (mode_space, mode_dhw, mode_off) for a raw HP mode string."""
+    if mode is None or not isinstance(mode, str):
+        return 0, 0, 1
+    normalized = mode.strip().lower()
+    if any(token in normalized for token in _MODE_DHW_TOKENS):
+        return 0, 1, 0
+    if any(token in normalized for token in _MODE_SPACE_TOKENS):
+        return 1, 0, 0
+    if any(token in normalized for token in _MODE_OFF_TOKENS):
+        return 0, 0, 1
+    return 0, 0, 1
 
 
 class DailyKpis(DomainModel):
@@ -378,10 +396,8 @@ def count_setpoint_changes(series: NumericSeries | None) -> int:
     return changes
 
 
-def count_compressor_starts(series: NumericSeries | None) -> int | None:
+def count_compressor_starts(series: NumericSeries | None) -> int:
     points = _sorted_points(series)
-    if not points:
-        return None
     starts = 0
     previous_running = False
     for point in points:
@@ -389,6 +405,21 @@ def count_compressor_starts(series: NumericSeries | None) -> int | None:
         if running and not previous_running:
             starts += 1
         previous_running = running
+    return starts
+
+
+def count_compressor_starts_from_mode(series: TextSeries | None) -> int:
+    if series is None or not series.points:
+        return 0
+    sorted_points = sorted(series.points, key=lambda point: point.timestamp)
+    starts = 0
+    previous_active = False
+    for point in sorted_points:
+        mode_space, mode_dhw, _mode_off = classify_hp_mode(point.value)
+        active = bool(mode_space or mode_dhw)
+        if active and not previous_active:
+            starts += 1
+        previous_active = active
     return starts
 
 
@@ -486,6 +517,7 @@ def compute_daily_kpis(
     room_target_max: NumericSeries,
     thermostat_setpoint: NumericSeries | None,
     compressor_frequency: NumericSeries | None,
+    hp_mode: TextSeries | None = None,
     hp_electric_power: NumericSeries | None,
     hp_electric_total_kwh: NumericSeries | None,
     net_power: NumericSeries | None,
@@ -790,7 +822,11 @@ def compute_daily_kpis(
             end_time=end_time,
         ),
         thermostat_setpoint_changes=count_setpoint_changes(thermostat_setpoint),
-        compressor_starts=count_compressor_starts(compressor_frequency),
+        compressor_starts=(
+            count_compressor_starts(compressor_frequency)
+            if compressor_frequency and compressor_frequency.points
+            else count_compressor_starts_from_mode(hp_mode)
+        ),
     )
 
 

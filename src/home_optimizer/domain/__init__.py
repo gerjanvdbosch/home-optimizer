@@ -12,7 +12,7 @@ from .dataset_resampling import (
     dataset_text_signal_spec,
 )
 from .forecast import ForecastEntry
-from .kpis import BaselineKpiSummary, DailyKpis, compute_baseline_kpi_summary, compute_daily_kpis
+from .kpis import BaselineKpiSummary, DailyKpis, classify_hp_mode, compute_baseline_kpi_summary, compute_daily_kpis
 from .location import Location, parse_location
 from .models import DomainModel
 from .names import (
@@ -168,6 +168,7 @@ __all__ = [
     "adjusted_gti_with_shutter",
     "build_daily_price_series",
     "build_fixed_price_intervals",
+    "classify_hp_mode",
     "compute_baseline_kpi_summary",
     "compute_daily_kpis",
     "dataset_numeric_signal_names",

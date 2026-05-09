@@ -12,6 +12,7 @@ from home_optimizer.domain import (
     GTI_LIVING_ROOM_WINDOWS,
     HP_ELECTRIC_POWER,
     HP_ELECTRIC_TOTAL_KWH,
+    HP_MODE,
     OUTDOOR_TEMPERATURE,
     P1_EXPORT_TOTAL_KWH,
     P1_IMPORT_TOTAL_KWH,
@@ -28,6 +29,7 @@ from home_optimizer.domain import (
     DailyKpis,
     FixedPricing,
     NumericSeries,
+    TextSeries,
     build_daily_price_series,
     build_daily_target_band_series,
     compute_baseline_kpi_summary,
@@ -43,6 +45,10 @@ from .ports import KpiDataReader
 
 
 def _series_by_name(series_list: list[NumericSeries]) -> dict[str, NumericSeries]:
+    return {series.name: series for series in series_list}
+
+
+def _text_series_by_name(series_list: list[TextSeries]) -> dict[str, TextSeries]:
     return {series.name: series for series in series_list}
 
 
@@ -117,6 +123,13 @@ class DailyKpiService:
         shutter_by_name = _series_by_name(shutter_series)
         forecast_by_name = _series_by_name(forecast_series)
 
+        text_series = self.reader.read_text_series(
+            names=[HP_MODE],
+            start_time=start_time,
+            end_time=end_time,
+        )
+        text_by_name = _text_series_by_name(text_series)
+
         room_target, room_target_min, room_target_max = build_daily_target_band_series(
             self.settings.room_target,
             start_time=start_time,
@@ -155,6 +168,7 @@ class DailyKpiService:
             room_target_max=room_target_max,
             thermostat_setpoint=series_by_name.get(THERMOSTAT_SETPOINT),
             compressor_frequency=series_by_name.get(COMPRESSOR_FREQUENCY),
+            hp_mode=text_by_name.get(HP_MODE),
             hp_electric_power=series_by_name.get(HP_ELECTRIC_POWER),
             hp_electric_total_kwh=series_by_name.get(HP_ELECTRIC_TOTAL_KWH),
             net_power=series_by_name.get(P1_NET_POWER),

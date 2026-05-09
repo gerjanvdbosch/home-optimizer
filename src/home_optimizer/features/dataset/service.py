@@ -32,6 +32,7 @@ from home_optimizer.domain import (
     TemperatureTargetWindow,
     build_daily_price_series,
     build_daily_target_band_series,
+    classify_hp_mode,
     dataset_numeric_signal_names,
     dataset_numeric_signal_spec,
     dataset_text_signal_names,
@@ -50,9 +51,6 @@ from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 
 _OCCUPIED_MARGIN_C = 0.25
 _DHW_DRAW_DROP_THRESHOLD_C = 0.75
-_MODE_SPACE_TOKENS = ("heat", "heating", "ufh")
-_MODE_DHW_TOKENS = ("dhw", "sww")
-_MODE_OFF_TOKENS = ("off", "idle", "standby", "none")
 _MIN_PLAUSIBLE_COP = 1.0
 _MAX_PLAUSIBLE_COP = 8.0
 _THERMAL_FACTOR_KW_PER_LMIN_DELTA_C = 4186.0 / 60000.0
@@ -106,19 +104,6 @@ def _resolve_price_series(
 
     return NumericSeries(name="electricity_price", unit="EUR/kWh", points=[])
 
-
-def _classify_hp_mode(mode: str | None) -> tuple[int, int, int]:
-    if mode is None or not isinstance(mode, str):
-        return 0, 0, 1
-
-    normalized = mode.strip().lower()
-    if any(token in normalized for token in _MODE_DHW_TOKENS):
-        return 0, 1, 0
-    if any(token in normalized for token in _MODE_SPACE_TOKENS):
-        return 1, 0, 0
-    if any(token in normalized for token in _MODE_OFF_TOKENS):
-        return 0, 0, 1
-    return 0, 0, 1
 
 
 def _price_export_value(settings: AppSettings) -> float:
@@ -590,7 +575,7 @@ class MpcDatasetService:
         )
 
         frame["hp_mode_raw"] = frame.get(HP_MODE)
-        mode_values = frame["hp_mode_raw"].map(_classify_hp_mode)
+        mode_values = frame["hp_mode_raw"].map(classify_hp_mode)
         frame["mode_space"] = mode_values.map(lambda item: item[0])
         frame["mode_dhw"] = mode_values.map(lambda item: item[1])
         frame["mode_off"] = mode_values.map(lambda item: item[2])
