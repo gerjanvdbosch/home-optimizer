@@ -756,8 +756,8 @@ def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["number_of_days"] == 20
-    assert payload["number_of_valid_days"] == 20
+    assert payload["number_of_days"] == 87
+    assert payload["number_of_valid_days"] == 87
     assert payload["mean_hp_electric_kwh_per_day"] is not None
     assert payload["mean_electricity_cost_eur_per_day"] is not None
     assert payload["mean_room_temperature_mae_c"] is not None

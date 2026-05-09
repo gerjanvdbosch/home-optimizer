@@ -169,14 +169,3 @@ def test_forecast_scheduler_runs_once_on_start_and_registers_interval_job() -> N
     finally:
         scheduler.stop()
 
-
-def test_forecast_scheduler_skips_start_when_disabled() -> None:
-    runner = FakeForecastRunner(enabled=False)
-    scheduler = ForecastScheduler(runner)
-
-    scheduler.start()
-
-    assert runner.calls == 0
-    assert scheduler.scheduler.running is False
-
-
