@@ -150,6 +150,8 @@ class RoomArxTrainer:
                 f"outdoor temperature <= {config.freezing_outdoor_temperature_max_c:.1f} C",
             ),
             ("mild_weather", f"outdoor temperature >= {config.mild_outdoor_temperature_min_c:.1f} C"),
+            ("freezing_and_heating", "freezing weather with heating active"),
+            ("freezing_night", "freezing weather during night hours"),
             ("shutters_open", f"shutter position >= {config.shutters_open_min_pct:.0f}%"),
             (
                 "shutters_closed",
@@ -193,13 +195,14 @@ class RoomArxTrainer:
             shutter_position is not None and shutter_position <= config.shutters_closed_max_pct
         )
         is_night = local_hour >= config.night_start_hour or local_hour < config.night_end_hour
+        is_freezing = (
+            outdoor_temperature is not None
+            and outdoor_temperature <= config.freezing_outdoor_temperature_max_c
+        )
 
         if outdoor_temperature is not None and outdoor_temperature <= config.cold_outdoor_temperature_max_c:
             segments.add("cold_weather")
-        if (
-            outdoor_temperature is not None
-            and outdoor_temperature <= config.freezing_outdoor_temperature_max_c
-        ):
+        if is_freezing:
             segments.add("freezing_weather")
         if outdoor_temperature is not None and outdoor_temperature >= config.mild_outdoor_temperature_min_c:
             segments.add("mild_weather")
@@ -221,6 +224,10 @@ class RoomArxTrainer:
             segments.add("heating_and_sunny")
         if is_night:
             segments.add("night")
+        if is_freezing and is_heating_active:
+            segments.add("freezing_and_heating")
+        if is_freezing and is_night:
+            segments.add("freezing_night")
         if occupied_flag:
             segments.add("occupied")
 

@@ -115,6 +115,8 @@ def test_room_modeling_service_runs_rolling_recursive_validation() -> None:
         "cold_weather",
         "freezing_weather",
         "mild_weather",
+        "freezing_and_heating",
+        "freezing_night",
         "shutters_open",
         "shutters_closed",
         "sunny_shutters_open",
