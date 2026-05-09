@@ -26,7 +26,6 @@ class ElectricityPriceScheduler:
         self.scheduler = BackgroundScheduler()
 
     def start(self) -> None:
-
         if self.scheduler.running:
             return
 

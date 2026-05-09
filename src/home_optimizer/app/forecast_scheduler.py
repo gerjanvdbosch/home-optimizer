@@ -29,9 +29,6 @@ class ForecastScheduler:
         self.scheduler = BackgroundScheduler()
 
     def start(self) -> None:
-        if not self.runner.enabled:
-            LOGGER.info("Forecast scheduler not started: Open-Meteo configuration incomplete")
-            return
 
         if self.scheduler.running:
             return
