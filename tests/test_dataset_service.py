@@ -197,7 +197,7 @@ class FakeDatasetDataReader:
 
 
 class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
-    """Simulates 1m-with-fallback-to-15m: uses 1m data if it covers the range, else 15m."""
+    """Simulates 1m-with-fallback-to-15m plus 1m overlay for brief flag events."""
 
     def __init__(
         self,
@@ -220,47 +220,48 @@ class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
         self.text_series_1m = text_series_1m
         self.text_series_15m = text_series_15m
 
+    def _read_for(self, interval: int, **kwargs):
+        self.numeric_series = self.numeric_series_1m if interval == 1 else self.numeric_series_15m
+        self.text_series = self.text_series_1m if interval == 1 else self.text_series_15m
+        return super().read_samples(**kwargs)
+
     def read_samples(
         self,
         *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
+        start_time=None,
+        end_time=None,
+        names=None,
+        sources=None,
+        categories=None,
+        entity_ids=None,
     ) -> pd.DataFrame:
-        # Try 1m first
-        self.numeric_series = self.numeric_series_1m
-        self.text_series = self.text_series_1m
-        frame_1m = super().read_samples(
+        kwargs = dict(
             start_time=start_time, end_time=end_time, names=names,
             sources=sources, categories=categories, entity_ids=entity_ids,
         )
-        # Check coverage: does 1m data start near the requested start?
-        if (
-            not frame_1m.empty
-            and start_time is not None
-            and end_time is not None
-        ):
+        frame_1m = self._read_for(1, **kwargs)
+
+        covers = False
+        if not frame_1m.empty and start_time is not None and end_time is not None:
             import pandas as _pd
             timestamps = _pd.to_datetime(frame_1m["timestamp_utc"], utc=True).dropna()
             tolerance = _pd.Timedelta(minutes=2)
             start_ts = _pd.Timestamp(start_time).tz_convert("UTC") if _pd.Timestamp(start_time).tzinfo else _pd.Timestamp(start_time, tz="UTC")
             end_ts = _pd.Timestamp(end_time).tz_convert("UTC") if _pd.Timestamp(end_time).tzinfo else _pd.Timestamp(end_time, tz="UTC")
-            if (
+            covers = (
                 timestamps.min() <= start_ts + tolerance
                 and timestamps.max() >= end_ts - tolerance
-            ):
-                return frame_1m
+            )
 
-        # Fall back to 15m
-        self.numeric_series = self.numeric_series_15m
-        self.text_series = self.text_series_15m
-        return super().read_samples(
-            start_time=start_time, end_time=end_time, names=names,
-            sources=sources, categories=categories, entity_ids=entity_ids,
-        )
+        if covers:
+            return frame_1m
+
+        frame_15m = self._read_for(15, **kwargs)
+        if frame_1m.empty:
+            return frame_15m
+
+        import pandas as _pd
+        return _pd.concat([frame_15m, frame_1m], ignore_index=True)
 
 
 def build_numeric_series(
@@ -587,22 +588,11 @@ def test_mpc_dataset_service_falls_back_to_15m_when_1m_coverage_is_partial() -> 
 
 
 def test_mpc_dataset_service_uses_1m_window_flags_when_available() -> None:
-    """When 1m data covers the full range, window flags are detected at 1m resolution."""
+    """Window-flag signals use 1m data to catch brief events, even with 15m primary data."""
     start_time = datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc)
     end_time = start_time + timedelta(minutes=30)
-    reader = FakeDatasetDataReader(
-        numeric_series=[
-            build_numeric_series(
-                name=ROOM_TEMPERATURE,
-                unit="°C",
-                start_time=start_time,
-                values=[20.0, 20.1, 20.2, 20.3, 20.4, 20.5,
-                        20.6, 20.7, 20.8, 20.9, 21.0, 21.1,
-                        21.2, 21.3, 21.4, 21.5, 21.6, 21.7,
-                        21.8, 21.9, 22.0, 22.1, 22.2, 22.3,
-                        22.4, 22.5, 22.6, 22.7, 22.8, 22.9],
-                interval_minutes=1,
-            ),
+    reader = CoverageAwareFakeDatasetReader(
+        numeric_series_1m=[
             build_numeric_series(
                 name=DEFROST_ACTIVE,
                 unit="bool",
@@ -611,7 +601,22 @@ def test_mpc_dataset_service_uses_1m_window_flags_when_available() -> None:
                 interval_minutes=1,
             ),
         ],
-        text_series=[],
+        numeric_series_15m=[
+            build_numeric_series(
+                name=ROOM_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[20.0, 20.1],
+            ),
+            build_numeric_series(
+                name=OUTDOOR_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[5.0, 5.1],
+            ),
+        ],
+        text_series_1m=[],
+        text_series_15m=[],
         forecast_series=[],
         price_series=build_numeric_series(
             name="electricity_price",
@@ -628,4 +633,5 @@ def test_mpc_dataset_service_uses_1m_window_flags_when_available() -> None:
         interval_minutes=15,
     )
 
+    # Defrost event at minute 12 should be captured via 1m overlay
     assert sum(row.defrost_active for row in dataset.rows) == 1

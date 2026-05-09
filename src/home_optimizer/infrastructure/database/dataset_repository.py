@@ -52,7 +52,14 @@ class DatasetRepository:
         categories: list[str] | None = None,
         entity_ids: list[str] | None = None,
     ) -> pd.DataFrame:
-        """Read measurement samples, preferring 1m resolution with fallback to 15m."""
+        """Read measurement samples, preferring 1m resolution with fallback to 15m.
+
+        When 1m data covers the full requested range it is returned exclusively.
+        Otherwise 15m data is used as the primary source, but any existing 1m
+        data is concatenated alongside it so that brief window-flag events
+        (defrost, booster heater) that only appear in 1m samples are still
+        captured by the max() aggregation in the service.
+        """
         frame_1m = self.read_samples_1m(
             start_time=start_time,
             end_time=end_time,
@@ -78,7 +85,13 @@ class DatasetRepository:
             entity_ids=entity_ids,
         )
         frame_15m["timestamp_utc"] = frame_15m["timestamp_15m_utc"]
-        return frame_15m
+
+        if frame_1m.empty:
+            return frame_15m
+
+        # Include 1m data alongside 15m so brief flag events are still captured.
+        frame_1m["timestamp_utc"] = frame_1m["timestamp_minute_utc"]
+        return pd.concat([frame_15m, frame_1m], ignore_index=True)
 
     def read_samples_1m(
         self,
