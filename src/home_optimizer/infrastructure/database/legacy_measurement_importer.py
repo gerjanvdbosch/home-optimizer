@@ -15,6 +15,7 @@ from home_optimizer.domain.names import (
     DHW_TOP_TEMPERATURE,
     HP_ELECTRIC_POWER,
     HP_ELECTRIC_TOTAL_KWH,
+    HP_FLOW,
     HP_MODE,
     HP_RETURN_TEMPERATURE,
     HP_SUPPLY_TARGET_TEMPERATURE,
@@ -82,6 +83,13 @@ _HVAC_MODE_MAP = {
     1: "dhw",
     2: "heat",
     4: "legionella",
+}
+
+# Default flow rates (L/min) per hvac mode code used when no flow sensor is present
+_FLOW_L_MIN_BY_MODE = {
+    2: 18.0,  # heat / UFH
+    1: 19.0,  # dhw
+    4: 19.0,  # legionella
 }
 
 
@@ -326,6 +334,22 @@ def _map_measurement_row(
             )
         )
 
+    hvac_mode_code = _int_value(row["hvac_mode"])
+    if hvac_mode_code is not None:
+        flow_l_min = _FLOW_L_MIN_BY_MODE.get(hvac_mode_code)
+        if flow_l_min is not None:
+            samples.append(
+                _numeric_sample(
+                    timestamp_utc=timestamp_utc,
+                    name=HP_FLOW,
+                    source=source,
+                    entity_id=_legacy_entity_id("hp_flow"),
+                    category="heatpump",
+                    unit="L/min",
+                    value=flow_l_min,
+                )
+            )
+
     return samples
 
 
@@ -354,6 +378,12 @@ def _real_value(raw_value: object | None) -> float | None:
     if raw_value is None:
         return None
     return float(cast(float | int | str, raw_value))
+
+
+def _int_value(raw_value: object | None) -> int | None:
+    if raw_value is None:
+        return None
+    return int(cast(int | str, raw_value))
 
 
 def _mode_value(raw_value: object | None) -> str | None:
