@@ -54,10 +54,6 @@ class WeatherImportService:
         fetched_at = ensure_utc(created_at or utc_now())
         window_end = _floor_to_quarter_hour(fetched_at)
         past_days = self.history_days_back
-        if past_days > 92:
-            raise ValueError(
-                "historische weerdata ligt verder terug dan Open-Meteo past_days ondersteunt"
-            )
 
         entries = self.builder.build_entries(
             fetched_at=fetched_at,

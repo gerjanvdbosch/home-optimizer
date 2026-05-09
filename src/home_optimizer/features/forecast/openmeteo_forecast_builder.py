@@ -71,20 +71,14 @@ class OpenMeteoForecastEntryBuilder:
         use_forecast_time_as_created_at: bool = False,
     ) -> list[ForecastEntry]:
         entries = self._build_base_entries(
-            fetched_at,
-            latitude,
-            longitude,
-            forecast_steps=forecast_steps,
-            past_days=past_days,
+            fetched_at, latitude, longitude,
+            forecast_steps=forecast_steps, past_days=past_days,
             use_forecast_time_as_created_at=use_forecast_time_as_created_at,
         )
         entries.extend(
             self._build_gti_entries(
-                fetched_at,
-                latitude,
-                longitude,
-                forecast_steps=forecast_steps,
-                past_days=past_days,
+                fetched_at, latitude, longitude,
+                forecast_steps=forecast_steps, past_days=past_days,
                 use_forecast_time_as_created_at=use_forecast_time_as_created_at,
             )
         )
@@ -138,8 +132,7 @@ class OpenMeteoForecastEntryBuilder:
             )
             entries.extend(
                 self._entries_from_payload(
-                    payload=payload,
-                    fetched_at=fetched_at,
+                    payload=payload, fetched_at=fetched_at,
                     variable_map={GTI_PV: GTI_VARIABLE},
                     use_forecast_time_as_created_at=use_forecast_time_as_created_at,
                 )
@@ -157,8 +150,7 @@ class OpenMeteoForecastEntryBuilder:
             )
             entries.extend(
                 self._entries_from_payload(
-                    payload=payload,
-                    fetched_at=fetched_at,
+                    payload=payload, fetched_at=fetched_at,
                     variable_map={GTI_LIVING_ROOM_WINDOWS: GTI_VARIABLE},
                     use_forecast_time_as_created_at=use_forecast_time_as_created_at,
                 )
@@ -245,5 +237,4 @@ def _compass_to_open_meteo_azimuth(compass_degrees: float) -> float:
     if converted <= -180.0:
         converted += 360.0
     return converted
-
 
