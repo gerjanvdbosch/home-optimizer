@@ -5,7 +5,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
-from home_optimizer.features.modeling import RoomArxConfig, RoomModelingService
+from home_optimizer.features.modeling import (
+    ROOM_2R2C_MODEL_KIND,
+    Room2R2CConfig,
+    RoomArxConfig,
+    RoomModelingService,
+)
 
 
 def build_synthetic_room_dataset(row_count: int = 80) -> MpcDataset:
@@ -155,3 +160,33 @@ def test_room_modeling_service_improves_24h_sample_count_and_segment_bias_metric
     )
     assert sunny_midday.metrics[0].sample_count > 0
     assert sunny_midday.metrics[0].bias_c is not None
+
+
+def test_room_modeling_service_fits_two_state_room_model_on_dataset() -> None:
+    dataset = build_synthetic_room_dataset(row_count=220)
+    service = RoomModelingService()
+    config = Room2R2CConfig(
+        min_train_rows=60,
+        validation_window_rows=24,
+        validation_horizons_steps=[1, 6],
+        history_warmup_rows=24,
+        mass_decay_candidates=[0.90, 0.97],
+        thermal_to_mass_candidates=[0.0, 0.05],
+    )
+
+    model = service.fit_room_model(dataset, config=config)
+    prediction = service.predict_next_room_temperature(model, dataset.rows, source_index=100)
+    report = service.rolling_validate_room_model(dataset, config=config)
+
+    assert model.model_kind == ROOM_2R2C_MODEL_KIND
+    assert model.feature_names == [
+        "room_temperature_c",
+        "mass_temperature_c",
+        "outdoor_temperature_c",
+        "solar_gain_proxy_w_m2",
+        "occupied_flag",
+    ]
+    assert 0.0 <= model.mass_decay <= 1.0
+    assert prediction is not None
+    assert len(report.aggregate_metrics) == 2
+    assert report.aggregate_metrics[0].mae_c is not None

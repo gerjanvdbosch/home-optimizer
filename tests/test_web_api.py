@@ -21,7 +21,9 @@ from home_optimizer.domain import (
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
+    ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
+    Room2R2CConfig,
     RoomArxConfig,
     StoredModelVersion,
     TrainedLinearRoomModel,
@@ -714,6 +716,29 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert app.state.container.model_version_repository.saved_versions
     assert app.state.container.model_version_repository.saved_versions[0].is_active is True
 
+
+def test_train_endpoint_supports_two_state_room_model_type() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/train",
+            params={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-26T00:00:00+00:00",
+                "interval_minutes": 15,
+                "min_train_rows": 20,
+                "validation_window_rows": 24,
+                "model_type": ROOM_2R2C_MODEL_KIND,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_type"] == ROOM_2R2C_MODEL_KIND
+    saved_model = app.state.container.model_version_repository.saved_versions[0].model
+    assert isinstance(saved_model.config, Room2R2CConfig)
+
 def test_settings_reject_legacy_sensor_fields() -> None:
     with pytest.raises(ValidationError):
         AppSettings.from_options(
@@ -971,13 +996,13 @@ def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["number_of_days"] == 26
-    assert payload["number_of_valid_days"] == 26
+    assert payload["number_of_days"] == 90
+    assert payload["number_of_valid_days"] == 90
     assert payload["mean_hp_electric_kwh_per_day"] is not None
     assert payload["mean_electricity_cost_eur_per_day"] is not None
     assert payload["mean_room_temperature_mae_c"] is not None
     assert payload["mean_solar_irradiance_w_m2"] == 220.0
-    assert payload["mean_shutter_open_pct"] is None
+    assert payload["mean_shutter_open_pct"] == 50.0
     assert payload["total_comfort_undershoot_degree_hours"] >= 0.0
     assert payload["total_comfort_overshoot_while_heating_degree_hours"] >= 0.0
     assert payload["total_comfort_overshoot_passive_degree_hours"] >= 0.0

@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 
 from home_optimizer.features.modeling import (
     HorizonMetric,
+    ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
+    Room2R2CConfig,
+    Room2R2CModel,
     RoomArxConfig,
     RoomModelValidationReport,
     StoredModelVersion,
@@ -101,6 +104,32 @@ def build_validation_report() -> RoomModelValidationReport:
     )
 
 
+def build_2r2c_model() -> Room2R2CModel:
+    return Room2R2CModel(
+        trained_from_utc=datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc),
+        trained_to_utc=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=10,
+        config=Room2R2CConfig(
+            validation_horizons_steps=[6, 36, 72, 144],
+            min_train_rows=10,
+            validation_window_rows=10,
+            history_warmup_rows=24,
+        ),
+        feature_names=[
+            "room_temperature_c",
+            "mass_temperature_c",
+            "outdoor_temperature_c",
+            "solar_gain_proxy_w_m2",
+            "occupied_flag",
+        ],
+        intercept=1.1,
+        coefficients=[0.8, 0.1, 0.05, 0.002, 0.03],
+        sample_count=220,
+        mass_decay=0.97,
+        thermal_to_mass=0.05,
+    )
+
+
 def test_model_version_repository_round_trips_room_model_versions(tmp_path) -> None:
     database = Database(str(tmp_path / "model_versions.sqlite"))
     database.init_schema()
@@ -179,3 +208,30 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
     summary_by_id = {summary.model_id: summary for summary in summaries}
     assert summary_by_id["room-model-v1"].is_active is False
     assert summary_by_id["room-model-v2"].is_active is True
+
+
+def test_model_version_repository_round_trips_two_state_room_model_versions(tmp_path) -> None:
+    database = Database(str(tmp_path / "model_versions.sqlite"))
+    database.init_schema()
+    repository = ModelVersionRepository(database)
+
+    version = StoredModelVersion(
+        model_id="room-model-2r2c",
+        model_type=ROOM_2R2C_MODEL_KIND,
+        created_at_utc=datetime(2026, 5, 11, 11, 0, tzinfo=timezone.utc),
+        is_active=True,
+        model=build_2r2c_model(),
+        validation_report=build_validation_report(),
+    )
+
+    repository.save_room_model_version(version)
+
+    loaded = repository.get_room_model_version("room-model-2r2c")
+    active = repository.get_active_room_model_version()
+
+    assert loaded is not None
+    assert loaded.model_type == ROOM_2R2C_MODEL_KIND
+    assert isinstance(loaded.model, Room2R2CModel)
+    assert loaded.model.mass_decay == 0.97
+    assert active is not None
+    assert active.model_id == "room-model-2r2c"

@@ -5,14 +5,18 @@ from sqlalchemy.dialects.sqlite import insert
 
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.features.modeling import (
+    ROOM_2R2C_MODEL_KIND,
     RoomModelValidationReport,
     ROOM_ARX_MODEL_KIND,
     RoomArxModel,
+    Room2R2CModel,
     StoredModelVersion,
     StoredModelVersionSummary,
 )
 from home_optimizer.infrastructure.database.orm_models import ModelVersion
 from home_optimizer.infrastructure.database.session import Database
+
+ROOM_MODEL_KINDS = (ROOM_ARX_MODEL_KIND, ROOM_2R2C_MODEL_KIND)
 
 
 def _metric_by_minutes(
@@ -64,7 +68,7 @@ class ModelVersionRepository:
             if version.is_active:
                 session.execute(
                     update(ModelVersion)
-                    .where(ModelVersion.model_type == version.model_type)
+                    .where(ModelVersion.model_type.in_(ROOM_MODEL_KINDS))
                     .values(is_active=0)
                 )
 
@@ -98,7 +102,7 @@ class ModelVersionRepository:
             row = session.execute(
                 select(ModelVersion).where(
                     ModelVersion.model_id == model_id,
-                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
+                    ModelVersion.model_type.in_(ROOM_MODEL_KINDS),
                 )
             ).scalar_one_or_none()
 
@@ -110,7 +114,7 @@ class ModelVersionRepository:
         with self.database.session() as session:
             row = session.execute(
                 select(ModelVersion).where(
-                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
+                    ModelVersion.model_type.in_(ROOM_MODEL_KINDS),
                     ModelVersion.is_active == 1,
                 )
             ).scalar_one_or_none()
@@ -123,7 +127,7 @@ class ModelVersionRepository:
         with self.database.session() as session:
             rows = session.execute(
                 select(ModelVersion)
-                .where(ModelVersion.model_type == ROOM_ARX_MODEL_KIND)
+                .where(ModelVersion.model_type.in_(ROOM_MODEL_KINDS))
                 .order_by(ModelVersion.created_at_utc.desc())
             ).scalars().all()
 
@@ -134,7 +138,7 @@ class ModelVersionRepository:
             row = session.execute(
                 select(ModelVersion).where(
                     ModelVersion.model_id == model_id,
-                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
+                    ModelVersion.model_type.in_(ROOM_MODEL_KINDS),
                 )
             ).scalar_one_or_none()
             if row is None:
@@ -142,7 +146,7 @@ class ModelVersionRepository:
 
             session.execute(
                 update(ModelVersion)
-                .where(ModelVersion.model_type == ROOM_ARX_MODEL_KIND)
+                .where(ModelVersion.model_type.in_(ROOM_MODEL_KINDS))
                 .values(is_active=0)
             )
             session.execute(
@@ -153,12 +157,19 @@ class ModelVersionRepository:
             session.commit()
 
     def _to_room_model_version(self, row: ModelVersion) -> StoredModelVersion:
+        if row.model_type == ROOM_ARX_MODEL_KIND:
+            model = RoomArxModel.model_validate_json(row.model_json)
+        elif row.model_type == ROOM_2R2C_MODEL_KIND:
+            model = Room2R2CModel.model_validate_json(row.model_json)
+        else:
+            raise ValueError(f"unsupported room model type: {row.model_type}")
+
         return StoredModelVersion(
             model_id=row.model_id,
             model_type=row.model_type,
             created_at_utc=parse_datetime(row.created_at_utc),
             is_active=bool(row.is_active),
-            model=RoomArxModel.model_validate_json(row.model_json),
+            model=model,
             validation_report=(
                 RoomModelValidationReport.model_validate_json(row.validation_report_json)
                 if row.validation_report_json is not None

@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from home_optimizer.app import AppSettings
 from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.modeling import (
+    ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
     RoomArxConfig,
+    Room2R2CConfig,
     RoomModelingService,
     StoredModelVersion,
 )
@@ -27,6 +29,7 @@ TrainingWindowQuery = Annotated[int | None, Query(alias="training_window_rows", 
 ValidationWindowQuery = Annotated[int, Query(alias="validation_window_rows", gt=1)]
 MinTrainRowsQuery = Annotated[int, Query(alias="min_train_rows", gt=1)]
 ActivateQuery = Annotated[bool, Query(alias="activate")]
+ModelTypeQuery = Annotated[str, Query(alias="model_type")]
 DEFAULT_TRAIN_START_TIME = datetime(2026, 4, 16, 0, 0, 0, tzinfo=timezone.utc)
 DEFAULT_TRAIN_END_TIME = datetime(2026, 5, 7, 23, 59, 0, tzinfo=timezone.utc)
 
@@ -44,17 +47,27 @@ def create_train_router(settings: AppSettings) -> APIRouter:
         validation_window_rows: ValidationWindowQuery = 144,
         min_train_rows: MinTrainRowsQuery = 96,
         activate: ActivateQuery = False,
+        model_type: ModelTypeQuery = ROOM_ARX_MODEL_KIND,
     ) -> TrainRoomModelResponse:
         dataset_service = MpcDatasetService(
             container.dataset_repository,
             settings,
         )
         modeling_service = RoomModelingService()
-        config = RoomArxConfig(
-            min_train_rows=min_train_rows,
-            training_window_rows=training_window_rows,
-            validation_window_rows=validation_window_rows,
-        )
+        if model_type == ROOM_ARX_MODEL_KIND:
+            config = RoomArxConfig(
+                min_train_rows=min_train_rows,
+                training_window_rows=training_window_rows,
+                validation_window_rows=validation_window_rows,
+            )
+        elif model_type == ROOM_2R2C_MODEL_KIND:
+            config = Room2R2CConfig(
+                min_train_rows=min_train_rows,
+                training_window_rows=training_window_rows,
+                validation_window_rows=validation_window_rows,
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"unsupported room model type: {model_type}")
 
         try:
             dataset = dataset_service.build_dataset(
@@ -72,7 +85,7 @@ def create_train_router(settings: AppSettings) -> APIRouter:
 
         version = StoredModelVersion(
             model_id=f"room-model-{uuid4().hex[:12]}",
-            model_type=ROOM_ARX_MODEL_KIND,
+            model_type=model_type,
             created_at_utc=datetime.now(timezone.utc),
             is_active=activate,
             model=model,

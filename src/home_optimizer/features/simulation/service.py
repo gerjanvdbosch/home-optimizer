@@ -33,14 +33,8 @@ class RoomSimulationService:
 
         anchor_time_utc = ensure_utc(anchor_time)
         interval = timedelta(minutes=model.interval_minutes)
-        max_lag = max(
-            model.config.room_temperature_lags
-            + model.config.outdoor_temperature_lags
-            + model.config.thermal_output_lags
-            + model.config.solar_gain_lags
-            + model.config.occupied_flag_lags
-        )
-        start_time = anchor_time_utc - (interval * max_lag)
+        history_rows = self.modeling_service.max_history_rows(model)
+        start_time = anchor_time_utc - (interval * history_rows)
         end_time = anchor_time_utc + (interval * (horizon_steps + 1))
 
         dataset = MpcDatasetService(samples_reader, self.settings).build_dataset(
@@ -58,7 +52,7 @@ class RoomSimulationService:
         )
         if anchor_index is None:
             raise ValueError("anchor_time does not align with dataset interval")
-        if anchor_index < max_lag:
+        if anchor_index < history_rows:
             raise ValueError("not enough history before anchor_time for simulation")
         if anchor_index + horizon_steps >= len(dataset.rows):
             raise ValueError("not enough future rows available for requested horizon")
