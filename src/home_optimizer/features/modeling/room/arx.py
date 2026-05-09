@@ -24,6 +24,11 @@ class RoomArxConfig(ValidationConfig):
     heating_active_threshold_kw: float = Field(default=0.1, ge=0.0)
     shutters_open_min_pct: float = Field(default=75.0, ge=0.0, le=100.0)
     shutters_closed_max_pct: float = Field(default=25.0, ge=0.0, le=100.0)
+    cold_outdoor_temperature_max_c: float = Field(default=5.0)
+    freezing_outdoor_temperature_max_c: float = Field(default=0.0)
+    mild_outdoor_temperature_min_c: float = Field(default=12.0)
+    night_start_hour: int = Field(default=22, ge=0, le=23)
+    night_end_hour: int = Field(default=6, ge=0, le=23)
     sunny_midday_start_hour: int = Field(default=11, ge=0, le=23)
     sunny_midday_end_hour: int = Field(default=16, ge=1, le=24)
     notes: str = Field(
@@ -139,11 +144,28 @@ class RoomArxTrainer:
         return [
             ("sunny", f"solar irradiance >= {config.sunny_irradiance_threshold_w_m2:.0f} W/m2"),
             ("heating_active", f"thermal output >= {config.heating_active_threshold_kw:.2f} kW"),
+            ("cold_weather", f"outdoor temperature <= {config.cold_outdoor_temperature_max_c:.1f} C"),
+            (
+                "freezing_weather",
+                f"outdoor temperature <= {config.freezing_outdoor_temperature_max_c:.1f} C",
+            ),
+            ("mild_weather", f"outdoor temperature >= {config.mild_outdoor_temperature_min_c:.1f} C"),
             ("shutters_open", f"shutter position >= {config.shutters_open_min_pct:.0f}%"),
             (
                 "shutters_closed",
                 f"shutter position <= {config.shutters_closed_max_pct:.0f}%",
             ),
+            ("sunny_shutters_open", "sunny with shutters open"),
+            ("sunny_shutters_closed", "sunny with shutters closed"),
+            ("heating_and_sunny", "heating active with sunny conditions"),
+            (
+                "night",
+                (
+                    f"local hour in "
+                    f"[{config.night_start_hour:02d}:00, 24:00) or [00:00, {config.night_end_hour:02d}:00)"
+                ),
+            ),
+            ("occupied", "occupied_flag == 1"),
             (
                 "sunny_midday",
                 (
@@ -157,19 +179,50 @@ class RoomArxTrainer:
         segments: set[str] = set()
         solar_irradiance = row.solar_irradiance_w_m2 or 0.0
         thermal_output = row.thermal_output_estimate_kw or 0.0
+        outdoor_temperature = row.outdoor_temperature_c
         shutter_position = row.shutter_position_pct
         local_hour = row.timestamp_utc.astimezone().hour
+        occupied_flag = row.occupied_flag
 
-        if solar_irradiance >= config.sunny_irradiance_threshold_w_m2:
+        is_sunny = solar_irradiance >= config.sunny_irradiance_threshold_w_m2
+        is_heating_active = thermal_output >= config.heating_active_threshold_kw
+        is_shutters_open = (
+            shutter_position is not None and shutter_position >= config.shutters_open_min_pct
+        )
+        is_shutters_closed = (
+            shutter_position is not None and shutter_position <= config.shutters_closed_max_pct
+        )
+        is_night = local_hour >= config.night_start_hour or local_hour < config.night_end_hour
+
+        if outdoor_temperature is not None and outdoor_temperature <= config.cold_outdoor_temperature_max_c:
+            segments.add("cold_weather")
+        if (
+            outdoor_temperature is not None
+            and outdoor_temperature <= config.freezing_outdoor_temperature_max_c
+        ):
+            segments.add("freezing_weather")
+        if outdoor_temperature is not None and outdoor_temperature >= config.mild_outdoor_temperature_min_c:
+            segments.add("mild_weather")
+        if is_sunny:
             segments.add("sunny")
             if config.sunny_midday_start_hour <= local_hour < config.sunny_midday_end_hour:
                 segments.add("sunny_midday")
-        if thermal_output >= config.heating_active_threshold_kw:
+        if is_heating_active:
             segments.add("heating_active")
-        if shutter_position is not None and shutter_position >= config.shutters_open_min_pct:
+        if is_shutters_open:
             segments.add("shutters_open")
-        if shutter_position is not None and shutter_position <= config.shutters_closed_max_pct:
+        if is_shutters_closed:
             segments.add("shutters_closed")
+        if is_sunny and is_shutters_open:
+            segments.add("sunny_shutters_open")
+        if is_sunny and is_shutters_closed:
+            segments.add("sunny_shutters_closed")
+        if is_sunny and is_heating_active:
+            segments.add("heating_and_sunny")
+        if is_night:
+            segments.add("night")
+        if occupied_flag:
+            segments.add("occupied")
 
         return segments
 

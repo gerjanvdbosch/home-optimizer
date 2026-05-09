@@ -112,8 +112,16 @@ def test_room_modeling_service_runs_rolling_recursive_validation() -> None:
     assert [segment.segment_name for segment in report.segment_metrics] == [
         "sunny",
         "heating_active",
+        "cold_weather",
+        "freezing_weather",
+        "mild_weather",
         "shutters_open",
         "shutters_closed",
+        "sunny_shutters_open",
+        "sunny_shutters_closed",
+        "heating_and_sunny",
+        "night",
+        "occupied",
         "sunny_midday",
     ]
 
