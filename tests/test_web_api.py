@@ -411,11 +411,14 @@ class FakeDatasetRepository:
         frame = pd.DataFrame(rows)
         if frame.empty:
             return frame
+        timestamp_column = (
+            "timestamp_minute_utc"
+            if "timestamp_minute_utc" in frame.columns
+            else "timestamp_15m_utc"
+        )
         if start_time is not None:
-            timestamp_column = "timestamp_minute_utc" if interval_minutes == 1 else "timestamp_15m_utc"
             frame = frame.loc[frame[timestamp_column] >= start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
         if end_time is not None:
-            timestamp_column = "timestamp_minute_utc" if interval_minutes == 1 else "timestamp_15m_utc"
             frame = frame.loc[frame[timestamp_column] < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
         return frame.reset_index(drop=True)
 

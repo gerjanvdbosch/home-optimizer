@@ -230,8 +230,25 @@ def _numeric_series_points_frame(series_list: list[NumericSeries]) -> pd.DataFra
     return pd.DataFrame(rows).sort_values(["name", "timestamp_utc"]).reset_index(drop=True)
 
 
-def _source_interval_minutes(target_interval_minutes: int) -> int:
-    return 1 if target_interval_minutes < 15 else 15
+def _raw_frame_covers_range(
+    raw: pd.DataFrame,
+    *,
+    timestamp_column: str,
+    start_time: datetime,
+    end_time: datetime,
+    source_interval_minutes: int,
+) -> bool:
+    if raw.empty or timestamp_column not in raw.columns:
+        return False
+
+    timestamps = pd.to_datetime(raw[timestamp_column], utc=True).dropna()
+    if timestamps.empty:
+        return False
+
+    tolerance = pd.Timedelta(minutes=source_interval_minutes)
+    earliest = timestamps.min()
+    latest = timestamps.max()
+    return earliest <= pd.Timestamp(start_time) + tolerance and latest >= pd.Timestamp(end_time) - tolerance
 
 
 class MpcDatasetService:
@@ -250,11 +267,28 @@ class MpcDatasetService:
             source="measurement"
         )
         raw = self.samples_reader.read_samples(
-            interval_minutes=_source_interval_minutes(interval_minutes),
+            interval_minutes=1,
             start_time=start_time,
             end_time=end_time,
             names=requested_names,
         ).copy()
+
+        timestamp_column = (
+            "timestamp_minute_utc" if "timestamp_minute_utc" in raw.columns else "timestamp_15m_utc"
+        )
+        if not _raw_frame_covers_range(
+            raw,
+            timestamp_column=timestamp_column,
+            start_time=start_time,
+            end_time=end_time,
+            source_interval_minutes=1 if timestamp_column == "timestamp_minute_utc" else 15,
+        ):
+            raw = self.samples_reader.read_samples(
+                interval_minutes=15,
+                start_time=start_time,
+                end_time=end_time,
+                names=requested_names,
+            ).copy()
 
         grid = pd.DataFrame(
             {

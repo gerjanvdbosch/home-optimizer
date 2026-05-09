@@ -30,7 +30,7 @@ class DailyKpis(DomainModel):
     comfort_overshoot_passive_degree_hours: float | None = None
     dhw_comfort_undershoot_minutes: float | None = None
     thermostat_setpoint_changes: int = 0
-    compressor_starts: int = 0
+    compressor_starts: int | None = None
 
 
 class BaselineKpiSummary(DomainModel):
@@ -378,8 +378,10 @@ def count_setpoint_changes(series: NumericSeries | None) -> int:
     return changes
 
 
-def count_compressor_starts(series: NumericSeries | None) -> int:
+def count_compressor_starts(series: NumericSeries | None) -> int | None:
     points = _sorted_points(series)
+    if not points:
+        return None
     starts = 0
     previous_running = False
     for point in points:
@@ -838,7 +840,11 @@ def compute_baseline_kpi_summary(daily_kpis: list[DailyKpis]) -> BaselineKpiSumm
             for day_kpis in valid_days
         ),
         mean_compressor_starts_per_day=mean(
-            [float(day_kpis.compressor_starts) for day_kpis in valid_days]
+            [
+                float(day_kpis.compressor_starts)
+                for day_kpis in valid_days
+                if day_kpis.compressor_starts is not None
+            ]
         ),
         mean_self_consumption_ratio=mean(
             [day_kpis.self_consumption_ratio for day_kpis in valid_days]

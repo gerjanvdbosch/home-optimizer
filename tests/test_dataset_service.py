@@ -200,6 +200,62 @@ class FakeDatasetDataReader:
         return frame.reset_index(drop=True)
 
 
+class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
+    def __init__(
+        self,
+        *,
+        numeric_series_1m: list[NumericSeries],
+        numeric_series_15m: list[NumericSeries],
+        text_series_1m: list[TextSeries],
+        text_series_15m: list[TextSeries],
+        forecast_series: list[NumericSeries],
+        price_series: NumericSeries,
+    ) -> None:
+        super().__init__(
+            numeric_series=numeric_series_1m,
+            text_series=text_series_1m,
+            forecast_series=forecast_series,
+            price_series=price_series,
+        )
+        self.numeric_series_1m = numeric_series_1m
+        self.numeric_series_15m = numeric_series_15m
+        self.text_series_1m = text_series_1m
+        self.text_series_15m = text_series_15m
+        self.read_intervals: list[int] = []
+
+    def read_samples(
+        self,
+        *,
+        interval_minutes: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        self.read_intervals.append(interval_minutes)
+        original_numeric = self.numeric_series
+        original_text = self.text_series
+        self.numeric_series = (
+            self.numeric_series_1m if interval_minutes == 1 else self.numeric_series_15m
+        )
+        self.text_series = self.text_series_1m if interval_minutes == 1 else self.text_series_15m
+        try:
+            return super().read_samples(
+                interval_minutes=interval_minutes,
+                start_time=start_time,
+                end_time=end_time,
+                names=names,
+                sources=sources,
+                categories=categories,
+                entity_ids=entity_ids,
+            )
+        finally:
+            self.numeric_series = original_numeric
+            self.text_series = original_text
+
+
 def build_numeric_series(
     *,
     name: str,
@@ -472,3 +528,52 @@ def test_dataset_signal_specs_are_centralized() -> None:
     assert dataset_numeric_signal_spec(ROOM_TEMPERATURE).resample_method == "sample"
     assert dataset_numeric_signal_spec(HP_ELECTRIC_POWER).resample_method == "mean"
     assert dataset_numeric_signal_spec(DEFROST_ACTIVE).resample_method == "window_flag"
+
+
+def test_mpc_dataset_service_falls_back_to_15m_when_1m_coverage_is_partial() -> None:
+    start_time = datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc)
+    end_time = start_time + timedelta(hours=1)
+    reader = CoverageAwareFakeDatasetReader(
+        numeric_series_1m=[
+            build_numeric_series(
+                name=ROOM_TEMPERATURE,
+                unit="°C",
+                start_time=start_time + timedelta(minutes=30),
+                values=[20.3, 20.4],
+                interval_minutes=15,
+            )
+        ],
+        numeric_series_15m=[
+            build_numeric_series(
+                name=ROOM_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[20.0, 20.1, 20.2, 20.3],
+            ),
+            build_numeric_series(
+                name=OUTDOOR_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[5.0, 5.1, 5.2, 5.3],
+            ),
+        ],
+        text_series_1m=[],
+        text_series_15m=[],
+        forecast_series=[],
+        price_series=build_numeric_series(
+            name="electricity_price",
+            unit="EUR/kWh",
+            start_time=start_time,
+            values=[0.25, 0.25, 0.25, 0.25],
+        ),
+    )
+    service = MpcDatasetService(reader, build_settings())
+
+    dataset = service.build_dataset(
+        start_time=start_time,
+        end_time=end_time,
+        interval_minutes=10,
+    )
+
+    assert reader.read_intervals == [1, 15]
+    assert dataset.rows[0].room_temperature_c == 20.0
