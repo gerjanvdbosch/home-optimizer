@@ -657,3 +657,52 @@ def test_mpc_dataset_service_falls_back_to_15m_when_1m_coverage_is_partial() -> 
 
     assert reader.read_intervals == [1, 15]
     assert dataset.rows[0].room_temperature_c == 20.0
+
+
+def test_mpc_dataset_service_overlays_1m_window_flags_on_15m_fallback() -> None:
+    start_time = datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc)
+    end_time = start_time + timedelta(minutes=30)
+    reader = CoverageAwareFakeDatasetReader(
+        numeric_series_1m=[
+            build_numeric_series(
+                name=DEFROST_ACTIVE,
+                unit="bool",
+                start_time=start_time + timedelta(minutes=12),
+                values=[1.0],
+                interval_minutes=1,
+            )
+        ],
+        numeric_series_15m=[
+            build_numeric_series(
+                name=ROOM_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[20.0, 20.1],
+            ),
+            build_numeric_series(
+                name=OUTDOOR_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[5.0, 5.1],
+            ),
+        ],
+        text_series_1m=[],
+        text_series_15m=[],
+        forecast_series=[],
+        price_series=build_numeric_series(
+            name="electricity_price",
+            unit="EUR/kWh",
+            start_time=start_time,
+            values=[0.25, 0.25],
+        ),
+    )
+    service = MpcDatasetService(reader, build_settings())
+
+    dataset = service.build_dataset(
+        start_time=start_time,
+        end_time=end_time,
+        interval_minutes=10,
+    )
+
+    assert reader.read_intervals == [1, 15]
+    assert sum(row.defrost_active for row in dataset.rows) == 1

@@ -251,24 +251,24 @@ class MpcDatasetService:
         requested_names = dataset_numeric_signal_names(source="measurement") + dataset_text_signal_names(
             source="measurement"
         )
-        raw = self.samples_reader.read_samples_1m(
+        raw_1m = self.samples_reader.read_samples_1m(
             start_time=start_time,
             end_time=end_time,
             names=requested_names,
         ).copy()
 
-        if not _raw_frame_covers_range(
-            raw,
+        use_1m_as_primary = _raw_frame_covers_range(
+            raw_1m,
             timestamp_column="timestamp_minute_utc",
             start_time=start_time,
             end_time=end_time,
             source_interval_minutes=1,
-        ):
-            raw = self.samples_reader.read_samples_15m(
-                start_time=start_time,
-                end_time=end_time,
-                names=requested_names,
-            ).copy()
+        )
+        raw = raw_1m if use_1m_as_primary else self.samples_reader.read_samples_15m(
+            start_time=start_time,
+            end_time=end_time,
+            names=requested_names,
+        ).copy()
 
         grid = pd.DataFrame(
             {
@@ -341,6 +341,12 @@ class MpcDatasetService:
             if dataset_numeric_signal_spec(name).resample_method == "window_flag"
         ]
 
+        raw_1m_flags = pd.DataFrame()
+        if not raw_1m.empty and flag_numeric_names:
+            raw_1m_flags = raw_1m.loc[
+                raw_1m["name"].isin(flag_numeric_names)
+            ].copy()
+
         for name in sample_numeric_names:
             signal = raw.loc[raw["name"] == name, ["timestamp_utc", "value_sample"]].dropna()
             if signal.empty:
@@ -364,6 +370,30 @@ class MpcDatasetService:
                 unit="m",
             )
             raw = raw.loc[(raw["bucket_start"] >= start_time) & (raw["bucket_start"] < end_time)]
+            if not raw_1m_flags.empty:
+                raw_1m_flags["timestamp_utc"] = pd.to_datetime(
+                    raw_1m_flags["timestamp_minute_utc"],
+                    utc=True,
+                )
+                raw_1m_flags["value_flag"] = (
+                    raw_1m_flags["last_bool"]
+                    .combine_first(raw_1m_flags["last_real"])
+                    .combine_first(raw_1m_flags["mean_real"])
+                    .combine_first(raw_1m_flags["max_real"])
+                    .combine_first(raw_1m_flags["min_real"])
+                )
+                raw_1m_flags["bucket_start"] = start_time + pd.to_timedelta(
+                    (
+                        (raw_1m_flags["timestamp_utc"] - start_time).dt.total_seconds()
+                        // (interval_minutes * 60)
+                    )
+                    * interval_minutes,
+                    unit="m",
+                )
+                raw_1m_flags = raw_1m_flags.loc[
+                    (raw_1m_flags["bucket_start"] >= start_time)
+                    & (raw_1m_flags["bucket_start"] < end_time)
+                ]
 
         for name in mean_numeric_names:
             signal = raw.loc[raw["name"] == name, ["bucket_start", "value_mean"]].dropna()
@@ -378,7 +408,15 @@ class MpcDatasetService:
             result = result.merge(aggregated, on="timestamp_utc", how="left")
 
         for name in flag_numeric_names:
-            signal = raw.loc[raw["name"] == name, ["bucket_start", "value_flag"]].dropna()
+            signal_frames = [raw.loc[raw["name"] == name, ["bucket_start", "value_flag"]].dropna()]
+            if not use_1m_as_primary and not raw_1m_flags.empty:
+                signal_frames.append(
+                    raw_1m_flags.loc[
+                        raw_1m_flags["name"] == name,
+                        ["bucket_start", "value_flag"],
+                    ].dropna()
+                )
+            signal = pd.concat(signal_frames, ignore_index=True)
             if signal.empty:
                 result[name] = 0
                 continue
