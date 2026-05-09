@@ -13,7 +13,7 @@ from home_optimizer.features.identification import (
 )
 from home_optimizer.features.modeling import (
     RoomModelValidationReport,
-    StoredRoomModelVersion,
+    StoredModelVersion,
 )
 from home_optimizer.features.simulation import RoomSimulationResult
 from home_optimizer.web.schemas import (
@@ -100,7 +100,7 @@ def identification_dataset_response(
 
 
 def train_room_model_response(
-    version: StoredRoomModelVersion,
+    version: StoredModelVersion,
     validation_report: RoomModelValidationReport,
 ) -> TrainRoomModelResponse:
     return TrainRoomModelResponse(

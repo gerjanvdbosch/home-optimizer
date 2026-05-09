@@ -2,19 +2,51 @@ from __future__ import annotations
 
 import numpy as np
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
-from home_optimizer.features.modeling.models import RoomModelConfig, TrainedLinearRoomModel
+from home_optimizer.features.modeling.models import TrainedLinearRoomModel, ValidationConfig
 
 ROOM_ARX_MODEL_KIND = "room_arx"
 
 
-class RoomArxConfig(RoomModelConfig):
+class RoomArxConfig(ValidationConfig):
     model_kind: str = ROOM_ARX_MODEL_KIND
+    room_temperature_lags: list[int] = Field(default_factory=lambda: [0, 1])
+    outdoor_temperature_lags: list[int] = Field(default_factory=lambda: [0])
+    thermal_output_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6])
+    solar_gain_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6, 12, 18])
+    shutter_position_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6])
+    solar_shutter_interaction_lags: list[int] = Field(default_factory=lambda: [0, 1, 3, 6, 12])
+    occupied_flag_lags: list[int] = Field(default_factory=lambda: [0])
+    ridge_alpha: float = Field(default=0.0, ge=0.0)
+    sunny_irradiance_threshold_w_m2: float = Field(default=150.0, ge=0.0)
+    heating_active_threshold_kw: float = Field(default=0.1, ge=0.0)
+    shutters_open_min_pct: float = Field(default=75.0, ge=0.0, le=100.0)
+    shutters_closed_max_pct: float = Field(default=25.0, ge=0.0, le=100.0)
+    sunny_midday_start_hour: int = Field(default=11, ge=0, le=23)
+    sunny_midday_end_hour: int = Field(default=16, ge=1, le=24)
     notes: str = Field(
         default="Autoregressive room model with exogenous thermal, solar, shutter, and occupancy inputs."
     )
+
+    @field_validator(
+        "room_temperature_lags",
+        "outdoor_temperature_lags",
+        "thermal_output_lags",
+        "solar_gain_lags",
+        "shutter_position_lags",
+        "solar_shutter_interaction_lags",
+        "occupied_flag_lags",
+    )
+    @classmethod
+    def _validate_non_negative_int_list(cls, value: list[int]) -> list[int]:
+        ordered = sorted(set(value))
+        if not ordered:
+            raise ValueError("lag lists cannot be empty")
+        if ordered[0] < 0:
+            raise ValueError("lag values must be non-negative")
+        return ordered
 
 
 class RoomArxModel(TrainedLinearRoomModel):
@@ -25,7 +57,7 @@ class RoomArxModel(TrainedLinearRoomModel):
 
 
 class RoomArxTrainer:
-    def max_lag(self, config: RoomModelConfig) -> int:
+    def max_lag(self, config: RoomArxConfig) -> int:
         return max(
             config.room_temperature_lags
             + config.outdoor_temperature_lags
@@ -53,7 +85,7 @@ class RoomArxTrainer:
             return None
         return float(value)
 
-    def feature_specs(self, config: RoomModelConfig) -> list[tuple[str, str, int]]:
+    def feature_specs(self, config: RoomArxConfig) -> list[tuple[str, str, int]]:
         specs: list[tuple[str, str, int]] = []
         specs.extend(
             ("room_temperature_c", f"room_temperature_lag_{lag}", lag)
@@ -97,12 +129,12 @@ class RoomArxTrainer:
             return 0.0
         return None
 
-    def validation_stride_rows(self, config: RoomModelConfig, interval_minutes: int) -> int:
+    def validation_stride_rows(self, config: RoomArxConfig, interval_minutes: int) -> int:
         if config.validation_stride_rows is not None:
             return config.validation_stride_rows
         return max(1, 60 // interval_minutes)
 
-    def segment_definitions(self, config: RoomModelConfig) -> list[tuple[str, str]]:
+    def segment_definitions(self, config: RoomArxConfig) -> list[tuple[str, str]]:
         return [
             ("sunny", f"solar irradiance >= {config.sunny_irradiance_threshold_w_m2:.0f} W/m2"),
             ("heating_active", f"thermal output >= {config.heating_active_threshold_kw:.2f} kW"),
@@ -120,7 +152,7 @@ class RoomArxTrainer:
             ),
         ]
 
-    def row_segments(self, row: MpcDatasetRow, config: RoomModelConfig) -> set[str]:
+    def row_segments(self, row: MpcDatasetRow, config: RoomArxConfig) -> set[str]:
         segments: set[str] = set()
         solar_irradiance = row.solar_irradiance_w_m2 or 0.0
         thermal_output = row.thermal_output_estimate_kw or 0.0
@@ -143,7 +175,7 @@ class RoomArxTrainer:
     def build_training_matrix(
         self,
         rows: list[MpcDatasetRow],
-        config: RoomModelConfig,
+        config: RoomArxConfig,
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         max_lag = self.max_lag(config)
         specs = self.feature_specs(config)
@@ -207,7 +239,7 @@ class RoomArxTrainer:
     def fit(
         self,
         dataset: MpcDataset,
-        config: RoomModelConfig,
+        config: RoomArxConfig,
     ) -> RoomArxModel:
         x_matrix, y_values, feature_names = self.build_training_matrix(dataset.rows, config)
         intercept, coefficients = self.solve_ridge_regression(

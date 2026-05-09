@@ -5,10 +5,10 @@ from sqlalchemy.dialects.sqlite import insert
 
 from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.features.modeling import (
-    LINEAR_ROOM_MODEL_TYPE,
     RoomModelValidationReport,
-    StoredRoomModelVersion,
-    StoredRoomModelVersionSummary,
+    ROOM_ARX_MODEL_KIND,
+    StoredModelVersion,
+    StoredModelVersionSummary,
     TrainedLinearRoomModel,
 )
 from home_optimizer.infrastructure.database.orm_models import ModelVersion
@@ -31,7 +31,7 @@ class ModelVersionRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def save_room_model_version(self, version: StoredRoomModelVersion) -> None:
+    def save_room_model_version(self, version: StoredModelVersion) -> None:
         metric_1h = _metric_by_minutes(version.validation_report, 60)
         metric_6h = _metric_by_minutes(version.validation_report, 360)
         metric_12h = _metric_by_minutes(version.validation_report, 720)
@@ -93,12 +93,12 @@ class ModelVersionRepository:
             )
             session.commit()
 
-    def get_room_model_version(self, model_id: str) -> StoredRoomModelVersion | None:
+    def get_room_model_version(self, model_id: str) -> StoredModelVersion | None:
         with self.database.session() as session:
             row = session.execute(
                 select(ModelVersion).where(
                     ModelVersion.model_id == model_id,
-                    ModelVersion.model_type == LINEAR_ROOM_MODEL_TYPE,
+                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
                 )
             ).scalar_one_or_none()
 
@@ -106,11 +106,11 @@ class ModelVersionRepository:
             return None
         return self._to_room_model_version(row)
 
-    def get_active_room_model_version(self) -> StoredRoomModelVersion | None:
+    def get_active_room_model_version(self) -> StoredModelVersion | None:
         with self.database.session() as session:
             row = session.execute(
                 select(ModelVersion).where(
-                    ModelVersion.model_type == LINEAR_ROOM_MODEL_TYPE,
+                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
                     ModelVersion.is_active == 1,
                 )
             ).scalar_one_or_none()
@@ -119,11 +119,11 @@ class ModelVersionRepository:
             return None
         return self._to_room_model_version(row)
 
-    def list_room_model_versions(self) -> list[StoredRoomModelVersionSummary]:
+    def list_room_model_versions(self) -> list[StoredModelVersionSummary]:
         with self.database.session() as session:
             rows = session.execute(
                 select(ModelVersion)
-                .where(ModelVersion.model_type == LINEAR_ROOM_MODEL_TYPE)
+                .where(ModelVersion.model_type == ROOM_ARX_MODEL_KIND)
                 .order_by(ModelVersion.created_at_utc.desc())
             ).scalars().all()
 
@@ -134,7 +134,7 @@ class ModelVersionRepository:
             row = session.execute(
                 select(ModelVersion).where(
                     ModelVersion.model_id == model_id,
-                    ModelVersion.model_type == LINEAR_ROOM_MODEL_TYPE,
+                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
                 )
             ).scalar_one_or_none()
             if row is None:
@@ -142,7 +142,7 @@ class ModelVersionRepository:
 
             session.execute(
                 update(ModelVersion)
-                .where(ModelVersion.model_type == LINEAR_ROOM_MODEL_TYPE)
+                .where(ModelVersion.model_type == ROOM_ARX_MODEL_KIND)
                 .values(is_active=0)
             )
             session.execute(
@@ -152,8 +152,8 @@ class ModelVersionRepository:
             )
             session.commit()
 
-    def _to_room_model_version(self, row: ModelVersion) -> StoredRoomModelVersion:
-        return StoredRoomModelVersion(
+    def _to_room_model_version(self, row: ModelVersion) -> StoredModelVersion:
+        return StoredModelVersion(
             model_id=row.model_id,
             model_type=row.model_type,
             created_at_utc=parse_datetime(row.created_at_utc),
@@ -169,8 +169,8 @@ class ModelVersionRepository:
     def _to_room_model_version_summary(
         self,
         row: ModelVersion,
-    ) -> StoredRoomModelVersionSummary:
-        return StoredRoomModelVersionSummary(
+    ) -> StoredModelVersionSummary:
+        return StoredModelVersionSummary(
             model_id=row.model_id,
             model_type=row.model_type,
             created_at_utc=parse_datetime(row.created_at_utc),

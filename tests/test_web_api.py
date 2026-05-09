@@ -20,8 +20,9 @@ from home_optimizer.domain import (
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
-    RoomModelConfig,
-    StoredRoomModelVersion,
+    ROOM_ARX_MODEL_KIND,
+    RoomArxConfig,
+    StoredModelVersion,
     TrainedLinearRoomModel,
 )
 from home_optimizer.web import create_app
@@ -69,16 +70,17 @@ class FakeWeatherImportService:
 
 class FakeModelVersionRepository:
     def __init__(self) -> None:
-        self.saved_versions: list[StoredRoomModelVersion] = []
-        self.active_version = StoredRoomModelVersion(
+        self.saved_versions: list[StoredModelVersion] = []
+        self.active_version = StoredModelVersion(
             model_id="room-model-active",
+            model_type=ROOM_ARX_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
             is_active=True,
             model=TrainedLinearRoomModel(
                 trained_from_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
                 trained_to_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
                 interval_minutes=15,
-                config=RoomModelConfig(
+                config=RoomArxConfig(
                     room_temperature_lags=[0],
                     outdoor_temperature_lags=[0],
                     thermal_output_lags=[0],
@@ -105,10 +107,10 @@ class FakeModelVersionRepository:
             validation_report=None,
         )
 
-    def save_room_model_version(self, version: StoredRoomModelVersion) -> None:
+    def save_room_model_version(self, version: StoredModelVersion) -> None:
         self.saved_versions.append(version)
 
-    def get_active_room_model_version(self) -> StoredRoomModelVersion | None:
+    def get_active_room_model_version(self) -> StoredModelVersion | None:
         return self.active_version
 
 
@@ -489,7 +491,7 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["model_id"].startswith("room-model-")
-    assert payload["model_type"] == "linear_room"
+    assert payload["model_type"] == "room_arx"
     assert payload["interval_minutes"] == 15
     assert payload["sample_count"] > 0
     assert payload["is_active"] is True

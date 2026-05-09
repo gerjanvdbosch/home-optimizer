@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from home_optimizer.app import AppSettings
 from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.modeling import (
-    RoomModelConfig,
+    ROOM_ARX_MODEL_KIND,
+    RoomArxConfig,
     RoomModelingService,
-    StoredRoomModelVersion,
+    StoredModelVersion,
 )
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import train_room_model_response
@@ -49,7 +50,7 @@ def create_train_router(settings: AppSettings) -> APIRouter:
             settings,
         )
         modeling_service = RoomModelingService()
-        config = RoomModelConfig(
+        config = RoomArxConfig(
             min_train_rows=min_train_rows,
             training_window_rows=training_window_rows,
             validation_window_rows=validation_window_rows,
@@ -69,8 +70,9 @@ def create_train_router(settings: AppSettings) -> APIRouter:
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
-        version = StoredRoomModelVersion(
+        version = StoredModelVersion(
             model_id=f"room-model-{uuid4().hex[:12]}",
+            model_type=ROOM_ARX_MODEL_KIND,
             created_at_utc=datetime.now(timezone.utc),
             is_active=activate,
             model=model,

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
-from home_optimizer.features.modeling import RoomModelConfig, RoomModelingService
+from home_optimizer.features.modeling import RoomArxConfig, RoomModelingService
 
 
 def build_synthetic_room_dataset(row_count: int = 80) -> MpcDataset:
@@ -53,7 +53,7 @@ def build_synthetic_room_dataset(row_count: int = 80) -> MpcDataset:
 def test_room_modeling_service_fits_linear_room_model_on_dataset() -> None:
     dataset = build_synthetic_room_dataset()
     service = RoomModelingService()
-    config = RoomModelConfig(
+    config = RoomArxConfig(
         room_temperature_lags=[0],
         outdoor_temperature_lags=[0],
         thermal_output_lags=[0],
@@ -87,7 +87,7 @@ def test_room_modeling_service_fits_linear_room_model_on_dataset() -> None:
 def test_room_modeling_service_runs_rolling_recursive_validation() -> None:
     dataset = build_synthetic_room_dataset()
     service = RoomModelingService()
-    config = RoomModelConfig(
+    config = RoomArxConfig(
         room_temperature_lags=[0],
         outdoor_temperature_lags=[0],
         thermal_output_lags=[0],
@@ -121,7 +121,7 @@ def test_room_modeling_service_runs_rolling_recursive_validation() -> None:
 def test_room_modeling_service_improves_24h_sample_count_and_segment_bias_metrics() -> None:
     dataset = build_synthetic_room_dataset(row_count=420)
     service = RoomModelingService()
-    config = RoomModelConfig(
+    config = RoomArxConfig(
         room_temperature_lags=[0],
         outdoor_temperature_lags=[0],
         thermal_output_lags=[0],

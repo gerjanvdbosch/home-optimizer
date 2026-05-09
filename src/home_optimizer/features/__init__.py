@@ -13,12 +13,12 @@ from .identification import (
 )
 from .kpi import DailyKpiService
 from .modeling import (
-    RoomModelConfig,
+    RoomArxConfig,
     RoomModelingService,
     RoomModelValidationReport,
     SegmentValidationReport,
-    StoredRoomModelVersion,
-    StoredRoomModelVersionSummary,
+    StoredModelVersion,
+    StoredModelVersionSummary,
 )
 from .pricing import ElectricityPriceService
 from .simulation import RoomSimulationResult, RoomSimulationService
@@ -33,12 +33,12 @@ __all__ = [
     "IdentificationDatasetRow",
     "IdentificationDatasetService",
     "IdentificationDatasetSummary",
-    "RoomModelConfig",
+    "RoomArxConfig",
     "RoomModelValidationReport",
     "SegmentValidationReport",
     "RoomModelingService",
-    "StoredRoomModelVersion",
-    "StoredRoomModelVersionSummary",
+    "StoredModelVersion",
+    "StoredModelVersionSummary",
     "WeatherImportService",
     "ElectricityPriceService",
     "LiveMeasurement",

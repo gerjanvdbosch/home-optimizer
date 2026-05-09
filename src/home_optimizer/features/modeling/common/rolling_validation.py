@@ -3,7 +3,6 @@ from __future__ import annotations
 from home_optimizer.features.dataset.models import MpcDataset
 from home_optimizer.features.modeling.common.metrics import build_metric
 from home_optimizer.features.modeling.models import (
-    RoomModelConfig,
     RoomModelValidationReport,
     SegmentValidationReport,
     TrainedLinearRoomModel,
@@ -14,7 +13,7 @@ from home_optimizer.features.modeling.models import (
 def rolling_validate_room_model(
     dataset: MpcDataset,
     *,
-    config: RoomModelConfig,
+    config,
     trainer,
 ) -> RoomModelValidationReport:
     rows = dataset.rows

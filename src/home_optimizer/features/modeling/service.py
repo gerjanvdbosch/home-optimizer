@@ -3,11 +3,10 @@ from __future__ import annotations
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.common.rolling_validation import rolling_validate_room_model
 from home_optimizer.features.modeling.models import (
-    RoomModelConfig,
     RoomModelValidationReport,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.modeling.room.arx import ROOM_ARX_TRAINER
+from home_optimizer.features.modeling.room.arx import ROOM_ARX_TRAINER, RoomArxConfig
 
 
 class RoomModelingService:
@@ -18,9 +17,9 @@ class RoomModelingService:
         self,
         dataset: MpcDataset,
         *,
-        config: RoomModelConfig | None = None,
+        config: RoomArxConfig | None = None,
     ) -> TrainedLinearRoomModel:
-        config = config or RoomModelConfig()
+        config = config or RoomArxConfig()
         return self.trainer.fit(dataset, config)
 
     def predict_next_room_temperature(
@@ -59,9 +58,9 @@ class RoomModelingService:
         self,
         dataset: MpcDataset,
         *,
-        config: RoomModelConfig | None = None,
+        config: RoomArxConfig | None = None,
     ) -> RoomModelValidationReport:
-        config = config or RoomModelConfig()
+        config = config or RoomArxConfig()
         return rolling_validate_room_model(
             dataset,
             config=config,

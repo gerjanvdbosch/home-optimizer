@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 
 from home_optimizer.features.modeling import (
     HorizonMetric,
-    RoomModelConfig,
+    ROOM_ARX_MODEL_KIND,
+    RoomArxConfig,
     RoomModelValidationReport,
-    StoredRoomModelVersion,
+    StoredModelVersion,
     TrainedLinearRoomModel,
     ValidationFoldResult,
 )
@@ -21,7 +22,7 @@ def build_model() -> TrainedLinearRoomModel:
         trained_from_utc=datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc),
         trained_to_utc=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
         interval_minutes=10,
-        config=RoomModelConfig(
+        config=RoomArxConfig(
             room_temperature_lags=[0],
             outdoor_temperature_lags=[0],
             thermal_output_lags=[0],
@@ -105,8 +106,9 @@ def test_model_version_repository_round_trips_room_model_versions(tmp_path) -> N
     database.init_schema()
     repository = ModelVersionRepository(database)
 
-    version = StoredRoomModelVersion(
+    version = StoredModelVersion(
         model_id="room-model-v1",
+        model_type=ROOM_ARX_MODEL_KIND,
         created_at_utc=datetime(2026, 5, 11, 9, 0, tzinfo=timezone.utc),
         is_active=True,
         model=build_model(),
@@ -142,8 +144,9 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
     repository = ModelVersionRepository(database)
 
     repository.save_room_model_version(
-        StoredRoomModelVersion(
+        StoredModelVersion(
             model_id="room-model-v1",
+            model_type=ROOM_ARX_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 11, 9, 0, tzinfo=timezone.utc),
             is_active=True,
             model=build_model(),
@@ -151,8 +154,9 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
         )
     )
     repository.save_room_model_version(
-        StoredRoomModelVersion(
+        StoredModelVersion(
             model_id="room-model-v2",
+            model_type=ROOM_ARX_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 11, 10, 0, tzinfo=timezone.utc),
             is_active=False,
             model=build_model().model_copy(
