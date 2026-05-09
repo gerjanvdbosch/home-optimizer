@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
+    DEFROST_ACTIVE,
     DHW_TOP_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
     HP_ELECTRIC_POWER,
@@ -222,3 +223,103 @@ def test_mpc_dataset_service_builds_generic_dataset_rows() -> None:
     assert summary.total_rows == 2
     assert summary.mode_space_rows == 1
     assert summary.mode_off_rows == 1
+
+
+def test_mpc_dataset_service_applies_explicit_resample_semantics() -> None:
+    start_time = datetime(2026, 4, 25, 7, 0, tzinfo=timezone.utc)
+    end_time = start_time + timedelta(minutes=15)
+    service = MpcDatasetService(
+        FakeDatasetDataReader(
+            numeric_series=[
+                build_numeric_series(
+                    name=ROOM_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[20.0, 20.4, 20.8],
+                    interval_minutes=1,
+                ),
+                build_numeric_series(
+                    name=HP_ELECTRIC_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[1.0, 2.0, 3.0],
+                    interval_minutes=1,
+                ),
+                build_numeric_series(
+                    name=PV_OUTPUT_POWER,
+                    unit="kW",
+                    start_time=start_time,
+                    values=[0.0, 1.0, 2.0],
+                    interval_minutes=1,
+                ),
+                build_numeric_series(
+                    name=HP_SUPPLY_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[30.0, 32.0, 34.0],
+                    interval_minutes=1,
+                ),
+                build_numeric_series(
+                    name=HP_RETURN_TEMPERATURE,
+                    unit="°C",
+                    start_time=start_time,
+                    values=[28.0, 29.0, 30.0],
+                    interval_minutes=1,
+                ),
+                build_numeric_series(
+                    name=HP_FLOW,
+                    unit="L/min",
+                    start_time=start_time,
+                    values=[10.0, 10.0, 10.0],
+                    interval_minutes=1,
+                ),
+                build_numeric_series(
+                    name=DEFROST_ACTIVE,
+                    unit="bool",
+                    start_time=start_time,
+                    values=[0.0, 1.0, 0.0],
+                    interval_minutes=1,
+                ),
+            ],
+            text_series=[
+                build_text_series(
+                    name=HP_MODE,
+                    start_time=start_time,
+                    values=["space_heating", "space_heating", "space_heating"],
+                    interval_minutes=1,
+                )
+            ],
+            forecast_series=[
+                build_numeric_series(
+                    name=GTI_LIVING_ROOM_WINDOWS,
+                    unit="W/m2",
+                    start_time=start_time,
+                    values=[100.0, 200.0, 300.0],
+                    interval_minutes=1,
+                )
+            ],
+            price_series=build_numeric_series(
+                name="electricity_price",
+                unit="EUR/kWh",
+                start_time=start_time,
+                values=[0.25],
+            ),
+        ),
+        build_settings(),
+    )
+
+    dataset = service.build_dataset(
+        start_time=start_time,
+        end_time=end_time,
+        interval_minutes=15,
+    )
+
+    row = dataset.rows[0]
+    assert row.room_temperature_c == 20.0
+    assert row.hp_electric_power_kw == 2.0
+    assert row.pv_output_power_kw == 1.0
+    assert row.supply_temperature_c == 32.0
+    assert row.return_temperature_c == 29.0
+    assert row.flow_l_min == 10.0
+    assert row.solar_irradiance_w_m2 == 200.0
+    assert row.defrost_active == 1

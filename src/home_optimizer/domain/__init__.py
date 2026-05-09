@@ -71,10 +71,14 @@ from .series_transforms import (
     build_daily_target_band_series,
     build_thermal_output_series,
     latest_value_at,
+    latest_text_value_at,
+    mean_value_between,
     merge_numeric_with_fallback,
     merge_text_with_fallback,
     shutter_open_fraction_at,
+    sum_value_between,
     upsample_series_forward_fill,
+    window_values_between,
 )
 from .target_schedule import TemperatureTargetWindow
 from .time import ensure_utc, normalize_utc_timestamp
@@ -158,6 +162,8 @@ __all__ = [
     "empty_electricity_price_series",
     "ensure_utc",
     "latest_value_at",
+    "latest_text_value_at",
+    "mean_value_between",
     "merge_numeric_with_fallback",
     "merge_text_with_fallback",
     "normalize_utc_timestamp",
@@ -165,6 +171,8 @@ __all__ = [
     "price_intervals_from_series",
     "resolve_daily_price_series",
     "shutter_open_fraction_at",
+    "sum_value_between",
     "upsample_series_forward_fill",
     "utc_now",
+    "window_values_between",
 ]

@@ -17,6 +17,63 @@ def latest_value_at(points: list[NumericPoint], timestamp: str) -> float | None:
     return latest
 
 
+def latest_text_value_at(points: list[TextPoint], timestamp: str) -> str | None:
+    latest: str | None = None
+    for point in points:
+        if point.timestamp > timestamp:
+            break
+        latest = point.value
+    return latest
+
+
+def window_values_between(
+    points: list[NumericPoint],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> list[float]:
+    values: list[float] = []
+    for point in points:
+        point_time = parse_datetime(point.timestamp)
+        if point_time < window_start:
+            continue
+        if point_time >= window_end:
+            break
+        values.append(point.value)
+    return values
+
+
+def mean_value_between(
+    points: list[NumericPoint],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> float | None:
+    values = window_values_between(
+        points,
+        window_start=window_start,
+        window_end=window_end,
+    )
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def sum_value_between(
+    points: list[NumericPoint],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> float:
+    return sum(
+        window_values_between(
+            points,
+            window_start=window_start,
+            window_end=window_end,
+        )
+    )
+
+
 def shutter_open_fraction_at(points: list[NumericPoint], timestamp: str) -> float:
     position = latest_value_at(points, timestamp)
     if position is None:

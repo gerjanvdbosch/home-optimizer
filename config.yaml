@@ -32,7 +32,7 @@ map:
   - addon_config:rw
 
 options:
-  history_import_max_days_back: 10
+  history_import_max_days_back: 92
 
   # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
   # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West

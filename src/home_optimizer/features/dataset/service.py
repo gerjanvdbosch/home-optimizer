@@ -33,6 +33,8 @@ from home_optimizer.domain import (
     build_thermal_output_series,
     ensure_utc,
     latest_value_at,
+    latest_text_value_at,
+    mean_value_between,
     normalize_utc_timestamp,
     shutter_open_fraction_at,
 )
@@ -51,6 +53,28 @@ _MODE_DHW_TOKENS = ("dhw", "sww")
 _MODE_OFF_TOKENS = ("off", "idle", "standby", "none")
 _MIN_PLAUSIBLE_COP = 1.0
 _MAX_PLAUSIBLE_COP = 8.0
+_SAMPLED_NUMERIC_NAMES = frozenset(
+    {
+        ROOM_TEMPERATURE,
+        OUTDOOR_TEMPERATURE,
+        DHW_TOP_TEMPERATURE,
+        DHW_BOTTOM_TEMPERATURE,
+        SHUTTER_LIVING_ROOM,
+        THERMOSTAT_SETPOINT,
+    }
+)
+_MEAN_RESAMPLED_NUMERIC_NAMES = frozenset(
+    {
+        HP_ELECTRIC_POWER,
+        PV_OUTPUT_POWER,
+        P1_NET_POWER,
+        HP_SUPPLY_TEMPERATURE,
+        HP_RETURN_TEMPERATURE,
+        HP_FLOW,
+        GTI_LIVING_ROOM_WINDOWS,
+    }
+)
+_WINDOW_FLAG_NAMES = frozenset({DEFROST_ACTIVE, BOOSTER_HEATER_ACTIVE})
 
 
 def _series_by_name(series_list: list[NumericSeries]) -> dict[str, NumericSeries]:
@@ -218,6 +242,41 @@ def _latest_numeric_value(
     return latest_value_at(series_by_name.get(name, _empty_numeric_series()).points, timestamp)
 
 
+def _mean_numeric_value(
+    series_by_name: dict[str, NumericSeries],
+    name: str,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> float | None:
+    series = series_by_name.get(name)
+    if series is None:
+        return None
+    return mean_value_between(
+        series.points,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+
+def _window_positive_sum(
+    series_by_name: dict[str, NumericSeries],
+    name: str,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> float:
+    series = series_by_name.get(name)
+    if series is None:
+        return 0.0
+
+    return sum(
+        point.value
+        for point in series.points
+        if window_start <= parse_datetime(point.timestamp) < window_end and point.value > 0
+    )
+
+
 def _window_has_positive_value(
     series_by_name: dict[str, NumericSeries],
     name: str,
@@ -225,20 +284,26 @@ def _window_has_positive_value(
     window_start: datetime,
     window_end: datetime,
 ) -> int:
+    return int(
+        _window_positive_sum(
+            series_by_name,
+            name,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        > 0
+    )
+
+
+def _latest_text_value(
+    series_by_name: dict[str, TextSeries],
+    name: str,
+    timestamp: str,
+) -> str | None:
     series = series_by_name.get(name)
     if series is None:
-        return 0
-
-    for point in series.points:
-        point_time = parse_datetime(point.timestamp)
-        if point_time < window_start:
-            continue
-        if point_time >= window_end:
-            break
-        if point.value > 0:
-            return 1
-
-    return 0
+        return None
+    return latest_text_value_at(series.points, timestamp)
 
 
 def _validate_row(
@@ -290,6 +355,51 @@ class MpcDatasetService:
     def __init__(self, reader: DatasetDataReader, settings: AppSettings) -> None:
         self.reader = reader
         self.settings = settings
+
+    def _sample_numeric(
+        self,
+        series_by_name: dict[str, NumericSeries],
+        name: str,
+        *,
+        timestamp: str,
+    ) -> float | None:
+        if name not in _SAMPLED_NUMERIC_NAMES:
+            raise ValueError(f"Unsupported sampled numeric series: {name}")
+        return _latest_numeric_value(series_by_name, name, timestamp)
+
+    def _mean_numeric(
+        self,
+        series_by_name: dict[str, NumericSeries],
+        name: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> float | None:
+        if name not in _MEAN_RESAMPLED_NUMERIC_NAMES:
+            raise ValueError(f"Unsupported mean-resampled numeric series: {name}")
+        return _mean_numeric_value(
+            series_by_name,
+            name,
+            window_start=window_start,
+            window_end=window_end,
+        )
+
+    def _window_flag(
+        self,
+        series_by_name: dict[str, NumericSeries],
+        name: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> int:
+        if name not in _WINDOW_FLAG_NAMES:
+            raise ValueError(f"Unsupported window-flag series: {name}")
+        return _window_has_positive_value(
+            series_by_name,
+            name,
+            window_start=window_start,
+            window_end=window_end,
+        )
 
     def build_dataset(
         self,
@@ -387,76 +497,101 @@ class MpcDatasetService:
         while cursor < end_time_utc:
             timestamp = normalize_utc_timestamp(cursor)
             next_cursor = min(cursor + interval, end_time_utc)
-            room_temperature = _latest_numeric_value(
+            room_temperature = self._sample_numeric(
                 numeric_series,
                 ROOM_TEMPERATURE,
-                timestamp,
+                timestamp=timestamp,
             )
-            outdoor_temperature = _latest_numeric_value(
+            outdoor_temperature = self._sample_numeric(
                 numeric_series,
                 OUTDOOR_TEMPERATURE,
-                timestamp,
+                timestamp=timestamp,
             )
-            dhw_top_temperature = _latest_numeric_value(
+            dhw_top_temperature = self._sample_numeric(
                 numeric_series,
                 DHW_TOP_TEMPERATURE,
-                timestamp,
+                timestamp=timestamp,
             )
-            dhw_bottom_temperature = _latest_numeric_value(
+            dhw_bottom_temperature = self._sample_numeric(
                 numeric_series,
                 DHW_BOTTOM_TEMPERATURE,
-                timestamp,
+                timestamp=timestamp,
             )
-            hp_electric_power = _latest_numeric_value(numeric_series, HP_ELECTRIC_POWER, timestamp)
-            pv_output_power = _latest_numeric_value(numeric_series, PV_OUTPUT_POWER, timestamp)
-            net_power = _latest_numeric_value(numeric_series, P1_NET_POWER, timestamp)
-            defrost_active = _window_has_positive_value(
+            hp_electric_power = self._mean_numeric(
+                numeric_series,
+                HP_ELECTRIC_POWER,
+                window_start=cursor,
+                window_end=next_cursor,
+            )
+            pv_output_power = self._mean_numeric(
+                numeric_series,
+                PV_OUTPUT_POWER,
+                window_start=cursor,
+                window_end=next_cursor,
+            )
+            net_power = self._mean_numeric(
+                numeric_series,
+                P1_NET_POWER,
+                window_start=cursor,
+                window_end=next_cursor,
+            )
+            defrost_active = self._window_flag(
                 numeric_series,
                 DEFROST_ACTIVE,
                 window_start=cursor,
                 window_end=next_cursor,
             )
-            booster_heater_active = _window_has_positive_value(
+            booster_heater_active = self._window_flag(
                 numeric_series,
                 BOOSTER_HEATER_ACTIVE,
                 window_start=cursor,
                 window_end=next_cursor,
             )
-            shutter_position = _latest_numeric_value(numeric_series, SHUTTER_LIVING_ROOM, timestamp)
-            thermostat_setpoint = _latest_numeric_value(
+            shutter_position = self._sample_numeric(
+                numeric_series,
+                SHUTTER_LIVING_ROOM,
+                timestamp=timestamp,
+            )
+            thermostat_setpoint = self._sample_numeric(
                 numeric_series,
                 THERMOSTAT_SETPOINT,
-                timestamp,
+                timestamp=timestamp,
             )
-            supply_temperature = _latest_numeric_value(
+            supply_temperature = self._mean_numeric(
                 numeric_series,
                 HP_SUPPLY_TEMPERATURE,
-                timestamp,
+                window_start=cursor,
+                window_end=next_cursor,
             )
-            return_temperature = _latest_numeric_value(
+            return_temperature = self._mean_numeric(
                 numeric_series,
                 HP_RETURN_TEMPERATURE,
-                timestamp,
+                window_start=cursor,
+                window_end=next_cursor,
             )
-            flow_l_min = _latest_numeric_value(numeric_series, HP_FLOW, timestamp)
-            thermal_output_estimate = latest_value_at(thermal_output_series.points, timestamp)
-            solar_irradiance = _latest_numeric_value(
+            flow_l_min = self._mean_numeric(
+                numeric_series,
+                HP_FLOW,
+                window_start=cursor,
+                window_end=next_cursor,
+            )
+            thermal_output_estimate = mean_value_between(
+                thermal_output_series.points,
+                window_start=cursor,
+                window_end=next_cursor,
+            )
+            solar_irradiance = self._mean_numeric(
                 forecast_series,
                 GTI_LIVING_ROOM_WINDOWS,
-                timestamp,
+                window_start=cursor,
+                window_end=next_cursor,
             )
             price_import = latest_value_at(price_series.points, timestamp)
             room_target_temperature = latest_value_at(room_target.points, timestamp)
             room_target_min_temperature = latest_value_at(room_target_min.points, timestamp)
             room_target_max_temperature = latest_value_at(room_target_max.points, timestamp)
 
-            hp_mode_raw = None
-            mode_series = text_series.get(HP_MODE)
-            if mode_series is not None:
-                for point in mode_series.points:
-                    if point.timestamp > timestamp:
-                        break
-                    hp_mode_raw = point.value
+            hp_mode_raw = _latest_text_value(text_series, HP_MODE, timestamp)
 
             mode_space, mode_dhw, mode_off = _classify_hp_mode(hp_mode_raw)
             hp_delta_t = None
