@@ -46,8 +46,9 @@ def create_train_router(settings: AppSettings) -> APIRouter:
         activate: ActivateQuery = False,
     ) -> TrainRoomModelResponse:
         dataset_service = MpcDatasetService(
-            container.time_series_read_repository,
+            container.dataset_repository,
             settings,
+            support_reader=container.time_series_read_repository,
         )
         modeling_service = RoomModelingService()
         config = RoomArxConfig(

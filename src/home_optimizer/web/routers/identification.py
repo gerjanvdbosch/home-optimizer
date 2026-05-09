@@ -29,6 +29,7 @@ def create_identification_router(settings: AppSettings) -> APIRouter:
         interval_minutes: IntervalQuery = 15,
     ) -> IdentificationDatasetResponse:
         service = IdentificationDatasetService(
+            container.dataset_repository,
             container.time_series_read_repository,
             settings,
         )

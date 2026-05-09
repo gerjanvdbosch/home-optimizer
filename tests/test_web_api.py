@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from time import sleep
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -299,6 +300,152 @@ class FakeTimeSeriesReadRepository:
         )
 
 
+class FakeDatasetRepository:
+    def read_samples(
+        self,
+        *,
+        interval_minutes: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        base_start = (start_time or datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)).astimezone(
+            ZoneInfo("UTC")
+        )
+        points = [
+            base_start + timedelta(minutes=15 * index)
+            for index in range(
+                max(
+                    1,
+                    int(
+                        (
+                            ((end_time or (base_start + timedelta(days=1))) - base_start)
+                            .total_seconds()
+                        )
+                        // 900
+                    ),
+                )
+            )
+        ]
+        requested = set(names or [])
+        rows: list[dict[str, object]] = []
+
+        def include(name: str) -> bool:
+            return not requested or name in requested
+
+        for index, timestamp in enumerate(points):
+            timestamp_text = timestamp.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            if include("room_temperature"):
+                rows.append(_sample_row(timestamp_text, "room_temperature", mean_real=20.5))
+            if include("outdoor_temperature"):
+                rows.append(_sample_row(timestamp_text, "outdoor_temperature", mean_real=12.1))
+            if include("thermostat_setpoint"):
+                rows.append(
+                    _sample_row(
+                        timestamp_text,
+                        "thermostat_setpoint",
+                        mean_real=20.0 if index < 48 else 21.0,
+                    )
+                )
+            if include("dhw_top_temperature"):
+                rows.append(_sample_row(timestamp_text, "dhw_top_temperature", mean_real=48.0))
+            if include("dhw_bottom_temperature"):
+                rows.append(_sample_row(timestamp_text, "dhw_bottom_temperature", mean_real=42.0))
+            if include("hp_electric_power"):
+                rows.append(
+                    _sample_row(
+                        timestamp_text,
+                        "hp_electric_power",
+                        mean_real=1.5 if index < 48 else 0.0,
+                        unit="kW",
+                    )
+                )
+            if include("p1_net_power"):
+                rows.append(
+                    _sample_row(
+                        timestamp_text,
+                        "p1_net_power",
+                        mean_real=2.0 if index < 48 else -0.5,
+                        unit="kW",
+                    )
+                )
+            if include("pv_output_power"):
+                rows.append(
+                    _sample_row(
+                        timestamp_text,
+                        "pv_output_power",
+                        mean_real=0.0 if index < 48 else 1.0,
+                        unit="kW",
+                    )
+                )
+            if include("hp_flow"):
+                rows.append(_sample_row(timestamp_text, "hp_flow", mean_real=0.0, unit="L/min"))
+            if include("hp_supply_temperature"):
+                rows.append(
+                    _sample_row(timestamp_text, "hp_supply_temperature", mean_real=30.0, unit="°C")
+                )
+            if include("hp_return_temperature"):
+                rows.append(
+                    _sample_row(timestamp_text, "hp_return_temperature", mean_real=30.0, unit="°C")
+                )
+            if include("shutter_living_room"):
+                rows.append(_sample_row(timestamp_text, "shutter_living_room", mean_real=50.0, unit="%"))
+            if include("defrost_active"):
+                rows.append(_sample_row(timestamp_text, "defrost_active", last_bool=0, unit="bool"))
+            if include("booster_heater_active"):
+                rows.append(_sample_row(timestamp_text, "booster_heater_active", last_bool=0, unit="bool"))
+
+        if include("hp_mode"):
+            rows.append(
+                _sample_row(
+                    "2026-04-25T11:50:00+00:00",
+                    "hp_mode",
+                    last_text="heat",
+                    unit=None,
+                )
+            )
+
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            timestamp_column = "timestamp_minute_utc" if interval_minutes == 1 else "timestamp_15m_utc"
+            frame = frame.loc[frame[timestamp_column] >= start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
+        if end_time is not None:
+            timestamp_column = "timestamp_minute_utc" if interval_minutes == 1 else "timestamp_15m_utc"
+            frame = frame.loc[frame[timestamp_column] < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
+        return frame.reset_index(drop=True)
+
+
+def _sample_row(
+    timestamp_text: str,
+    name: str,
+    *,
+    mean_real: float | None = None,
+    last_text: str | None = None,
+    last_bool: int | None = None,
+    unit: str | None = "°C",
+) -> dict[str, object]:
+    return {
+        "timestamp_15m_utc": timestamp_text,
+        "name": name,
+        "source": "test",
+        "entity_id": f"sensor.{name}",
+        "category": "measurement",
+        "unit": unit,
+        "mean_real": mean_real,
+        "min_real": mean_real,
+        "max_real": mean_real,
+        "last_real": mean_real,
+        "last_text": last_text,
+        "last_bool": last_bool,
+        "sample_count": 1,
+    }
+
+
 class FakeContainer:
     def __init__(
         self,
@@ -307,6 +454,7 @@ class FakeContainer:
     ) -> None:
         self.history_import_service = history_import_service
         self.home_assistant = home_assistant
+        self.dataset_repository = FakeDatasetRepository()
         self.time_series_read_repository = FakeTimeSeriesReadRepository()
         self.weather_import_service = FakeWeatherImportService()
         self.model_version_repository = FakeModelVersionRepository()
@@ -756,13 +904,13 @@ def test_baseline_kpi_summary_endpoint_uses_default_date_range() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["number_of_days"] == 87
-    assert payload["number_of_valid_days"] == 87
+    assert payload["number_of_days"] == 26
+    assert payload["number_of_valid_days"] == 26
     assert payload["mean_hp_electric_kwh_per_day"] is not None
     assert payload["mean_electricity_cost_eur_per_day"] is not None
     assert payload["mean_room_temperature_mae_c"] is not None
     assert payload["mean_solar_irradiance_w_m2"] == 220.0
-    assert payload["mean_shutter_open_pct"] == 50.0
+    assert payload["mean_shutter_open_pct"] is None
     assert payload["total_comfort_undershoot_degree_hours"] >= 0.0
     assert payload["total_comfort_overshoot_while_heating_degree_hours"] >= 0.0
     assert payload["total_comfort_overshoot_passive_degree_hours"] >= 0.0

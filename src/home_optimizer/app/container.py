@@ -24,6 +24,7 @@ from home_optimizer.features.telemetry.service import TelemetryService
 from home_optimizer.infrastructure.database.electricity_price_repository import (
     ElectricityPriceRepository,
 )
+from home_optimizer.infrastructure.database.dataset_repository import DatasetRepository
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.model_version_repository import (
     ModelVersionRepository,
@@ -53,6 +54,7 @@ class AppContainer:
     history_import_service: HistoryImportService
     weather_import_service: WeatherImportService
     telemetry_repository: TimeSeriesWriteRepository
+    dataset_repository: DatasetRepository
     time_series_read_repository: TimeSeriesReadRepository
     telemetry_service: TelemetryService
     telemetry_scheduler: TelemetryScheduler
@@ -91,6 +93,7 @@ def build_container(
     )
     history_import_repository = TimeSeriesWriteRepository(database, source=history_source)
     telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
+    dataset_repository = DatasetRepository(database)
     time_series_read_repository = TimeSeriesReadRepository(database)
     electricity_price_repository = ElectricityPriceRepository(database)
     forecast_repository = ForecastRepository(database)
@@ -148,6 +151,7 @@ def build_container(
         history_import_service=history_import_service,
         weather_import_service=weather_import_service,
         telemetry_repository=telemetry_repository,
+        dataset_repository=dataset_repository,
         time_series_read_repository=time_series_read_repository,
         telemetry_service=telemetry_service,
         telemetry_scheduler=telemetry_scheduler,

@@ -43,7 +43,8 @@ def create_simulation_router(settings: AppSettings) -> APIRouter:
 
         try:
             result = RoomSimulationService(settings).simulate_room(
-                reader=container.time_series_read_repository,
+                samples_reader=container.dataset_repository,
+                support_reader=container.time_series_read_repository,
                 model_id=active_version.model_id,
                 model=active_version.model,
                 anchor_time=anchor_time,

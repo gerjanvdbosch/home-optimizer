@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
+import pandas as pd
+
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain import (
     BOOSTER_HEATER_ACTIVE,
@@ -28,27 +30,21 @@ from home_optimizer.domain import (
     NumericPoint,
     NumericSeries,
     TemperatureTargetWindow,
-    TextSeries,
     build_daily_price_series,
-    build_thermal_output_series,
+    build_daily_target_band_series,
     dataset_numeric_signal_names,
     dataset_numeric_signal_spec,
     dataset_text_signal_names,
-    dataset_text_signal_spec,
     ensure_utc,
     latest_value_at,
-    latest_text_value_at,
-    mean_value_between,
     normalize_utc_timestamp,
-    shutter_open_fraction_at,
 )
 from home_optimizer.domain.pricing import (
     DEFAULT_DYNAMIC_PRICE_SOURCE,
     DEFAULT_FIXED_PRICE_SOURCE,
 )
-from home_optimizer.domain.time import parse_datetime
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow, MpcDatasetSummary
-from home_optimizer.features.dataset.ports import DatasetDataReader
+from home_optimizer.features.dataset.ports import DatasetSampleFrameReader, DatasetSupportReader
 
 _OCCUPIED_MARGIN_C = 0.25
 _DHW_DRAW_DROP_THRESHOLD_C = 0.75
@@ -57,18 +53,11 @@ _MODE_DHW_TOKENS = ("dhw", "sww")
 _MODE_OFF_TOKENS = ("off", "idle", "standby", "none")
 _MIN_PLAUSIBLE_COP = 1.0
 _MAX_PLAUSIBLE_COP = 8.0
-
-
-def _series_by_name(series_list: list[NumericSeries]) -> dict[str, NumericSeries]:
-    return {series.name: series for series in series_list}
-
-
-def _text_series_by_name(series_list: list[TextSeries]) -> dict[str, TextSeries]:
-    return {series.name: series for series in series_list}
+_THERMAL_FACTOR_KW_PER_LMIN_DELTA_C = 4186.0 / 60000.0
 
 
 def _resolve_price_series(
-    reader: DatasetDataReader,
+    reader: DatasetSupportReader,
     settings: AppSettings,
     *,
     start_time: datetime,
@@ -99,65 +88,8 @@ def _resolve_price_series(
     return NumericSeries(name="electricity_price", unit="EUR/kWh", points=[])
 
 
-def _active_target_window(
-    schedule: list[TemperatureTargetWindow],
-    timestamp: datetime,
-) -> TemperatureTargetWindow | None:
-    if not schedule:
-        return None
-
-    ordered_schedule = sorted(schedule, key=lambda window: window.time)
-    local_timestamp = timestamp.astimezone(timestamp.tzinfo)
-    active_window = ordered_schedule[-1]
-
-    for window in ordered_schedule:
-        change_time = datetime.combine(
-            local_timestamp.date(),
-            window.time,
-            tzinfo=local_timestamp.tzinfo,
-        )
-        if change_time <= local_timestamp:
-            active_window = window
-            continue
-        break
-
-    return active_window
-
-
-def _build_target_series(
-    schedule: list[TemperatureTargetWindow],
-    *,
-    start_time: datetime,
-    end_time: datetime,
-    interval_minutes: int,
-    series_name: str,
-    extractor: Callable[[TemperatureTargetWindow], float],
-) -> NumericSeries:
-    if interval_minutes <= 0:
-        raise ValueError("interval_minutes must be greater than zero")
-    if end_time <= start_time or not schedule:
-        return NumericSeries(name=series_name, unit="°C", points=[])
-
-    interval = timedelta(minutes=interval_minutes)
-    points: list[NumericPoint] = []
-    cursor = start_time
-
-    while cursor < end_time:
-        active_window = _active_target_window(schedule, cursor)
-        if active_window is not None:
-            points.append(
-                NumericPoint(
-                    timestamp=normalize_utc_timestamp(cursor),
-                    value=extractor(active_window),
-                )
-            )
-        cursor += interval
-
-    return NumericSeries(name=series_name, unit="°C", points=points)
-
-
 def _classify_hp_mode(mode: str | None) -> tuple[int, int, int]:
-    if mode is None:
+    if mode is None or not isinstance(mode, str):
         return 0, 0, 1
 
     normalized = mode.strip().lower()
@@ -187,18 +119,6 @@ def _occupied_flag(
     return int(target_temperature > minimum_target + _OCCUPIED_MARGIN_C)
 
 
-def _detect_dhw_draw(
-    current_value: float | None,
-    previous_value: float | None,
-    *,
-    mode_dhw: int,
-) -> int:
-    return int(
-        _dhw_draw_proxy_c(current_value, previous_value, mode_dhw=mode_dhw)
-        >= _DHW_DRAW_DROP_THRESHOLD_C
-    )
-
-
 def _dhw_draw_proxy_c(
     current_value: float | None,
     previous_value: float | None,
@@ -212,82 +132,22 @@ def _dhw_draw_proxy_c(
     return max(0.0, previous_value - current_value)
 
 
-def _empty_numeric_series() -> NumericSeries:
-    return NumericSeries(name="", unit=None, points=[])
-
-
-def _latest_numeric_value(
-    series_by_name: dict[str, NumericSeries],
-    name: str,
-    timestamp: str,
-) -> float | None:
-    return latest_value_at(series_by_name.get(name, _empty_numeric_series()).points, timestamp)
-
-
-def _mean_numeric_value(
-    series_by_name: dict[str, NumericSeries],
-    name: str,
+def _detect_dhw_draw(
+    current_value: float | None,
+    previous_value: float | None,
     *,
-    window_start: datetime,
-    window_end: datetime,
-) -> float | None:
-    series = series_by_name.get(name)
-    if series is None:
-        return None
-    return mean_value_between(
-        series.points,
-        window_start=window_start,
-        window_end=window_end,
-    )
-
-
-def _window_positive_sum(
-    series_by_name: dict[str, NumericSeries],
-    name: str,
-    *,
-    window_start: datetime,
-    window_end: datetime,
-) -> float:
-    series = series_by_name.get(name)
-    if series is None:
-        return 0.0
-
-    return sum(
-        point.value
-        for point in series.points
-        if window_start <= parse_datetime(point.timestamp) < window_end and point.value > 0
-    )
-
-
-def _window_has_positive_value(
-    series_by_name: dict[str, NumericSeries],
-    name: str,
-    *,
-    window_start: datetime,
-    window_end: datetime,
+    mode_dhw: int,
 ) -> int:
     return int(
-        _window_positive_sum(
-            series_by_name,
-            name,
-            window_start=window_start,
-            window_end=window_end,
-        )
-        > 0
+        _dhw_draw_proxy_c(current_value, previous_value, mode_dhw=mode_dhw)
+        >= _DHW_DRAW_DROP_THRESHOLD_C
     )
 
 
-def _latest_text_value(
-    series_by_name: dict[str, TextSeries],
-    name: str,
-    timestamp: str,
-) -> str | None:
-    if dataset_text_signal_spec(name).resample_method != "sample":
-        raise ValueError(f"Unsupported sampled text series: {name}")
-    series = series_by_name.get(name)
-    if series is None:
+def _optional_string(value: object) -> str | None:
+    if value is None or pd.isna(value):
         return None
-    return latest_text_value_at(series.points, timestamp)
+    return str(value)
 
 
 def _validate_row(
@@ -335,55 +195,276 @@ def _validate_row(
     return room_valid, dhw_valid, cop_valid, reasons
 
 
+def _numeric_series_points_frame(series_list: list[NumericSeries]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for series in series_list:
+        for point in series.points:
+            rows.append(
+                {
+                    "name": series.name,
+                    "timestamp_utc": pd.Timestamp(point.timestamp, tz="UTC"),
+                    "value": float(point.value),
+                }
+            )
+    if not rows:
+        return pd.DataFrame(columns=["name", "timestamp_utc", "value"])
+    return pd.DataFrame(rows).sort_values(["name", "timestamp_utc"]).reset_index(drop=True)
+
+
+def _source_interval_minutes(target_interval_minutes: int) -> int:
+    return 1 if target_interval_minutes < 15 else 15
+
+
 class MpcDatasetService:
-    def __init__(self, reader: DatasetDataReader, settings: AppSettings) -> None:
-        self.reader = reader
+    def __init__(
+        self,
+        samples_reader: DatasetSampleFrameReader,
+        settings: AppSettings,
+        support_reader: DatasetSupportReader | None = None,
+    ) -> None:
+        self.samples_reader = samples_reader
         self.settings = settings
+        self.support_reader = support_reader or samples_reader
 
-    def _sample_numeric(
+    def _measurement_frame(
         self,
-        series_by_name: dict[str, NumericSeries],
-        name: str,
         *,
-        timestamp: str,
-    ) -> float | None:
-        if dataset_numeric_signal_spec(name).resample_method != "sample":
-            raise ValueError(f"Unsupported sampled numeric series: {name}")
-        return _latest_numeric_value(series_by_name, name, timestamp)
-
-    def _mean_numeric(
-        self,
-        series_by_name: dict[str, NumericSeries],
-        name: str,
-        *,
-        window_start: datetime,
-        window_end: datetime,
-    ) -> float | None:
-        if dataset_numeric_signal_spec(name).resample_method != "mean":
-            raise ValueError(f"Unsupported mean-resampled numeric series: {name}")
-        return _mean_numeric_value(
-            series_by_name,
-            name,
-            window_start=window_start,
-            window_end=window_end,
+        start_time: datetime,
+        end_time: datetime,
+        interval_minutes: int,
+    ) -> pd.DataFrame:
+        requested_names = dataset_numeric_signal_names(source="measurement") + dataset_text_signal_names(
+            source="measurement"
         )
+        raw = self.samples_reader.read_samples(
+            interval_minutes=_source_interval_minutes(interval_minutes),
+            start_time=start_time,
+            end_time=end_time,
+            names=requested_names,
+        ).copy()
 
-    def _window_flag(
-        self,
-        series_by_name: dict[str, NumericSeries],
-        name: str,
-        *,
-        window_start: datetime,
-        window_end: datetime,
-    ) -> int:
-        if dataset_numeric_signal_spec(name).resample_method != "window_flag":
-            raise ValueError(f"Unsupported window-flag series: {name}")
-        return _window_has_positive_value(
-            series_by_name,
-            name,
-            window_start=window_start,
-            window_end=window_end,
+        grid = pd.DataFrame(
+            {
+                "timestamp_utc": pd.date_range(
+                    start=start_time,
+                    end=end_time,
+                    freq=f"{interval_minutes}min",
+                    inclusive="left",
+                    tz="UTC",
+                )
+            }
         )
+        if grid.empty:
+            return grid
+
+        if raw.empty:
+            return grid
+
+        timestamp_column = (
+            "timestamp_minute_utc" if "timestamp_minute_utc" in raw.columns else "timestamp_15m_utc"
+        )
+        raw["timestamp_utc"] = pd.to_datetime(raw[timestamp_column], utc=True)
+        raw = raw.sort_values(["timestamp_utc", "name", "source"]).reset_index(drop=True)
+
+        numeric_cols = ["mean_real", "min_real", "max_real", "last_real", "last_bool"]
+        for column in numeric_cols:
+            if column in raw.columns:
+                raw[column] = pd.to_numeric(raw[column], errors="coerce")
+
+        if "mean_real" in raw.columns:
+            raw["value_mean"] = (
+                raw["mean_real"]
+                .combine_first(raw["last_real"])
+                .combine_first(raw["max_real"])
+                .combine_first(raw["min_real"])
+                .combine_first(raw["last_bool"])
+            )
+        if "last_real" in raw.columns:
+            raw["value_sample"] = (
+                raw["last_real"]
+                .combine_first(raw["mean_real"])
+                .combine_first(raw["max_real"])
+                .combine_first(raw["min_real"])
+                .combine_first(raw["last_bool"])
+            )
+        if "last_bool" in raw.columns:
+            raw["value_flag"] = (
+                raw["last_bool"]
+                .combine_first(raw["last_real"])
+                .combine_first(raw["mean_real"])
+                .combine_first(raw["max_real"])
+                .combine_first(raw["min_real"])
+            )
+
+        result = grid.copy()
+
+        sample_numeric_names = [
+            name
+            for name in dataset_numeric_signal_names(source="measurement")
+            if dataset_numeric_signal_spec(name).resample_method == "sample"
+        ]
+        mean_numeric_names = [
+            name
+            for name in dataset_numeric_signal_names(source="measurement")
+            if dataset_numeric_signal_spec(name).resample_method == "mean"
+        ]
+        flag_numeric_names = [
+            name
+            for name in dataset_numeric_signal_names(source="measurement")
+            if dataset_numeric_signal_spec(name).resample_method == "window_flag"
+        ]
+
+        for name in sample_numeric_names:
+            signal = raw.loc[raw["name"] == name, ["timestamp_utc", "value_sample"]].dropna()
+            if signal.empty:
+                result[name] = pd.NA
+                continue
+            signal = signal.drop_duplicates(subset=["timestamp_utc"], keep="last").sort_values(
+                "timestamp_utc"
+            )
+            merged = pd.merge_asof(
+                result[["timestamp_utc"]],
+                signal.rename(columns={"value_sample": name}),
+                on="timestamp_utc",
+                direction="backward",
+            )
+            result[name] = merged[name]
+
+        if mean_numeric_names or flag_numeric_names:
+            raw["bucket_start"] = start_time + pd.to_timedelta(
+                ((raw["timestamp_utc"] - start_time).dt.total_seconds() // (interval_minutes * 60))
+                * interval_minutes,
+                unit="m",
+            )
+            raw = raw.loc[(raw["bucket_start"] >= start_time) & (raw["bucket_start"] < end_time)]
+
+        for name in mean_numeric_names:
+            signal = raw.loc[raw["name"] == name, ["bucket_start", "value_mean"]].dropna()
+            if signal.empty:
+                result[name] = pd.NA
+                continue
+            aggregated = (
+                signal.groupby("bucket_start", as_index=False)["value_mean"].mean().rename(
+                    columns={"bucket_start": "timestamp_utc", "value_mean": name}
+                )
+            )
+            result = result.merge(aggregated, on="timestamp_utc", how="left")
+
+        for name in flag_numeric_names:
+            signal = raw.loc[raw["name"] == name, ["bucket_start", "value_flag"]].dropna()
+            if signal.empty:
+                result[name] = 0
+                continue
+            aggregated = (
+                signal.groupby("bucket_start", as_index=False)["value_flag"]
+                .max()
+                .rename(columns={"bucket_start": "timestamp_utc", "value_flag": name})
+            )
+            result = result.merge(aggregated, on="timestamp_utc", how="left")
+            result[name] = result[name].fillna(0).gt(0).astype(int)
+
+        for name in dataset_text_signal_names(source="measurement"):
+            signal = raw.loc[raw["name"] == name, ["timestamp_utc", "last_text"]].dropna()
+            if signal.empty:
+                result[name] = pd.NA
+                continue
+            signal = signal.drop_duplicates(subset=["timestamp_utc"], keep="last").sort_values(
+                "timestamp_utc"
+            )
+            merged = pd.merge_asof(
+                result[["timestamp_utc"]],
+                signal.rename(columns={"last_text": name}),
+                on="timestamp_utc",
+                direction="backward",
+            )
+            result[name] = merged[name]
+
+        return result
+
+    def _forecast_frame(
+        self,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        interval_minutes: int,
+    ) -> pd.DataFrame:
+        grid = pd.DataFrame(
+            {
+                "timestamp_utc": pd.date_range(
+                    start=start_time,
+                    end=end_time,
+                    freq=f"{interval_minutes}min",
+                    inclusive="left",
+                    tz="UTC",
+                )
+            }
+        )
+        names = dataset_numeric_signal_names(source="forecast")
+        if not names:
+            return grid
+
+        forecast_frame = _numeric_series_points_frame(
+            self.support_reader.read_forecast_series(
+                names=names,
+                start_time=start_time,
+                end_time=end_time,
+            )
+        )
+        if forecast_frame.empty:
+            return grid
+
+        forecast_frame["bucket_start"] = start_time + pd.to_timedelta(
+            (
+                (forecast_frame["timestamp_utc"] - start_time).dt.total_seconds()
+                // (interval_minutes * 60)
+            )
+            * interval_minutes,
+            unit="m",
+        )
+        forecast_frame = forecast_frame.loc[
+            (forecast_frame["bucket_start"] >= start_time)
+            & (forecast_frame["bucket_start"] < end_time)
+        ]
+
+        result = grid
+        for name in names:
+            signal = forecast_frame.loc[
+                forecast_frame["name"] == name, ["bucket_start", "value"]
+            ].dropna()
+            if signal.empty:
+                result[name] = pd.NA
+                continue
+            aggregated = (
+                signal.groupby("bucket_start", as_index=False)["value"].mean().rename(
+                    columns={"bucket_start": "timestamp_utc", "value": name}
+                )
+            )
+            result = result.merge(aggregated, on="timestamp_utc", how="left")
+
+        return result
+
+    def _series_value_at_grid(
+        self,
+        series: NumericSeries,
+        grid: pd.DataFrame,
+        column_name: str,
+    ) -> pd.Series:
+        if not series.points:
+            return pd.Series([pd.NA] * len(grid), index=grid.index, dtype="object")
+
+        frame = pd.DataFrame(
+            {
+                "timestamp_utc": [pd.Timestamp(point.timestamp, tz="UTC") for point in series.points],
+                column_name: [point.value for point in series.points],
+            }
+        ).sort_values("timestamp_utc")
+        merged = pd.merge_asof(
+            grid[["timestamp_utc"]],
+            frame,
+            on="timestamp_utc",
+            direction="backward",
+        )
+        return merged[column_name]
 
     def build_dataset(
         self,
@@ -399,255 +480,239 @@ class MpcDatasetService:
         if end_time_utc <= start_time_utc:
             raise ValueError("end_time must be after start_time")
 
-        numeric_series = _series_by_name(
-            self.reader.read_series(
-                names=dataset_numeric_signal_names(source="measurement"),
-                start_time=start_time_utc,
-                end_time=end_time_utc,
-            )
+        measurement_frame = self._measurement_frame(
+            start_time=start_time_utc,
+            end_time=end_time_utc,
+            interval_minutes=interval_minutes,
         )
-        text_series = _text_series_by_name(
-            self.reader.read_text_series(
-                names=dataset_text_signal_names(source="measurement"),
-                start_time=start_time_utc,
-                end_time=end_time_utc,
-            )
+        forecast_frame = self._forecast_frame(
+            start_time=start_time_utc,
+            end_time=end_time_utc,
+            interval_minutes=interval_minutes,
         )
-        forecast_series = _series_by_name(
-            self.reader.read_forecast_series(
-                names=dataset_numeric_signal_names(source="forecast"),
-                start_time=start_time_utc,
-                end_time=end_time_utc,
-            )
+        frame = measurement_frame.merge(
+            forecast_frame,
+            on="timestamp_utc",
+            how="left",
+            suffixes=("", "_forecast"),
         )
 
+        grid = frame[["timestamp_utc"]].copy()
+
         price_series = _resolve_price_series(
-            self.reader,
+            self.support_reader,
             self.settings,
             start_time=start_time_utc,
             end_time=end_time_utc,
             interval_minutes=interval_minutes,
         )
-        room_target = _build_target_series(
+        room_target, room_target_min, room_target_max = build_daily_target_band_series(
             self.settings.room_target,
             start_time=start_time_utc,
             end_time=end_time_utc,
+            target_name=ROOM_TARGET_TEMPERATURE,
+            minimum_name=ROOM_TARGET_MIN_TEMPERATURE,
+            maximum_name=ROOM_TARGET_MAX_TEMPERATURE,
             interval_minutes=interval_minutes,
-            series_name=ROOM_TARGET_TEMPERATURE,
-            extractor=lambda window: window.target,
-        )
-        room_target_min = _build_target_series(
-            self.settings.room_target,
-            start_time=start_time_utc,
-            end_time=end_time_utc,
-            interval_minutes=interval_minutes,
-            series_name=ROOM_TARGET_MIN_TEMPERATURE,
-            extractor=lambda window: window.minimum,
-        )
-        room_target_max = _build_target_series(
-            self.settings.room_target,
-            start_time=start_time_utc,
-            end_time=end_time_utc,
-            interval_minutes=interval_minutes,
-            series_name=ROOM_TARGET_MAX_TEMPERATURE,
-            extractor=lambda window: window.maximum,
-        )
-        thermal_output_series = build_thermal_output_series(
-            numeric_series.get(HP_FLOW),
-            numeric_series.get(HP_SUPPLY_TEMPERATURE),
-            numeric_series.get(HP_RETURN_TEMPERATURE),
         )
 
-        interval = timedelta(minutes=interval_minutes)
-        rows: list[MpcDatasetRow] = []
-        previous_dhw_top: float | None = None
-        cursor = start_time_utc
+        frame["price_import_eur_kwh"] = self._series_value_at_grid(
+            price_series,
+            grid,
+            "price_import_eur_kwh",
+        )
+        frame["room_target_temperature_c"] = self._series_value_at_grid(
+            room_target,
+            grid,
+            "room_target_temperature_c",
+        )
+        frame["room_target_min_temperature_c"] = self._series_value_at_grid(
+            room_target_min,
+            grid,
+            "room_target_min_temperature_c",
+        )
+        frame["room_target_max_temperature_c"] = self._series_value_at_grid(
+            room_target_max,
+            grid,
+            "room_target_max_temperature_c",
+        )
 
-        while cursor < end_time_utc:
-            timestamp = normalize_utc_timestamp(cursor)
-            next_cursor = min(cursor + interval, end_time_utc)
-            room_temperature = self._sample_numeric(
-                numeric_series,
-                ROOM_TEMPERATURE,
-                timestamp=timestamp,
-            )
-            outdoor_temperature = self._sample_numeric(
-                numeric_series,
-                OUTDOOR_TEMPERATURE,
-                timestamp=timestamp,
-            )
-            dhw_top_temperature = self._sample_numeric(
-                numeric_series,
-                DHW_TOP_TEMPERATURE,
-                timestamp=timestamp,
-            )
-            dhw_bottom_temperature = self._sample_numeric(
-                numeric_series,
-                DHW_BOTTOM_TEMPERATURE,
-                timestamp=timestamp,
-            )
-            hp_electric_power = self._mean_numeric(
-                numeric_series,
-                HP_ELECTRIC_POWER,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            pv_output_power = self._mean_numeric(
-                numeric_series,
-                PV_OUTPUT_POWER,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            net_power = self._mean_numeric(
-                numeric_series,
-                P1_NET_POWER,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            defrost_active = self._window_flag(
-                numeric_series,
-                DEFROST_ACTIVE,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            booster_heater_active = self._window_flag(
-                numeric_series,
-                BOOSTER_HEATER_ACTIVE,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            shutter_position = self._sample_numeric(
-                numeric_series,
-                SHUTTER_LIVING_ROOM,
-                timestamp=timestamp,
-            )
-            thermostat_setpoint = self._sample_numeric(
-                numeric_series,
-                THERMOSTAT_SETPOINT,
-                timestamp=timestamp,
-            )
-            supply_temperature = self._mean_numeric(
-                numeric_series,
-                HP_SUPPLY_TEMPERATURE,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            return_temperature = self._mean_numeric(
-                numeric_series,
-                HP_RETURN_TEMPERATURE,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            flow_l_min = self._mean_numeric(
-                numeric_series,
-                HP_FLOW,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            thermal_output_estimate = mean_value_between(
-                thermal_output_series.points,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            solar_irradiance = self._mean_numeric(
-                forecast_series,
-                GTI_LIVING_ROOM_WINDOWS,
-                window_start=cursor,
-                window_end=next_cursor,
-            )
-            price_import = latest_value_at(price_series.points, timestamp)
-            room_target_temperature = latest_value_at(room_target.points, timestamp)
-            room_target_min_temperature = latest_value_at(room_target_min.points, timestamp)
-            room_target_max_temperature = latest_value_at(room_target_max.points, timestamp)
+        frame["hp_mode_raw"] = frame.get(HP_MODE)
+        mode_values = frame["hp_mode_raw"].map(_classify_hp_mode)
+        frame["mode_space"] = mode_values.map(lambda item: item[0])
+        frame["mode_dhw"] = mode_values.map(lambda item: item[1])
+        frame["mode_off"] = mode_values.map(lambda item: item[2])
 
-            hp_mode_raw = _latest_text_value(text_series, HP_MODE, timestamp)
+        frame["hp_delta_t_c"] = frame[HP_SUPPLY_TEMPERATURE] - frame[HP_RETURN_TEMPERATURE]
+        frame["thermal_output_estimate_kw"] = (
+            frame[HP_FLOW] * frame["hp_delta_t_c"] * _THERMAL_FACTOR_KW_PER_LMIN_DELTA_C
+        )
+        frame.loc[frame["thermal_output_estimate_kw"] < 0, "thermal_output_estimate_kw"] = 0.0
 
-            mode_space, mode_dhw, mode_off = _classify_hp_mode(hp_mode_raw)
-            hp_delta_t = None
-            if supply_temperature is not None and return_temperature is not None:
-                hp_delta_t = supply_temperature - return_temperature
+        frame["cop_estimate"] = (
+            frame["thermal_output_estimate_kw"] / frame[HP_ELECTRIC_POWER]
+        )
+        frame.loc[frame[HP_ELECTRIC_POWER].isna() | (frame[HP_ELECTRIC_POWER] <= 0), "cop_estimate"] = pd.NA
 
-            cop_estimate = None
-            if (
-                thermal_output_estimate is not None
-                and hp_electric_power is not None
-                and hp_electric_power > 0
-            ):
-                cop_estimate = thermal_output_estimate / hp_electric_power
+        shutter_fraction = frame[SHUTTER_LIVING_ROOM].clip(lower=0, upper=100) / 100.0
+        shutter_fraction = shutter_fraction.where(frame[SHUTTER_LIVING_ROOM].notna(), 1.0)
+        frame["solar_gain_proxy_w_m2"] = frame[GTI_LIVING_ROOM_WINDOWS] * shutter_fraction
+        frame["price_export_eur_kwh"] = _price_export_value(self.settings)
 
-            solar_gain_proxy = None
-            shutter_fraction = shutter_open_fraction_at(
-                numeric_series.get(SHUTTER_LIVING_ROOM, _empty_numeric_series()).points,
-                timestamp,
+        frame["occupied_flag"] = frame["room_target_temperature_c"].map(
+            lambda target: _occupied_flag(float(target) if pd.notna(target) else None, self.settings.room_target)
+        )
+
+        previous_dhw_top = frame[DHW_TOP_TEMPERATURE].shift(1)
+        frame["dhw_draw_proxy_c"] = [
+            _dhw_draw_proxy_c(
+                float(current) if pd.notna(current) else None,
+                float(previous) if pd.notna(previous) else None,
+                mode_dhw=int(mode_dhw),
             )
-            if solar_irradiance is not None:
-                solar_gain_proxy = solar_irradiance * shutter_fraction
-
-            room_valid, dhw_valid, cop_valid, exclusion_reasons = _validate_row(
-                mode_space=mode_space,
-                mode_dhw=mode_dhw,
-                mode_off=mode_off,
-                defrost_active=defrost_active,
-                booster_heater_active=booster_heater_active,
-                flow_l_min=flow_l_min,
-                thermal_output_estimate=thermal_output_estimate,
-                cop_estimate=cop_estimate,
-            )
-            dhw_draw_proxy = _dhw_draw_proxy_c(
-                dhw_top_temperature,
+            for current, previous, mode_dhw in zip(
+                frame[DHW_TOP_TEMPERATURE],
                 previous_dhw_top,
-                mode_dhw=mode_dhw,
+                frame["mode_dhw"],
+                strict=False,
             )
+        ]
+        frame["dhw_draw_detected"] = [
+            _detect_dhw_draw(
+                float(current) if pd.notna(current) else None,
+                float(previous) if pd.notna(previous) else None,
+                mode_dhw=int(mode_dhw),
+            )
+            for current, previous, mode_dhw in zip(
+                frame[DHW_TOP_TEMPERATURE],
+                previous_dhw_top,
+                frame["mode_dhw"],
+                strict=False,
+            )
+        ]
 
+        rows: list[MpcDatasetRow] = []
+        for record in frame.to_dict(orient="records"):
+            room_valid, dhw_valid, cop_valid, exclusion_reasons = _validate_row(
+                mode_space=int(record["mode_space"]),
+                mode_dhw=int(record["mode_dhw"]),
+                mode_off=int(record["mode_off"]),
+                defrost_active=int(record.get(DEFROST_ACTIVE, 0) or 0),
+                booster_heater_active=int(record.get(BOOSTER_HEATER_ACTIVE, 0) or 0),
+                flow_l_min=float(record[HP_FLOW]) if pd.notna(record.get(HP_FLOW)) else None,
+                thermal_output_estimate=(
+                    float(record["thermal_output_estimate_kw"])
+                    if pd.notna(record.get("thermal_output_estimate_kw"))
+                    else None
+                ),
+                cop_estimate=(
+                    float(record["cop_estimate"]) if pd.notna(record.get("cop_estimate")) else None
+                ),
+            )
             rows.append(
                 MpcDatasetRow(
-                    timestamp_utc=cursor,
-                    room_temperature_c=room_temperature,
-                    outdoor_temperature_c=outdoor_temperature,
-                    dhw_top_temperature_c=dhw_top_temperature,
-                    dhw_bottom_temperature_c=dhw_bottom_temperature,
-                    hp_electric_power_kw=hp_electric_power,
-                    hp_mode_raw=hp_mode_raw,
-                    mode_space=mode_space,
-                    mode_dhw=mode_dhw,
-                    mode_off=mode_off,
-                    defrost_active=defrost_active,
-                    booster_heater_active=booster_heater_active,
-                    pv_output_power_kw=pv_output_power,
-                    net_power_kw=net_power,
-                    shutter_position_pct=shutter_position,
-                    thermostat_setpoint_c=thermostat_setpoint,
-                    room_target_temperature_c=room_target_temperature,
-                    room_target_min_temperature_c=room_target_min_temperature,
-                    room_target_max_temperature_c=room_target_max_temperature,
-                    supply_temperature_c=supply_temperature,
-                    return_temperature_c=return_temperature,
-                    flow_l_min=flow_l_min,
-                    hp_delta_t_c=hp_delta_t,
-                    thermal_output_estimate_kw=thermal_output_estimate,
-                    cop_estimate=cop_estimate,
-                    solar_irradiance_w_m2=solar_irradiance,
-                    solar_gain_proxy_w_m2=solar_gain_proxy,
-                    price_import_eur_kwh=price_import,
-                    price_export_eur_kwh=_price_export_value(self.settings),
-                    occupied_flag=_occupied_flag(
-                        room_target_temperature,
-                        self.settings.room_target,
+                    timestamp_utc=record["timestamp_utc"].to_pydatetime(),
+                    room_temperature_c=(
+                        float(record[ROOM_TEMPERATURE]) if pd.notna(record.get(ROOM_TEMPERATURE)) else None
                     ),
-                    dhw_draw_proxy_c=dhw_draw_proxy,
-                    dhw_draw_detected=_detect_dhw_draw(
-                        dhw_top_temperature,
-                        previous_dhw_top,
-                        mode_dhw=mode_dhw,
+                    outdoor_temperature_c=(
+                        float(record[OUTDOOR_TEMPERATURE]) if pd.notna(record.get(OUTDOOR_TEMPERATURE)) else None
                     ),
+                    dhw_top_temperature_c=(
+                        float(record[DHW_TOP_TEMPERATURE]) if pd.notna(record.get(DHW_TOP_TEMPERATURE)) else None
+                    ),
+                    dhw_bottom_temperature_c=(
+                        float(record[DHW_BOTTOM_TEMPERATURE])
+                        if pd.notna(record.get(DHW_BOTTOM_TEMPERATURE))
+                        else None
+                    ),
+                    hp_electric_power_kw=(
+                        float(record[HP_ELECTRIC_POWER]) if pd.notna(record.get(HP_ELECTRIC_POWER)) else None
+                    ),
+                    hp_mode_raw=_optional_string(record.get("hp_mode_raw")),
+                    mode_space=int(record["mode_space"]),
+                    mode_dhw=int(record["mode_dhw"]),
+                    mode_off=int(record["mode_off"]),
+                    defrost_active=int(record.get(DEFROST_ACTIVE, 0) or 0),
+                    booster_heater_active=int(record.get(BOOSTER_HEATER_ACTIVE, 0) or 0),
+                    pv_output_power_kw=(
+                        float(record[PV_OUTPUT_POWER]) if pd.notna(record.get(PV_OUTPUT_POWER)) else None
+                    ),
+                    net_power_kw=(
+                        float(record[P1_NET_POWER]) if pd.notna(record.get(P1_NET_POWER)) else None
+                    ),
+                    shutter_position_pct=(
+                        float(record[SHUTTER_LIVING_ROOM])
+                        if pd.notna(record.get(SHUTTER_LIVING_ROOM))
+                        else None
+                    ),
+                    thermostat_setpoint_c=(
+                        float(record[THERMOSTAT_SETPOINT])
+                        if pd.notna(record.get(THERMOSTAT_SETPOINT))
+                        else None
+                    ),
+                    room_target_temperature_c=(
+                        float(record["room_target_temperature_c"])
+                        if pd.notna(record.get("room_target_temperature_c"))
+                        else None
+                    ),
+                    room_target_min_temperature_c=(
+                        float(record["room_target_min_temperature_c"])
+                        if pd.notna(record.get("room_target_min_temperature_c"))
+                        else None
+                    ),
+                    room_target_max_temperature_c=(
+                        float(record["room_target_max_temperature_c"])
+                        if pd.notna(record.get("room_target_max_temperature_c"))
+                        else None
+                    ),
+                    supply_temperature_c=(
+                        float(record[HP_SUPPLY_TEMPERATURE])
+                        if pd.notna(record.get(HP_SUPPLY_TEMPERATURE))
+                        else None
+                    ),
+                    return_temperature_c=(
+                        float(record[HP_RETURN_TEMPERATURE])
+                        if pd.notna(record.get(HP_RETURN_TEMPERATURE))
+                        else None
+                    ),
+                    flow_l_min=float(record[HP_FLOW]) if pd.notna(record.get(HP_FLOW)) else None,
+                    hp_delta_t_c=(
+                        float(record["hp_delta_t_c"]) if pd.notna(record.get("hp_delta_t_c")) else None
+                    ),
+                    thermal_output_estimate_kw=(
+                        float(record["thermal_output_estimate_kw"])
+                        if pd.notna(record.get("thermal_output_estimate_kw"))
+                        else None
+                    ),
+                    cop_estimate=(
+                        float(record["cop_estimate"]) if pd.notna(record.get("cop_estimate")) else None
+                    ),
+                    solar_irradiance_w_m2=(
+                        float(record[GTI_LIVING_ROOM_WINDOWS])
+                        if pd.notna(record.get(GTI_LIVING_ROOM_WINDOWS))
+                        else None
+                    ),
+                    solar_gain_proxy_w_m2=(
+                        float(record["solar_gain_proxy_w_m2"])
+                        if pd.notna(record.get("solar_gain_proxy_w_m2"))
+                        else None
+                    ),
+                    price_import_eur_kwh=(
+                        float(record["price_import_eur_kwh"])
+                        if pd.notna(record.get("price_import_eur_kwh"))
+                        else None
+                    ),
+                    price_export_eur_kwh=float(record["price_export_eur_kwh"]),
+                    occupied_flag=int(record["occupied_flag"]),
+                    dhw_draw_proxy_c=float(record["dhw_draw_proxy_c"]),
+                    dhw_draw_detected=int(record["dhw_draw_detected"]),
                     is_valid_for_room_identification=room_valid,
                     is_valid_for_dhw_identification=dhw_valid,
                     is_valid_for_cop_identification=cop_valid,
                     exclusion_reasons=exclusion_reasons,
                 )
             )
-            previous_dhw_top = dhw_top_temperature
-            cursor += interval
 
         return MpcDataset(
             interval_minutes=interval_minutes,

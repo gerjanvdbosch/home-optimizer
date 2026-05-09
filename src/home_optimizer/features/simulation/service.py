@@ -22,7 +22,8 @@ class RoomSimulationService:
     def simulate_room(
         self,
         *,
-        reader,
+        samples_reader,
+        support_reader,
         model_id: str,
         model: TrainedLinearRoomModel,
         anchor_time: datetime,
@@ -43,7 +44,11 @@ class RoomSimulationService:
         start_time = anchor_time_utc - (interval * max_lag)
         end_time = anchor_time_utc + (interval * (horizon_steps + 1))
 
-        dataset = MpcDatasetService(reader, self.settings).build_dataset(
+        dataset = MpcDatasetService(
+            samples_reader,
+            self.settings,
+            support_reader=support_reader,
+        ).build_dataset(
             start_time=start_time,
             end_time=end_time,
             interval_minutes=model.interval_minutes,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
+
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
     DEFROST_ACTIVE,
@@ -44,8 +46,72 @@ class FakeDatasetDataReader:
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [series for series in self.numeric_series if series.name in names]
 
-    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
-        return [series for series in self.text_series if series.name in names]
+    def read_samples(
+        self,
+        *,
+        interval_minutes: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
+        allowed_names = set(names or [])
+
+        for series in self.numeric_series:
+            if allowed_names and series.name not in allowed_names:
+                continue
+            for point in series.points:
+                rows.append(
+                    {
+                        "timestamp_minute_utc": point.timestamp,
+                        "name": series.name,
+                        "source": "test",
+                        "entity_id": f"sensor.{series.name}",
+                        "category": "measurement",
+                        "unit": series.unit,
+                        "mean_real": point.value,
+                        "min_real": point.value,
+                        "max_real": point.value,
+                        "last_real": point.value,
+                        "last_text": None,
+                        "last_bool": None,
+                        "sample_count": 1,
+                    }
+                )
+
+        for series in self.text_series:
+            if allowed_names and series.name not in allowed_names:
+                continue
+            for point in series.points:
+                rows.append(
+                    {
+                        "timestamp_minute_utc": point.timestamp,
+                        "name": series.name,
+                        "source": "test",
+                        "entity_id": f"sensor.{series.name}",
+                        "category": "measurement",
+                        "unit": None,
+                        "mean_real": None,
+                        "min_real": None,
+                        "max_real": None,
+                        "last_real": None,
+                        "last_text": point.value,
+                        "last_bool": None,
+                        "sample_count": 1,
+                    }
+                )
+
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            frame = frame.loc[frame["timestamp_minute_utc"] >= normalize_utc_timestamp(start_time)]
+        if end_time is not None:
+            frame = frame.loc[frame["timestamp_minute_utc"] < normalize_utc_timestamp(end_time)]
+        return frame.reset_index(drop=True)
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [series for series in self.forecast_series if series.name in names]

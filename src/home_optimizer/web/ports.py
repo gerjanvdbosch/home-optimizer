@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+import pandas as pd
+
 from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.modeling import StoredModelVersion
@@ -67,6 +69,20 @@ class ModelVersionWriter(Protocol):
     def get_active_room_model_version(self) -> StoredModelVersion | None: ...
 
 
+class DatasetFrameReader(Protocol):
+    def read_samples(
+        self,
+        *,
+        interval_minutes: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame: ...
+
+
 class WebAppContainer(Protocol):
     @property
     def home_assistant(self) -> ClosableGateway: ...
@@ -76,6 +92,9 @@ class WebAppContainer(Protocol):
 
     @property
     def time_series_read_repository(self) -> DashboardDataReader: ...
+
+    @property
+    def dataset_repository(self) -> DatasetFrameReader: ...
 
     @property
     def telemetry_scheduler(self) -> TelemetrySchedulerRunner: ...
