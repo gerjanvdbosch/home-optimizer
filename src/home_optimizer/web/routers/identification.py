@@ -30,7 +30,6 @@ def create_identification_router(settings: AppSettings) -> APIRouter:
     ) -> IdentificationDatasetResponse:
         service = IdentificationDatasetService(
             container.dataset_repository,
-            container.time_series_read_repository,
             settings,
         )
         dataset = service.build_dataset(

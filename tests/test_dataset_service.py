@@ -26,6 +26,7 @@ from home_optimizer.domain import (
     dataset_numeric_signal_spec,
     normalize_utc_timestamp,
 )
+from home_optimizer.domain.time import parse_datetime
 from home_optimizer.features.dataset import MpcDatasetService
 
 
@@ -116,6 +117,41 @@ class FakeDatasetDataReader:
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [series for series in self.forecast_series if series.name in names]
 
+    def read_forecast_values(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_at_start_time: datetime | None = None,
+        created_at_end_time: datetime | None = None,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
+        allowed_names = set(names or [])
+        for series in self.forecast_series:
+            if allowed_names and series.name not in allowed_names:
+                continue
+            for point in series.points:
+                rows.append(
+                    {
+                        "created_at_utc": normalize_utc_timestamp(start_time or datetime.now(timezone.utc)),
+                        "forecast_time_utc": point.timestamp,
+                        "name": series.name,
+                        "source": "test",
+                        "unit": series.unit,
+                        "value": point.value,
+                    }
+                )
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            frame = frame.loc[frame["forecast_time_utc"] >= normalize_utc_timestamp(start_time)]
+        if end_time is not None:
+            frame = frame.loc[frame["forecast_time_utc"] < normalize_utc_timestamp(end_time)]
+        return frame.reset_index(drop=True)
+
     def read_electricity_price_series(
         self,
         start_time,
@@ -125,6 +161,43 @@ class FakeDatasetDataReader:
         interval_minutes=15,
     ) -> NumericSeries:
         return self.price_series
+
+    def read_electricity_price_intervals(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
+        ordered_points = self.price_series.points
+        for index, point in enumerate(ordered_points):
+            interval_end = (
+                ordered_points[index + 1].timestamp
+                if index + 1 < len(ordered_points)
+                else normalize_utc_timestamp(
+                    parse_datetime(point.timestamp) + timedelta(minutes=15)
+                )
+            )
+            rows.append(
+                {
+                    "name": self.price_series.name,
+                    "start_time_utc": point.timestamp,
+                    "end_time_utc": interval_end,
+                    "source": "fixed_pricing",
+                    "unit": self.price_series.unit,
+                    "value": point.value,
+                }
+            )
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            frame = frame.loc[frame["end_time_utc"] > normalize_utc_timestamp(start_time)]
+        if end_time is not None:
+            frame = frame.loc[frame["start_time_utc"] < normalize_utc_timestamp(end_time)]
+        return frame.reset_index(drop=True)
 
 
 def build_numeric_series(

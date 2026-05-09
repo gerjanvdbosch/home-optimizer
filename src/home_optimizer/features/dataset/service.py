@@ -36,15 +36,17 @@ from home_optimizer.domain import (
     dataset_numeric_signal_spec,
     dataset_text_signal_names,
     ensure_utc,
-    latest_value_at,
     normalize_utc_timestamp,
 )
 from home_optimizer.domain.pricing import (
     DEFAULT_DYNAMIC_PRICE_SOURCE,
     DEFAULT_FIXED_PRICE_SOURCE,
+    PriceInterval,
+    price_series_from_intervals,
 )
+from home_optimizer.domain.time import parse_datetime
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow, MpcDatasetSummary
-from home_optimizer.features.dataset.ports import DatasetSampleFrameReader, DatasetSupportReader
+from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 
 _OCCUPIED_MARGIN_C = 0.25
 _DHW_DRAW_DROP_THRESHOLD_C = 0.75
@@ -57,25 +59,42 @@ _THERMAL_FACTOR_KW_PER_LMIN_DELTA_C = 4186.0 / 60000.0
 
 
 def _resolve_price_series(
-    reader: DatasetSupportReader,
+    reader: DatasetSampleFrameReader,
     settings: AppSettings,
     *,
     start_time: datetime,
     end_time: datetime,
     interval_minutes: int,
 ) -> NumericSeries:
-    fetched_series = reader.read_electricity_price_series(
+    source = (
+        DEFAULT_DYNAMIC_PRICE_SOURCE
+        if settings.electricity_pricing.mode == "dynamic"
+        else DEFAULT_FIXED_PRICE_SOURCE
+    )
+    raw_intervals = reader.read_electricity_price_intervals(
         start_time=start_time,
         end_time=end_time,
-        source=(
-            DEFAULT_DYNAMIC_PRICE_SOURCE
-            if settings.electricity_pricing.mode == "dynamic"
-            else DEFAULT_FIXED_PRICE_SOURCE
-        ),
-        interval_minutes=interval_minutes,
+        names=["electricity_price"],
+        sources=[source],
     )
-    if fetched_series.points:
-        return fetched_series
+    if not raw_intervals.empty:
+        intervals = [
+            PriceInterval(
+                start_time_utc=parse_datetime(row["start_time_utc"]),
+                end_time_utc=parse_datetime(row["end_time_utc"]),
+                source=str(row["source"]),
+                name=str(row["name"]),
+                unit=str(row["unit"]),
+                value=float(row["value"]),
+            )
+            for row in raw_intervals.to_dict(orient="records")
+        ]
+        return price_series_from_intervals(
+            intervals,
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=interval_minutes,
+        )
 
     if isinstance(settings.electricity_pricing, FixedPricing):
         return build_daily_price_series(
@@ -216,15 +235,9 @@ def _source_interval_minutes(target_interval_minutes: int) -> int:
 
 
 class MpcDatasetService:
-    def __init__(
-        self,
-        samples_reader: DatasetSampleFrameReader,
-        settings: AppSettings,
-        support_reader: DatasetSupportReader | None = None,
-    ) -> None:
+    def __init__(self, samples_reader: DatasetSampleFrameReader, settings: AppSettings) -> None:
         self.samples_reader = samples_reader
         self.settings = settings
-        self.support_reader = support_reader or samples_reader
 
     def _measurement_frame(
         self,
@@ -403,16 +416,21 @@ class MpcDatasetService:
         if not names:
             return grid
 
-        forecast_frame = _numeric_series_points_frame(
-            self.support_reader.read_forecast_series(
-                names=names,
-                start_time=start_time,
-                end_time=end_time,
-            )
-        )
+        forecast_frame = self.samples_reader.read_forecast_values(
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+        ).copy()
         if forecast_frame.empty:
+            for name in names:
+                grid[name] = pd.NA
             return grid
 
+        forecast_frame["timestamp_utc"] = pd.to_datetime(
+            forecast_frame["forecast_time_utc"],
+            utc=True,
+        )
+        forecast_frame["value"] = pd.to_numeric(forecast_frame["value"], errors="coerce")
         forecast_frame["bucket_start"] = start_time + pd.to_timedelta(
             (
                 (forecast_frame["timestamp_utc"] - start_time).dt.total_seconds()
@@ -500,7 +518,7 @@ class MpcDatasetService:
         grid = frame[["timestamp_utc"]].copy()
 
         price_series = _resolve_price_series(
-            self.support_reader,
+            self.samples_reader,
             self.settings,
             start_time=start_time_utc,
             end_time=end_time_utc,

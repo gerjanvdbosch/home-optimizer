@@ -419,6 +419,86 @@ class FakeDatasetRepository:
             frame = frame.loc[frame[timestamp_column] < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
         return frame.reset_index(drop=True)
 
+    def read_forecast_values(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_at_start_time: datetime | None = None,
+        created_at_end_time: datetime | None = None,
+    ) -> pd.DataFrame:
+        rows = [
+            {
+                "created_at_utc": "2026-04-25T00:00:00+00:00",
+                "forecast_time_utc": "2026-04-25T12:00:00+00:00",
+                "name": "gti_living_room_windows",
+                "source": "openmeteo",
+                "unit": "W/m2",
+                "value": 220.0,
+            }
+        ]
+        frame = pd.DataFrame(rows)
+        if names:
+            frame = frame.loc[frame["name"].isin(names)]
+        if sources:
+            frame = frame.loc[frame["source"].isin(sources)]
+        if start_time is not None:
+            frame = frame.loc[
+                frame["forecast_time_utc"]
+                >= start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            ]
+        if end_time is not None:
+            frame = frame.loc[
+                frame["forecast_time_utc"]
+                < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            ]
+        return frame.reset_index(drop=True)
+
+    def read_electricity_price_intervals(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+    ) -> pd.DataFrame:
+        rows = [
+            {
+                "name": "electricity_price",
+                "start_time_utc": "2026-04-25T00:00:00+00:00",
+                "end_time_utc": "2026-04-25T12:00:00+00:00",
+                "source": "fixed_pricing",
+                "unit": "EUR/kWh",
+                "value": 0.245,
+            },
+            {
+                "name": "electricity_price",
+                "start_time_utc": "2026-04-25T12:00:00+00:00",
+                "end_time_utc": "2026-04-26T00:00:00+00:00",
+                "source": "fixed_pricing",
+                "unit": "EUR/kWh",
+                "value": 0.245,
+            },
+        ]
+        frame = pd.DataFrame(rows)
+        if names:
+            frame = frame.loc[frame["name"].isin(names)]
+        if sources:
+            frame = frame.loc[frame["source"].isin(sources)]
+        if start_time is not None:
+            frame = frame.loc[
+                frame["end_time_utc"]
+                > start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            ]
+        if end_time is not None:
+            frame = frame.loc[
+                frame["start_time_utc"]
+                < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            ]
+        return frame.reset_index(drop=True)
+
 
 def _sample_row(
     timestamp_text: str,

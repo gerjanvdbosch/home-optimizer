@@ -9,21 +9,12 @@ from home_optimizer.features.identification.models import (
     IdentificationDatasetRow,
     IdentificationDatasetSummary,
 )
-from home_optimizer.features.dataset.ports import DatasetSampleFrameReader, DatasetSupportReader
+from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 
 
 class IdentificationDatasetService:
-    def __init__(
-        self,
-        samples_reader: DatasetSampleFrameReader,
-        support_reader: DatasetSupportReader,
-        settings: AppSettings,
-    ) -> None:
-        self.dataset_service = MpcDatasetService(
-            samples_reader,
-            settings,
-            support_reader=support_reader,
-        )
+    def __init__(self, samples_reader: DatasetSampleFrameReader, settings: AppSettings) -> None:
+        self.dataset_service = MpcDatasetService(samples_reader, settings)
 
     def build_dataset(
         self,

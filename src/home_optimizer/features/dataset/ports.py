@@ -5,8 +5,6 @@ from typing import Protocol
 
 import pandas as pd
 
-from home_optimizer.domain.series import NumericSeries, TextSeries
-
 
 class DatasetSampleFrameReader(Protocol):
     def read_samples(
@@ -21,20 +19,22 @@ class DatasetSampleFrameReader(Protocol):
         entity_ids: list[str] | None = None,
     ) -> pd.DataFrame: ...
 
-
-class DatasetSupportReader(Protocol):
-    def read_forecast_series(
+    def read_forecast_values(
         self,
-        names: list[str],
-        start_time: datetime,
-        end_time: datetime,
-    ) -> list[NumericSeries]: ...
-
-    def read_electricity_price_series(
-        self,
-        start_time: datetime,
-        end_time: datetime,
         *,
-        source: str,
-        interval_minutes: int = 15,
-    ) -> NumericSeries: ...
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_at_start_time: datetime | None = None,
+        created_at_end_time: datetime | None = None,
+    ) -> pd.DataFrame: ...
+
+    def read_electricity_price_intervals(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+    ) -> pd.DataFrame: ...
