@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
 
@@ -27,7 +26,6 @@ from home_optimizer.domain import (
     SHUTTER_LIVING_ROOM,
     THERMOSTAT_SETPOINT,
     FixedPricing,
-    NumericPoint,
     NumericSeries,
     TemperatureTargetWindow,
     build_daily_price_series,
@@ -37,7 +35,6 @@ from home_optimizer.domain import (
     dataset_numeric_signal_spec,
     dataset_text_signal_names,
     ensure_utc,
-    normalize_utc_timestamp,
 )
 from home_optimizer.domain.pricing import (
     DEFAULT_DYNAMIC_PRICE_SOURCE,

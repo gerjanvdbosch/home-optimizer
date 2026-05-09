@@ -10,7 +10,7 @@ from pydantic import Field, field_validator
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import TrainedLinearRoomModel, ValidationConfig
-from home_optimizer.features.modeling.room.common import (
+from home_optimizer.features.modeling.common import (
     prepare_room_data,
     row_segments,
     segment_definitions,

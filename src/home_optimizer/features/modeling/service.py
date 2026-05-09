@@ -6,13 +6,13 @@ from home_optimizer.features.modeling.models import (
     RoomModelValidationReport,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.modeling.room.two_r2c import (
+from home_optimizer.features.modeling.room_2r2c import (
     ROOM_2R2C_MODEL_KIND,
     Room2R2CConfig,
     Room2R2CModel,
     Room2R2CTrainer,
 )
-from home_optimizer.features.modeling.room.arx import (
+from home_optimizer.features.modeling.room_arx import (
     ROOM_ARX_MODEL_KIND,
     RoomArxConfig,
     RoomArxModel,
