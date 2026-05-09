@@ -17,9 +17,9 @@ from home_optimizer.features.modeling import (
     StoredModelVersion,
 )
 from home_optimizer.web.dependencies import get_container
-from home_optimizer.web.mappers import train_room_model_response
+from home_optimizer.web.mappers import room_model_catalog_response, train_room_model_response
 from home_optimizer.web.ports import WebAppContainer
-from home_optimizer.web.schemas import TrainRoomModelResponse
+from home_optimizer.web.schemas import RoomModelCatalogResponse, TrainRoomModelResponse
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[datetime, Query(alias="start_time")]
@@ -36,6 +36,14 @@ DEFAULT_TRAIN_END_TIME = datetime(2026, 5, 7, 23, 59, 0, tzinfo=timezone.utc)
 
 def create_modeling_router(settings: AppSettings) -> APIRouter:
     router = APIRouter()
+
+    @router.get("/api/models/room", response_model=RoomModelCatalogResponse)
+    def list_room_models(
+        container: ContainerDependency,
+    ) -> RoomModelCatalogResponse:
+        return room_model_catalog_response(
+            container.model_version_repository.list_room_model_versions()
+        )
 
     @router.post("/api/train", response_model=TrainRoomModelResponse)
     def train_room_model(

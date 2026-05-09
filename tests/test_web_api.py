@@ -24,7 +24,9 @@ from home_optimizer.features.modeling import (
     ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
     Room2R2CConfig,
+    Room2R2CModel,
     RoomArxConfig,
+    StoredModelVersionSummary,
     StoredModelVersion,
     TrainedLinearRoomModel,
 )
@@ -109,12 +111,63 @@ class FakeModelVersionRepository:
             ),
             validation_report=None,
         )
+        self.secondary_version = StoredModelVersion(
+            model_id="room-model-2r2c-active",
+            model_type=ROOM_2R2C_MODEL_KIND,
+            created_at_utc=datetime(2026, 5, 8, 13, 0, tzinfo=timezone.utc),
+            is_active=True,
+            model=Room2R2CModel(
+                trained_from_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
+                trained_to_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
+                interval_minutes=15,
+                config=Room2R2CConfig(
+                    min_train_rows=10,
+                    validation_window_rows=10,
+                    history_warmup_rows=24,
+                ),
+                feature_names=[
+                    "room_temperature_c",
+                    "mass_temperature_c",
+                    "outdoor_temperature_c",
+                    "solar_gain_proxy_w_m2",
+                    "occupied_flag",
+                ],
+                intercept=0.0,
+                coefficients=[1.0, 0.0, 0.0, 0.0, 0.0],
+                sample_count=100,
+                mass_decay=0.97,
+                thermal_to_mass=0.05,
+            ),
+            validation_report=None,
+        )
 
     def save_room_model_version(self, version: StoredModelVersion) -> None:
         self.saved_versions.append(version)
 
+    def get_room_model_version(self, model_id: str) -> StoredModelVersion | None:
+        for version in [self.active_version, self.secondary_version, *self.saved_versions]:
+            if version.model_id == model_id:
+                return version
+        return None
+
     def get_active_room_model_version(self) -> StoredModelVersion | None:
         return self.active_version
+
+    def list_room_model_versions(self) -> list[StoredModelVersionSummary]:
+        versions = [self.secondary_version, self.active_version, *self.saved_versions]
+        return [
+            StoredModelVersionSummary(
+                model_id=version.model_id,
+                model_type=version.model_type,
+                created_at_utc=version.created_at_utc,
+                trained_from_utc=version.model.trained_from_utc,
+                trained_to_utc=version.model.trained_to_utc,
+                interval_minutes=version.model.interval_minutes,
+                sample_count=version.model.sample_count,
+                is_active=version.is_active,
+            )
+            for version in versions
+        ]
 
 
 def build_half_hourly_series(
@@ -738,6 +791,39 @@ def test_train_endpoint_supports_two_state_room_model_type() -> None:
     assert payload["model_type"] == ROOM_2R2C_MODEL_KIND
     saved_model = app.state.container.model_version_repository.saved_versions[0].model
     assert isinstance(saved_model.config, Room2R2CConfig)
+
+
+def test_room_model_catalog_endpoint_lists_models() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get("/api/models/room")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["models"]) >= 2
+    assert {model["model_type"] for model in payload["models"]} >= {
+        ROOM_ARX_MODEL_KIND,
+        ROOM_2R2C_MODEL_KIND,
+    }
+
+
+def test_simulate_room_endpoint_supports_explicit_model_id() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/simulate/room",
+            params={
+                "anchor_time": "2026-04-25T12:00:00+00:00",
+                "horizon_steps": 4,
+                "model_id": "room-model-2r2c-active",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_id"] == "room-model-2r2c-active"
 
 def test_settings_reject_legacy_sensor_fields() -> None:
     with pytest.raises(ValidationError):

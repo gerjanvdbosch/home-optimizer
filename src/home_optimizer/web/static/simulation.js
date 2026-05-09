@@ -95,11 +95,13 @@ function simulationTrace(series, label, color, options = {}) {
 
 const anchorTimeInput = document.getElementById("anchor-time");
 const horizonStepsInput = document.getElementById("horizon-steps");
+const simulationModelSelect = document.getElementById("simulation-model-select");
 const trainButton = document.getElementById("train-button");
 const simulateButton = document.getElementById("simulate-button");
 const trainStartDateInput = document.getElementById("train-start-date");
 const trainEndDateInput = document.getElementById("train-end-date");
 const trainActivateInput = document.getElementById("train-activate");
+const trainModelTypeSelect = document.getElementById("train-model-type");
 const simulationPreviousDayButton = document.getElementById("simulation-previous-day");
 const simulationNextDayButton = document.getElementById("simulation-next-day");
 const simulationSelectedDate = document.getElementById("simulation-selected-date");
@@ -138,6 +140,9 @@ function setTrainingControlsDisabled(disabled) {
   if (trainActivateInput) {
     trainActivateInput.disabled = disabled;
   }
+  if (trainModelTypeSelect) {
+    trainModelTypeSelect.disabled = disabled;
+  }
 }
 
 function syncSimulationDateLabel(anchorTime) {
@@ -155,6 +160,64 @@ function shiftSimulationDay(days) {
   anchorTimeInput.value = localInputValue(anchorTime);
   syncSimulationDateLabel(anchorTime);
   loadSimulation().catch(handleSimulationError);
+}
+
+function modelLabel(model) {
+  const activeSuffix = model.is_active ? " active" : "";
+  return `${model.model_type} | ${model.model_id}${activeSuffix}`;
+}
+
+function populateSimulationModelSelect(models) {
+  if (!simulationModelSelect) {
+    return;
+  }
+
+  const previousValue = simulationModelSelect.value;
+  simulationModelSelect.innerHTML = "";
+
+  if (!models.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Geen modellen beschikbaar";
+    simulationModelSelect.append(option);
+    simulationModelSelect.disabled = true;
+    return;
+  }
+
+  simulationModelSelect.disabled = false;
+  const modelsByType = new Map();
+  for (const model of models) {
+    const entries = modelsByType.get(model.model_type) || [];
+    entries.push(model);
+    modelsByType.set(model.model_type, entries);
+  }
+
+  for (const [modelType, typeModels] of modelsByType.entries()) {
+    const group = document.createElement("optgroup");
+    group.label = modelType;
+    for (const model of typeModels) {
+      const option = document.createElement("option");
+      option.value = model.model_id;
+      option.textContent = modelLabel(model);
+      group.append(option);
+    }
+    simulationModelSelect.append(group);
+  }
+
+  const selectedValue =
+    models.some((model) => model.model_id === previousValue)
+      ? previousValue
+      : (models.find((model) => model.is_active)?.model_id || models[0].model_id);
+  simulationModelSelect.value = selectedValue;
+}
+
+async function refreshRoomModels() {
+  const response = await fetch(simulationApiUrl("api/models/room"));
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || "Kon modellijst niet laden.");
+  }
+  populateSimulationModelSelect(payload.models || []);
 }
 
 async function runTrain() {
@@ -176,6 +239,9 @@ async function runTrain() {
     if (trainEndDateInput?.value) {
       params.set("end_time", `${trainEndDateInput.value}T23:59:00Z`);
     }
+    if (trainModelTypeSelect?.value) {
+      params.set("model_type", trainModelTypeSelect.value);
+    }
     params.set("activate", trainActivateInput?.checked ? "true" : "false");
 
     const response = await fetch(simulationApiUrl(`api/train?${params.toString()}`), {
@@ -194,6 +260,10 @@ async function runTrain() {
     if (trainResult) {
       trainResult.hidden = false;
       trainResult.textContent = JSON.stringify(payload, null, 2);
+    }
+    await refreshRoomModels();
+    if (simulationModelSelect && payload.model_id) {
+      simulationModelSelect.value = payload.model_id;
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Modeltraining mislukt.";
@@ -223,6 +293,9 @@ async function loadSimulation() {
       anchor_time: anchorTime.toISOString(),
       horizon_steps: String(horizonSteps),
     });
+    if (simulationModelSelect?.value) {
+      params.set("model_id", simulationModelSelect.value);
+    }
 
     const response = await fetch(simulationApiUrl(`api/simulate/room?${params.toString()}`));
     const payload = await response.json();
@@ -313,11 +386,18 @@ if (trainEndDateInput) {
   trainEndDateInput.value = localDateValue(new Date("2026-05-08T23:59:00Z"));
 }
 
+if (trainModelTypeSelect) {
+  trainModelTypeSelect.value = "room_arx";
+}
+
 if (simulateButton) {
   simulateButton.addEventListener("click", () => {
     loadSimulation().catch(handleSimulationError);
   });
 }
+simulationModelSelect?.addEventListener("change", () => {
+  loadSimulation().catch(handleSimulationError);
+});
 
 trainButton?.addEventListener("click", () => {
   runTrain().catch(handleSimulationError);
@@ -329,4 +409,6 @@ simulationNextDayButton?.addEventListener("click", () => {
   shiftSimulationDay(1);
 });
 
-loadSimulation().catch(handleSimulationError);
+refreshRoomModels()
+  .then(() => loadSimulation())
+  .catch(handleSimulationError);

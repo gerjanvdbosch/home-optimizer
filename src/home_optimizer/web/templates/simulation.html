@@ -41,6 +41,10 @@
             <input id="anchor-time" type="datetime-local" />
           </label>
           <label>
+            Model
+            <select id="simulation-model-select"></select>
+          </label>
+          <label>
             Horizon (steps)
             <input id="horizon-steps" type="number" min="1" max="288" value="144" />
           </label>
@@ -87,6 +91,13 @@
           <p>Train een nieuw room-model op een gekozen datumbereik.</p>
         </div>
         <div class="actions">
+          <label>
+            Model type
+            <select id="train-model-type">
+              <option value="room_arx">ARX</option>
+              <option value="room_2r2c">2R2C</option>
+            </select>
+          </label>
           <label>
             Start date
             <input id="train-start-date" type="date" />

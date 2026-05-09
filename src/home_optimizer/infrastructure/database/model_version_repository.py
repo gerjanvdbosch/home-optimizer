@@ -68,7 +68,7 @@ class ModelVersionRepository:
             if version.is_active:
                 session.execute(
                     update(ModelVersion)
-                    .where(ModelVersion.model_type.in_(ROOM_MODEL_KINDS))
+                    .where(ModelVersion.model_type == version.model_type)
                     .values(is_active=0)
                 )
 
@@ -146,7 +146,7 @@ class ModelVersionRepository:
 
             session.execute(
                 update(ModelVersion)
-                .where(ModelVersion.model_type.in_(ROOM_MODEL_KINDS))
+                .where(ModelVersion.model_type == row.model_type)
                 .values(is_active=0)
             )
             session.execute(

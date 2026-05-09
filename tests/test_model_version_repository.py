@@ -235,3 +235,36 @@ def test_model_version_repository_round_trips_two_state_room_model_versions(tmp_
     assert loaded.model.mass_decay == 0.97
     assert active is not None
     assert active.model_id == "room-model-2r2c"
+
+
+def test_model_version_repository_keeps_one_active_model_per_type(tmp_path) -> None:
+    database = Database(str(tmp_path / "model_versions.sqlite"))
+    database.init_schema()
+    repository = ModelVersionRepository(database)
+
+    repository.save_room_model_version(
+        StoredModelVersion(
+            model_id="room-model-arx",
+            model_type=ROOM_ARX_MODEL_KIND,
+            created_at_utc=datetime(2026, 5, 11, 9, 0, tzinfo=timezone.utc),
+            is_active=True,
+            model=build_model(),
+            validation_report=build_validation_report(),
+        )
+    )
+    repository.save_room_model_version(
+        StoredModelVersion(
+            model_id="room-model-2r2c",
+            model_type=ROOM_2R2C_MODEL_KIND,
+            created_at_utc=datetime(2026, 5, 11, 10, 0, tzinfo=timezone.utc),
+            is_active=True,
+            model=build_2r2c_model(),
+            validation_report=build_validation_report(),
+        )
+    )
+
+    summaries = repository.list_room_model_versions()
+    summary_by_id = {summary.model_id: summary for summary in summaries}
+
+    assert summary_by_id["room-model-arx"].is_active is True
+    assert summary_by_id["room-model-2r2c"].is_active is True

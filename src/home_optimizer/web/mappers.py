@@ -14,6 +14,7 @@ from home_optimizer.features.identification import (
 from home_optimizer.features.modeling import (
     RoomModelValidationReport,
     StoredModelVersion,
+    StoredModelVersionSummary,
 )
 from home_optimizer.features.simulation import RoomSimulationResult
 from home_optimizer.web.schemas import (
@@ -29,6 +30,8 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
     RoomSimulationResponse,
+    RoomModelCatalogResponse,
+    RoomModelVersionSummaryResponse,
     SegmentValidationResponse,
     TrainRoomModelResponse,
 )
@@ -127,6 +130,23 @@ def train_room_model_response(
             )
             for segment in validation_report.segment_metrics
         ],
+    )
+
+
+def room_model_version_summary_response(
+    summary: StoredModelVersionSummary,
+) -> RoomModelVersionSummaryResponse:
+    return RoomModelVersionSummaryResponse(**summary.model_dump())
+
+
+def room_model_catalog_response(
+    summaries: list[StoredModelVersionSummary],
+) -> RoomModelCatalogResponse:
+    return RoomModelCatalogResponse(
+        models=[
+            room_model_version_summary_response(summary)
+            for summary in summaries
+        ]
     )
 
 

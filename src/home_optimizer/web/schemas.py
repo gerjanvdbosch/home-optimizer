@@ -214,6 +214,27 @@ class TrainRoomModelResponse(BaseModel):
     segment_metrics: list[SegmentValidationResponse]
 
 
+class RoomModelVersionSummaryResponse(BaseModel):
+    model_id: str
+    model_type: str
+    created_at_utc: datetime
+    trained_from_utc: datetime
+    trained_to_utc: datetime
+    interval_minutes: int
+    sample_count: int
+    is_active: bool
+    validation_mae_1h_c: float | None = None
+    validation_mae_6h_c: float | None = None
+    validation_mae_12h_c: float | None = None
+    validation_mae_24h_c: float | None = None
+    validation_bias_6h_c: float | None = None
+    validation_p95_12h_c: float | None = None
+
+
+class RoomModelCatalogResponse(BaseModel):
+    models: list[RoomModelVersionSummaryResponse]
+
+
 class RoomSimulationResponse(BaseModel):
     model_id: str
     anchor_time_utc: datetime
