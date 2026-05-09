@@ -301,22 +301,21 @@ class FakeTimeSeriesReadRepository:
 
 
 class FakeDatasetRepository:
-    def read_samples(
+    def _build_samples_frame(
         self,
         *,
         interval_minutes: int,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
     ) -> pd.DataFrame:
+        timestamp_key = "timestamp_minute_utc" if interval_minutes == 1 else "timestamp_15m_utc"
+        step_minutes = 1 if interval_minutes == 1 else 15
         base_start = (start_time or datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)).astimezone(
             ZoneInfo("UTC")
         )
         points = [
-            base_start + timedelta(minutes=15 * index)
+            base_start + timedelta(minutes=step_minutes * index)
             for index in range(
                 max(
                     1,
@@ -325,7 +324,7 @@ class FakeDatasetRepository:
                             ((end_time or (base_start + timedelta(days=1))) - base_start)
                             .total_seconds()
                         )
-                        // 900
+                        // (step_minutes * 60)
                     ),
                 )
             )
@@ -338,89 +337,113 @@ class FakeDatasetRepository:
 
         for index, timestamp in enumerate(points):
             timestamp_text = timestamp.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            def add_row(name: str, **kwargs: object) -> None:
+                row = _sample_row(timestamp_text, name, **kwargs)
+                if timestamp_key != "timestamp_15m_utc":
+                    row[timestamp_key] = row.pop("timestamp_15m_utc")
+                rows.append(row)
+
             if include("room_temperature"):
-                rows.append(_sample_row(timestamp_text, "room_temperature", mean_real=20.5))
+                add_row("room_temperature", mean_real=20.5)
             if include("outdoor_temperature"):
-                rows.append(_sample_row(timestamp_text, "outdoor_temperature", mean_real=12.1))
+                add_row("outdoor_temperature", mean_real=12.1)
             if include("thermostat_setpoint"):
-                rows.append(
-                    _sample_row(
-                        timestamp_text,
-                        "thermostat_setpoint",
-                        mean_real=20.0 if index < 48 else 21.0,
-                    )
-                )
+                add_row("thermostat_setpoint", mean_real=20.0 if index < 48 else 21.0)
             if include("dhw_top_temperature"):
-                rows.append(_sample_row(timestamp_text, "dhw_top_temperature", mean_real=48.0))
+                add_row("dhw_top_temperature", mean_real=48.0)
             if include("dhw_bottom_temperature"):
-                rows.append(_sample_row(timestamp_text, "dhw_bottom_temperature", mean_real=42.0))
+                add_row("dhw_bottom_temperature", mean_real=42.0)
             if include("hp_electric_power"):
-                rows.append(
-                    _sample_row(
-                        timestamp_text,
-                        "hp_electric_power",
-                        mean_real=1.5 if index < 48 else 0.0,
-                        unit="kW",
-                    )
-                )
+                add_row("hp_electric_power", mean_real=1.5 if index < 48 else 0.0, unit="kW")
             if include("p1_net_power"):
-                rows.append(
-                    _sample_row(
-                        timestamp_text,
-                        "p1_net_power",
-                        mean_real=2.0 if index < 48 else -0.5,
-                        unit="kW",
-                    )
-                )
+                add_row("p1_net_power", mean_real=2.0 if index < 48 else -0.5, unit="kW")
             if include("pv_output_power"):
-                rows.append(
-                    _sample_row(
-                        timestamp_text,
-                        "pv_output_power",
-                        mean_real=0.0 if index < 48 else 1.0,
-                        unit="kW",
-                    )
-                )
+                add_row("pv_output_power", mean_real=0.0 if index < 48 else 1.0, unit="kW")
             if include("hp_flow"):
-                rows.append(_sample_row(timestamp_text, "hp_flow", mean_real=0.0, unit="L/min"))
+                add_row("hp_flow", mean_real=0.0, unit="L/min")
             if include("hp_supply_temperature"):
-                rows.append(
-                    _sample_row(timestamp_text, "hp_supply_temperature", mean_real=30.0, unit="°C")
-                )
+                add_row("hp_supply_temperature", mean_real=30.0, unit="°C")
             if include("hp_return_temperature"):
-                rows.append(
-                    _sample_row(timestamp_text, "hp_return_temperature", mean_real=30.0, unit="°C")
-                )
+                add_row("hp_return_temperature", mean_real=30.0, unit="°C")
             if include("shutter_living_room"):
-                rows.append(_sample_row(timestamp_text, "shutter_living_room", mean_real=50.0, unit="%"))
+                add_row("shutter_living_room", mean_real=50.0, unit="%")
             if include("defrost_active"):
-                rows.append(_sample_row(timestamp_text, "defrost_active", last_bool=0, unit="bool"))
+                add_row("defrost_active", last_bool=0, unit="bool")
             if include("booster_heater_active"):
-                rows.append(_sample_row(timestamp_text, "booster_heater_active", last_bool=0, unit="bool"))
+                add_row("booster_heater_active", last_bool=0, unit="bool")
 
         if include("hp_mode"):
-            rows.append(
-                _sample_row(
-                    "2026-04-25T11:50:00+00:00",
-                    "hp_mode",
-                    last_text="heat",
-                    unit=None,
-                )
-            )
+            row = _sample_row("2026-04-25T11:50:00+00:00", "hp_mode", last_text="heat", unit=None)
+            if timestamp_key != "timestamp_15m_utc":
+                row[timestamp_key] = row.pop("timestamp_15m_utc")
+            rows.append(row)
 
         frame = pd.DataFrame(rows)
         if frame.empty:
             return frame
-        timestamp_column = (
-            "timestamp_minute_utc"
-            if "timestamp_minute_utc" in frame.columns
-            else "timestamp_15m_utc"
-        )
         if start_time is not None:
-            frame = frame.loc[frame[timestamp_column] >= start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
+            frame = frame.loc[
+                frame[timestamp_key]
+                >= start_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            ]
         if end_time is not None:
-            frame = frame.loc[frame[timestamp_column] < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")]
+            frame = frame.loc[
+                frame[timestamp_key]
+                < end_time.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+            ]
         return frame.reset_index(drop=True)
+
+    def read_samples_1m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self._build_samples_frame(
+            interval_minutes=1,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+        )
+
+    def read_samples_15m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self._build_samples_frame(
+            interval_minutes=15,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+        )
+
+    def read_samples(
+        self,
+        *,
+        interval_minutes: int,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self._build_samples_frame(
+            interval_minutes=interval_minutes,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+        )
 
     def read_forecast_values(
         self,

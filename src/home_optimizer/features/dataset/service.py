@@ -251,25 +251,20 @@ class MpcDatasetService:
         requested_names = dataset_numeric_signal_names(source="measurement") + dataset_text_signal_names(
             source="measurement"
         )
-        raw = self.samples_reader.read_samples(
-            interval_minutes=1,
+        raw = self.samples_reader.read_samples_1m(
             start_time=start_time,
             end_time=end_time,
             names=requested_names,
         ).copy()
 
-        timestamp_column = (
-            "timestamp_minute_utc" if "timestamp_minute_utc" in raw.columns else "timestamp_15m_utc"
-        )
         if not _raw_frame_covers_range(
             raw,
-            timestamp_column=timestamp_column,
+            timestamp_column="timestamp_minute_utc",
             start_time=start_time,
             end_time=end_time,
-            source_interval_minutes=1 if timestamp_column == "timestamp_minute_utc" else 15,
+            source_interval_minutes=1,
         ):
-            raw = self.samples_reader.read_samples(
-                interval_minutes=15,
+            raw = self.samples_reader.read_samples_15m(
                 start_time=start_time,
                 end_time=end_time,
                 names=requested_names,

@@ -7,6 +7,28 @@ import pandas as pd
 
 
 class DatasetSampleFrameReader(Protocol):
+    def read_samples_1m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame: ...
+
+    def read_samples_15m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame: ...
+
     def read_samples(
         self,
         *,

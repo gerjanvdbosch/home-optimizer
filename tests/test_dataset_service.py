@@ -47,6 +47,46 @@ class FakeDatasetDataReader:
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         return [series for series in self.numeric_series if series.name in names]
 
+    def read_samples_1m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self.read_samples(
+            interval_minutes=1,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+            sources=sources,
+            categories=categories,
+            entity_ids=entity_ids,
+        )
+
+    def read_samples_15m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self.read_samples(
+            interval_minutes=15,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+            sources=sources,
+            categories=categories,
+            entity_ids=entity_ids,
+        )
+
     def read_samples(
         self,
         *,
@@ -254,6 +294,46 @@ class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
         finally:
             self.numeric_series = original_numeric
             self.text_series = original_text
+
+    def read_samples_1m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self.read_samples(
+            interval_minutes=1,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+            sources=sources,
+            categories=categories,
+            entity_ids=entity_ids,
+        )
+
+    def read_samples_15m(
+        self,
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        names: list[str] | None = None,
+        sources: list[str] | None = None,
+        categories: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+    ) -> pd.DataFrame:
+        return self.read_samples(
+            interval_minutes=15,
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+            sources=sources,
+            categories=categories,
+            entity_ids=entity_ids,
+        )
 
 
 def build_numeric_series(
