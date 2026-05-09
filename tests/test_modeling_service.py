@@ -173,6 +173,7 @@ def test_room_modeling_service_fits_two_state_room_model_on_dataset() -> None:
         mass_decay_candidates=[0.90, 0.97],
         thermal_to_mass_candidates=[0.0, 0.05],
         solar_to_mass_candidates=[0.0, 0.001],
+        candidate_scoring_horizons_steps=[6],
     )
 
     model = service.fit_room_model(dataset, config=config)
@@ -182,11 +183,10 @@ def test_room_modeling_service_fits_two_state_room_model_on_dataset() -> None:
     assert model.model_kind == ROOM_2R2C_MODEL_KIND
     assert model.feature_names == [
         "room_temperature_c",
-        "mass_temperature_c",
+        "thermal_mass_state",
         "outdoor_temperature_c",
-        "thermal_output_estimate_kw",
-        "solar_effective_w_m2",
-        "occupied_flag",
+        "thermal_output_energy_kwh",
+        "solar_effective_energy",
     ]
     assert 0.0 <= model.mass_decay <= 1.0
     assert model.solar_to_mass >= 0.0
