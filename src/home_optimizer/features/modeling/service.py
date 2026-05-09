@@ -6,12 +6,12 @@ from home_optimizer.features.modeling.models import (
     RoomModelValidationReport,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.modeling.room.arx import ROOM_ARX_TRAINER, RoomArxConfig
+from home_optimizer.features.modeling.room.arx import RoomArxConfig, RoomArxTrainer
 
 
 class RoomModelingService:
-    def __init__(self) -> None:
-        self.trainer = ROOM_ARX_TRAINER
+    def __init__(self, trainer: RoomArxTrainer | None = None) -> None:
+        self.trainer = trainer or RoomArxTrainer()
 
     def fit_room_model(
         self,

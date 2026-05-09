@@ -321,6 +321,3 @@ class RoomArxTrainer:
             predictions[target_index] = prediction
 
         return [predictions[start_index + step] for step in range(1, horizon_steps + 1)]
-
-
-ROOM_ARX_TRAINER = RoomArxTrainer()
