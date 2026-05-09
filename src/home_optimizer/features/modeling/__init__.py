@@ -10,8 +10,12 @@ from .models import (
     ValidationFoldResult,
 )
 from .service import RoomModelingService
+from .dhw.onestate import DhwOneStateConfig, DhwOneStateModel
+from .room.twostate import RoomTwoStateConfig, RoomTwoStateModel
 
 __all__ = [
+    "DhwOneStateConfig",
+    "DhwOneStateModel",
     "HorizonMetric",
     "LINEAR_ROOM_MODEL_TYPE",
     "RoomModelConfig",
@@ -21,5 +25,7 @@ __all__ = [
     "SegmentValidationReport",
     "RoomModelingService",
     "TrainedLinearRoomModel",
+    "RoomTwoStateConfig",
+    "RoomTwoStateModel",
     "ValidationFoldResult",
 ]
