@@ -304,13 +304,12 @@ class FakeDatasetRepository:
     def _build_samples_frame(
         self,
         *,
-        interval_minutes: int,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         names: list[str] | None = None,
     ) -> pd.DataFrame:
-        timestamp_key = "timestamp_minute_utc" if interval_minutes == 1 else "timestamp_15m_utc"
-        step_minutes = 1 if interval_minutes == 1 else 15
+        step_minutes = 15
+        timestamp_key = "timestamp_utc"
         base_start = (start_time or datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)).astimezone(
             ZoneInfo("UTC")
         )
@@ -339,8 +338,7 @@ class FakeDatasetRepository:
             timestamp_text = timestamp.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
             def add_row(name: str, **kwargs: object) -> None:
                 row = _sample_row(timestamp_text, name, **kwargs)
-                if timestamp_key != "timestamp_15m_utc":
-                    row[timestamp_key] = row.pop("timestamp_15m_utc")
+                row[timestamp_key] = row.pop("timestamp_15m_utc")
                 rows.append(row)
 
             if include("room_temperature"):
@@ -374,8 +372,7 @@ class FakeDatasetRepository:
 
         if include("hp_mode"):
             row = _sample_row("2026-04-25T11:50:00+00:00", "hp_mode", last_text="heat", unit=None)
-            if timestamp_key != "timestamp_15m_utc":
-                row[timestamp_key] = row.pop("timestamp_15m_utc")
+            row[timestamp_key] = row.pop("timestamp_15m_utc")
             rows.append(row)
 
         frame = pd.DataFrame(rows)
@@ -393,44 +390,9 @@ class FakeDatasetRepository:
             ]
         return frame.reset_index(drop=True)
 
-    def read_samples_1m(
-        self,
-        *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
-    ) -> pd.DataFrame:
-        return self._build_samples_frame(
-            interval_minutes=1,
-            start_time=start_time,
-            end_time=end_time,
-            names=names,
-        )
-
-    def read_samples_15m(
-        self,
-        *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
-    ) -> pd.DataFrame:
-        return self._build_samples_frame(
-            interval_minutes=15,
-            start_time=start_time,
-            end_time=end_time,
-            names=names,
-        )
-
     def read_samples(
         self,
         *,
-        interval_minutes: int,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         names: list[str] | None = None,
@@ -439,7 +401,6 @@ class FakeDatasetRepository:
         entity_ids: list[str] | None = None,
     ) -> pd.DataFrame:
         return self._build_samples_frame(
-            interval_minutes=interval_minutes,
             start_time=start_time,
             end_time=end_time,
             names=names,

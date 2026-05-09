@@ -15,6 +15,28 @@ from home_optimizer.infrastructure.database.orm_models import (
 )
 from home_optimizer.infrastructure.database.session import Database
 
+_COVERAGE_TOLERANCE_MINUTES = 2
+
+
+def _frame_covers_range(
+    frame: pd.DataFrame,
+    timestamp_column: str,
+    start_time: datetime,
+    end_time: datetime,
+) -> bool:
+    if frame.empty or timestamp_column not in frame.columns:
+        return False
+    timestamps = pd.to_datetime(frame[timestamp_column], utc=True).dropna()
+    if timestamps.empty:
+        return False
+    tolerance = pd.Timedelta(minutes=_COVERAGE_TOLERANCE_MINUTES)
+    start_ts = pd.Timestamp(start_time).tz_convert("UTC") if pd.Timestamp(start_time).tzinfo else pd.Timestamp(start_time, tz="UTC")
+    end_ts = pd.Timestamp(end_time).tz_convert("UTC") if pd.Timestamp(end_time).tzinfo else pd.Timestamp(end_time, tz="UTC")
+    return (
+        timestamps.min() <= start_ts + tolerance
+        and timestamps.max() >= end_ts - tolerance
+    )
+
 
 class DatasetRepository:
     def __init__(self, database: Database) -> None:
@@ -23,7 +45,6 @@ class DatasetRepository:
     def read_samples(
         self,
         *,
-        interval_minutes: int,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         names: list[str] | None = None,
@@ -31,35 +52,33 @@ class DatasetRepository:
         categories: list[str] | None = None,
         entity_ids: list[str] | None = None,
     ) -> pd.DataFrame:
-        if interval_minutes == 1:
-            frame_1m = self.read_samples_1m(
-                start_time=start_time,
-                end_time=end_time,
-                names=names,
-                sources=sources,
-                categories=categories,
-                entity_ids=entity_ids,
-            )
-            if not frame_1m.empty:
-                return frame_1m
-            return self.read_samples_15m(
-                start_time=start_time,
-                end_time=end_time,
-                names=names,
-                sources=sources,
-                categories=categories,
-                entity_ids=entity_ids,
-            )
-        if interval_minutes == 15:
-            return self.read_samples_15m(
-                start_time=start_time,
-                end_time=end_time,
-                names=names,
-                sources=sources,
-                categories=categories,
-                entity_ids=entity_ids,
-            )
-        raise ValueError("interval_minutes must be 1 or 15")
+        """Read measurement samples, preferring 1m resolution with fallback to 15m."""
+        frame_1m = self.read_samples_1m(
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+            sources=sources,
+            categories=categories,
+            entity_ids=entity_ids,
+        )
+        if (
+            start_time is not None
+            and end_time is not None
+            and _frame_covers_range(frame_1m, "timestamp_minute_utc", start_time, end_time)
+        ):
+            frame_1m["timestamp_utc"] = frame_1m["timestamp_minute_utc"]
+            return frame_1m
+
+        frame_15m = self.read_samples_15m(
+            start_time=start_time,
+            end_time=end_time,
+            names=names,
+            sources=sources,
+            categories=categories,
+            entity_ids=entity_ids,
+        )
+        frame_15m["timestamp_utc"] = frame_15m["timestamp_15m_utc"]
+        return frame_15m
 
     def read_samples_1m(
         self,

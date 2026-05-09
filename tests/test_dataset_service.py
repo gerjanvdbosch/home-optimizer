@@ -44,53 +44,9 @@ class FakeDatasetDataReader:
         self.forecast_series = forecast_series
         self.price_series = price_series
 
-    def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        return [series for series in self.numeric_series if series.name in names]
-
-    def read_samples_1m(
-        self,
-        *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
-    ) -> pd.DataFrame:
-        return self.read_samples(
-            interval_minutes=1,
-            start_time=start_time,
-            end_time=end_time,
-            names=names,
-            sources=sources,
-            categories=categories,
-            entity_ids=entity_ids,
-        )
-
-    def read_samples_15m(
-        self,
-        *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
-    ) -> pd.DataFrame:
-        return self.read_samples(
-            interval_minutes=15,
-            start_time=start_time,
-            end_time=end_time,
-            names=names,
-            sources=sources,
-            categories=categories,
-            entity_ids=entity_ids,
-        )
-
     def read_samples(
         self,
         *,
-        interval_minutes: int,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         names: list[str] | None = None,
@@ -107,7 +63,7 @@ class FakeDatasetDataReader:
             for point in series.points:
                 rows.append(
                     {
-                        "timestamp_minute_utc": point.timestamp,
+                        "timestamp_utc": point.timestamp,
                         "name": series.name,
                         "source": "test",
                         "entity_id": f"sensor.{series.name}",
@@ -129,7 +85,7 @@ class FakeDatasetDataReader:
             for point in series.points:
                 rows.append(
                     {
-                        "timestamp_minute_utc": point.timestamp,
+                        "timestamp_utc": point.timestamp,
                         "name": series.name,
                         "source": "test",
                         "entity_id": f"sensor.{series.name}",
@@ -149,9 +105,9 @@ class FakeDatasetDataReader:
         if frame.empty:
             return frame
         if start_time is not None:
-            frame = frame.loc[frame["timestamp_minute_utc"] >= normalize_utc_timestamp(start_time)]
+            frame = frame.loc[frame["timestamp_utc"] >= normalize_utc_timestamp(start_time)]
         if end_time is not None:
-            frame = frame.loc[frame["timestamp_minute_utc"] < normalize_utc_timestamp(end_time)]
+            frame = frame.loc[frame["timestamp_utc"] < normalize_utc_timestamp(end_time)]
         return frame.reset_index(drop=True)
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
@@ -241,6 +197,8 @@ class FakeDatasetDataReader:
 
 
 class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
+    """Simulates 1m-with-fallback-to-15m: uses 1m data if it covers the range, else 15m."""
+
     def __init__(
         self,
         *,
@@ -261,12 +219,10 @@ class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
         self.numeric_series_15m = numeric_series_15m
         self.text_series_1m = text_series_1m
         self.text_series_15m = text_series_15m
-        self.read_intervals: list[int] = []
 
     def read_samples(
         self,
         *,
-        interval_minutes: int,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         names: list[str] | None = None,
@@ -274,65 +230,36 @@ class CoverageAwareFakeDatasetReader(FakeDatasetDataReader):
         categories: list[str] | None = None,
         entity_ids: list[str] | None = None,
     ) -> pd.DataFrame:
-        self.read_intervals.append(interval_minutes)
-        original_numeric = self.numeric_series
-        original_text = self.text_series
-        self.numeric_series = (
-            self.numeric_series_1m if interval_minutes == 1 else self.numeric_series_15m
+        # Try 1m first
+        self.numeric_series = self.numeric_series_1m
+        self.text_series = self.text_series_1m
+        frame_1m = super().read_samples(
+            start_time=start_time, end_time=end_time, names=names,
+            sources=sources, categories=categories, entity_ids=entity_ids,
         )
-        self.text_series = self.text_series_1m if interval_minutes == 1 else self.text_series_15m
-        try:
-            return super().read_samples(
-                interval_minutes=interval_minutes,
-                start_time=start_time,
-                end_time=end_time,
-                names=names,
-                sources=sources,
-                categories=categories,
-                entity_ids=entity_ids,
-            )
-        finally:
-            self.numeric_series = original_numeric
-            self.text_series = original_text
+        # Check coverage: does 1m data start near the requested start?
+        if (
+            not frame_1m.empty
+            and start_time is not None
+            and end_time is not None
+        ):
+            import pandas as _pd
+            timestamps = _pd.to_datetime(frame_1m["timestamp_utc"], utc=True).dropna()
+            tolerance = _pd.Timedelta(minutes=2)
+            start_ts = _pd.Timestamp(start_time).tz_convert("UTC") if _pd.Timestamp(start_time).tzinfo else _pd.Timestamp(start_time, tz="UTC")
+            end_ts = _pd.Timestamp(end_time).tz_convert("UTC") if _pd.Timestamp(end_time).tzinfo else _pd.Timestamp(end_time, tz="UTC")
+            if (
+                timestamps.min() <= start_ts + tolerance
+                and timestamps.max() >= end_ts - tolerance
+            ):
+                return frame_1m
 
-    def read_samples_1m(
-        self,
-        *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
-    ) -> pd.DataFrame:
-        return self.read_samples(
-            interval_minutes=1,
-            start_time=start_time,
-            end_time=end_time,
-            names=names,
-            sources=sources,
-            categories=categories,
-            entity_ids=entity_ids,
-        )
-
-    def read_samples_15m(
-        self,
-        *,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-        names: list[str] | None = None,
-        sources: list[str] | None = None,
-        categories: list[str] | None = None,
-        entity_ids: list[str] | None = None,
-    ) -> pd.DataFrame:
-        return self.read_samples(
-            interval_minutes=15,
-            start_time=start_time,
-            end_time=end_time,
-            names=names,
-            sources=sources,
-            categories=categories,
-            entity_ids=entity_ids,
+        # Fall back to 15m
+        self.numeric_series = self.numeric_series_15m
+        self.text_series = self.text_series_15m
+        return super().read_samples(
+            start_time=start_time, end_time=end_time, names=names,
+            sources=sources, categories=categories, entity_ids=entity_ids,
         )
 
 
@@ -655,39 +582,36 @@ def test_mpc_dataset_service_falls_back_to_15m_when_1m_coverage_is_partial() -> 
         interval_minutes=10,
     )
 
-    assert reader.read_intervals == [1, 15]
+    # 1m data doesn't cover start_time → 15m fallback was used
     assert dataset.rows[0].room_temperature_c == 20.0
 
 
-def test_mpc_dataset_service_overlays_1m_window_flags_on_15m_fallback() -> None:
+def test_mpc_dataset_service_uses_1m_window_flags_when_available() -> None:
+    """When 1m data covers the full range, window flags are detected at 1m resolution."""
     start_time = datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc)
     end_time = start_time + timedelta(minutes=30)
-    reader = CoverageAwareFakeDatasetReader(
-        numeric_series_1m=[
+    reader = FakeDatasetDataReader(
+        numeric_series=[
+            build_numeric_series(
+                name=ROOM_TEMPERATURE,
+                unit="°C",
+                start_time=start_time,
+                values=[20.0, 20.1, 20.2, 20.3, 20.4, 20.5,
+                        20.6, 20.7, 20.8, 20.9, 21.0, 21.1,
+                        21.2, 21.3, 21.4, 21.5, 21.6, 21.7,
+                        21.8, 21.9, 22.0, 22.1, 22.2, 22.3,
+                        22.4, 22.5, 22.6, 22.7, 22.8, 22.9],
+                interval_minutes=1,
+            ),
             build_numeric_series(
                 name=DEFROST_ACTIVE,
                 unit="bool",
                 start_time=start_time + timedelta(minutes=12),
                 values=[1.0],
                 interval_minutes=1,
-            )
-        ],
-        numeric_series_15m=[
-            build_numeric_series(
-                name=ROOM_TEMPERATURE,
-                unit="°C",
-                start_time=start_time,
-                values=[20.0, 20.1],
-            ),
-            build_numeric_series(
-                name=OUTDOOR_TEMPERATURE,
-                unit="°C",
-                start_time=start_time,
-                values=[5.0, 5.1],
             ),
         ],
-        text_series_1m=[],
-        text_series_15m=[],
+        text_series=[],
         forecast_series=[],
         price_series=build_numeric_series(
             name="electricity_price",
@@ -701,8 +625,7 @@ def test_mpc_dataset_service_overlays_1m_window_flags_on_15m_fallback() -> None:
     dataset = service.build_dataset(
         start_time=start_time,
         end_time=end_time,
-        interval_minutes=10,
+        interval_minutes=15,
     )
 
-    assert reader.read_intervals == [1, 15]
     assert sum(row.defrost_active for row in dataset.rows) == 1

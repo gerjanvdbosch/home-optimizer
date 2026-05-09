@@ -45,24 +45,137 @@ class FakeIdentificationDataReader:
         self.forecast_series = forecast_series
         self.price_series = price_series
 
-    def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        return [series for series in self.numeric_series if series.name in names]
-
-    def read_text_series(self, names, start_time, end_time) -> list[TextSeries]:
-        return [series for series in self.text_series if series.name in names]
-
-    def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        return [series for series in self.forecast_series if series.name in names]
-
-    def read_electricity_price_series(
+    def read_samples(
         self,
-        start_time,
-        end_time,
         *,
-        source,
-        interval_minutes=15,
-    ) -> NumericSeries:
-        return self.price_series
+        start_time=None,
+        end_time=None,
+        names=None,
+        sources=None,
+        categories=None,
+        entity_ids=None,
+    ):
+        import pandas as pd
+        allowed_names = set(names or [])
+        rows = []
+        for series in self.numeric_series:
+            if allowed_names and series.name not in allowed_names:
+                continue
+            for point in series.points:
+                rows.append({
+                    "timestamp_utc": point.timestamp,
+                    "name": series.name,
+                    "source": "test",
+                    "entity_id": f"sensor.{series.name}",
+                    "category": "measurement",
+                    "unit": series.unit,
+                    "mean_real": point.value,
+                    "min_real": point.value,
+                    "max_real": point.value,
+                    "last_real": point.value,
+                    "last_text": None,
+                    "last_bool": None,
+                    "sample_count": 1,
+                })
+        for series in self.text_series:
+            if allowed_names and series.name not in allowed_names:
+                continue
+            for point in series.points:
+                rows.append({
+                    "timestamp_utc": point.timestamp,
+                    "name": series.name,
+                    "source": "test",
+                    "entity_id": f"sensor.{series.name}",
+                    "category": "measurement",
+                    "unit": None,
+                    "mean_real": None,
+                    "min_real": None,
+                    "max_real": None,
+                    "last_real": None,
+                    "last_text": point.value,
+                    "last_bool": None,
+                    "sample_count": 1,
+                })
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            frame = frame.loc[frame["timestamp_utc"] >= normalize_utc_timestamp(start_time)]
+        if end_time is not None:
+            frame = frame.loc[frame["timestamp_utc"] < normalize_utc_timestamp(end_time)]
+        return frame.reset_index(drop=True)
+
+    def read_forecast_values(
+        self,
+        *,
+        start_time=None,
+        end_time=None,
+        names=None,
+        sources=None,
+        created_at_start_time=None,
+        created_at_end_time=None,
+    ):
+        import pandas as pd
+        from datetime import timezone as _tz
+        allowed_names = set(names or [])
+        rows = []
+        for series in self.forecast_series:
+            if allowed_names and series.name not in allowed_names:
+                continue
+            for point in series.points:
+                rows.append({
+                    "created_at_utc": normalize_utc_timestamp(start_time or datetime.now(_tz.utc)),
+                    "forecast_time_utc": point.timestamp,
+                    "name": series.name,
+                    "source": "test",
+                    "unit": series.unit,
+                    "value": point.value,
+                })
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            frame = frame.loc[frame["forecast_time_utc"] >= normalize_utc_timestamp(start_time)]
+        if end_time is not None:
+            frame = frame.loc[frame["forecast_time_utc"] < normalize_utc_timestamp(end_time)]
+        return frame.reset_index(drop=True)
+
+    def read_electricity_price_intervals(
+        self,
+        *,
+        start_time=None,
+        end_time=None,
+        names=None,
+        sources=None,
+    ):
+        import pandas as pd
+        from datetime import timedelta as _td
+        rows = []
+        ordered_points = self.price_series.points
+        for index, point in enumerate(ordered_points):
+            interval_end = (
+                ordered_points[index + 1].timestamp
+                if index + 1 < len(ordered_points)
+                else normalize_utc_timestamp(
+                    datetime.fromisoformat(point.timestamp.replace("Z", "+00:00")) + _td(minutes=15)
+                )
+            )
+            rows.append({
+                "name": self.price_series.name,
+                "start_time_utc": point.timestamp,
+                "end_time_utc": interval_end,
+                "source": "fixed_pricing",
+                "unit": self.price_series.unit,
+                "value": point.value,
+            })
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
+        if start_time is not None:
+            frame = frame.loc[frame["end_time_utc"] > normalize_utc_timestamp(start_time)]
+        if end_time is not None:
+            frame = frame.loc[frame["start_time_utc"] < normalize_utc_timestamp(end_time)]
+        return frame.reset_index(drop=True)
 
 
 def build_numeric_series(

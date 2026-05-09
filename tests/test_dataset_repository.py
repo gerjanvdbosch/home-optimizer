@@ -66,8 +66,7 @@ def test_dataset_repository_reads_raw_samples_1m_and_15m_as_dataframes(tmp_path)
         start_time=datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc),
         end_time=datetime(2026, 2, 8, 0, 30, tzinfo=timezone.utc),
     )
-    frame_15m = repository.read_samples(
-        interval_minutes=15,
+    frame_15m = repository.read_samples_15m(
         start_time=datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc),
         end_time=datetime(2026, 2, 8, 0, 30, tzinfo=timezone.utc),
     )
@@ -126,13 +125,12 @@ def test_dataset_repository_falls_back_to_15m_when_1m_is_empty(tmp_path) -> None
         session.commit()
 
     frame = repository.read_samples(
-        interval_minutes=1,
         start_time=datetime(2026, 2, 8, 0, 0, tzinfo=timezone.utc),
         end_time=datetime(2026, 2, 8, 0, 30, tzinfo=timezone.utc),
     )
 
-    assert "timestamp_15m_utc" in frame.columns
-    assert frame.shape == (1, 13)
+    assert "timestamp_utc" in frame.columns
+    assert frame.shape[0] == 1
     assert frame.iloc[0]["name"] == "room_temperature"
     assert frame.iloc[0]["mean_real"] == 20.5
 
