@@ -3,11 +3,14 @@ from .models import (
     IdentificationDatasetRow,
     IdentificationDatasetSummary,
 )
-from .service import IdentificationDatasetService
+from .ports import KpiDataReader
+from .service import DailyKpiService, IdentificationDatasetService
 
 __all__ = [
+    "DailyKpiService",
     "IdentificationDataset",
     "IdentificationDatasetRow",
-    "IdentificationDatasetSummary",
     "IdentificationDatasetService",
+    "IdentificationDatasetSummary",
+    "KpiDataReader",
 ]

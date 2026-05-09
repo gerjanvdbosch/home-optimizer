@@ -34,7 +34,7 @@ DEFAULT_TRAIN_START_TIME = datetime(2026, 4, 16, 0, 0, 0, tzinfo=timezone.utc)
 DEFAULT_TRAIN_END_TIME = datetime(2026, 5, 7, 23, 59, 0, tzinfo=timezone.utc)
 
 
-def create_train_router(settings: AppSettings) -> APIRouter:
+def create_modeling_router(settings: AppSettings) -> APIRouter:
     router = APIRouter()
 
     @router.post("/api/train", response_model=TrainRoomModelResponse)

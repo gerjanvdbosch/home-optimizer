@@ -6,12 +6,12 @@ from .history import (
     WeatherImportService,
 )
 from .identification import (
+    DailyKpiService,
     IdentificationDataset,
     IdentificationDatasetRow,
     IdentificationDatasetService,
     IdentificationDatasetSummary,
 )
-from .kpi import DailyKpiService
 from .modeling import (
     RoomArxConfig,
     RoomModelingService,

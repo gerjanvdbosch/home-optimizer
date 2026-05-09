@@ -22,7 +22,7 @@ from home_optimizer.domain import (
     normalize_utc_timestamp,
 )
 from home_optimizer.domain.time import current_local_timezone, parse_datetime
-from home_optimizer.features.kpi.service import DailyKpiService
+from home_optimizer.features.identification.service import DailyKpiService
 
 
 class FakeKpiDataReader:
