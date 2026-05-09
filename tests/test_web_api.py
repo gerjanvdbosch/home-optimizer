@@ -23,6 +23,8 @@ from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
     ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
+    ROOM_GREYBOX_MODEL_KIND,
+    RoomGreyBoxConfig,
     Room2R2CConfig,
     Room2R2CModel,
     RoomArxConfig,
@@ -130,7 +132,7 @@ class FakeModelVersionRepository:
                     "thermal_mass_state",
                     "outdoor_temperature_c",
                     "thermal_output_energy_kwh",
-                    "solar_effective_energy",
+                    "solar_effective_exposure",
                 ],
                 intercept=0.0,
                 coefficients=[1.0, 0.0, 0.0, 0.0, 0.0],
@@ -138,6 +140,7 @@ class FakeModelVersionRepository:
                 mass_decay=0.97,
                 thermal_to_mass=0.05,
                 solar_to_mass=0.001,
+                observer_gain=0.1,
             ),
             validation_report=None,
         )
@@ -807,6 +810,29 @@ def test_room_model_catalog_endpoint_lists_models() -> None:
         ROOM_ARX_MODEL_KIND,
         ROOM_2R2C_MODEL_KIND,
     }
+
+
+def test_train_endpoint_supports_greybox_room_model_type() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/train",
+            params={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-26T00:00:00+00:00",
+                "interval_minutes": 15,
+                "min_train_rows": 20,
+                "validation_window_rows": 24,
+                "model_type": ROOM_GREYBOX_MODEL_KIND,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_type"] == ROOM_GREYBOX_MODEL_KIND
+    saved_model = app.state.container.model_version_repository.saved_versions[0].model
+    assert isinstance(saved_model.config, RoomGreyBoxConfig)
 
 
 def test_simulate_room_endpoint_supports_explicit_model_id() -> None:

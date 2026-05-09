@@ -11,7 +11,9 @@ from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.modeling import (
     ROOM_2R2C_MODEL_KIND,
     ROOM_ARX_MODEL_KIND,
+    ROOM_GREYBOX_MODEL_KIND,
     RoomArxConfig,
+    RoomGreyBoxConfig,
     Room2R2CConfig,
     RoomModelingService,
     StoredModelVersion,
@@ -32,6 +34,7 @@ ActivateQuery = Annotated[bool, Query(alias="activate")]
 ModelTypeQuery = Annotated[str, Query(alias="model_type")]
 DEFAULT_TRAIN_START_TIME = datetime(2026, 4, 16, 0, 0, 0, tzinfo=timezone.utc)
 DEFAULT_TRAIN_END_TIME = datetime(2026, 5, 7, 23, 59, 0, tzinfo=timezone.utc)
+DEFAULT_2R2C_TRAINING_WINDOW_ROWS = 30 * 24 * 6
 
 
 def create_modeling_router(settings: AppSettings) -> APIRouter:
@@ -69,10 +72,30 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
                 validation_window_rows=validation_window_rows,
             )
         elif model_type == ROOM_2R2C_MODEL_KIND:
+            resolved_training_window_rows = (
+                training_window_rows
+                if training_window_rows is not None
+                else DEFAULT_2R2C_TRAINING_WINDOW_ROWS
+            )
             config = Room2R2CConfig(
                 min_train_rows=min_train_rows,
-                training_window_rows=training_window_rows,
+                training_window_rows=resolved_training_window_rows,
                 validation_window_rows=validation_window_rows,
+                validation_stride_rows=max(1, (12 * 60) // interval_minutes),
+                validation_horizons_steps=[1, 6, 36],
+            )
+        elif model_type == ROOM_GREYBOX_MODEL_KIND:
+            resolved_training_window_rows = (
+                training_window_rows
+                if training_window_rows is not None
+                else DEFAULT_2R2C_TRAINING_WINDOW_ROWS
+            )
+            config = RoomGreyBoxConfig(
+                min_train_rows=min_train_rows,
+                training_window_rows=resolved_training_window_rows,
+                validation_window_rows=validation_window_rows,
+                validation_stride_rows=max(1, (12 * 60) // interval_minutes),
+                validation_horizons_steps=[1, 6, 36],
             )
         else:
             raise HTTPException(status_code=400, detail=f"unsupported room model type: {model_type}")

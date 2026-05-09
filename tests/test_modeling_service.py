@@ -7,6 +7,8 @@ import pytest
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling import (
     ROOM_2R2C_MODEL_KIND,
+    ROOM_GREYBOX_MODEL_KIND,
+    RoomGreyBoxConfig,
     Room2R2CConfig,
     RoomArxConfig,
     RoomModelingService,
@@ -186,10 +188,39 @@ def test_room_modeling_service_fits_two_state_room_model_on_dataset() -> None:
         "thermal_mass_state",
         "outdoor_temperature_c",
         "thermal_output_energy_kwh",
-        "solar_effective_energy",
+        "solar_effective_exposure",
     ]
     assert 0.0 <= model.mass_decay <= 1.0
     assert model.solar_to_mass >= 0.0
+    assert prediction is not None
+    assert len(report.aggregate_metrics) == 2
+    assert report.aggregate_metrics[0].mae_c is not None
+
+
+def test_room_modeling_service_fits_greybox_room_model_on_dataset() -> None:
+    dataset = build_synthetic_room_dataset(row_count=160)
+    service = RoomModelingService()
+    config = RoomGreyBoxConfig(
+        min_train_rows=60,
+        training_window_rows=96,
+        validation_window_rows=24,
+        validation_stride_rows=12,
+        validation_horizons_steps=[1, 6],
+        optimization_max_nfev=20,
+    )
+
+    model = service.fit_room_model(dataset, config=config)
+    prediction = service.predict_next_room_temperature(model, dataset.rows, source_index=100)
+    report = service.rolling_validate_room_model(dataset, config=config)
+
+    assert model.model_kind == ROOM_GREYBOX_MODEL_KIND
+    assert model.feature_names == [
+        "room_temperature_c",
+        "thermal_mass_state",
+        "outdoor_temperature_c",
+        "thermal_output_energy_kwh",
+        "solar_effective_exposure",
+    ]
     assert prediction is not None
     assert len(report.aggregate_metrics) == 2
     assert report.aggregate_metrics[0].mae_c is not None

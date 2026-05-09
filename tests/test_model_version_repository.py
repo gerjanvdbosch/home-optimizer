@@ -120,7 +120,7 @@ def build_2r2c_model() -> Room2R2CModel:
             "thermal_mass_state",
             "outdoor_temperature_c",
             "thermal_output_energy_kwh",
-            "solar_effective_energy",
+            "solar_effective_exposure",
         ],
         intercept=1.1,
         coefficients=[0.8, 0.1, 0.05, 0.04, 0.002],
@@ -128,6 +128,7 @@ def build_2r2c_model() -> Room2R2CModel:
         mass_decay=0.97,
         thermal_to_mass=0.05,
         solar_to_mass=0.001,
+        observer_gain=0.1,
     )
 
 
