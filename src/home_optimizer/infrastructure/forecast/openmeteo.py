@@ -38,12 +38,6 @@ class OpenMeteoGateway:
         tilt: float | None = None,
         azimuth: float | None = None,
     ) -> dict[str, Any]:
-        """Fetch 15-minute forecast data from Open-Meteo.
-
-        When past_days exceeds the 92-day limit of the regular Forecast API,
-        the Historical Forecast API is used automatically with equivalent
-        start_date/end_date parameters.
-        """
         use_historical = past_days is not None and past_days > _MAX_FORECAST_PAST_DAYS
 
         url = self.historical_base_url if use_historical else self.base_url
