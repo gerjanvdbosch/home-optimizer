@@ -46,7 +46,7 @@ def create_kpi_router(settings: AppSettings) -> APIRouter:
     def get_baseline_kpi_summary(
         container: ContainerDependency,
         start_date: SummaryStartDateQuery = date(2026, 2, 8),
-        end_date: SummaryEndDateQuery = date(2026, 5, 5),
+        end_date: SummaryEndDateQuery = date(2026, 3, 5),
     ) -> BaselineKpiSummaryResponse:
         return baseline_kpi_summary_response(
             DailyKpiService(

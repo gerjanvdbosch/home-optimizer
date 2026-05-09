@@ -468,6 +468,14 @@ def weighted_mean(
     return weighted_total / total_hours
 
 
+_NON_CRITICAL_VALIDITY_REASONS = frozenset(
+    {
+        "missing_thermostat_setpoint",
+        "missing_compressor_frequency",
+    }
+)
+
+
 def compute_daily_kpis(
     *,
     room_temperature: NumericSeries | None,
@@ -723,8 +731,10 @@ def compute_daily_kpis(
         end_time=end_time,
     )
 
+    critical_reasons = [r for r in validity_reasons if r not in _NON_CRITICAL_VALIDITY_REASONS]
+
     return DailyKpis(
-        is_valid_for_control_evaluation=not validity_reasons,
+        is_valid_for_control_evaluation=not critical_reasons,
         validity_reasons=validity_reasons,
         data_coverage_pct=min(coverage_values) if coverage_values else None,
         largest_data_gap_minutes=largest_gap_minutes if coverage_values else None,

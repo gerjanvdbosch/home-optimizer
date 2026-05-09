@@ -25,7 +25,7 @@ def create_identification_router(settings: AppSettings) -> APIRouter:
     def get_identification_dataset(
         container: ContainerDependency,
         start_time: StartTimeQuery = datetime(2026, 2, 8, 0, 0,0, tzinfo=datetime.now().astimezone().tzinfo),
-        end_time: EndTimeQuery = datetime(2026, 5, 5, 23, 59, 0, tzinfo=datetime.now().astimezone().tzinfo),
+        end_time: EndTimeQuery = datetime(2026, 3, 5, 23, 59, 0, tzinfo=datetime.now().astimezone().tzinfo),
         interval_minutes: IntervalQuery = 15,
     ) -> IdentificationDatasetResponse:
         service = IdentificationDatasetService(
