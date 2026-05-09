@@ -299,29 +299,17 @@ class MpcDatasetService:
                 raw[column] = pd.to_numeric(raw[column], errors="coerce")
 
         if "mean_real" in raw.columns:
-            raw["value_mean"] = (
-                raw["mean_real"]
-                .combine_first(raw["last_real"])
-                .combine_first(raw["max_real"])
-                .combine_first(raw["min_real"])
-                .combine_first(raw["last_bool"])
-            )
+            raw["value_mean"] = raw[
+                ["mean_real", "last_real", "max_real", "min_real", "last_bool"]
+            ].bfill(axis=1).iloc[:, 0]
         if "last_real" in raw.columns:
-            raw["value_sample"] = (
-                raw["last_real"]
-                .combine_first(raw["mean_real"])
-                .combine_first(raw["max_real"])
-                .combine_first(raw["min_real"])
-                .combine_first(raw["last_bool"])
-            )
+            raw["value_sample"] = raw[
+                ["last_real", "mean_real", "max_real", "min_real", "last_bool"]
+            ].bfill(axis=1).iloc[:, 0]
         if "last_bool" in raw.columns:
-            raw["value_flag"] = (
-                raw["last_bool"]
-                .combine_first(raw["last_real"])
-                .combine_first(raw["mean_real"])
-                .combine_first(raw["max_real"])
-                .combine_first(raw["min_real"])
-            )
+            raw["value_flag"] = raw[
+                ["last_bool", "last_real", "mean_real", "max_real", "min_real"]
+            ].bfill(axis=1).iloc[:, 0]
 
         result = grid.copy()
 
@@ -375,13 +363,9 @@ class MpcDatasetService:
                     raw_1m_flags["timestamp_minute_utc"],
                     utc=True,
                 )
-                raw_1m_flags["value_flag"] = (
-                    raw_1m_flags["last_bool"]
-                    .combine_first(raw_1m_flags["last_real"])
-                    .combine_first(raw_1m_flags["mean_real"])
-                    .combine_first(raw_1m_flags["max_real"])
-                    .combine_first(raw_1m_flags["min_real"])
-                )
+                raw_1m_flags["value_flag"] = raw_1m_flags[
+                    ["last_bool", "last_real", "mean_real", "max_real", "min_real"]
+                ].bfill(axis=1).iloc[:, 0]
                 raw_1m_flags["bucket_start"] = start_time + pd.to_timedelta(
                     (
                         (raw_1m_flags["timestamp_utc"] - start_time).dt.total_seconds()
