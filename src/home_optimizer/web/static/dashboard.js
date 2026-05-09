@@ -559,7 +559,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
     mode: "lines",
     line: { color: "#2196f3", width: 2 },
     hovertemplate:
-      `%{x|%H:%M}<br>%{y:.1f} ${powerSeries.unit || ""}<br>Mode: %{customdata}<extra></extra>`,
+      `%{x|%H:%M}<br>%{y:.2f} ${powerSeries.unit || ""}<br>Mode: %{customdata}<extra></extra>`,
   }];
 
   if (options.loadSeries && Array.isArray(options.loadSeries)) {
@@ -578,7 +578,7 @@ function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesL
           ...(loadTraceOptions[index]?.dash ? { dash: loadTraceOptions[index].dash } : {}),
         },
         hovertemplate:
-          `%{x|%H:%M}<br>%{y:.1f} ${series.unit || ""}<extra>${loadTraceOptions[index]?.label || series.name}</extra>`,
+          `%{x|%H:%M}<br>%{y:.2f} ${series.unit || ""}<extra>${loadTraceOptions[index]?.label || series.name}</extra>`,
       });
     });
   }
