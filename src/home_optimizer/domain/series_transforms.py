@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, tzinfo
 
 from .names import GTI_LIVING_ROOM_WINDOWS_ADJUSTED, THERMAL_OUTPUT
 from .series import NumericPoint, NumericSeries, TextPoint
 from .target_schedule import TemperatureTargetWindow
-from .time import normalize_utc_timestamp, parse_datetime
+from .time import current_local_timezone, normalize_utc_timestamp, parse_datetime
 
 
 def latest_value_at(points: list[NumericPoint], timestamp: str) -> float | None:
@@ -151,6 +151,7 @@ def build_daily_target_band_series(
     maximum_name: str,
     unit: str = "°C",
     interval_minutes: int | None = None,
+    local_tz: tzinfo | None = None,
 ) -> tuple[NumericSeries, NumericSeries, NumericSeries]:
     empty_target = NumericSeries(name=target_name, unit=unit, points=[])
     empty_minimum = NumericSeries(name=minimum_name, unit=unit, points=[])
@@ -158,10 +159,12 @@ def build_daily_target_band_series(
     if end_time <= start_time or not schedule:
         return empty_target, empty_minimum, empty_maximum
 
+    resolved_tz: tzinfo = local_tz if local_tz is not None else current_local_timezone()
+
     ordered_schedule = sorted(schedule, key=lambda window: window.time)
     active_window = ordered_schedule[-1]
     for window in ordered_schedule:
-        change_time = datetime.combine(start_time.date(), window.time, tzinfo=start_time.tzinfo)
+        change_time = datetime.combine(start_time.date(), window.time, tzinfo=resolved_tz)
         if change_time <= start_time:
             active_window = window
             continue
@@ -179,12 +182,16 @@ def build_daily_target_band_series(
 
     append_points(start_time, active_window)
 
-    for window in ordered_schedule:
-        change_time = datetime.combine(start_time.date(), window.time, tzinfo=start_time.tzinfo)
-        if not start_time < change_time < end_time:
-            continue
-        active_window = window
-        append_points(change_time, active_window)
+    current_date = start_time.date()
+    end_date = end_time.date()
+    while current_date <= end_date:
+        for window in ordered_schedule:
+            change_time = datetime.combine(current_date, window.time, tzinfo=resolved_tz)
+            if not start_time < change_time < end_time:
+                continue
+            active_window = window
+            append_points(change_time, active_window)
+        current_date += timedelta(days=1)
 
     final_timestamp = end_time - timedelta(seconds=1)
     if final_timestamp > start_time:

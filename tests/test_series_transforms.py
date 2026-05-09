@@ -32,6 +32,7 @@ def test_build_daily_target_band_series_creates_target_min_max_points() -> None:
         target_name=ROOM_TARGET_TEMPERATURE,
         minimum_name=ROOM_TARGET_MIN_TEMPERATURE,
         maximum_name=ROOM_TARGET_MAX_TEMPERATURE,
+        local_tz=timezone.utc,
     )
 
     assert target.points == [
@@ -62,6 +63,7 @@ def test_build_daily_target_band_series_uses_previous_day_window_before_first_ch
         target_name=DHW_TARGET_TEMPERATURE,
         minimum_name=DHW_TARGET_MIN_TEMPERATURE,
         maximum_name=DHW_TARGET_MAX_TEMPERATURE,
+        local_tz=timezone.utc,
     )
 
     assert target.points[:2] == [
@@ -72,4 +74,28 @@ def test_build_daily_target_band_series_uses_previous_day_window_before_first_ch
     assert maximum.points[0].value == 55.0
 
 
+def test_build_daily_target_band_series_repeats_schedule_across_multiple_days() -> None:
+    target, minimum, maximum = build_daily_target_band_series(
+        [
+            TemperatureTargetWindow(time=time(0, 0), target=18.0, low_margin=0.5, high_margin=1.0),
+            TemperatureTargetWindow(time=time(7, 0), target=20.0, low_margin=0.5, high_margin=1.0),
+        ],
+        start_time=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        target_name=ROOM_TARGET_TEMPERATURE,
+        minimum_name=ROOM_TARGET_MIN_TEMPERATURE,
+        maximum_name=ROOM_TARGET_MAX_TEMPERATURE,
+    )
+
+    target_timestamps = [p.timestamp for p in target.points]
+    # Transitions for both days must be present
+    assert "2026-04-25T07:00:00+00:00" in target_timestamps
+    assert "2026-04-26T00:00:00+00:00" in target_timestamps
+    assert "2026-04-26T07:00:00+00:00" in target_timestamps
+
+    # Nighttime on day 2 should be 18°C, not 20°C
+    day2_night = next(p for p in target.points if p.timestamp == "2026-04-26T00:00:00+00:00")
+    assert day2_night.value == 18.0
+    day2_day = next(p for p in target.points if p.timestamp == "2026-04-26T07:00:00+00:00")
+    assert day2_day.value == 20.0
 
