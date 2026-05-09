@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
-from home_optimizer.features.modeling.common.rolling_validation import rolling_validate_room_model
+from home_optimizer.features.modeling.rolling_validation import rolling_validate_room_model
 from home_optimizer.features.modeling.models import (
     RoomModelValidationReport,
     TrainedLinearRoomModel,

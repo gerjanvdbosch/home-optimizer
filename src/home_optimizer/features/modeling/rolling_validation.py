@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from home_optimizer.features.dataset.models import MpcDataset
-from home_optimizer.features.modeling.common.metrics import build_metric
+from home_optimizer.features.modeling.metrics import build_metric
 from home_optimizer.features.modeling.models import (
     RoomModelValidationReport,
     SegmentValidationReport,
-    TrainedLinearRoomModel,
     ValidationFoldResult,
 )
 
