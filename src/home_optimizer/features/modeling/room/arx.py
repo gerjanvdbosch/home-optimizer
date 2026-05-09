@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
+
 import numpy as np
+import pandas as pd
 
 from pydantic import Field, field_validator
 
@@ -60,6 +64,18 @@ class RoomArxModel(TrainedLinearRoomModel):
     notes: str = Field(
         default="Trained ARX room model with linear coefficients over lagged room and exogenous features."
     )
+
+
+@dataclass(frozen=True)
+class PreparedRoomArxData:
+    timestamps_utc: list[datetime]
+    feature_specs: list[tuple[str, str, int]]
+    feature_names: list[str]
+    feature_matrix: np.ndarray
+    target_values: np.ndarray
+    valid_training_mask: np.ndarray
+    field_arrays: dict[str, np.ndarray]
+    segment_masks: dict[str, np.ndarray]
 
 
 class RoomArxTrainer:
@@ -139,6 +155,131 @@ class RoomArxTrainer:
         if config.validation_stride_rows is not None:
             return config.validation_stride_rows
         return max(1, 60 // interval_minutes)
+
+    def prepare(self, rows: list[MpcDatasetRow], config: RoomArxConfig) -> PreparedRoomArxData:
+        timestamps_utc = [row.timestamp_utc for row in rows]
+        local_hours = np.asarray(
+            [timestamp_utc.astimezone().hour for timestamp_utc in timestamps_utc],
+            dtype=int,
+        )
+        room_temperature = np.asarray(
+            [
+                np.nan if row.room_temperature_c is None else float(row.room_temperature_c)
+                for row in rows
+            ],
+            dtype=float,
+        )
+        outdoor_temperature = np.asarray(
+            [
+                np.nan if row.outdoor_temperature_c is None else float(row.outdoor_temperature_c)
+                for row in rows
+            ],
+            dtype=float,
+        )
+        thermal_output = np.asarray(
+            [
+                0.0
+                if row.thermal_output_estimate_kw is None
+                else float(row.thermal_output_estimate_kw)
+                for row in rows
+            ],
+            dtype=float,
+        )
+        solar_gain = np.asarray(
+            [0.0 if row.solar_gain_proxy_w_m2 is None else float(row.solar_gain_proxy_w_m2) for row in rows],
+            dtype=float,
+        )
+        solar_irradiance = np.asarray(
+            [0.0 if row.solar_irradiance_w_m2 is None else float(row.solar_irradiance_w_m2) for row in rows],
+            dtype=float,
+        )
+        shutter_position = np.asarray(
+            [0.0 if row.shutter_position_pct is None else float(row.shutter_position_pct) for row in rows],
+            dtype=float,
+        )
+        occupied_flag = np.asarray(
+            [0.0 if row.occupied_flag is None else float(row.occupied_flag) for row in rows],
+            dtype=float,
+        )
+        solar_shutter_interaction = solar_irradiance * np.clip(shutter_position, 0.0, 100.0) / 100.0
+
+        frame = pd.DataFrame(
+            {
+                "room_temperature_c": room_temperature,
+                "outdoor_temperature_c": outdoor_temperature,
+                "thermal_output_estimate_kw": thermal_output,
+                "solar_gain_proxy_w_m2": solar_gain,
+                "shutter_position_pct": shutter_position,
+                "solar_shutter_interaction": solar_shutter_interaction,
+                "occupied_flag": occupied_flag,
+            }
+        )
+
+        specs = self.feature_specs(config)
+        feature_names = [feature_name for _, feature_name, _ in specs]
+        for field_name, feature_name, lag in specs:
+            frame[feature_name] = frame[field_name].shift(lag)
+
+        feature_matrix = frame[feature_names].to_numpy(dtype=float)
+        target_values = pd.Series(room_temperature).shift(-1).to_numpy(dtype=float)
+
+        source_indices = np.arange(len(rows), dtype=int)
+        valid_training_mask = (
+            (source_indices >= self.max_lag(config))
+            & (source_indices < max(0, len(rows) - 1))
+            & ~np.isnan(target_values)
+        )
+        for column_index, (field_name, _, _) in enumerate(specs):
+            if self.default_feature_value(field_name) is None:
+                valid_training_mask &= ~np.isnan(feature_matrix[:, column_index])
+
+        feature_matrix = np.nan_to_num(feature_matrix, nan=0.0)
+
+        is_sunny = solar_irradiance >= config.sunny_irradiance_threshold_w_m2
+        is_heating_active = thermal_output >= config.heating_active_threshold_kw
+        is_shutters_open = shutter_position >= config.shutters_open_min_pct
+        is_shutters_closed = shutter_position <= config.shutters_closed_max_pct
+        is_night = (local_hours >= config.night_start_hour) | (local_hours < config.night_end_hour)
+        is_freezing = outdoor_temperature <= config.freezing_outdoor_temperature_max_c
+
+        segment_masks = {
+            "sunny": is_sunny,
+            "heating_active": is_heating_active,
+            "cold_weather": outdoor_temperature <= config.cold_outdoor_temperature_max_c,
+            "freezing_weather": is_freezing,
+            "mild_weather": outdoor_temperature >= config.mild_outdoor_temperature_min_c,
+            "freezing_and_heating": is_freezing & is_heating_active,
+            "freezing_night": is_freezing & is_night,
+            "shutters_open": is_shutters_open,
+            "shutters_closed": is_shutters_closed,
+            "sunny_shutters_open": is_sunny & is_shutters_open,
+            "sunny_shutters_closed": is_sunny & is_shutters_closed,
+            "heating_and_sunny": is_sunny & is_heating_active,
+            "night": is_night,
+            "occupied": occupied_flag >= 1.0,
+            "sunny_midday": is_sunny
+            & (local_hours >= config.sunny_midday_start_hour)
+            & (local_hours < config.sunny_midday_end_hour),
+        }
+
+        return PreparedRoomArxData(
+            timestamps_utc=timestamps_utc,
+            feature_specs=specs,
+            feature_names=feature_names,
+            feature_matrix=feature_matrix,
+            target_values=target_values,
+            valid_training_mask=valid_training_mask,
+            field_arrays={
+                "room_temperature_c": room_temperature,
+                "outdoor_temperature_c": outdoor_temperature,
+                "thermal_output_estimate_kw": thermal_output,
+                "solar_gain_proxy_w_m2": solar_gain,
+                "shutter_position_pct": shutter_position,
+                "solar_shutter_interaction": solar_shutter_interaction,
+                "occupied_flag": occupied_flag,
+            },
+            segment_masks=segment_masks,
+        )
 
     def segment_definitions(self, config: RoomArxConfig) -> list[tuple[str, str]]:
         return [
@@ -233,45 +374,20 @@ class RoomArxTrainer:
 
         return segments
 
-    def build_training_matrix(
+    def training_slice(
         self,
-        rows: list[MpcDatasetRow],
-        config: RoomArxConfig,
-    ) -> tuple[np.ndarray, np.ndarray, list[str]]:
-        max_lag = self.max_lag(config)
-        specs = self.feature_specs(config)
-        feature_names = [feature_name for _, feature_name, _ in specs]
-
-        x_rows: list[list[float]] = []
-        y_values: list[float] = []
-
-        for source_index in range(max_lag, len(rows) - 1):
-            next_room_temperature = rows[source_index + 1].room_temperature_c
-            if next_room_temperature is None:
-                continue
-
-            feature_values: list[float] = []
-            valid = True
-            for field_name, _, lag in specs:
-                lagged_index = source_index - lag
-                value = self.row_value(rows[lagged_index], field_name)
-                if value is None:
-                    value = self.default_feature_value(field_name)
-                if value is None:
-                    valid = False
-                    break
-                feature_values.append(value)
-
-            if not valid:
-                continue
-
-            x_rows.append(feature_values)
-            y_values.append(float(next_room_temperature))
-
-        if not x_rows:
-            return np.zeros((0, len(feature_names))), np.zeros((0,)), feature_names
-
-        return np.asarray(x_rows, dtype=float), np.asarray(y_values, dtype=float), feature_names
+        prepared: PreparedRoomArxData,
+        *,
+        start_index: int = 0,
+        end_exclusive: int | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        resolved_end_exclusive = (
+            len(prepared.timestamps_utc) if end_exclusive is None else end_exclusive
+        )
+        mask = prepared.valid_training_mask.copy()
+        mask[:start_index] = False
+        mask[resolved_end_exclusive:] = False
+        return prepared.feature_matrix[mask], prepared.target_values[mask]
 
     def solve_ridge_regression(
         self,
@@ -302,7 +418,8 @@ class RoomArxTrainer:
         dataset: MpcDataset,
         config: RoomArxConfig,
     ) -> RoomArxModel:
-        x_matrix, y_values, feature_names = self.build_training_matrix(dataset.rows, config)
+        prepared = self.prepare(dataset.rows, config)
+        x_matrix, y_values = self.training_slice(prepared)
         intercept, coefficients = self.solve_ridge_regression(
             x_matrix,
             y_values,
@@ -314,10 +431,87 @@ class RoomArxTrainer:
             trained_to_utc=dataset.end_time_utc,
             interval_minutes=dataset.interval_minutes,
             config=config,
-            feature_names=feature_names,
+            feature_names=prepared.feature_names,
             intercept=intercept,
             coefficients=coefficients,
             sample_count=len(y_values),
+        )
+
+    def fit_prepared(
+        self,
+        prepared: PreparedRoomArxData,
+        *,
+        config: RoomArxConfig,
+        interval_minutes: int,
+        train_start_index: int = 0,
+        train_end_exclusive: int | None = None,
+    ) -> RoomArxModel:
+        resolved_train_end_exclusive = (
+            len(prepared.timestamps_utc) if train_end_exclusive is None else train_end_exclusive
+        )
+        x_matrix, y_values = self.training_slice(
+            prepared,
+            start_index=train_start_index,
+            end_exclusive=resolved_train_end_exclusive,
+        )
+        intercept, coefficients = self.solve_ridge_regression(
+            x_matrix,
+            y_values,
+            ridge_alpha=config.ridge_alpha,
+        )
+        trained_to_index = max(train_start_index, resolved_train_end_exclusive - 1)
+        return RoomArxModel(
+            trained_from_utc=prepared.timestamps_utc[train_start_index],
+            trained_to_utc=prepared.timestamps_utc[trained_to_index],
+            interval_minutes=interval_minutes,
+            config=config,
+            feature_names=prepared.feature_names,
+            intercept=intercept,
+            coefficients=coefficients,
+            sample_count=len(y_values),
+        )
+
+    def predict_next_prepared(
+        self,
+        model: TrainedLinearRoomModel,
+        prepared: PreparedRoomArxData,
+        *,
+        source_index: int,
+        predicted_room_temperatures: dict[int, float] | None = None,
+        prediction_origin_index: int | None = None,
+    ) -> float | None:
+        if len(model.coefficients) != len(prepared.feature_specs):
+            raise ValueError(
+                "model coefficient count does not match the current ARX feature layout; "
+                "retrain or reload a compatible model"
+            )
+
+        predicted_room_temperatures = predicted_room_temperatures or {}
+        prediction_origin_index = (
+            source_index if prediction_origin_index is None else prediction_origin_index
+        )
+
+        feature_values: list[float] = []
+        for index, (field_name, _, lag) in enumerate(prepared.feature_specs):
+            lagged_index = source_index - lag
+
+            if field_name == "room_temperature_c" and lagged_index > prediction_origin_index:
+                value = predicted_room_temperatures.get(lagged_index)
+            else:
+                value = float(prepared.field_arrays[field_name][lagged_index])
+                if np.isnan(value):
+                    value = None
+
+            if value is None:
+                value = self.default_feature_value(field_name)
+            if value is None:
+                return None
+
+            feature_values.append(value)
+
+        return model.intercept + sum(
+            value * model.coefficients[index]
+            for index, value in enumerate(feature_values)
         )
 
     def predict_next(
@@ -333,32 +527,19 @@ class RoomArxTrainer:
         prediction_origin_index = (
             source_index if prediction_origin_index is None else prediction_origin_index
         )
-
-        feature_values: list[float] = []
-        for field_name, _, lag in self.feature_specs(model.config):
-            lagged_index = source_index - lag
-
-            if field_name == "room_temperature_c" and lagged_index > prediction_origin_index:
-                value = predicted_room_temperatures.get(lagged_index)
-            else:
-                value = self.row_value(rows[lagged_index], field_name)
-
-            if value is None:
-                value = self.default_feature_value(field_name)
-            if value is None:
-                return None
-
-            feature_values.append(value)
-
-        return model.intercept + sum(
-            value * model.coefficients[index]
-            for index, value in enumerate(feature_values)
+        prepared = self.prepare(rows, model.config)
+        return self.predict_next_prepared(
+            model,
+            prepared,
+            source_index=source_index,
+            predicted_room_temperatures=predicted_room_temperatures,
+            prediction_origin_index=prediction_origin_index,
         )
 
-    def simulate_horizon(
+    def simulate_horizon_prepared(
         self,
         model: TrainedLinearRoomModel,
-        rows: list[MpcDatasetRow],
+        prepared: PreparedRoomArxData,
         *,
         start_index: int,
         horizon_steps: int,
@@ -370,9 +551,9 @@ class RoomArxTrainer:
         for step in range(1, horizon_steps + 1):
             source_index = start_index + step - 1
             target_index = start_index + step
-            prediction = self.predict_next(
+            prediction = self.predict_next_prepared(
                 model,
-                rows,
+                prepared,
                 source_index=source_index,
                 predicted_room_temperatures=predictions,
                 prediction_origin_index=start_index,
@@ -382,3 +563,19 @@ class RoomArxTrainer:
             predictions[target_index] = prediction
 
         return [predictions[start_index + step] for step in range(1, horizon_steps + 1)]
+
+    def simulate_horizon(
+        self,
+        model: TrainedLinearRoomModel,
+        rows: list[MpcDatasetRow],
+        *,
+        start_index: int,
+        horizon_steps: int,
+    ) -> list[float]:
+        prepared = self.prepare(rows, model.config)
+        return self.simulate_horizon_prepared(
+            model,
+            prepared,
+            start_index=start_index,
+            horizon_steps=horizon_steps,
+        )

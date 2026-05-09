@@ -20,6 +20,7 @@ def rolling_validate_room_model(
     if len(rows) < config.min_train_rows + 2:
         raise ValueError("dataset is too small for rolling validation")
 
+    prepared = trainer.prepare(rows, config)
     folds: list[ValidationFoldResult] = []
     all_errors_by_horizon: dict[int, list[float]] = {
         horizon_steps: [] for horizon_steps in config.validation_horizons_steps
@@ -45,13 +46,13 @@ def rolling_validate_room_model(
         if len(training_rows) < config.min_train_rows:
             break
 
-        training_dataset = MpcDataset(
+        model = trainer.fit_prepared(
+            prepared,
+            config=config,
             interval_minutes=dataset.interval_minutes,
-            start_time_utc=training_rows[0].timestamp_utc,
-            end_time_utc=training_rows[-1].timestamp_utc,
-            rows=training_rows,
+            train_start_index=train_start_index,
+            train_end_exclusive=fold_start,
         )
-        model = trainer.fit(training_dataset, config)
 
         metrics = []
         for horizon_steps in config.validation_horizons_steps:
@@ -61,9 +62,9 @@ def rolling_validate_room_model(
                 if actual_room_temperature is None:
                     continue
 
-                simulated = trainer.simulate_horizon(
+                simulated = trainer.simulate_horizon_prepared(
                     model,
-                    rows,
+                    prepared,
                     start_index=origin_index,
                     horizon_steps=horizon_steps,
                 )
@@ -73,8 +74,9 @@ def rolling_validate_room_model(
                 error = simulated[-1] - actual_room_temperature
                 errors.append(error)
                 all_errors_by_horizon[horizon_steps].append(error)
-                for segment_name in trainer.row_segments(rows[origin_index], config):
-                    segment_errors_by_horizon[segment_name][horizon_steps].append(error)
+                for segment_name, segment_mask in prepared.segment_masks.items():
+                    if bool(segment_mask[origin_index]):
+                        segment_errors_by_horizon[segment_name][horizon_steps].append(error)
 
             metrics.append(
                 build_metric(
