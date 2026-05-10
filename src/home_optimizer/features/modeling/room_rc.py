@@ -776,6 +776,8 @@ class RoomRC2StatePhysicalModel:
             for column in ["room_temp_c", "outdoor_temp_c", "heating_kw", "irradiance_wm2", "shutter_position", "occupied_flag"]
             if column in frame.columns
         ]
+        for column in essential_numeric:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
         missing_before = frame[essential_numeric].isna().sum().to_dict()
         if any(count > 0 for count in missing_before.values()):
             LOGGER.warning("Missing values before interpolation: %s", missing_before)

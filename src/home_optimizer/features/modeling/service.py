@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from home_optimizer.features.modeling.metrics import build_metric
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.rolling_validation import rolling_validate_room_model
 from home_optimizer.features.modeling.models import (
+    SegmentValidationReport,
+    ValidationFoldResult,
     RoomModelValidationReport,
     TrainedLinearRoomModel,
 )
@@ -148,4 +151,73 @@ class RoomModelingService:
                 model=model,
                 metrics={**metrics, **segment_metrics},
             )
-        return self.rolling_validate_room_model(dataset, config=model.config)
+        trainer = self.arx_trainer
+        prepared = trainer.prepare(dataset.rows, model.config)
+        all_errors_by_horizon: dict[int, list[float]] = {
+            horizon_steps: [] for horizon_steps in model.config.validation_horizons_steps
+        }
+        segment_errors_by_horizon: dict[str, dict[int, list[float]]] = {
+            segment_name: {
+                horizon_steps: [] for horizon_steps in model.config.validation_horizons_steps
+            }
+            for segment_name, _ in trainer.segment_definitions(model.config)
+        }
+
+        for horizon_steps in model.config.validation_horizons_steps:
+            for origin_index in range(0, len(dataset.rows) - horizon_steps):
+                actual_room_temperature = dataset.rows[origin_index + horizon_steps].room_temperature_c
+                if actual_room_temperature is None:
+                    continue
+                simulated = trainer.simulate_horizon_prepared(
+                    model,
+                    prepared,
+                    start_index=origin_index,
+                    horizon_steps=horizon_steps,
+                )
+                if len(simulated) != horizon_steps:
+                    continue
+                error = simulated[-1] - actual_room_temperature
+                all_errors_by_horizon[horizon_steps].append(error)
+                for segment_name, segment_mask in prepared.segment_masks.items():
+                    if bool(segment_mask[origin_index]):
+                        segment_errors_by_horizon[segment_name][horizon_steps].append(error)
+
+        aggregate_metrics = [
+            build_metric(
+                errors=all_errors_by_horizon[horizon_steps],
+                horizon_steps=horizon_steps,
+                interval_minutes=dataset.interval_minutes,
+            )
+            for horizon_steps in model.config.validation_horizons_steps
+        ]
+        segment_metrics = [
+            SegmentValidationReport(
+                segment_name=segment_name,
+                description=description,
+                metrics=[
+                    build_metric(
+                        errors=segment_errors_by_horizon[segment_name][horizon_steps],
+                        horizon_steps=horizon_steps,
+                        interval_minutes=dataset.interval_minutes,
+                    )
+                    for horizon_steps in model.config.validation_horizons_steps
+                ],
+            )
+            for segment_name, description in trainer.segment_definitions(model.config)
+        ]
+        return RoomModelValidationReport(
+            interval_minutes=dataset.interval_minutes,
+            config=model.config,
+            folds=[
+                ValidationFoldResult(
+                    train_start_utc=model.trained_from_utc,
+                    train_end_utc=model.trained_to_utc,
+                    validate_start_utc=dataset.start_time_utc,
+                    validate_end_utc=dataset.end_time_utc,
+                    training_sample_count=model.sample_count,
+                    metrics=aggregate_metrics,
+                )
+            ],
+            aggregate_metrics=aggregate_metrics,
+            segment_metrics=segment_metrics,
+        )

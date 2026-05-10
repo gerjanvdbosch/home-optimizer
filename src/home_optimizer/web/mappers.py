@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from home_optimizer.app.history_import_jobs import HistoryImportJob
 from home_optimizer.domain import (
     BaselineKpiSummary,
@@ -105,6 +107,12 @@ def identification_dataset_response(
 def train_room_model_response(
     version: StoredModelVersion,
     validation_report: RoomModelValidationReport,
+    *,
+    validation_from_utc: datetime | None = None,
+    validation_to_utc: datetime | None = None,
+    test_report: RoomModelValidationReport | None = None,
+    test_from_utc: datetime | None = None,
+    test_to_utc: datetime | None = None,
 ) -> TrainRoomModelResponse:
     return TrainRoomModelResponse(
         model_id=version.model_id,
@@ -112,6 +120,10 @@ def train_room_model_response(
         created_at_utc=version.created_at_utc,
         trained_from_utc=version.model.trained_from_utc,
         trained_to_utc=version.model.trained_to_utc,
+        validation_from_utc=validation_from_utc,
+        validation_to_utc=validation_to_utc,
+        test_from_utc=test_from_utc,
+        test_to_utc=test_to_utc,
         interval_minutes=version.model.interval_minutes,
         sample_count=version.model.sample_count,
         is_active=version.is_active,
@@ -129,6 +141,21 @@ def train_room_model_response(
                 ],
             )
             for segment in validation_report.segment_metrics
+        ],
+        test_aggregate_metrics=[
+            HorizonMetricResponse(**metric.model_dump())
+            for metric in (test_report.aggregate_metrics if test_report is not None else [])
+        ],
+        test_segment_metrics=[
+            SegmentValidationResponse(
+                segment_name=segment.segment_name,
+                description=segment.description,
+                metrics=[
+                    HorizonMetricResponse(**metric.model_dump())
+                    for metric in segment.metrics
+                ],
+            )
+            for segment in (test_report.segment_metrics if test_report is not None else [])
         ],
     )
 

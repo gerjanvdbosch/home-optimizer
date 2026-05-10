@@ -207,11 +207,17 @@ class TrainRoomModelResponse(BaseModel):
     created_at_utc: datetime
     trained_from_utc: datetime
     trained_to_utc: datetime
+    validation_from_utc: datetime | None = None
+    validation_to_utc: datetime | None = None
+    test_from_utc: datetime | None = None
+    test_to_utc: datetime | None = None
     interval_minutes: int
     sample_count: int
     is_active: bool
     aggregate_metrics: list[HorizonMetricResponse]
     segment_metrics: list[SegmentValidationResponse]
+    test_aggregate_metrics: list[HorizonMetricResponse] = []
+    test_segment_metrics: list[SegmentValidationResponse] = []
 
 
 class RoomModelVersionSummaryResponse(BaseModel):

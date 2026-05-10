@@ -735,7 +735,12 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert payload["interval_minutes"] == 15
     assert payload["sample_count"] > 0
     assert payload["is_active"] is True
+    assert payload["validation_from_utc"] is not None
+    assert payload["validation_to_utc"] is not None
+    assert payload["test_from_utc"] is not None
+    assert payload["test_to_utc"] is not None
     assert len(payload["aggregate_metrics"]) == 5
+    assert len(payload["test_aggregate_metrics"]) == 5
     assert app.state.container.model_version_repository.saved_versions
     assert app.state.container.model_version_repository.saved_versions[0].is_active is True
 
@@ -762,6 +767,38 @@ def test_train_endpoint_supports_physical_rc_room_model() -> None:
     saved_version = app.state.container.model_version_repository.saved_versions[0]
     assert saved_version.model_type == ROOM_RC_MODEL_KIND
     assert isinstance(saved_version.model, RoomRcModel)
+
+
+def test_train_endpoint_supports_separate_validation_and_test_ranges() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/train",
+            params={
+                "start_time": "2026-04-20T00:00:00+00:00",
+                "end_time": "2026-04-28T00:00:00+00:00",
+                "validation_start_time": "2026-04-28T00:00:00+00:00",
+                "validation_end_time": "2026-05-02T00:00:00+00:00",
+                "test_start_time": "2026-05-02T00:00:00+00:00",
+                "test_end_time": "2026-05-06T00:00:00+00:00",
+                "interval_minutes": 15,
+                "min_train_rows": 20,
+                "validation_window_rows": 24,
+                "model_type": ROOM_RC_MODEL_KIND,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trained_from_utc"] == "2026-04-20T00:00:00Z"
+    assert payload["trained_to_utc"] == "2026-04-27T23:45:00Z"
+    assert payload["validation_from_utc"] == "2026-04-28T00:00:00Z"
+    assert payload["validation_to_utc"] == "2026-05-02T00:00:00Z"
+    assert payload["test_from_utc"] == "2026-05-02T00:00:00Z"
+    assert payload["test_to_utc"] == "2026-05-06T00:00:00Z"
+    assert len(payload["aggregate_metrics"]) == 5
+    assert len(payload["test_aggregate_metrics"]) == 5
 
 
 def test_room_model_catalog_endpoint_lists_models() -> None:
