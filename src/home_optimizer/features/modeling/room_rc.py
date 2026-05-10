@@ -683,6 +683,25 @@ class RoomRC2StatePhysicalModel:
         measurement_room_temp_c: Optional[float],
     ) -> tuple[np.ndarray, np.ndarray]:
         _, _, A_d, B_d = self.params_to_matrices(self.params)
+        return self._filter_update_with_matrices(
+            state=state,
+            covariance=covariance,
+            u=u,
+            measurement_room_temp_c=measurement_room_temp_c,
+            A_d=A_d,
+            B_d=B_d,
+        )
+
+    def _filter_update_with_matrices(
+        self,
+        *,
+        state: np.ndarray,
+        covariance: np.ndarray,
+        u: np.ndarray,
+        measurement_room_temp_c: Optional[float],
+        A_d: np.ndarray,
+        B_d: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
         x_pred = A_d @ state + B_d @ u
         Q = np.diag(
             [
@@ -944,6 +963,7 @@ class RoomRC2StatePhysicalModel:
         previous = self.params
         self.params = params
         try:
+            _, _, A_d, B_d = self.params_to_matrices(params)
             state = self._initial_state_from_sequence(cache.frame, params)
             covariance = self._initial_covariance()
             filtered_states = np.zeros((len(cache.frame), STATE_DIM), dtype=float)
@@ -951,17 +971,35 @@ class RoomRC2StatePhysicalModel:
             filtered_states[0] = state
             filtered_covariances[0] = covariance
             for index in range(1, len(cache.frame)):
-                state, covariance = self.filter_update(
-                    state,
-                    covariance,
-                    cache.inputs[index - 1],
-                    cache.measurements[index],
+                state, covariance = self._filter_update_with_matrices(
+                    state=state,
+                    covariance=covariance,
+                    u=cache.inputs[index - 1],
+                    measurement_room_temp_c=cache.measurements[index],
+                    A_d=A_d,
+                    B_d=B_d,
                 )
                 filtered_states[index] = state
                 filtered_covariances[index] = covariance
             return filtered_states, filtered_covariances
         finally:
             self.params = previous
+
+    def _rollout_room_predictions(
+        self,
+        filtered_states: np.ndarray,
+        inputs: np.ndarray,
+        A_d: np.ndarray,
+        B_d: np.ndarray,
+        horizon: int,
+    ) -> np.ndarray:
+        sample_count = len(filtered_states) - horizon
+        if sample_count <= 0:
+            return np.array([], dtype=float)
+        states = filtered_states[:sample_count].copy()
+        for offset in range(horizon):
+            states = (states @ A_d.T) + (inputs[offset : offset + sample_count] @ B_d.T)
+        return states[:, 0]
 
     def _objective_for_sequences(
         self,
@@ -980,26 +1018,30 @@ class RoomRC2StatePhysicalModel:
             for horizon in horizons:
                 if length <= horizon:
                     continue
+                predictions = self._rollout_room_predictions(
+                    filtered_states=filtered_states,
+                    inputs=cache.inputs,
+                    A_d=A_d,
+                    B_d=B_d,
+                    horizon=horizon,
+                )
+                targets = cache.measurements[horizon:]
+                errors = predictions - targets
                 weight_h = horizon_weights[horizon]
-                for start in range(length - horizon):
-                    state = filtered_states[start].copy()
-                    for offset in range(horizon):
-                        u = cache.inputs[start + offset]
-                        state = A_d @ state + B_d @ u
-                    error = float(state[0] - cache.measurements[start + horizon])
-                    sample_weight = cache.sample_weights[start] * weight_h
-                    total_loss += sample_weight * self._robust_error(error)
-                    total_weight += sample_weight
-                    if (
-                        state[0] < self.config.min_forecast_temp_c
-                        or state[0] > self.config.max_forecast_temp_c
-                    ):
-                        overflow = max(
-                            state[0] - self.config.max_forecast_temp_c,
-                            self.config.min_forecast_temp_c - state[0],
-                            0.0,
-                        )
-                        total_loss += self.config.physical_penalty_weight * (overflow**2)
+                sample_weights = cache.sample_weights[: len(errors)] * weight_h
+                robust_losses = np.array(
+                    [self._robust_error(float(error)) for error in errors],
+                    dtype=float,
+                )
+                total_loss += float(np.sum(sample_weights * robust_losses))
+                total_weight += float(np.sum(sample_weights))
+                above = predictions - self.config.max_forecast_temp_c
+                below = self.config.min_forecast_temp_c - predictions
+                overflow = np.maximum(np.maximum(above, below), 0.0)
+                if np.any(overflow > 0.0):
+                    total_loss += float(
+                        self.config.physical_penalty_weight * np.sum(overflow**2)
+                    )
         return total_loss / total_weight
 
     def _physical_penalty(self, params: RoomRC2StateParams) -> float:
@@ -1042,11 +1084,15 @@ class RoomRC2StatePhysicalModel:
             for horizon in horizons:
                 if length <= horizon:
                     continue
-                for start in range(length - horizon):
-                    state = filtered_states[start].copy()
-                    for offset in range(horizon):
-                        state = A_d @ state + B_d @ cache.inputs[start + offset]
-                    errors[horizon].append(float(state[0] - cache.measurements[start + horizon]))
+                predictions = self._rollout_room_predictions(
+                    filtered_states=filtered_states,
+                    inputs=cache.inputs,
+                    A_d=A_d,
+                    B_d=B_d,
+                    horizon=horizon,
+                )
+                horizon_errors = predictions - cache.measurements[horizon:]
+                errors[horizon].extend(float(error) for error in horizon_errors)
         return errors
 
     def _collect_segment_errors(
@@ -1065,14 +1111,19 @@ class RoomRC2StatePhysicalModel:
             for horizon in horizons:
                 if length <= horizon:
                     continue
-                for start in range(length - horizon):
-                    state = filtered_states[start].copy()
-                    for offset in range(horizon):
-                        state = A_d @ state + B_d @ cache.inputs[start + offset]
-                    error = float(state[0] - cache.measurements[start + horizon])
-                    for name, mask in cache.segment_masks.items():
-                        if bool(mask[start]):
-                            segment_errors[name][horizon].append(error)
+                predictions = self._rollout_room_predictions(
+                    filtered_states=filtered_states,
+                    inputs=cache.inputs,
+                    A_d=A_d,
+                    B_d=B_d,
+                    horizon=horizon,
+                )
+                horizon_errors = predictions - cache.measurements[horizon:]
+                for name, mask in cache.segment_masks.items():
+                    relevant_errors = horizon_errors[mask[: len(horizon_errors)]]
+                    segment_errors[name][horizon].extend(
+                        float(error) for error in relevant_errors
+                    )
         return segment_errors
 
     def _metric_dict(self, horizon: int, errors: list[float]) -> dict[str, Any]:

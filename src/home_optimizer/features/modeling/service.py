@@ -126,3 +126,26 @@ class RoomModelingService:
             config=config,
             trainer=self.trainer_for_config(config),
         )
+
+    def validation_report_for_model(
+        self,
+        dataset: MpcDataset,
+        *,
+        model: TrainedLinearRoomModel | RoomRcModel,
+    ) -> RoomModelValidationReport:
+        if isinstance(model, RoomRcModel):
+            prepared = self.rc_trainer.prepare(dataset.rows, model.config)
+            physical = self.rc_trainer._physical_from_model(model)
+            metrics = physical.evaluate(
+                prepared.frame,
+                horizons=model.config.validation_horizons_steps,
+            )
+            segment_metrics = physical.evaluate_segments(
+                prepared.frame,
+                horizons=model.config.validation_horizons_steps,
+            )
+            return room_rc_validation_report_from_metrics(
+                model=model,
+                metrics={**metrics, **segment_metrics},
+            )
+        return self.rolling_validate_room_model(dataset, config=model.config)

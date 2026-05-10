@@ -84,9 +84,9 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
                 interval_minutes=interval_minutes,
             )
             model = modeling_service.fit_room_model(dataset, config=config)
-            validation_report = modeling_service.rolling_validate_room_model(
+            validation_report = modeling_service.validation_report_for_model(
                 dataset,
-                config=config,
+                model=model,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
