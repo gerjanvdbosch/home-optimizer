@@ -3,19 +3,31 @@ from __future__ import annotations
 import json
 import logging
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
 import numpy as np
 import pandas as pd
+from pydantic import Field
 from scipy.linalg import expm
 from scipy.optimize import minimize
+
+from home_optimizer.domain.models import DomainModel
+from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
+from home_optimizer.features.modeling.models import (
+    HorizonMetric,
+    RoomModelValidationReport,
+    SegmentValidationReport,
+    ValidationConfig,
+    ValidationFoldResult,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 MODEL_TYPE = "physical_2state_rc"
+ROOM_RC_MODEL_KIND = MODEL_TYPE
 STATE_DIM = 2
 INPUT_COLUMNS = (
     "outdoor_temp_c",
@@ -211,6 +223,155 @@ class _SequenceCache:
     measurements: np.ndarray
     sample_weights: np.ndarray
     segment_masks: dict[str, np.ndarray]
+
+
+@dataclass
+class PreparedRoomRcData:
+    timestamps_utc: list[datetime]
+    frame: pd.DataFrame
+    segment_masks: dict[str, np.ndarray]
+
+
+class RoomRcConfig(ValidationConfig):
+    model_kind: str = ROOM_RC_MODEL_KIND
+    glass_area_m2: float = Field(default=8.0, ge=0.0)
+    g_glass: float = Field(default=0.50, ge=0.0)
+    shutter_mode: str = Field(default="open_percent")
+    alpha_solar: float = Field(default=0.85, ge=0.0, le=0.99)
+    alpha_heat: float = Field(default=0.70, ge=0.0, le=0.99)
+    use_segment_weights: bool = True
+    use_huber_loss: bool = True
+    huber_delta_c: float = Field(default=0.25, gt=0.0)
+    kalman_process_noise_air: float = Field(default=0.02, ge=0.0)
+    kalman_process_noise_mass: float = Field(default=0.005, ge=0.0)
+    kalman_measurement_noise: float = Field(default=0.03, ge=0.0)
+    max_forecast_temp_c: float = 45.0
+    min_forecast_temp_c: float = -10.0
+    local_timezone: str | None = None
+    gap_factor: float = Field(default=1.5, gt=1.0)
+    short_gap_interpolation_limit: int = Field(default=2, ge=0)
+    optimizer_maxiter: int = Field(default=300, gt=0)
+    spectral_radius_penalty: float = Field(default=1e5, ge=0.0)
+    physical_penalty_weight: float = Field(default=1e3, ge=0.0)
+    regularization_weight: float = Field(default=1e-3, ge=0.0)
+    train_weight_freezing: float = Field(default=2.0, ge=0.0)
+    train_weight_heating_active: float = Field(default=1.0, ge=0.0)
+    train_weight_sunny_shutters_open: float = Field(default=1.0, ge=0.0)
+    train_weight_night: float = Field(default=0.5, ge=0.0)
+    sunny_irradiance_threshold_wm2: float = Field(default=150.0, ge=0.0)
+    heating_active_threshold_kw: float = Field(default=0.40, ge=0.0)
+    shutters_open_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    shutters_closed_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    cold_outdoor_temp_threshold_c: float = 5.0
+    freezing_outdoor_temp_threshold_c: float = 0.0
+    mild_outdoor_temp_threshold_c: float = 12.0
+    night_start_hour: int = Field(default=22, ge=0, le=23)
+    night_end_hour: int = Field(default=6, ge=0, le=23)
+    sunny_midday_start_hour: int = Field(default=11, ge=0, le=23)
+    sunny_midday_end_hour: int = Field(default=16, ge=1, le=24)
+    R_air_out_min: float = Field(default=0.1, gt=0.0)
+    R_air_out_max: float = Field(default=100.0, gt=0.0)
+    R_air_mass_min: float = Field(default=0.1, gt=0.0)
+    R_air_mass_max: float = Field(default=100.0, gt=0.0)
+    R_mass_out_min: float = Field(default=0.1, gt=0.0)
+    R_mass_out_max: float = Field(default=100.0, gt=0.0)
+    C_air_min: float = Field(default=0.05, gt=0.0)
+    C_air_max: float = Field(default=10.0, gt=0.0)
+    C_mass_min: float = Field(default=1.0, gt=0.0)
+    C_mass_max: float = Field(default=500.0, gt=0.0)
+    eta_heat_min: float = 0.1
+    eta_heat_max: float = 1.5
+    eta_solar_air_min: float = 0.0
+    eta_solar_air_max: float = 1.5
+    eta_solar_mass_min: float = 0.0
+    eta_solar_mass_max: float = 1.5
+    eta_internal_min: float = -0.2
+    eta_internal_max: float = 0.5
+    hour_coeff_min: float = -0.5
+    hour_coeff_max: float = 0.5
+    initial_mass_offset_min: float = -5.0
+    initial_mass_offset_max: float = 5.0
+    notes: str = Field(
+        default="Physical 2-state RC room model with exact discretization and Kalman-filtered mass state."
+    )
+
+    def to_physical_config(self, interval_minutes: int) -> "RoomRC2StateConfig":
+        return RoomRC2StateConfig(
+            interval_minutes=interval_minutes,
+            glass_area_m2=self.glass_area_m2,
+            g_glass=self.g_glass,
+            shutter_mode=self.shutter_mode,
+            alpha_solar=self.alpha_solar,
+            alpha_heat=self.alpha_heat,
+            use_segment_weights=self.use_segment_weights,
+            use_huber_loss=self.use_huber_loss,
+            huber_delta_c=self.huber_delta_c,
+            kalman_process_noise_air=self.kalman_process_noise_air,
+            kalman_process_noise_mass=self.kalman_process_noise_mass,
+            kalman_measurement_noise=self.kalman_measurement_noise,
+            max_forecast_temp_c=self.max_forecast_temp_c,
+            min_forecast_temp_c=self.min_forecast_temp_c,
+            local_timezone=self.local_timezone,
+            gap_factor=self.gap_factor,
+            short_gap_interpolation_limit=self.short_gap_interpolation_limit,
+            min_train_rows=self.min_train_rows,
+            optimizer_maxiter=self.optimizer_maxiter,
+            spectral_radius_penalty=self.spectral_radius_penalty,
+            physical_penalty_weight=self.physical_penalty_weight,
+            regularization_weight=self.regularization_weight,
+            train_weight_freezing=self.train_weight_freezing,
+            train_weight_heating_active=self.train_weight_heating_active,
+            train_weight_sunny_shutters_open=self.train_weight_sunny_shutters_open,
+            train_weight_night=self.train_weight_night,
+            sunny_irradiance_threshold_wm2=self.sunny_irradiance_threshold_wm2,
+            heating_active_threshold_kw=self.heating_active_threshold_kw,
+            shutters_open_threshold=self.shutters_open_threshold,
+            shutters_closed_threshold=self.shutters_closed_threshold,
+            cold_outdoor_temp_threshold_c=self.cold_outdoor_temp_threshold_c,
+            freezing_outdoor_temp_threshold_c=self.freezing_outdoor_temp_threshold_c,
+            mild_outdoor_temp_threshold_c=self.mild_outdoor_temp_threshold_c,
+            night_start_hour=self.night_start_hour,
+            night_end_hour=self.night_end_hour,
+            sunny_midday_start_hour=self.sunny_midday_start_hour,
+            sunny_midday_end_hour=self.sunny_midday_end_hour,
+            R_air_out_min=self.R_air_out_min,
+            R_air_out_max=self.R_air_out_max,
+            R_air_mass_min=self.R_air_mass_min,
+            R_air_mass_max=self.R_air_mass_max,
+            R_mass_out_min=self.R_mass_out_min,
+            R_mass_out_max=self.R_mass_out_max,
+            C_air_min=self.C_air_min,
+            C_air_max=self.C_air_max,
+            C_mass_min=self.C_mass_min,
+            C_mass_max=self.C_mass_max,
+            eta_heat_min=self.eta_heat_min,
+            eta_heat_max=self.eta_heat_max,
+            eta_solar_air_min=self.eta_solar_air_min,
+            eta_solar_air_max=self.eta_solar_air_max,
+            eta_solar_mass_min=self.eta_solar_mass_min,
+            eta_solar_mass_max=self.eta_solar_mass_max,
+            eta_internal_min=self.eta_internal_min,
+            eta_internal_max=self.eta_internal_max,
+            hour_coeff_min=self.hour_coeff_min,
+            hour_coeff_max=self.hour_coeff_max,
+            initial_mass_offset_min=self.initial_mass_offset_min,
+            initial_mass_offset_max=self.initial_mass_offset_max,
+        )
+
+
+class RoomRcModel(DomainModel):
+    model_kind: str = ROOM_RC_MODEL_KIND
+    trained_from_utc: datetime
+    trained_to_utc: datetime
+    interval_minutes: int
+    config: RoomRcConfig
+    params: dict[str, float]
+    sample_count: int
+    training_metadata: dict[str, Any] = Field(default_factory=dict)
+    feature_schema: dict[str, Any] = Field(default_factory=dict)
+    notes: str = Field(
+        default="Stored physical RC room model parameters and metadata."
+    )
 
 
 class RoomRC2StatePhysicalModel:
@@ -607,9 +768,27 @@ class RoomRC2StatePhysicalModel:
                 limit_direction="both",
             )
 
-        missing_after = frame[essential_numeric].isna().sum()
+        zero_fill_columns = [
+            column
+            for column in ["heating_kw", "irradiance_wm2", "shutter_position", "occupied_flag"]
+            if column in frame.columns
+        ]
+        zero_fill_missing = frame[zero_fill_columns].isna().sum().to_dict()
+        if any(count > 0 for count in zero_fill_missing.values()):
+            LOGGER.warning(
+                "Filling remaining missing exogenous values with 0.0 after interpolation: %s",
+                zero_fill_missing,
+            )
+            frame.loc[:, zero_fill_columns] = frame.loc[:, zero_fill_columns].fillna(0.0)
+
+        strict_columns = [
+            column for column in ["room_temp_c", "outdoor_temp_c"] if column in frame.columns
+        ]
+        missing_after = frame[strict_columns].isna().sum()
         if int(missing_after.sum()) > 0:
-            raise ValueError(f"Missing values remain after interpolation: {missing_after.to_dict()}")
+            raise ValueError(
+                f"Missing required state/weather values remain after interpolation: {missing_after.to_dict()}"
+            )
 
         frame["heating_kw"] = frame["heating_kw"].clip(lower=0.0)
         frame["irradiance_wm2"] = frame["irradiance_wm2"].clip(lower=0.0)
@@ -939,3 +1118,217 @@ class RoomRC2StatePhysicalModel:
             for name, mask in cache.segment_masks.items():
                 counts[name] += int(np.sum(mask))
         LOGGER.info("Segment counts: %s", counts)
+
+
+class RoomRcTrainer:
+    def max_history_rows(self, config: RoomRcConfig) -> int:
+        return max(36, max(config.validation_horizons_steps, default=1))
+
+    def validation_stride_rows(self, config: RoomRcConfig, interval_minutes: int) -> int:
+        if config.validation_stride_rows is not None:
+            return config.validation_stride_rows
+        return max(1, 60 // interval_minutes)
+
+    def prepare(self, rows: list[MpcDatasetRow], config: RoomRcConfig) -> PreparedRoomRcData:
+        frame = pd.DataFrame(
+            [
+                {
+                    "timestamp": row.timestamp_utc,
+                    "room_temp_c": row.room_temperature_c,
+                    "outdoor_temp_c": row.outdoor_temperature_c,
+                    "heating_kw": row.thermal_output_estimate_kw,
+                    "irradiance_wm2": row.solar_irradiance_w_m2,
+                    "shutter_position": row.shutter_position_pct,
+                    "occupied_flag": row.occupied_flag,
+                }
+                for row in rows
+            ]
+        )
+        inferred_interval_minutes = 10
+        if len(frame) >= 2:
+            delta_minutes = (
+                pd.to_datetime(frame.iloc[1]["timestamp"], utc=True)
+                - pd.to_datetime(frame.iloc[0]["timestamp"], utc=True)
+            ).total_seconds() / 60.0
+            if delta_minutes > 0:
+                inferred_interval_minutes = int(round(delta_minutes))
+        physical = RoomRC2StatePhysicalModel(
+            config.to_physical_config(interval_minutes=inferred_interval_minutes)
+        )
+        prepared = physical.prepare_features(frame)
+        segment_masks = physical._segment_masks(prepared)
+        timestamps = [timestamp.to_pydatetime() for timestamp in prepared["timestamp"]]
+        return PreparedRoomRcData(
+            timestamps_utc=timestamps,
+            frame=prepared,
+            segment_masks=segment_masks,
+        )
+
+    def fit(self, dataset: MpcDataset, config: RoomRcConfig) -> RoomRcModel:
+        prepared = self.prepare(dataset.rows, config)
+        return self.fit_prepared(
+            prepared,
+            config=config,
+            interval_minutes=dataset.interval_minutes,
+            train_start_index=0,
+            train_end_exclusive=len(prepared.frame),
+        )
+
+    def fit_prepared(
+        self,
+        prepared: PreparedRoomRcData,
+        *,
+        config: RoomRcConfig,
+        interval_minutes: int,
+        train_start_index: int = 0,
+        train_end_exclusive: int | None = None,
+    ) -> RoomRcModel:
+        resolved_end = len(prepared.frame) if train_end_exclusive is None else train_end_exclusive
+        train_frame = prepared.frame.iloc[train_start_index:resolved_end].reset_index(drop=True)
+        physical = RoomRC2StatePhysicalModel(config.to_physical_config(interval_minutes))
+        horizons = tuple(config.validation_horizons_steps)
+        fit_report = physical.fit(
+            train_frame,
+            horizons=horizons,
+            include_144=144 in horizons,
+        )
+        trained_to_index = max(train_start_index, resolved_end - 1)
+        return RoomRcModel(
+            trained_from_utc=prepared.timestamps_utc[train_start_index],
+            trained_to_utc=prepared.timestamps_utc[trained_to_index],
+            interval_minutes=interval_minutes,
+            config=config,
+            params=physical.get_params().to_dict(),
+            sample_count=int(fit_report["train_sample_count"]),
+            training_metadata=physical.training_metadata,
+            feature_schema=physical.feature_schema,
+        )
+
+    def _physical_from_model(self, model: RoomRcModel) -> RoomRC2StatePhysicalModel:
+        physical = RoomRC2StatePhysicalModel(
+            model.config.to_physical_config(interval_minutes=model.interval_minutes)
+        )
+        physical.set_params(RoomRC2StateParams.from_dict(model.params))
+        physical.training_metadata = dict(model.training_metadata)
+        physical.feature_schema = dict(model.feature_schema)
+        return physical
+
+    def predict_next_prepared(
+        self,
+        model: RoomRcModel,
+        prepared: PreparedRoomRcData,
+        *,
+        source_index: int,
+        predicted_room_temperatures: dict[int, float] | None = None,
+        prediction_origin_index: int | None = None,
+    ) -> float | None:
+        simulated = self.simulate_horizon_prepared(
+            model,
+            prepared,
+            start_index=source_index,
+            horizon_steps=1,
+        )
+        if not simulated:
+            return None
+        return float(simulated[0])
+
+    def predict_next(
+        self,
+        model: RoomRcModel,
+        rows: list[MpcDatasetRow],
+        *,
+        source_index: int,
+        predicted_room_temperatures: dict[int, float] | None = None,
+        prediction_origin_index: int | None = None,
+    ) -> float | None:
+        prepared = self.prepare(rows, model.config)
+        return self.predict_next_prepared(
+            model,
+            prepared,
+            source_index=source_index,
+            predicted_room_temperatures=predicted_room_temperatures,
+            prediction_origin_index=prediction_origin_index,
+        )
+
+    def simulate_horizon_prepared(
+        self,
+        model: RoomRcModel,
+        prepared: PreparedRoomRcData,
+        *,
+        start_index: int,
+        horizon_steps: int,
+    ) -> list[float]:
+        if horizon_steps <= 0:
+            raise ValueError("horizon_steps must be greater than zero")
+        if start_index < 0 or start_index >= len(prepared.frame) - 1:
+            return []
+        if start_index + horizon_steps >= len(prepared.frame):
+            return []
+
+        physical = self._physical_from_model(model)
+        cache = physical._build_sequence_cache(prepared.frame)
+        filtered_states, _ = physical._estimate_filtered_states(
+            cache,
+            RoomRC2StateParams.from_dict(model.params),
+        )
+        state = filtered_states[start_index].copy()
+        _, _, A_d, B_d = physical.params_to_matrices(RoomRC2StateParams.from_dict(model.params))
+        predictions: list[float] = []
+        for step in range(1, horizon_steps + 1):
+            input_index = start_index + step - 1
+            state = A_d @ state + B_d @ cache.inputs[input_index]
+            predictions.append(float(state[0]))
+        return predictions
+
+    def simulate_horizon(
+        self,
+        model: RoomRcModel,
+        rows: list[MpcDatasetRow],
+        *,
+        start_index: int,
+        horizon_steps: int,
+    ) -> list[float]:
+        prepared = self.prepare(rows, model.config)
+        return self.simulate_horizon_prepared(
+            model,
+            prepared,
+            start_index=start_index,
+            horizon_steps=horizon_steps,
+        )
+
+    def segment_definitions(self, config: RoomRcConfig) -> list[tuple[str, str]]:
+        return list(DEFAULT_SEGMENT_DESCRIPTIONS.items())
+
+
+def room_rc_validation_report_from_metrics(
+    *,
+    model: RoomRcModel,
+    metrics: dict[str, Any],
+) -> RoomModelValidationReport:
+    aggregate_metrics = [
+        HorizonMetric(**metric) for metric in metrics.get("aggregate_metrics", [])
+    ]
+    segment_metrics = [
+        SegmentValidationReport(
+            segment_name=segment["segment_name"],
+            description=segment["description"],
+            metrics=[HorizonMetric(**metric) for metric in segment["metrics"]],
+        )
+        for segment in metrics.get("segment_metrics", [])
+    ]
+    return RoomModelValidationReport(
+        interval_minutes=model.interval_minutes,
+        config=model.config,
+        folds=[
+            ValidationFoldResult(
+                train_start_utc=model.trained_from_utc,
+                train_end_utc=model.trained_to_utc,
+                validate_start_utc=model.trained_from_utc,
+                validate_end_utc=model.trained_to_utc,
+                training_sample_count=model.sample_count,
+                metrics=aggregate_metrics,
+            )
+        ],
+        aggregate_metrics=aggregate_metrics,
+        segment_metrics=segment_metrics,
+    )

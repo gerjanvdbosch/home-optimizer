@@ -6,7 +6,7 @@ from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain import NumericPoint, NumericSeries, normalize_utc_timestamp
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset import MpcDatasetService
-from home_optimizer.features.modeling import RoomModelingService, TrainedLinearRoomModel
+from home_optimizer.features.modeling import RoomModelingService, RoomRcModel, TrainedLinearRoomModel
 from home_optimizer.features.simulation.models import RoomSimulationResult
 
 
@@ -24,7 +24,7 @@ class RoomSimulationService:
         *,
         samples_reader,
         model_id: str,
-        model: TrainedLinearRoomModel,
+        model: TrainedLinearRoomModel | RoomRcModel,
         anchor_time: datetime,
         horizon_steps: int,
     ) -> RoomSimulationResult:

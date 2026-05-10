@@ -75,7 +75,7 @@ class StoredModelVersion(DomainModel):
     model_type: str
     created_at_utc: datetime
     is_active: bool = False
-    model: TrainedLinearRoomModel
+    model: DomainModel
     validation_report: RoomModelValidationReport | None = None
 
 

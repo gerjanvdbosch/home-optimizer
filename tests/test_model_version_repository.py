@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from home_optimizer.features.modeling import (
     HorizonMetric,
     ROOM_ARX_MODEL_KIND,
+    ROOM_RC_MODEL_KIND,
     RoomArxConfig,
+    RoomRcConfig,
+    RoomRcModel,
     RoomModelValidationReport,
     StoredModelVersion,
     TrainedLinearRoomModel,
@@ -101,6 +104,38 @@ def build_validation_report() -> RoomModelValidationReport:
     )
 
 
+def build_rc_model() -> RoomRcModel:
+    return RoomRcModel(
+        trained_from_utc=datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc),
+        trained_to_utc=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
+        interval_minutes=10,
+        config=RoomRcConfig(
+            min_train_rows=10,
+            validation_window_rows=10,
+            validation_horizons_steps=[1, 6, 36, 72],
+        ),
+        params={
+            "R_air_out": 5.0,
+            "R_air_mass": 1.0,
+            "R_mass_out": 20.0,
+            "C_air": 0.5,
+            "C_mass": 50.0,
+            "eta_heat": 0.9,
+            "eta_solar_air": 0.2,
+            "eta_solar_mass": 0.5,
+            "eta_internal": 0.1,
+            "b_hour_sin_air": 0.0,
+            "b_hour_cos_air": 0.0,
+            "b_hour_sin_mass": 0.0,
+            "b_hour_cos_mass": 0.0,
+            "initial_mass_offset_c": 0.0,
+        },
+        sample_count=180,
+        training_metadata={"final_train_loss": 0.12},
+        feature_schema={"input_columns": ["outdoor_temp_c"]},
+    )
+
+
 def test_model_version_repository_round_trips_room_model_versions(tmp_path) -> None:
     database = Database(str(tmp_path / "model_versions.sqlite"))
     database.init_schema()
@@ -180,3 +215,33 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
     assert summary_by_id["room-model-v1"].is_active is False
     assert summary_by_id["room-model-v2"].is_active is True
 
+
+def test_model_version_repository_round_trips_room_rc_model_versions(tmp_path) -> None:
+    database = Database(str(tmp_path / "model_versions_rc.sqlite"))
+    database.init_schema()
+    repository = ModelVersionRepository(database)
+
+    version = StoredModelVersion(
+        model_id="room-rc-v1",
+        model_type=ROOM_RC_MODEL_KIND,
+        created_at_utc=datetime(2026, 5, 12, 9, 0, tzinfo=timezone.utc),
+        is_active=True,
+        model=build_rc_model(),
+        validation_report=build_validation_report(),
+    )
+
+    repository.save_room_model_version(version)
+
+    loaded = repository.get_room_model_version("room-rc-v1")
+    active = repository.get_active_room_model_version()
+    summaries = repository.list_room_model_versions()
+
+    assert loaded is not None
+    assert loaded.model_id == "room-rc-v1"
+    assert loaded.model_type == ROOM_RC_MODEL_KIND
+    assert isinstance(loaded.model, RoomRcModel)
+    assert loaded.model.params["C_mass"] == 50.0
+    assert active is not None
+    assert active.model_id == "room-rc-v1"
+    summary_by_id = {summary.model_id: summary for summary in summaries}
+    assert summary_by_id["room-rc-v1"].model_type == ROOM_RC_MODEL_KIND

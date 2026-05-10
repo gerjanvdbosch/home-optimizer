@@ -22,7 +22,9 @@ from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
     ROOM_ARX_MODEL_KIND,
+    ROOM_RC_MODEL_KIND,
     RoomArxConfig,
+    RoomRcModel,
     StoredModelVersionSummary,
     StoredModelVersion,
     TrainedLinearRoomModel,
@@ -736,6 +738,32 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert len(payload["aggregate_metrics"]) == 5
     assert app.state.container.model_version_repository.saved_versions
     assert app.state.container.model_version_repository.saved_versions[0].is_active is True
+
+
+def test_train_endpoint_supports_physical_rc_room_model() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/train",
+            params={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-26T00:00:00+00:00",
+                "interval_minutes": 15,
+                "min_train_rows": 20,
+                "validation_window_rows": 24,
+                "model_type": ROOM_RC_MODEL_KIND,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_type"] == ROOM_RC_MODEL_KIND
+    saved_version = app.state.container.model_version_repository.saved_versions[0]
+    assert saved_version.model_type == ROOM_RC_MODEL_KIND
+    assert isinstance(saved_version.model, RoomRcModel)
+
+
 def test_room_model_catalog_endpoint_lists_models() -> None:
     app, _ = build_test_app(imported_rows={})
 

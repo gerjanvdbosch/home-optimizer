@@ -12,24 +12,35 @@ from home_optimizer.features.modeling.room_arx import (
     RoomArxModel,
     RoomArxTrainer,
 )
+from home_optimizer.features.modeling.room_rc import (
+    ROOM_RC_MODEL_KIND,
+    RoomRcConfig,
+    RoomRcModel,
+    RoomRcTrainer,
+    room_rc_validation_report_from_metrics,
+)
 
 
 class RoomModelingService:
     def __init__(
         self,
         arx_trainer: RoomArxTrainer | None = None,
+        rc_trainer: RoomRcTrainer | None = None,
     ) -> None:
         self.arx_trainer = arx_trainer or RoomArxTrainer()
+        self.rc_trainer = rc_trainer or RoomRcTrainer()
 
-    def trainer_for_config(self, config) -> RoomArxTrainer:
+    def trainer_for_config(self, config) -> RoomArxTrainer | RoomRcTrainer:
         if config.model_kind == ROOM_ARX_MODEL_KIND:
             return self.arx_trainer
+        if config.model_kind == ROOM_RC_MODEL_KIND:
+            return self.rc_trainer
         raise ValueError(f"unsupported room model kind: {config.model_kind}")
 
     def trainer_for_model(
         self,
-        model: TrainedLinearRoomModel,
-    ) -> RoomArxTrainer:
+        model: TrainedLinearRoomModel | RoomRcModel,
+    ) -> RoomArxTrainer | RoomRcTrainer:
         model_kind = getattr(model, "model_kind", None)
         if (
             isinstance(model, RoomArxModel)
@@ -37,6 +48,12 @@ class RoomModelingService:
             or isinstance(model.config, RoomArxConfig)
         ):
             return self.arx_trainer
+        if (
+            isinstance(model, RoomRcModel)
+            or model_kind == ROOM_RC_MODEL_KIND
+            or isinstance(model.config, RoomRcConfig)
+        ):
+            return self.rc_trainer
         raise ValueError(f"unsupported room model kind: {model_kind}")
 
     def max_history_rows(self, model: TrainedLinearRoomModel) -> int:
@@ -47,14 +64,14 @@ class RoomModelingService:
         self,
         dataset: MpcDataset,
         *,
-        config: RoomArxConfig | None = None,
-    ) -> TrainedLinearRoomModel:
+        config: RoomArxConfig | RoomRcConfig | None = None,
+    ) -> TrainedLinearRoomModel | RoomRcModel:
         config = config or RoomArxConfig()
         return self.trainer_for_config(config).fit(dataset, config)
 
     def predict_next_room_temperature(
         self,
-        model: TrainedLinearRoomModel,
+        model: TrainedLinearRoomModel | RoomRcModel,
         rows: list[MpcDatasetRow],
         *,
         source_index: int,
@@ -71,7 +88,7 @@ class RoomModelingService:
 
     def simulate_horizon(
         self,
-        model: TrainedLinearRoomModel,
+        model: TrainedLinearRoomModel | RoomRcModel,
         rows: list[MpcDatasetRow],
         *,
         start_index: int,
@@ -88,9 +105,22 @@ class RoomModelingService:
         self,
         dataset: MpcDataset,
         *,
-        config: RoomArxConfig | None = None,
+        config: RoomArxConfig | RoomRcConfig | None = None,
     ) -> RoomModelValidationReport:
         config = config or RoomArxConfig()
+        if isinstance(config, RoomRcConfig):
+            model = self.rc_trainer.fit(dataset, config)
+            prepared = self.rc_trainer.prepare(dataset.rows, config)
+            physical = self.rc_trainer._physical_from_model(model)
+            metrics = physical.evaluate(prepared.frame, horizons=config.validation_horizons_steps)
+            segment_metrics = physical.evaluate_segments(
+                prepared.frame,
+                horizons=config.validation_horizons_steps,
+            )
+            return room_rc_validation_report_from_metrics(
+                model=model,
+                metrics={**metrics, **segment_metrics},
+            )
         return rolling_validate_room_model(
             dataset,
             config=config,

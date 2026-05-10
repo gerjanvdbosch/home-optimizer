@@ -14,6 +14,7 @@ from .identification import (
 )
 from .modeling import (
     RoomArxConfig,
+    RoomRcConfig,
     RoomModelingService,
     RoomModelValidationReport,
     SegmentValidationReport,
@@ -34,6 +35,7 @@ __all__ = [
     "IdentificationDatasetService",
     "IdentificationDatasetSummary",
     "RoomArxConfig",
+    "RoomRcConfig",
     "RoomModelValidationReport",
     "SegmentValidationReport",
     "RoomModelingService",

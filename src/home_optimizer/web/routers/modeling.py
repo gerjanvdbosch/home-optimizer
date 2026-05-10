@@ -10,7 +10,9 @@ from home_optimizer.app import AppSettings
 from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.modeling import (
     ROOM_ARX_MODEL_KIND,
+    ROOM_RC_MODEL_KIND,
     RoomArxConfig,
+    RoomRcConfig,
     RoomModelingService,
     StoredModelVersion,
 )
@@ -62,6 +64,12 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         modeling_service = RoomModelingService()
         if model_type == ROOM_ARX_MODEL_KIND:
             config = RoomArxConfig(
+                min_train_rows=min_train_rows,
+                training_window_rows=training_window_rows,
+                validation_window_rows=validation_window_rows,
+            )
+        elif model_type == ROOM_RC_MODEL_KIND:
+            config = RoomRcConfig(
                 min_train_rows=min_train_rows,
                 training_window_rows=training_window_rows,
                 validation_window_rows=validation_window_rows,
