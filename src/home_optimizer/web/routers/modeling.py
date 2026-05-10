@@ -96,7 +96,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         validation_end_time: OptionalEndTimeQuery = None,
         test_start_time: OptionalTestStartTimeQuery = None,
         test_end_time: OptionalTestEndTimeQuery = None,
-        interval_minutes: IntervalQuery = 10,
+        interval_minutes: IntervalQuery = 15,
         training_window_rows: TrainingWindowQuery = None,
         validation_window_rows: ValidationWindowQuery = 144,
         min_train_rows: MinTrainRowsQuery = 96,
@@ -117,6 +117,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         elif model_type == ROOM_RC_MODEL_KIND:
             config = RoomRcConfig(
                 min_train_rows=min_train_rows,
+                min_valid_train_rows=min_train_rows,
                 training_window_rows=training_window_rows,
                 validation_window_rows=validation_window_rows,
             )

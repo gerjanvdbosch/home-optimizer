@@ -64,6 +64,29 @@ DEFAULT_SEGMENT_DESCRIPTIONS: dict[str, str] = {
     "occupied": "occupied flag == 1",
     "sunny_midday": "irradiance >= 150 W/m2 and 11:00 <= local hour < 16:00",
 }
+RC_VALIDITY_COLUMN = "is_valid_for_room_rc_identification"
+RC_EXCLUSION_REASONS_COLUMN = "room_rc_exclusion_reasons"
+OBJECTIVE_FAILURE_LOSS = 1e12
+
+
+@dataclass
+class PreprocessingDiagnostics:
+    missing_counts_before: dict[str, int]
+    missing_counts_after_interpolation: dict[str, int]
+    zero_filled_counts: dict[str, int]
+    fraction_filled: dict[str, float]
+    sample_count_before_filtering: int
+    sample_count_after_filtering: int
+    warnings: list[str]
+
+
+@dataclass
+class TrainingSequenceDiagnostics:
+    min_sequence_length: int
+    total_valid_sequence_count: int
+    usable_sequence_count: int
+    dropped_short_sequence_count: int
+    usable_sample_count: int
 
 
 @dataclass
@@ -85,7 +108,9 @@ class RoomRC2StateConfig:
     local_timezone: Optional[str] = None
     gap_factor: float = 1.5
     short_gap_interpolation_limit: int = 2
+    max_irradiance_interpolation_gap_minutes: int = 30
     min_train_rows: int = 96
+    min_valid_train_rows: int = 96
     optimizer_maxiter: int = 300
     spectral_radius_penalty: float = 1e5
     physical_penalty_weight: float = 1e3
@@ -127,6 +152,10 @@ class RoomRC2StateConfig:
     hour_coeff_max: float = 0.5
     initial_mass_offset_min: float = -5.0
     initial_mass_offset_max: float = 5.0
+    missing_heating_policy: str = "drop"
+    heating_off_threshold_kw: float = 0.3
+    warn_missing_fraction: float = 0.2
+    warn_bound_hit_count: int = 2
 
     def __post_init__(self) -> None:
         if self.interval_minutes <= 0:
@@ -141,6 +170,8 @@ class RoomRC2StateConfig:
             raise ValueError("glass_area_m2 must be non-negative")
         if self.huber_delta_c <= 0.0:
             raise ValueError("huber_delta_c must be positive")
+        if self.missing_heating_policy not in {"drop", "allow_zero_when_off"}:
+            raise ValueError("missing_heating_policy must be 'drop' or 'allow_zero_when_off'")
 
     @property
     def dt_hours(self) -> float:
@@ -223,6 +254,7 @@ class _SequenceCache:
     measurements: np.ndarray
     sample_weights: np.ndarray
     segment_masks: dict[str, np.ndarray]
+    valid_row_mask: np.ndarray
 
 
 @dataclass
@@ -250,7 +282,9 @@ class RoomRcConfig(ValidationConfig):
     local_timezone: str | None = None
     gap_factor: float = Field(default=1.5, gt=1.0)
     short_gap_interpolation_limit: int = Field(default=2, ge=0)
+    max_irradiance_interpolation_gap_minutes: int = Field(default=30, ge=0)
     optimizer_maxiter: int = Field(default=300, gt=0)
+    min_valid_train_rows: int = Field(default=96, gt=1)
     spectral_radius_penalty: float = Field(default=1e5, ge=0.0)
     physical_penalty_weight: float = Field(default=1e3, ge=0.0)
     regularization_weight: float = Field(default=1e-3, ge=0.0)
@@ -291,6 +325,10 @@ class RoomRcConfig(ValidationConfig):
     hour_coeff_max: float = 0.5
     initial_mass_offset_min: float = -5.0
     initial_mass_offset_max: float = 5.0
+    missing_heating_policy: str = Field(default="drop")
+    heating_off_threshold_kw: float = Field(default=0.05, ge=0.0)
+    warn_missing_fraction: float = Field(default=0.2, ge=0.0, le=1.0)
+    warn_bound_hit_count: int = Field(default=2, ge=1)
     notes: str = Field(
         default="Physical 2-state RC room model with exact discretization and Kalman-filtered mass state."
     )
@@ -314,7 +352,9 @@ class RoomRcConfig(ValidationConfig):
             local_timezone=self.local_timezone,
             gap_factor=self.gap_factor,
             short_gap_interpolation_limit=self.short_gap_interpolation_limit,
+            max_irradiance_interpolation_gap_minutes=self.max_irradiance_interpolation_gap_minutes,
             min_train_rows=self.min_train_rows,
+            min_valid_train_rows=self.min_valid_train_rows,
             optimizer_maxiter=self.optimizer_maxiter,
             spectral_radius_penalty=self.spectral_radius_penalty,
             physical_penalty_weight=self.physical_penalty_weight,
@@ -356,6 +396,10 @@ class RoomRcConfig(ValidationConfig):
             hour_coeff_max=self.hour_coeff_max,
             initial_mass_offset_min=self.initial_mass_offset_min,
             initial_mass_offset_max=self.initial_mass_offset_max,
+            missing_heating_policy=self.missing_heating_policy,
+            heating_off_threshold_kw=self.heating_off_threshold_kw,
+            warn_missing_fraction=self.warn_missing_fraction,
+            warn_bound_hit_count=self.warn_bound_hit_count,
         )
 
 
@@ -421,7 +465,11 @@ class RoomRC2StatePhysicalModel:
         return model
 
     def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        return self._prepare_features(df, require_room_temp="room_temp_c" in df.columns)
+        prepared, _ = self._prepare_features_with_diagnostics(
+            df,
+            require_room_temp="room_temp_c" in df.columns,
+        )
+        return prepared
 
     def split_into_sequences(self, df_prepared: pd.DataFrame) -> list[pd.DataFrame]:
         if df_prepared.empty:
@@ -495,27 +543,68 @@ class RoomRC2StatePhysicalModel:
         horizons: Sequence[int] = (1, 6, 36, 72),
         include_144: bool = False,
     ) -> dict[str, Any]:
-        prepared = self._prepare_features(df, require_room_temp=True)
-        sequences = self.split_into_sequences(prepared)
-        sample_count = int(sum(len(sequence) for sequence in sequences))
-        if sample_count < self.config.min_train_rows:
+        prepared, diagnostics = self._prepare_features_with_diagnostics(df, require_room_temp=True)
+        valid_sequences = self._split_into_valid_rc_sequences(prepared)
+        if len(prepared) < self.config.min_train_rows:
             raise ValueError(
-                f"Training data has {sample_count} rows, fewer than min_train_rows={self.config.min_train_rows}"
+                f"Training data has {len(prepared)} rows, fewer than min_train_rows={self.config.min_train_rows}"
             )
 
         horizon_list = self._normalize_horizons(horizons, include_144=include_144)
-        weights = self._horizon_weights(horizon_list)
+        effective_horizons = [
+            horizon
+            for horizon in horizon_list
+            if any(len(sequence) > horizon for sequence in valid_sequences)
+        ]
+        if not effective_horizons:
+            raise ValueError(
+                "No training horizons are feasible for the available RC-valid sequences. "
+                f"Requested horizons were {list(horizon_list)}."
+            )
+        sequence_diagnostics = self._training_sequence_diagnostics(
+            valid_sequences=valid_sequences,
+            horizons=effective_horizons,
+        )
+        sequences = [
+            sequence
+            for sequence in valid_sequences
+            if len(sequence) >= sequence_diagnostics.min_sequence_length
+        ]
+        sample_count = int(sequence_diagnostics.usable_sample_count)
+        if diagnostics.sample_count_after_filtering < self.config.min_valid_train_rows:
+            raise ValueError(
+                f"RC-valid training data has {diagnostics.sample_count_after_filtering} rows, "
+                f"fewer than min_valid_train_rows={self.config.min_valid_train_rows}"
+            )
+        if not sequences:
+            raise ValueError(
+                "No RC-valid training sequences remain after enforcing the minimum sequence length "
+                f"of {sequence_diagnostics.min_sequence_length} rows for horizons {list(effective_horizons)}"
+            )
+        if sample_count < self.config.min_valid_train_rows:
+            raise ValueError(
+                f"Usable RC training data has {sample_count} rows after dropping short sequences, "
+                f"fewer than min_valid_train_rows={self.config.min_valid_train_rows}"
+            )
+
+        weights = self._horizon_weights(effective_horizons)
         caches = [self._build_sequence_cache(sequence) for sequence in sequences]
-        self._log_training_context(prepared, caches)
+        self._log_training_context(prepared, caches, diagnostics, sequence_diagnostics)
 
         def objective(vector: np.ndarray) -> float:
             params = RoomRC2StateParams.from_vector(vector)
-            loss = self._objective_for_sequences(caches, params, horizon_list, weights)
+            loss = self._objective_for_sequences(caches, params, effective_horizons, weights)
             if not np.isfinite(loss):
-                return 1e12
+                return OBJECTIVE_FAILURE_LOSS
             return float(loss)
 
         x0 = self.params.to_vector()
+        initial_loss = float(objective(x0))
+        if initial_loss >= OBJECTIVE_FAILURE_LOSS:
+            raise ValueError(
+                "RC training objective is non-finite at the initial parameters. "
+                "This usually indicates fragmented sequences or remaining invalid inputs after RC filtering."
+            )
         result = minimize(
             objective,
             x0=x0,
@@ -524,8 +613,20 @@ class RoomRC2StatePhysicalModel:
             options={"maxiter": self.config.optimizer_maxiter},
         )
         fitted_params = RoomRC2StateParams.from_vector(result.x)
-        self.params = fitted_params
         train_loss = float(objective(result.x))
+        parameters_changed = not np.allclose(result.x, x0, rtol=1e-6, atol=1e-8)
+        improved_from_initial = train_loss < (initial_loss - 1e-9)
+        if train_loss >= OBJECTIVE_FAILURE_LOSS:
+            raise ValueError(
+                "RC optimizer returned a non-finite objective. "
+                "The model was not stored because the fitted parameters are not trustworthy."
+            )
+        if not bool(result.success) and not (parameters_changed or improved_from_initial):
+            raise ValueError(
+                "RC optimizer failed without improving the initial solution: "
+                f"{result.message}"
+            )
+        self.params = fitted_params
 
         validation_metrics = None
         if validation_df is not None:
@@ -535,7 +636,11 @@ class RoomRC2StatePhysicalModel:
             "fitted_at_utc": datetime.now(timezone.utc).isoformat(),
             "train_sample_count": sample_count,
             "train_sequence_count": len(sequences),
+            "train_valid_sequence_count_before_length_filter": sequence_diagnostics.total_valid_sequence_count,
+            "train_dropped_short_sequence_count": sequence_diagnostics.dropped_short_sequence_count,
+            "train_min_sequence_length": sequence_diagnostics.min_sequence_length,
             "horizons": list(horizon_list),
+            "effective_train_horizons": list(effective_horizons),
             "horizon_weights": {str(k): v for k, v in weights.items()},
             "optimizer_success": bool(result.success),
             "optimizer_status": int(result.status),
@@ -543,9 +648,18 @@ class RoomRC2StatePhysicalModel:
             "optimizer_iterations": int(getattr(result, "nit", 0)),
             "final_train_loss": train_loss,
             "validation_metrics": validation_metrics,
+            "rc_diagnostics": self._training_diagnostics_summary(
+                prepared=prepared,
+                diagnostics=diagnostics,
+                caches=caches,
+                params=self.params,
+                sequence_diagnostics=sequence_diagnostics,
+            ),
         }
         LOGGER.info("Fitted RC parameters: %s", self.params.to_dict())
         LOGGER.info("Final train loss: %.6f", train_loss)
+        for warning in self.training_metadata["rc_diagnostics"]["warnings"]:
+            LOGGER.warning("RC diagnostic warning: %s", warning)
         if validation_metrics is not None:
             LOGGER.info("Validation metrics: %s", validation_metrics)
         return {
@@ -557,13 +671,14 @@ class RoomRC2StatePhysicalModel:
             "final_train_loss": train_loss,
             "params": self.params.to_dict(),
             "validation_metrics": validation_metrics,
+            "rc_diagnostics": self.training_metadata["rc_diagnostics"],
         }
 
     def predict_one_step(
         self, df: pd.DataFrame, initial_state: Optional[np.ndarray] = None
     ) -> pd.DataFrame:
-        prepared = self._prepare_features(df, require_room_temp=True)
-        sequences = self.split_into_sequences(prepared)
+        prepared, _ = self._prepare_features_with_diagnostics(df, require_room_temp=True)
+        sequences = self._split_into_valid_rc_sequences(prepared)
         rows: list[dict[str, Any]] = []
         for sequence in sequences:
             cache = self._build_sequence_cache(sequence)
@@ -618,7 +733,7 @@ class RoomRC2StatePhysicalModel:
         last_measurement_c: Optional[float] = None,
         horizon_steps: int = 72,
     ) -> pd.DataFrame:
-        prepared = self._prepare_features(future_df, require_room_temp=False)
+        prepared, _ = self._prepare_features_with_diagnostics(future_df, require_room_temp=False)
         if prepared.empty:
             return pd.DataFrame(
                 columns=[
@@ -727,21 +842,21 @@ class RoomRC2StatePhysicalModel:
         df: pd.DataFrame,
         horizons: Sequence[int] = (1, 6, 36, 72, 144),
     ) -> dict[str, Any]:
-        prepared = self._prepare_features(df, require_room_temp=True)
-        sequences = self.split_into_sequences(prepared)
+        prepared, diagnostics = self._prepare_features_with_diagnostics(df, require_room_temp=True)
+        sequences = self._split_into_valid_rc_sequences(prepared)
         caches = [self._build_sequence_cache(sequence) for sequence in sequences]
         horizon_list = self._normalize_horizons(horizons, include_144=False)
         errors_by_horizon = self._collect_errors(caches, self.params, horizon_list)
         metrics = [self._metric_dict(h, errors_by_horizon[h]) for h in horizon_list]
-        return {"aggregate_metrics": metrics}
+        return {"aggregate_metrics": metrics, "rc_diagnostics": {"sample_count_before_filtering": diagnostics.sample_count_before_filtering, "sample_count_after_filtering": diagnostics.sample_count_after_filtering}}
 
     def evaluate_segments(
         self,
         df: pd.DataFrame,
         horizons: Sequence[int] = (1, 6, 36, 72, 144),
     ) -> dict[str, Any]:
-        prepared = self._prepare_features(df, require_room_temp=True)
-        sequences = self.split_into_sequences(prepared)
+        prepared, diagnostics = self._prepare_features_with_diagnostics(df, require_room_temp=True)
+        sequences = self._split_into_valid_rc_sequences(prepared)
         caches = [self._build_sequence_cache(sequence) for sequence in sequences]
         horizon_list = self._normalize_horizons(horizons, include_144=False)
         segment_errors = self._collect_segment_errors(caches, self.params, horizon_list)
@@ -755,9 +870,13 @@ class RoomRC2StatePhysicalModel:
                     "metrics": [self._metric_dict(h, segment_errors[name][h]) for h in horizon_list],
                 }
             )
-        return {"segment_metrics": reports}
+        return {"segment_metrics": reports, "rc_diagnostics": {"sample_count_before_filtering": diagnostics.sample_count_before_filtering, "sample_count_after_filtering": diagnostics.sample_count_after_filtering}}
 
-    def _prepare_features(self, df: pd.DataFrame, require_room_temp: bool) -> pd.DataFrame:
+    def _prepare_features_with_diagnostics(
+        self,
+        df: pd.DataFrame,
+        require_room_temp: bool,
+    ) -> tuple[pd.DataFrame, PreprocessingDiagnostics]:
         required_columns = set(FORECAST_FEATURE_COLUMNS)
         if require_room_temp:
             required_columns.add("room_temp_c")
@@ -782,25 +901,74 @@ class RoomRC2StatePhysicalModel:
         if any(count > 0 for count in missing_before.values()):
             LOGGER.warning("Missing values before interpolation: %s", missing_before)
 
-        if essential_numeric:
-            frame.loc[:, essential_numeric] = frame.loc[:, essential_numeric].interpolate(
+        interpolation_columns = [
+            column
+            for column in ["room_temp_c", "outdoor_temp_c", "irradiance_wm2", "shutter_position", "occupied_flag"]
+            if column in frame.columns
+        ]
+        if interpolation_columns:
+            frame.loc[:, interpolation_columns] = frame.loc[:, interpolation_columns].interpolate(
                 method="linear",
                 limit=self.config.short_gap_interpolation_limit,
                 limit_direction="both",
             )
 
-        zero_fill_columns = [
+        if "irradiance_wm2" in frame.columns:
+            max_gap_steps = max(1, self.config.max_irradiance_interpolation_gap_minutes // self.config.interval_minutes)
+            frame["irradiance_wm2"] = (
+                frame.set_index("timestamp")["irradiance_wm2"]
+                .interpolate(
+                    method="time",
+                    limit=max_gap_steps,
+                    limit_direction="both",
+                    limit_area="inside",
+                )
+                .reset_index(drop=True)
+            )
+
+        explicit_off_mask = self._explicit_heating_off_mask(frame)
+        zero_filled_counts = {column: 0 for column in essential_numeric}
+        if "heating_kw" in frame.columns:
+            heating_missing_mask = frame["heating_kw"].isna()
+            if self.config.missing_heating_policy == "allow_zero_when_off":
+                fill_mask = heating_missing_mask & explicit_off_mask
+            else:
+                fill_mask = heating_missing_mask & explicit_off_mask
+            zero_filled_counts["heating_kw"] = int(fill_mask.sum())
+            frame.loc[fill_mask, "heating_kw"] = 0.0
+
+        non_heating_zero_fill_columns = [
             column
-            for column in ["heating_kw", "irradiance_wm2", "shutter_position", "occupied_flag"]
+            for column in ["shutter_position", "occupied_flag"]
             if column in frame.columns
         ]
-        zero_fill_missing = frame[zero_fill_columns].isna().sum().to_dict()
-        if any(count > 0 for count in zero_fill_missing.values()):
+        for column in non_heating_zero_fill_columns:
+            missing_mask = frame[column].isna()
+            zero_filled_counts[column] = int(missing_mask.sum())
+            if int(missing_mask.sum()) > 0:
+                frame.loc[missing_mask, column] = 0.0
+
+        if "irradiance_wm2" in frame.columns:
+            irradiance_missing_mask = frame["irradiance_wm2"].isna()
+            zero_filled_counts["irradiance_wm2"] = int(irradiance_missing_mask.sum())
+            if int(irradiance_missing_mask.sum()) > 0:
+                LOGGER.warning(
+                    "Filling remaining irradiance gaps with 0.0 after bounded interpolation: %s",
+                    int(irradiance_missing_mask.sum()),
+                )
+                frame.loc[irradiance_missing_mask, "irradiance_wm2"] = 0.0
+
+        missing_after_interpolation = frame[essential_numeric].isna().sum().to_dict()
+        non_heating_missing = {
+            key: value
+            for key, value in missing_after_interpolation.items()
+            if key != "heating_kw"
+        }
+        if any(count > 0 for count in non_heating_missing.values()):
             LOGGER.warning(
-                "Filling remaining missing exogenous values with 0.0 after interpolation: %s",
-                zero_fill_missing,
+                "Remaining non-heating missing values after interpolation/fill: %s",
+                non_heating_missing,
             )
-            frame.loc[:, zero_fill_columns] = frame.loc[:, zero_fill_columns].fillna(0.0)
 
         strict_columns = [
             column for column in ["room_temp_c", "outdoor_temp_c"] if column in frame.columns
@@ -814,6 +982,14 @@ class RoomRC2StatePhysicalModel:
         frame["heating_kw"] = frame["heating_kw"].clip(lower=0.0)
         frame["irradiance_wm2"] = frame["irradiance_wm2"].clip(lower=0.0)
         frame["occupied_flag"] = frame["occupied_flag"].clip(lower=0.0, upper=1.0)
+        if RC_VALIDITY_COLUMN not in frame.columns:
+            rc_reasons = self._derive_rc_exclusion_reasons(frame, require_room_temp=require_room_temp)
+            frame[RC_EXCLUSION_REASONS_COLUMN] = rc_reasons
+            frame[RC_VALIDITY_COLUMN] = rc_reasons.map(lambda reasons: len(reasons) == 0)
+        else:
+            frame[RC_VALIDITY_COLUMN] = frame[RC_VALIDITY_COLUMN].fillna(False).astype(bool)
+            if RC_EXCLUSION_REASONS_COLUMN not in frame.columns:
+                frame[RC_EXCLUSION_REASONS_COLUMN] = [[] for _ in range(len(frame))]
         frame["shutter_factor"] = frame["shutter_position"].map(self._shutter_factor_from_position)
         frame["solar_glass_kw"] = (
             frame["irradiance_wm2"]
@@ -856,7 +1032,34 @@ class RoomRC2StatePhysicalModel:
             frame["timestamp"].iloc[0],
             frame["timestamp"].iloc[-1],
         )
-        return frame
+        sample_count_after_filtering = int(frame[RC_VALIDITY_COLUMN].sum()) if require_room_temp else len(frame)
+        fraction_filled = {
+            column: (
+                (max(0, diagnostics_before - missing_after_interpolation.get(column, 0)) / len(frame))
+                if len(frame)
+                else 0.0
+            )
+            for column, diagnostics_before in missing_before.items()
+        }
+        warnings: list[str] = []
+        for column, fraction in fraction_filled.items():
+            if fraction >= self.config.warn_missing_fraction:
+                warnings.append(f"high_filled_fraction:{column}={fraction:.3f}")
+        if sample_count_after_filtering < self.config.min_valid_train_rows and require_room_temp:
+            warnings.append(
+                f"low_valid_sample_count:{sample_count_after_filtering}<{self.config.min_valid_train_rows}"
+            )
+        return frame, PreprocessingDiagnostics(
+            missing_counts_before={key: int(value) for key, value in missing_before.items()},
+            missing_counts_after_interpolation={
+                key: int(value) for key, value in missing_after_interpolation.items()
+            },
+            zero_filled_counts=zero_filled_counts,
+            fraction_filled=fraction_filled,
+            sample_count_before_filtering=len(frame),
+            sample_count_after_filtering=sample_count_after_filtering,
+            warnings=warnings,
+        )
 
     def _shutter_factor_from_position(self, shutter_position: float) -> float:
         raw = float(shutter_position)
@@ -866,13 +1069,63 @@ class RoomRC2StatePhysicalModel:
             factor = 1.0 - (raw / 100.0)
         return float(np.clip(factor, 0.0, 1.0))
 
+    def _explicit_heating_off_mask(self, frame: pd.DataFrame) -> pd.Series:
+        if "heating_semantically_off" in frame.columns:
+            return frame["heating_semantically_off"].fillna(False).astype(bool)
+        explicit_off = pd.Series(False, index=frame.index, dtype=bool)
+        if "mode_off" in frame.columns:
+            explicit_off = explicit_off | frame["mode_off"].fillna(0).astype(int).eq(1)
+        if "hp_electric_power_kw" in frame.columns:
+            explicit_off = explicit_off | (
+                pd.to_numeric(frame["hp_electric_power_kw"], errors="coerce")
+                .fillna(np.inf)
+                .le(self.config.heating_off_threshold_kw)
+            )
+        return explicit_off
+
+    def _derive_rc_exclusion_reasons(
+        self,
+        frame: pd.DataFrame,
+        *,
+        require_room_temp: bool,
+    ) -> pd.Series:
+        existing = frame.get("room_rc_exclusion_reasons")
+        if existing is not None:
+            return existing.map(lambda item: item if isinstance(item, list) else [])
+
+        room_valid = frame.get("is_valid_for_room_rc_identification")
+        if room_valid is not None:
+            inferred = room_valid.fillna(False).astype(bool)
+            return inferred.map(lambda ok: [] if ok else ["precomputed_room_rc_invalid"])
+
+        explicit_off_mask = self._explicit_heating_off_mask(frame)
+        base_reasons = frame.get("exclusion_reasons")
+        base_reasons = (
+            base_reasons.map(lambda item: item if isinstance(item, list) else [])
+            if base_reasons is not None
+            else pd.Series([[] for _ in range(len(frame))], index=frame.index)
+        )
+
+        derived: list[list[str]] = []
+        for index, reasons in enumerate(base_reasons):
+            row_reasons = list(reasons)
+            if require_room_temp and pd.isna(frame.at[index, "room_temp_c"]):
+                row_reasons.append("missing_room_temperature")
+            if pd.isna(frame.at[index, "outdoor_temp_c"]):
+                row_reasons.append("missing_outdoor_temperature")
+            if "heating_kw" in frame.columns and pd.isna(frame.at[index, "heating_kw"]) and not bool(explicit_off_mask.iloc[index]):
+                row_reasons.append("missing_heating_input")
+            derived.append(list(dict.fromkeys(row_reasons)))
+        return pd.Series(derived, index=frame.index)
+
     def _exp_filter(self, values: np.ndarray, alpha: float) -> np.ndarray:
         if len(values) == 0:
             return np.array([], dtype=float)
         filtered = np.zeros_like(values, dtype=float)
-        filtered[0] = float(values[0])
+        filtered[0] = 0.0 if not np.isfinite(values[0]) else float(values[0])
         for index in range(1, len(values)):
-            filtered[index] = (alpha * filtered[index - 1]) + ((1.0 - alpha) * values[index])
+            current = filtered[index - 1] if not np.isfinite(values[index]) else float(values[index])
+            filtered[index] = (alpha * filtered[index - 1]) + ((1.0 - alpha) * current)
         return filtered
 
     def _normalize_horizons(
@@ -900,6 +1153,58 @@ class RoomRC2StatePhysicalModel:
             measurements=sequence["room_temp_c"].to_numpy(dtype=float),
             sample_weights=weights,
             segment_masks=segment_masks,
+            valid_row_mask=sequence[RC_VALIDITY_COLUMN].to_numpy(dtype=bool),
+        )
+
+    def _split_into_valid_rc_sequences(self, prepared: pd.DataFrame) -> list[pd.DataFrame]:
+        gap_sequences = self.split_into_sequences(prepared)
+        valid_sequences: list[pd.DataFrame] = []
+        for sequence in gap_sequences:
+            valid_mask = sequence[RC_VALIDITY_COLUMN].to_numpy(dtype=bool)
+            start_index: int | None = None
+            for index, is_valid in enumerate(valid_mask):
+                if is_valid and start_index is None:
+                    start_index = index
+                if (not is_valid or index == len(valid_mask) - 1) and start_index is not None:
+                    end_index = index if not is_valid else index + 1
+                    candidate = self._recompute_sequence_filtered_inputs(
+                        sequence.iloc[start_index:end_index].reset_index(drop=True)
+                    )
+                    if not candidate.empty:
+                        valid_sequences.append(candidate)
+                    start_index = None
+        return valid_sequences
+
+    def _recompute_sequence_filtered_inputs(self, sequence: pd.DataFrame) -> pd.DataFrame:
+        if sequence.empty:
+            return sequence
+        result = sequence.copy()
+        result["heating_kw_eff"] = self._exp_filter(
+            result["heating_kw"].to_numpy(dtype=float),
+            self.config.alpha_heat,
+        )
+        result["solar_glass_kw_filtered"] = self._exp_filter(
+            result["solar_glass_kw"].to_numpy(dtype=float),
+            self.config.alpha_solar,
+        )
+        return result
+
+    def _training_sequence_diagnostics(
+        self,
+        *,
+        valid_sequences: list[pd.DataFrame],
+        horizons: Sequence[int],
+    ) -> TrainingSequenceDiagnostics:
+        min_sequence_length = max(2, max(int(horizon) for horizon in horizons) + 1)
+        usable_sequences = [
+            sequence for sequence in valid_sequences if len(sequence) >= min_sequence_length
+        ]
+        return TrainingSequenceDiagnostics(
+            min_sequence_length=min_sequence_length,
+            total_valid_sequence_count=len(valid_sequences),
+            usable_sequence_count=len(usable_sequences),
+            dropped_short_sequence_count=len(valid_sequences) - len(usable_sequences),
+            usable_sample_count=int(sum(len(sequence) for sequence in usable_sequences)),
         )
 
     def _training_weights(self, segment_masks: dict[str, np.ndarray], length: int) -> np.ndarray:
@@ -1151,7 +1456,11 @@ class RoomRC2StatePhysicalModel:
         }
 
     def _log_training_context(
-        self, prepared: pd.DataFrame, caches: list[_SequenceCache]
+        self,
+        prepared: pd.DataFrame,
+        caches: list[_SequenceCache],
+        diagnostics: PreprocessingDiagnostics,
+        sequence_diagnostics: TrainingSequenceDiagnostics,
     ) -> None:
         LOGGER.info(
             "Training on %s samples from %s to %s across %s sequences",
@@ -1159,6 +1468,18 @@ class RoomRC2StatePhysicalModel:
             prepared["timestamp"].iloc[0],
             prepared["timestamp"].iloc[-1],
             len(caches),
+        )
+        LOGGER.info(
+            "RC-valid samples after filtering: %s / %s",
+            diagnostics.sample_count_after_filtering,
+            diagnostics.sample_count_before_filtering,
+        )
+        LOGGER.info(
+            "Usable RC training sequences: %s / %s (dropped short sequences: %s, min length: %s rows)",
+            sequence_diagnostics.usable_sequence_count,
+            sequence_diagnostics.total_valid_sequence_count,
+            sequence_diagnostics.dropped_short_sequence_count,
+            sequence_diagnostics.min_sequence_length,
         )
         if not self.config.use_segment_weights:
             return
@@ -1171,6 +1492,67 @@ class RoomRC2StatePhysicalModel:
             for name, mask in cache.segment_masks.items():
                 counts[name] += int(np.sum(mask))
         LOGGER.info("Segment counts: %s", counts)
+
+    def _parameters_at_bounds(self, params: RoomRC2StateParams) -> list[str]:
+        hits: list[str] = []
+        vector = params.to_vector()
+        names = list(params.to_dict().keys())
+        for name, value, (lower, upper) in zip(names, vector, self.config.bounds(), strict=False):
+            if np.isclose(value, lower):
+                hits.append(f"{name}@min")
+            elif np.isclose(value, upper):
+                hits.append(f"{name}@max")
+        return hits
+
+    def _training_diagnostics_summary(
+        self,
+        *,
+        prepared: pd.DataFrame,
+        diagnostics: PreprocessingDiagnostics,
+        caches: list[_SequenceCache],
+        params: RoomRC2StateParams,
+        sequence_diagnostics: TrainingSequenceDiagnostics,
+    ) -> dict[str, Any]:
+        valid_counts: dict[str, int] = {name: 0 for name in DEFAULT_SEGMENT_DESCRIPTIONS}
+        for cache in caches:
+            for name, mask in cache.segment_masks.items():
+                valid_counts[name] += int(np.sum(mask))
+        warnings = list(diagnostics.warnings)
+        bound_hits = self._parameters_at_bounds(params)
+        if sequence_diagnostics.dropped_short_sequence_count > 0:
+            warnings.append(
+                "short_sequences_dropped:"
+                f"{sequence_diagnostics.dropped_short_sequence_count}/"
+                f"{sequence_diagnostics.total_valid_sequence_count}"
+            )
+        if len(bound_hits) >= self.config.warn_bound_hit_count:
+            warnings.append(f"bound_hits:{','.join(bound_hits)}")
+        return {
+            "missing_counts_before": diagnostics.missing_counts_before,
+            "missing_counts_after_interpolation": diagnostics.missing_counts_after_interpolation,
+            "zero_filled_counts": diagnostics.zero_filled_counts,
+            "fraction_filled": diagnostics.fraction_filled,
+            "sample_count_before_filtering": diagnostics.sample_count_before_filtering,
+            "sample_count_after_filtering": diagnostics.sample_count_after_filtering,
+            "usable_sample_count": sequence_diagnostics.usable_sample_count,
+            "min_training_sequence_length": sequence_diagnostics.min_sequence_length,
+            "total_valid_sequence_count": sequence_diagnostics.total_valid_sequence_count,
+            "usable_sequence_count": sequence_diagnostics.usable_sequence_count,
+            "dropped_short_sequence_count": sequence_diagnostics.dropped_short_sequence_count,
+            "segment_counts_after_rc_filtering": valid_counts,
+            "parameter_values": params.to_dict(),
+            "parameters_at_bounds": bound_hits,
+            "warnings": warnings,
+            "invalid_rc_reasons_top": (
+                prepared.loc[~prepared[RC_VALIDITY_COLUMN], RC_EXCLUSION_REASONS_COLUMN]
+                .explode()
+                .value_counts()
+                .head(10)
+                .to_dict()
+                if RC_EXCLUSION_REASONS_COLUMN in prepared.columns
+                else {}
+            ),
+        }
 
 
 class RoomRcTrainer:
@@ -1193,6 +1575,10 @@ class RoomRcTrainer:
                     "irradiance_wm2": row.solar_irradiance_w_m2,
                     "shutter_position": row.shutter_position_pct,
                     "occupied_flag": row.occupied_flag,
+                    RC_VALIDITY_COLUMN: row.is_valid_for_room_rc_identification,
+                    RC_EXCLUSION_REASONS_COLUMN: row.room_rc_exclusion_reasons,
+                    "mode_off": row.mode_off,
+                    "hp_electric_power_kw": row.hp_electric_power_kw,
                 }
                 for row in rows
             ]

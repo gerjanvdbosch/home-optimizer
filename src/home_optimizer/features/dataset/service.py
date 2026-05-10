@@ -51,6 +51,8 @@ _DHW_DRAW_DROP_THRESHOLD_C = 0.75
 _MIN_PLAUSIBLE_COP = 1.0
 _MAX_PLAUSIBLE_COP = 8.0
 _THERMAL_FACTOR_KW_PER_LMIN_DELTA_C = 4186.0 / 60000.0
+_GTI_INTERPOLATION_MAX_GAP_MINUTES = 30
+_HEATING_OFF_POWER_THRESHOLD_KW = 0.3
 
 
 def _resolve_price_series(
@@ -149,6 +151,35 @@ def _optional_string(value: object) -> str | None:
     if value is None or pd.isna(value):
         return None
     return str(value)
+
+
+def _room_rc_validate_row(
+    *,
+    room_valid: bool,
+    room_temperature_c: float | None,
+    outdoor_temperature_c: float | None,
+    thermal_output_estimate_kw: float | None,
+    hp_electric_power_kw: float | None,
+    mode_off: int,
+    exclusion_reasons: list[str],
+) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    if not room_valid:
+        reasons.extend(exclusion_reasons)
+    if room_temperature_c is None:
+        reasons.append("missing_room_temperature")
+    if outdoor_temperature_c is None:
+        reasons.append("missing_outdoor_temperature")
+
+    heating_missing = thermal_output_estimate_kw is None
+    heating_semantically_off = bool(mode_off) or (
+        hp_electric_power_kw is not None and hp_electric_power_kw <= _HEATING_OFF_POWER_THRESHOLD_KW
+    )
+    if heating_missing and not heating_semantically_off:
+        reasons.append("missing_heating_input")
+
+    deduped = list(dict.fromkeys(reasons))
+    return (len(deduped) == 0), deduped
 
 
 def _validate_row(
@@ -406,17 +437,35 @@ class MpcDatasetService:
         result = grid
         for name in names:
             signal = forecast_frame.loc[
-                forecast_frame["name"] == name, ["bucket_start", "value"]
+                forecast_frame["name"] == name, ["timestamp_utc", "value"]
             ].dropna()
             if signal.empty:
                 result[name] = pd.NA
                 continue
-            aggregated = (
-                signal.groupby("bucket_start", as_index=False)["value"].mean().rename(
-                    columns={"bucket_start": "timestamp_utc", "value": name}
-                )
+            signal = (
+                signal.groupby("timestamp_utc", as_index=False)["value"]
+                .mean()
+                .rename(columns={"value": name})
+                .sort_values("timestamp_utc")
             )
-            result = result.merge(aggregated, on="timestamp_utc", how="left")
+            merged = result[["timestamp_utc"]].merge(signal, on="timestamp_utc", how="left")
+            if name == GTI_LIVING_ROOM_WINDOWS:
+                max_gap_steps = max(1, _GTI_INTERPOLATION_MAX_GAP_MINUTES // interval_minutes)
+                interpolated = (
+                    merged.set_index("timestamp_utc")[name]
+                    .astype(float)
+                    .interpolate(
+                        method="time",
+                        limit=max_gap_steps,
+                        limit_direction="both",
+                        limit_area="inside",
+                    )
+                    .clip(lower=0.0)
+                    .reset_index(drop=True)
+                )
+                result[name] = interpolated
+            else:
+                result[name] = merged[name]
 
         return result
 
@@ -586,15 +635,34 @@ class MpcDatasetService:
                     float(record["cop_estimate"]) if pd.notna(record.get("cop_estimate")) else None
                 ),
             )
+            hp_electric_power_kw = (
+                float(record[HP_ELECTRIC_POWER]) if pd.notna(record.get(HP_ELECTRIC_POWER)) else None
+            )
+            room_temperature_c = (
+                float(record[ROOM_TEMPERATURE]) if pd.notna(record.get(ROOM_TEMPERATURE)) else None
+            )
+            outdoor_temperature_c = (
+                float(record[OUTDOOR_TEMPERATURE]) if pd.notna(record.get(OUTDOOR_TEMPERATURE)) else None
+            )
+            thermal_output_estimate_kw = (
+                float(record["thermal_output_estimate_kw"])
+                if pd.notna(record.get("thermal_output_estimate_kw"))
+                else None
+            )
+            room_rc_valid, room_rc_exclusion_reasons = _room_rc_validate_row(
+                room_valid=room_valid,
+                room_temperature_c=room_temperature_c,
+                outdoor_temperature_c=outdoor_temperature_c,
+                thermal_output_estimate_kw=thermal_output_estimate_kw,
+                hp_electric_power_kw=hp_electric_power_kw,
+                mode_off=int(record["mode_off"]),
+                exclusion_reasons=exclusion_reasons,
+            )
             rows.append(
                 MpcDatasetRow(
                     timestamp_utc=record["timestamp_utc"].to_pydatetime(),
-                    room_temperature_c=(
-                        float(record[ROOM_TEMPERATURE]) if pd.notna(record.get(ROOM_TEMPERATURE)) else None
-                    ),
-                    outdoor_temperature_c=(
-                        float(record[OUTDOOR_TEMPERATURE]) if pd.notna(record.get(OUTDOOR_TEMPERATURE)) else None
-                    ),
+                    room_temperature_c=room_temperature_c,
+                    outdoor_temperature_c=outdoor_temperature_c,
                     dhw_top_temperature_c=(
                         float(record[DHW_TOP_TEMPERATURE]) if pd.notna(record.get(DHW_TOP_TEMPERATURE)) else None
                     ),
@@ -603,9 +671,7 @@ class MpcDatasetService:
                         if pd.notna(record.get(DHW_BOTTOM_TEMPERATURE))
                         else None
                     ),
-                    hp_electric_power_kw=(
-                        float(record[HP_ELECTRIC_POWER]) if pd.notna(record.get(HP_ELECTRIC_POWER)) else None
-                    ),
+                    hp_electric_power_kw=hp_electric_power_kw,
                     hp_mode_raw=_optional_string(record.get("hp_mode_raw")),
                     mode_space=int(record["mode_space"]),
                     mode_dhw=int(record["mode_dhw"]),
@@ -657,11 +723,7 @@ class MpcDatasetService:
                     hp_delta_t_c=(
                         float(record["hp_delta_t_c"]) if pd.notna(record.get("hp_delta_t_c")) else None
                     ),
-                    thermal_output_estimate_kw=(
-                        float(record["thermal_output_estimate_kw"])
-                        if pd.notna(record.get("thermal_output_estimate_kw"))
-                        else None
-                    ),
+                    thermal_output_estimate_kw=thermal_output_estimate_kw,
                     cop_estimate=(
                         float(record["cop_estimate"]) if pd.notna(record.get("cop_estimate")) else None
                     ),
@@ -685,9 +747,11 @@ class MpcDatasetService:
                     dhw_draw_proxy_c=float(record["dhw_draw_proxy_c"]),
                     dhw_draw_detected=int(record["dhw_draw_detected"]),
                     is_valid_for_room_identification=room_valid,
+                    is_valid_for_room_rc_identification=room_rc_valid,
                     is_valid_for_dhw_identification=dhw_valid,
                     is_valid_for_cop_identification=cop_valid,
                     exclusion_reasons=exclusion_reasons,
+                    room_rc_exclusion_reasons=room_rc_exclusion_reasons,
                 )
             )
 

@@ -5,8 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from home_optimizer.features.modeling.room_rc import (
+    RC_VALIDITY_COLUMN,
     RoomRC2StateConfig,
     RoomRC2StateParams,
     RoomRC2StatePhysicalModel,
@@ -142,3 +144,79 @@ def test_save_load_preserves_parameters_and_predictions(tmp_path) -> None:
     assert np.allclose(before["predicted_room_temp_c"], after["predicted_room_temp_c"])
     assert np.allclose(before["predicted_mass_temp_c"], after["predicted_mass_temp_c"])
 
+
+def test_rc_validity_marks_missing_heating_invalid_without_explicit_off() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    df = build_dataframe(12)
+    df.loc[3, "heating_kw"] = np.nan
+    prepared = model.prepare_features(df)
+    assert bool(prepared.loc[3, RC_VALIDITY_COLUMN]) is False
+
+
+def test_rc_validity_allows_missing_heating_when_explicit_off() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    df = build_dataframe(12)
+    df["mode_off"] = 0
+    df["hp_electric_power_kw"] = 1.0
+    df.loc[3, "heating_kw"] = np.nan
+    df.loc[3, "mode_off"] = 1
+    df.loc[3, "hp_electric_power_kw"] = 0.0
+    prepared = model.prepare_features(df)
+    assert bool(prepared.loc[3, RC_VALIDITY_COLUMN]) is True
+    assert prepared.loc[3, "heating_kw"] == 0.0
+
+
+def test_prepare_features_interpolates_10_minute_irradiance_gaps() -> None:
+    model = RoomRC2StatePhysicalModel(
+        RoomRC2StateConfig(interval_minutes=10, max_irradiance_interpolation_gap_minutes=30)
+    )
+    df = pd.DataFrame(
+        [
+            {"timestamp": "2026-01-01T12:00:00Z", "room_temp_c": 20.0, "outdoor_temp_c": 5.0, "heating_kw": 0.0, "irradiance_wm2": 300.0, "shutter_position": 100.0, "occupied_flag": 0.0},
+            {"timestamp": "2026-01-01T12:10:00Z", "room_temp_c": 20.0, "outdoor_temp_c": 5.0, "heating_kw": 0.0, "irradiance_wm2": np.nan, "shutter_position": 100.0, "occupied_flag": 0.0},
+            {"timestamp": "2026-01-01T12:20:00Z", "room_temp_c": 20.0, "outdoor_temp_c": 5.0, "heating_kw": 0.0, "irradiance_wm2": 450.0, "shutter_position": 100.0, "occupied_flag": 0.0},
+        ]
+    )
+    prepared = model.prepare_features(df)
+    assert prepared.loc[1, "irradiance_wm2"] == 375.0
+
+
+def test_fit_reports_rc_diagnostics() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5))
+    df = build_dataframe(40)
+    df.loc[:5, "heating_kw"] = np.nan
+    report = model.fit(df, horizons=(1, 6))
+    diagnostics = report["rc_diagnostics"]
+    assert diagnostics["sample_count_before_filtering"] == 40
+    assert diagnostics["sample_count_after_filtering"] < 40
+    assert "missing_counts_before" in diagnostics
+    assert "parameters_at_bounds" in diagnostics
+
+
+def test_fit_rejects_fragmented_short_sequences() -> None:
+    model = RoomRC2StatePhysicalModel(
+        RoomRC2StateConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5)
+    )
+    df = build_dataframe(30)
+    df["mode_off"] = 0
+    df["hp_electric_power_kw"] = 1.0
+    df.loc[df.index % 2 == 1, "heating_kw"] = np.nan
+    with pytest.raises(
+        ValueError,
+        match="No training horizons are feasible|No RC-valid training sequences remain",
+    ):
+        model.fit(df, horizons=(1, 6))
+
+
+def test_fit_rejects_nonfinite_objective(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = RoomRC2StatePhysicalModel(
+        RoomRC2StateConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5)
+    )
+    df = build_dataframe(40)
+
+    def bad_objective(*args, **kwargs) -> float:
+        return float("nan")
+
+    monkeypatch.setattr(model, "_objective_for_sequences", bad_objective)
+    with pytest.raises(ValueError, match="objective is non-finite"):
+        model.fit(df, horizons=(1, 6))

@@ -39,9 +39,11 @@ class MpcDatasetRow(DomainModel):
     dhw_draw_proxy_c: float = 0.0
     dhw_draw_detected: int = 0
     is_valid_for_room_identification: bool = True
+    is_valid_for_room_rc_identification: bool = True
     is_valid_for_dhw_identification: bool = True
     is_valid_for_cop_identification: bool = True
     exclusion_reasons: list[str] = []
+    room_rc_exclusion_reasons: list[str] = []
 
 
 class MpcDataset(DomainModel):
