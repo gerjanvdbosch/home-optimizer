@@ -12,6 +12,7 @@ from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import TrainedLinearRoomModel, ValidationConfig
 from home_optimizer.features.modeling.common import (
     prepare_room_data,
+    room_identification_mask,
     row_segments,
     segment_definitions,
 )
@@ -30,7 +31,7 @@ class RoomArxConfig(ValidationConfig):
     occupied_flag_lags: list[int] = Field(default_factory=lambda: [0])
     ridge_alpha: float = Field(default=0.0, ge=0.0)
     sunny_irradiance_threshold_w_m2: float = Field(default=150.0, ge=0.0)
-    heating_active_threshold_kw: float = Field(default=0.1, ge=0.0)
+    heating_active_threshold_kw: float = Field(default=0.4, ge=0.0)
     shutters_open_min_pct: float = Field(default=75.0, ge=0.0, le=100.0)
     shutters_closed_max_pct: float = Field(default=25.0, ge=0.0, le=100.0)
     cold_outdoor_temperature_max_c: float = Field(default=5.0)
@@ -196,8 +197,10 @@ class RoomArxTrainer:
         target_values = pd.Series(room_temperature).shift(-1).to_numpy(dtype=float)
 
         source_indices = np.arange(len(rows), dtype=int)
+        valid_identification_rows = room_identification_mask(rows)
         valid_training_mask = (
-            (source_indices >= self.max_lag(config))
+            valid_identification_rows
+            & (source_indices >= self.max_lag(config))
             & (source_indices < max(0, len(rows) - 1))
             & ~np.isnan(target_values)
         )
