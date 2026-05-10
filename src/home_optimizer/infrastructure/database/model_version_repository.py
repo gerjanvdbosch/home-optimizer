@@ -7,16 +7,15 @@ from home_optimizer.domain.time import normalize_utc_timestamp, parse_datetime
 from home_optimizer.features.modeling import (
     RoomModelValidationReport,
     ROOM_ARX_MODEL_KIND,
-    ROOM_GREYBOX_MODEL_KIND,
     RoomArxModel,
-    RoomGreyBoxModel,
     StoredModelVersion,
     StoredModelVersionSummary,
 )
 from home_optimizer.infrastructure.database.orm_models import ModelVersion
 from home_optimizer.infrastructure.database.session import Database
 
-ROOM_MODEL_KINDS = (ROOM_ARX_MODEL_KIND, ROOM_GREYBOX_MODEL_KIND)
+ROOM_MODEL_KINDS = (ROOM_ARX_MODEL_KIND)
+
 
 
 def _metric_by_minutes(
@@ -162,8 +161,6 @@ class ModelVersionRepository:
     def _to_room_model_version(self, row: ModelVersion) -> StoredModelVersion:
         if row.model_type == ROOM_ARX_MODEL_KIND:
             model = RoomArxModel.model_validate_json(row.model_json)
-        elif row.model_type == ROOM_GREYBOX_MODEL_KIND:
-            model = RoomGreyBoxModel.model_validate_json(row.model_json)
         else:
             raise ValueError(f"unsupported room model type: {row.model_type}")
 

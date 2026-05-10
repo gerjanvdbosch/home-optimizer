@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import cast
 
 import pytest
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling import (
-    ROOM_GREYBOX_MODEL_KIND,
-    RoomGreyBoxConfig,
-    RoomGreyBoxModel,
     RoomArxConfig,
     RoomModelingService,
 )
@@ -163,72 +159,4 @@ def test_room_modeling_service_improves_24h_sample_count_and_segment_bias_metric
     assert sunny_midday.metrics[0].sample_count > 0
     assert sunny_midday.metrics[0].bias_c is not None
 
-def test_room_modeling_service_fits_greybox_room_model_on_dataset() -> None:
-    dataset = build_synthetic_room_dataset(row_count=160)
-    service = RoomModelingService()
-    config = RoomGreyBoxConfig(
-        min_train_rows=60,
-        training_window_rows=96,
-        validation_window_rows=24,
-        validation_stride_rows=12,
-        validation_horizons_steps=[1, 6],
-        optimization_max_nfev=20,
-    )
-
-    model = cast(RoomGreyBoxModel, service.fit_room_model(dataset, config=config))
-    prediction = service.predict_next_room_temperature(model, dataset.rows, source_index=100)
-    report = service.rolling_validate_room_model(dataset, config=config)
-
-    assert model.model_kind == ROOM_GREYBOX_MODEL_KIND
-    assert model.feature_names == [
-        "room_temperature_c",
-        "thermal_mass_state",
-        "outdoor_temperature_c",
-        "thermal_output_energy_kwh",
-        "solar_effective_exposure",
-    ]
-    assert model.k_out >= 0.0
-    assert model.k_mass >= 0.0
-    assert model.k_air_mass >= 0.0
-    assert model.g_heat_air >= 0.0
-    assert model.g_solar_air >= 0.0
-    assert model.g_heat_mass >= 0.0
-    assert model.g_solar_mass >= 0.0
-    assert "Parameters:" in model.notes
-    assert "Bound hits:" in model.notes
-    assert prediction is not None
-    assert len(report.aggregate_metrics) == 2
-    assert report.aggregate_metrics[0].mae_c is not None
-
-
-def test_room_modeling_service_greybox_ignores_nonfinite_training_inputs() -> None:
-    dataset = build_synthetic_room_dataset(row_count=160)
-    rows = list(dataset.rows)
-    rows[80] = rows[80].model_copy(update={"thermal_output_estimate_kw": float("inf")})
-    rows[81] = rows[81].model_copy(update={"solar_gain_proxy_w_m2": float("inf")})
-    rows[82] = rows[82].model_copy(update={"outdoor_temperature_c": float("inf")})
-    rows[83] = rows[83].model_copy(update={"room_temperature_c": float("inf")})
-    dataset = dataset.model_copy(update={"rows": rows})
-
-    service = RoomModelingService()
-    config = RoomGreyBoxConfig(
-        min_train_rows=60,
-        training_window_rows=96,
-        validation_window_rows=24,
-        validation_stride_rows=12,
-        validation_horizons_steps=[1, 6],
-        optimization_max_nfev=20,
-    )
-
-    model = cast(RoomGreyBoxModel, service.fit_room_model(dataset, config=config))
-    prediction = service.predict_next_room_temperature(model, dataset.rows, source_index=100)
-
-    assert model.model_kind == ROOM_GREYBOX_MODEL_KIND
-    assert model.k_out >= 0.0
-    assert model.k_mass >= 0.0
-    assert model.g_heat_air >= 0.0
-    assert model.g_solar_air >= 0.0
-    assert "Bound hits:" in model.notes
-    assert model.sample_count > 0
-    assert prediction is not None
 

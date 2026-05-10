@@ -22,9 +22,6 @@ from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
     ROOM_ARX_MODEL_KIND,
-    ROOM_GREYBOX_MODEL_KIND,
-    RoomGreyBoxConfig,
-    RoomGreyBoxModel,
     RoomArxConfig,
     StoredModelVersionSummary,
     StoredModelVersion,
@@ -111,45 +108,12 @@ class FakeModelVersionRepository:
             ),
             validation_report=None,
         )
-        self.secondary_version = StoredModelVersion(
-            model_id="room-model-greybox-active",
-            model_type=ROOM_GREYBOX_MODEL_KIND,
-            created_at_utc=datetime(2026, 5, 8, 13, 0, tzinfo=timezone.utc),
-            is_active=True,
-            model=RoomGreyBoxModel(
-                trained_from_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
-                trained_to_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
-                interval_minutes=15,
-                config=RoomGreyBoxConfig(
-                    min_train_rows=10,
-                    validation_window_rows=10,
-                    history_warmup_rows=24,
-                ),
-                feature_names=[
-                    "room_temperature_c",
-                    "thermal_mass_state",
-                    "outdoor_temperature_c",
-                    "thermal_output_energy_kwh",
-                    "solar_effective_exposure",
-                ],
-                intercept=0.0,
-                coefficients=[0.95, 0.0, 0.05, 0.0, 0.0],
-                sample_count=100,
-                k_out=0.05,
-                k_mass=0.0,
-                k_air_mass=0.05,
-                g_heat_mass=0.05,
-                g_solar_mass=0.001,
-                observer_gain=0.1,
-            ),
-            validation_report=None,
-        )
 
     def save_room_model_version(self, version: StoredModelVersion) -> None:
         self.saved_versions.append(version)
 
     def get_room_model_version(self, model_id: str) -> StoredModelVersion | None:
-        for version in [self.active_version, self.secondary_version, *self.saved_versions]:
+        for version in [self.active_version, *self.saved_versions]:
             if version.model_id == model_id:
                 return version
         return None
@@ -158,7 +122,7 @@ class FakeModelVersionRepository:
         return self.active_version
 
     def list_room_model_versions(self) -> list[StoredModelVersionSummary]:
-        versions = [self.secondary_version, self.active_version, *self.saved_versions]
+        versions = [self.active_version, *self.saved_versions]
         return [
             StoredModelVersionSummary(
                 model_id=version.model_id,
@@ -780,34 +744,10 @@ def test_room_model_catalog_endpoint_lists_models() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload["models"]) >= 2
+    assert len(payload["models"]) >= 1
     assert {model["model_type"] for model in payload["models"]} >= {
         ROOM_ARX_MODEL_KIND,
-        ROOM_GREYBOX_MODEL_KIND,
     }
-
-
-def test_train_endpoint_supports_greybox_room_model_type() -> None:
-    app, _ = build_test_app(imported_rows={})
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/train",
-            params={
-                "start_time": "2026-04-25T00:00:00+00:00",
-                "end_time": "2026-04-26T00:00:00+00:00",
-                "interval_minutes": 15,
-                "min_train_rows": 20,
-                "validation_window_rows": 24,
-                "model_type": ROOM_GREYBOX_MODEL_KIND,
-            },
-        )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["model_type"] == ROOM_GREYBOX_MODEL_KIND
-    saved_model = app.state.container.model_version_repository.saved_versions[0].model
-    assert isinstance(saved_model.config, RoomGreyBoxConfig)
 
 
 def test_simulate_room_endpoint_supports_explicit_model_id() -> None:
@@ -819,13 +759,13 @@ def test_simulate_room_endpoint_supports_explicit_model_id() -> None:
             params={
                 "anchor_time": "2026-04-25T12:00:00+00:00",
                 "horizon_steps": 4,
-                "model_id": "room-model-greybox-active",
+                "model_id": "room-model-active",
             },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_id"] == "room-model-greybox-active"
+    assert payload["model_id"] == "room-model-active"
 
 def test_settings_reject_legacy_sensor_fields() -> None:
     with pytest.raises(ValidationError):

@@ -10,9 +10,7 @@ from home_optimizer.app import AppSettings
 from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.modeling import (
     ROOM_ARX_MODEL_KIND,
-    ROOM_GREYBOX_MODEL_KIND,
     RoomArxConfig,
-    RoomGreyBoxConfig,
     RoomModelingService,
     StoredModelVersion,
 )
@@ -67,14 +65,6 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
                 min_train_rows=min_train_rows,
                 training_window_rows=training_window_rows,
                 validation_window_rows=validation_window_rows,
-            )
-        elif model_type == ROOM_GREYBOX_MODEL_KIND:
-            config = RoomGreyBoxConfig(
-                min_train_rows=min_train_rows,
-                training_window_rows=training_window_rows,
-                validation_window_rows=validation_window_rows,
-                validation_stride_rows=max(1, (12 * 60) // interval_minutes),
-                validation_horizons_steps=[1, 6, 36, 72],
             )
         else:
             raise HTTPException(status_code=400, detail=f"unsupported room model type: {model_type}")

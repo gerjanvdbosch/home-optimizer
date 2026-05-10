@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 
 from home_optimizer.features.modeling import (
     HorizonMetric,
     ROOM_ARX_MODEL_KIND,
-    ROOM_GREYBOX_MODEL_KIND,
     RoomArxConfig,
-    RoomGreyBoxConfig,
-    RoomGreyBoxModel,
     RoomModelValidationReport,
     StoredModelVersion,
     TrainedLinearRoomModel,
@@ -103,34 +99,6 @@ def build_validation_report() -> RoomModelValidationReport:
         ],
         aggregate_metrics=metrics,
     )
-def build_greybox_model() -> RoomGreyBoxModel:
-    return RoomGreyBoxModel(
-        trained_from_utc=datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc),
-        trained_to_utc=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
-        interval_minutes=10,
-        config=RoomGreyBoxConfig(
-            validation_horizons_steps=[6, 36, 72, 144],
-            min_train_rows=10,
-            validation_window_rows=10,
-            history_warmup_rows=24,
-        ),
-        feature_names=[
-            "room_temperature_c",
-            "thermal_mass_state",
-            "outdoor_temperature_c",
-            "thermal_output_energy_kwh",
-            "solar_effective_exposure",
-        ],
-        intercept=0.0,
-        coefficients=[0.85, 0.10, 0.05, 0.04, 0.002],
-        sample_count=220,
-        k_out=0.05,
-        k_mass=0.10,
-        k_air_mass=0.04,
-        g_heat_mass=0.03,
-        g_solar_mass=0.001,
-        observer_gain=0.1,
-    )
 
 
 def test_model_version_repository_round_trips_room_model_versions(tmp_path) -> None:
@@ -211,108 +179,4 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
     summary_by_id = {summary.model_id: summary for summary in summaries}
     assert summary_by_id["room-model-v1"].is_active is False
     assert summary_by_id["room-model-v2"].is_active is True
-def test_model_version_repository_keeps_one_active_model_per_type(tmp_path) -> None:
-    database = Database(str(tmp_path / "model_versions.sqlite"))
-    database.init_schema()
-    repository = ModelVersionRepository(database)
-
-    repository.save_room_model_version(
-        StoredModelVersion(
-            model_id="room-model-arx",
-            model_type=ROOM_ARX_MODEL_KIND,
-            created_at_utc=datetime(2026, 5, 11, 9, 0, tzinfo=timezone.utc),
-            is_active=True,
-            model=build_model(),
-            validation_report=build_validation_report(),
-        )
-    )
-    repository.save_room_model_version(
-        StoredModelVersion(
-            model_id="room-model-greybox",
-            model_type=ROOM_GREYBOX_MODEL_KIND,
-            created_at_utc=datetime(2026, 5, 11, 10, 0, tzinfo=timezone.utc),
-            is_active=True,
-            model=build_greybox_model(),
-            validation_report=build_validation_report(),
-        )
-    )
-
-    summaries = repository.list_room_model_versions()
-    summary_by_id = {summary.model_id: summary for summary in summaries}
-
-    assert summary_by_id["room-model-arx"].is_active is True
-    assert summary_by_id["room-model-greybox"].is_active is True
-
-
-def test_model_version_repository_round_trips_greybox_room_model_versions(tmp_path) -> None:
-    database = Database(str(tmp_path / "model_versions.sqlite"))
-    database.init_schema()
-    repository = ModelVersionRepository(database)
-
-    version = StoredModelVersion(
-        model_id="room-model-greybox",
-        model_type=ROOM_GREYBOX_MODEL_KIND,
-        created_at_utc=datetime(2026, 5, 11, 12, 0, tzinfo=timezone.utc),
-        is_active=True,
-        model=build_greybox_model(),
-        validation_report=build_validation_report(),
-    )
-
-    repository.save_room_model_version(version)
-
-    loaded = repository.get_room_model_version("room-model-greybox")
-    active = repository.get_active_room_model_version()
-
-    assert loaded is not None
-    assert loaded.model_type == ROOM_GREYBOX_MODEL_KIND
-    assert isinstance(loaded.model, RoomGreyBoxModel)
-    assert loaded.model.k_out == 0.05
-    assert loaded.model.k_mass == 0.10
-    assert loaded.model.k_air_mass == 0.04
-    assert loaded.model.g_heat_air == 0.04
-    assert loaded.model.g_solar_air == 0.002
-    assert "Trained grey-box room state-space model" in loaded.model.notes
-    assert active is not None
-    assert active.model_id == "room-model-greybox"
-
-
-def test_greybox_model_accepts_legacy_serialized_fields() -> None:
-    legacy_payload = {
-        "model_kind": ROOM_GREYBOX_MODEL_KIND,
-        "trained_from_utc": "2026-05-01T00:00:00+00:00",
-        "trained_to_utc": "2026-05-10T00:00:00+00:00",
-        "interval_minutes": 10,
-        "config": {
-            "model_kind": ROOM_GREYBOX_MODEL_KIND,
-            "min_train_rows": 10,
-            "validation_window_rows": 10,
-            "validation_horizons_steps": [6, 36, 72],
-            "history_warmup_rows": 24,
-        },
-        "feature_names": [
-            "room_temperature_c",
-            "thermal_mass_state",
-            "outdoor_temperature_c",
-            "thermal_output_energy_kwh",
-            "solar_effective_exposure",
-        ],
-        "intercept": 0.0,
-        "coefficients": [0.84, 0.11, 0.05, 0.04, 0.002],
-        "sample_count": 200,
-        "a21": 0.04,
-        "a22": 0.96,
-        "heat_to_mass": 0.03,
-        "solar_to_mass": 0.001,
-        "observer_gain": 0.1,
-    }
-
-    model = RoomGreyBoxModel.model_validate_json(json.dumps(legacy_payload))
-
-    assert model.k_out == 0.05
-    assert model.k_mass == 0.11
-    assert model.k_air_mass == 0.04
-    assert model.g_heat_air == 0.04
-    assert model.g_solar_air == 0.002
-    assert model.g_heat_mass == 0.03
-    assert model.g_solar_mass == 0.001
 
