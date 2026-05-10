@@ -374,7 +374,7 @@ function handleSimulationError(error) {
 }
 
 if (anchorTimeInput) {
-  anchorTimeInput.value = localInputValue(new Date("2026-05-07T00:00:00Z"));
+  anchorTimeInput.value = localInputValue(new Date("2026-05-07T22:00:00Z"));
   syncSimulationDateLabel(new Date(anchorTimeInput.value));
 }
 
