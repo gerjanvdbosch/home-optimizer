@@ -14,8 +14,6 @@ from home_optimizer.features.modeling import (
 from home_optimizer.infrastructure.database.orm_models import ModelVersion
 from home_optimizer.infrastructure.database.session import Database
 
-ROOM_MODEL_KINDS = (ROOM_ARX_MODEL_KIND)
-
 
 
 def _metric_by_minutes(
@@ -35,7 +33,7 @@ class ModelVersionRepository:
         self.database = database
 
     def save_room_model_version(self, version: StoredModelVersion) -> None:
-        if version.model_type not in ROOM_MODEL_KINDS:
+        if version.model_type != ROOM_ARX_MODEL_KIND:
             raise ValueError(f"unsupported room model type: {version.model_type}")
 
         metric_1h = _metric_by_minutes(version.validation_report, 60)
@@ -104,7 +102,7 @@ class ModelVersionRepository:
             row = session.execute(
                 select(ModelVersion).where(
                     ModelVersion.model_id == model_id,
-                    ModelVersion.model_type.in_(ROOM_MODEL_KINDS),
+                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
                 )
             ).scalar_one_or_none()
 
@@ -116,7 +114,7 @@ class ModelVersionRepository:
         with self.database.session() as session:
             row = session.execute(
                 select(ModelVersion).where(
-                    ModelVersion.model_type.in_(ROOM_MODEL_KINDS),
+                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
                     ModelVersion.is_active == 1,
                 )
             ).scalar_one_or_none()
@@ -129,7 +127,7 @@ class ModelVersionRepository:
         with self.database.session() as session:
             rows = session.execute(
                 select(ModelVersion)
-                .where(ModelVersion.model_type.in_(ROOM_MODEL_KINDS))
+                .where(ModelVersion.model_type == ROOM_ARX_MODEL_KIND)
                 .order_by(ModelVersion.created_at_utc.desc())
             ).scalars().all()
 
@@ -140,7 +138,7 @@ class ModelVersionRepository:
             row = session.execute(
                 select(ModelVersion).where(
                     ModelVersion.model_id == model_id,
-                    ModelVersion.model_type.in_(ROOM_MODEL_KINDS),
+                    ModelVersion.model_type == ROOM_ARX_MODEL_KIND,
                 )
             ).scalar_one_or_none()
             if row is None:
