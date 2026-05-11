@@ -24,6 +24,7 @@ class AppSettings(DomainModel):
     pv_tilt: float | None = Field(default=None, ge=0, le=90)
     pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)
+    living_room_glass_area_m2: float | None = Field(default=None, ge=0.0)
     boiler_tank_liters: int | None = Field(default=None, gt=0)
     sensors: dict[str, str] = Field(default_factory=dict)
     electricity_pricing: ElectricityPricingConfig = Field(default=DynamicPricing())

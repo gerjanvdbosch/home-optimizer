@@ -40,6 +40,7 @@ options:
   pv_tilt: 50.0
   pv_azimuth: 148.0
   living_room_window_azimuth: 148.0
+  living_room_glass_area_m2: 8.0
 
   boiler_tank_liters: 200
 
@@ -101,6 +102,7 @@ schema:
   pv_tilt: float
   pv_azimuth: float
   living_room_window_azimuth: float?
+  living_room_glass_area_m2: float?
 
   boiler_tank_liters: int
 

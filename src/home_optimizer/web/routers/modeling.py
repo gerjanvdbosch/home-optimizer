@@ -115,12 +115,14 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
                 validation_window_rows=validation_window_rows,
             )
         elif model_type == ROOM_RC_MODEL_KIND:
-            config = RoomRcConfig(
+            rc_kwargs: dict = dict(
                 min_train_rows=min_train_rows,
                 min_valid_train_rows=min_train_rows,
                 training_window_rows=training_window_rows,
                 validation_window_rows=validation_window_rows,
+                glass_area_m2=settings.living_room_glass_area_m2
             )
+            config = RoomRcConfig(**rc_kwargs)
         else:
             raise HTTPException(status_code=400, detail=f"unsupported room model type: {model_type}")
 
