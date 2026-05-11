@@ -96,7 +96,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         validation_end_time: OptionalEndTimeQuery = None,
         test_start_time: OptionalTestStartTimeQuery = None,
         test_end_time: OptionalTestEndTimeQuery = None,
-        interval_minutes: IntervalQuery = 15,
+        interval_minutes: IntervalQuery = 10,
         training_window_rows: TrainingWindowQuery = None,
         validation_window_rows: ValidationWindowQuery = 144,
         min_train_rows: MinTrainRowsQuery = 96,

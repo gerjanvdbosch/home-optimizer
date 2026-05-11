@@ -67,6 +67,7 @@ DEFAULT_SEGMENT_DESCRIPTIONS: dict[str, str] = {
 RC_VALIDITY_COLUMN = "is_valid_for_room_rc_identification"
 RC_EXCLUSION_REASONS_COLUMN = "room_rc_exclusion_reasons"
 OBJECTIVE_FAILURE_LOSS = 1e12
+DISABLED_MASS_OUTDOOR_RESISTANCE_OHM = 1e12
 
 
 @dataclass
@@ -156,6 +157,7 @@ class RoomRC2StateConfig:
     heating_off_threshold_kw: float = 0.3
     warn_missing_fraction: float = 0.2
     warn_bound_hit_count: int = 2
+    fit_mass_outdoor_resistance: bool = False
     fit_eta_solar_mass: bool = False
     fit_mass_hour_terms: bool = False
     mass_capacity_ratio_min: float = 3.0
@@ -180,7 +182,19 @@ class RoomRC2StateConfig:
     def dt_hours(self) -> float:
         return self.interval_minutes / 60.0
 
+    @property
+    def disabled_mass_outdoor_resistance_ohm(self) -> float:
+        return DISABLED_MASS_OUTDOOR_RESISTANCE_OHM
+
     def bounds(self) -> list[tuple[float, float]]:
+        mass_outdoor_resistance_bounds = (
+            (
+                self.disabled_mass_outdoor_resistance_ohm,
+                self.disabled_mass_outdoor_resistance_ohm,
+            )
+            if not self.fit_mass_outdoor_resistance
+            else (self.R_mass_out_min, self.R_mass_out_max)
+        )
         eta_solar_mass_bounds = (
             (0.0, 0.0)
             if not self.fit_eta_solar_mass
@@ -194,7 +208,7 @@ class RoomRC2StateConfig:
         return [
             (self.R_air_out_min, self.R_air_out_max),
             (self.R_air_mass_min, self.R_air_mass_max),
-            (self.R_mass_out_min, self.R_mass_out_max),
+            mass_outdoor_resistance_bounds,
             (self.C_air_min, self.C_air_max),
             (self.C_mass_min, self.C_mass_max),
             (self.eta_heat_min, self.eta_heat_max),
@@ -342,6 +356,7 @@ class RoomRcConfig(ValidationConfig):
     heating_off_threshold_kw: float = Field(default=0.05, ge=0.0)
     warn_missing_fraction: float = Field(default=0.2, ge=0.0, le=1.0)
     warn_bound_hit_count: int = Field(default=2, ge=1)
+    fit_mass_outdoor_resistance: bool = False
     fit_eta_solar_mass: bool = False
     fit_mass_hour_terms: bool = False
     mass_capacity_ratio_min: float = Field(default=3.0, ge=1.0)
@@ -416,6 +431,7 @@ class RoomRcConfig(ValidationConfig):
             heating_off_threshold_kw=self.heating_off_threshold_kw,
             warn_missing_fraction=self.warn_missing_fraction,
             warn_bound_hit_count=self.warn_bound_hit_count,
+            fit_mass_outdoor_resistance=self.fit_mass_outdoor_resistance,
             fit_eta_solar_mass=self.fit_eta_solar_mass,
             fit_mass_hour_terms=self.fit_mass_hour_terms,
             mass_capacity_ratio_min=self.mass_capacity_ratio_min,
@@ -509,7 +525,11 @@ class RoomRC2StatePhysicalModel:
         c_mass = params.C_mass
         r_air_out = params.R_air_out
         r_air_mass = params.R_air_mass
-        r_mass_out = params.R_mass_out
+        r_mass_out = (
+            params.R_mass_out
+            if self.config.fit_mass_outdoor_resistance
+            else self.config.disabled_mass_outdoor_resistance_ohm
+        )
 
         F = np.array(
             [
@@ -618,6 +638,8 @@ class RoomRC2StatePhysicalModel:
             return float(loss)
 
         x0 = self.params.to_vector()
+        if not self.config.fit_mass_outdoor_resistance:
+            x0[2] = self.config.disabled_mass_outdoor_resistance_ohm
         initial_loss = float(objective(x0))
         if initial_loss >= OBJECTIVE_FAILURE_LOSS:
             raise ValueError(

@@ -96,11 +96,30 @@ def test_default_config_disables_mass_solar_and_mass_hour_freedom() -> None:
     bounds = config.bounds()
     assert config.R_air_out_max == 100.0
     assert config.R_mass_out_max == 100.0
+    assert config.fit_mass_outdoor_resistance is False
+    assert bounds[2] == (
+        config.disabled_mass_outdoor_resistance_ohm,
+        config.disabled_mass_outdoor_resistance_ohm,
+    )
     assert bounds[7] == (0.0, 0.0)
     assert bounds[11] == (0.0, 0.0)
     assert bounds[12] == (0.0, 0.0)
     assert config.eta_internal_min == 0.0
     assert config.eta_internal_max == 0.2
+
+
+def test_mass_outdoor_resistance_can_be_enabled_explicitly() -> None:
+    config = RoomRC2StateConfig(fit_mass_outdoor_resistance=True)
+    bounds = config.bounds()
+    assert bounds[2] == (config.R_mass_out_min, config.R_mass_out_max)
+
+
+def test_default_config_disables_direct_mass_outdoor_conductance() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    params = RoomRC2StateParams(R_mass_out=20.0)
+    F, G, _, _ = model.params_to_matrices(params)
+    assert abs(F[1, 1] + (1.0 / params.R_air_mass) / params.C_mass) < 1e-12
+    assert abs(G[1, 0]) < 1e-12
 
 
 def test_predict_one_step_returns_expected_columns() -> None:
