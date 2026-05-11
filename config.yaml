@@ -112,7 +112,7 @@ schema:
     - { time: str, target: float, low_margin: float, high_margin: float }
 
   electricity_pricing:
-    mode: str
+    mode: list(fixed|dynamic)
     peak_price: float?
     off_peak_price: float?
     feed_in_tariff: float?
