@@ -1627,7 +1627,7 @@ class RoomRcTrainer:
                     "timestamp": row.timestamp_utc,
                     "room_temp_c": row.room_temperature_c,
                     "outdoor_temp_c": row.outdoor_temperature_c,
-                    "heating_kw": row.thermal_output_estimate_kw,
+                    "heating_kw": row.space_heating_output_estimate_kw,
                     "irradiance_wm2": row.solar_irradiance_w_m2,
                     "shutter_position": row.shutter_position_pct,
                     "occupied_flag": row.occupied_flag,

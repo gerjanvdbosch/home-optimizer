@@ -156,9 +156,10 @@ def _optional_string(value: object) -> str | None:
 def _room_rc_validate_row(
     *,
     room_valid: bool,
+    mode_space: int,
     room_temperature_c: float | None,
     outdoor_temperature_c: float | None,
-    thermal_output_estimate_kw: float | None,
+    space_heating_output_estimate_kw: float | None,
     hp_electric_power_kw: float | None,
     mode_off: int,
     exclusion_reasons: list[str],
@@ -171,7 +172,7 @@ def _room_rc_validate_row(
     if outdoor_temperature_c is None:
         reasons.append("missing_outdoor_temperature")
 
-    heating_missing = thermal_output_estimate_kw is None
+    heating_missing = mode_space == 1 and space_heating_output_estimate_kw is None
     heating_semantically_off = bool(mode_off) or (
         hp_electric_power_kw is not None and hp_electric_power_kw <= _HEATING_OFF_POWER_THRESHOLD_KW
     )
@@ -574,6 +575,10 @@ class MpcDatasetService:
             frame[HP_FLOW] * frame["hp_delta_t_c"] * _THERMAL_FACTOR_KW_PER_LMIN_DELTA_C
         )
         frame.loc[frame["thermal_output_estimate_kw"] < 0, "thermal_output_estimate_kw"] = 0.0
+        frame["space_heating_output_estimate_kw"] = frame["thermal_output_estimate_kw"].where(
+            frame["mode_space"] == 1,
+            0.0,
+        )
 
         frame["cop_estimate"] = (
             frame["thermal_output_estimate_kw"] / frame[HP_ELECTRIC_POWER]
@@ -649,11 +654,17 @@ class MpcDatasetService:
                 if pd.notna(record.get("thermal_output_estimate_kw"))
                 else None
             )
+            space_heating_output_estimate_kw = (
+                float(record["space_heating_output_estimate_kw"])
+                if pd.notna(record.get("space_heating_output_estimate_kw"))
+                else None
+            )
             room_rc_valid, room_rc_exclusion_reasons = _room_rc_validate_row(
                 room_valid=room_valid,
+                mode_space=int(record["mode_space"]),
                 room_temperature_c=room_temperature_c,
                 outdoor_temperature_c=outdoor_temperature_c,
-                thermal_output_estimate_kw=thermal_output_estimate_kw,
+                space_heating_output_estimate_kw=space_heating_output_estimate_kw,
                 hp_electric_power_kw=hp_electric_power_kw,
                 mode_off=int(record["mode_off"]),
                 exclusion_reasons=exclusion_reasons,
@@ -724,6 +735,7 @@ class MpcDatasetService:
                         float(record["hp_delta_t_c"]) if pd.notna(record.get("hp_delta_t_c")) else None
                     ),
                     thermal_output_estimate_kw=thermal_output_estimate_kw,
+                    space_heating_output_estimate_kw=space_heating_output_estimate_kw,
                     cop_estimate=(
                         float(record["cop_estimate"]) if pd.notna(record.get("cop_estimate")) else None
                     ),

@@ -764,6 +764,8 @@ def test_train_endpoint_supports_physical_rc_room_model() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["model_type"] == ROOM_RC_MODEL_KIND
+    assert payload["fit_quality"] in {"good", "degraded"}
+    assert isinstance(payload["fit_quality_reasons"], list)
     saved_version = app.state.container.model_version_repository.saved_versions[0]
     assert saved_version.model_type == ROOM_RC_MODEL_KIND
     assert isinstance(saved_version.model, RoomRcModel)

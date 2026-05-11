@@ -30,6 +30,7 @@ class MpcDatasetRow(DomainModel):
     flow_l_min: float | None = None
     hp_delta_t_c: float | None = None
     thermal_output_estimate_kw: float | None = None
+    space_heating_output_estimate_kw: float | None = None
     cop_estimate: float | None = None
     solar_irradiance_w_m2: float | None = None
     solar_gain_proxy_w_m2: float | None = None

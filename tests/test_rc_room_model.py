@@ -10,9 +10,12 @@ import pytest
 from home_optimizer.features.modeling.room_rc import (
     RC_VALIDITY_COLUMN,
     RoomRC2StateConfig,
+    RoomRcConfig,
+    RoomRcTrainer,
     RoomRC2StateParams,
     RoomRC2StatePhysicalModel,
 )
+from home_optimizer.features.dataset.models import MpcDatasetRow
 
 
 def build_dataframe(row_count: int = 72) -> pd.DataFrame:
@@ -91,6 +94,8 @@ def test_matrix_discretization_shapes_and_stability() -> None:
 def test_default_config_disables_mass_solar_and_mass_hour_freedom() -> None:
     config = RoomRC2StateConfig()
     bounds = config.bounds()
+    assert config.R_air_out_max == 100.0
+    assert config.R_mass_out_max == 100.0
     assert bounds[7] == (0.0, 0.0)
     assert bounds[11] == (0.0, 0.0)
     assert bounds[12] == (0.0, 0.0)
@@ -202,6 +207,23 @@ def test_fit_reports_rc_diagnostics() -> None:
     assert "missing_counts_before" in diagnostics
     assert "parameters_at_bounds" in diagnostics
     assert report["fit_quality"] in {"good", "degraded"}
+
+
+def test_room_rc_trainer_uses_space_heating_output_not_total_thermal_output() -> None:
+    trainer = RoomRcTrainer()
+    config = RoomRcConfig()
+    row = MpcDatasetRow(
+        timestamp_utc=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+        room_temperature_c=20.0,
+        outdoor_temperature_c=5.0,
+        thermal_output_estimate_kw=4.0,
+        space_heating_output_estimate_kw=0.0,
+        solar_irradiance_w_m2=0.0,
+        shutter_position_pct=0.0,
+        occupied_flag=0,
+    )
+    prepared = trainer.prepare([row], config)
+    assert prepared.frame.loc[0, "heating_kw"] == 0.0
 
 
 def test_fit_rejects_fragmented_short_sequences() -> None:

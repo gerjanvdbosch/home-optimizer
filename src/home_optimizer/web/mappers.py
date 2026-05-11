@@ -114,6 +114,7 @@ def train_room_model_response(
     test_from_utc: datetime | None = None,
     test_to_utc: datetime | None = None,
 ) -> TrainRoomModelResponse:
+    training_metadata = getattr(version.model, "training_metadata", {}) or {}
     return TrainRoomModelResponse(
         model_id=version.model_id,
         model_type=version.model_type,
@@ -127,6 +128,8 @@ def train_room_model_response(
         interval_minutes=version.model.interval_minutes,
         sample_count=version.model.sample_count,
         is_active=version.is_active,
+        fit_quality=training_metadata.get("fit_quality"),
+        fit_quality_reasons=list(training_metadata.get("fit_quality_reasons", [])),
         aggregate_metrics=[
             HorizonMetricResponse(**metric.model_dump())
             for metric in validation_report.aggregate_metrics

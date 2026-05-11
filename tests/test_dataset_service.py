@@ -422,8 +422,10 @@ def test_mpc_dataset_service_builds_generic_dataset_rows() -> None:
     assert len(dataset.rows) == 2
     assert dataset.rows[0].mode_space == 1
     assert dataset.rows[0].thermal_output_estimate_kw == 2.7906666666666666
+    assert dataset.rows[0].space_heating_output_estimate_kw == 2.7906666666666666
     assert dataset.rows[0].solar_gain_proxy_w_m2 == 150.0
     assert dataset.rows[1].mode_off == 1
+    assert dataset.rows[1].space_heating_output_estimate_kw == 0.0
     assert dataset.rows[1].solar_gain_proxy_w_m2 == 0.0
     assert summary.total_rows == 2
     assert summary.mode_space_rows == 1
@@ -526,7 +528,7 @@ def test_mpc_dataset_service_applies_explicit_resample_semantics() -> None:
     assert row.supply_temperature_c == 32.0
     assert row.return_temperature_c == 29.0
     assert row.flow_l_min == 10.0
-    assert row.solar_irradiance_w_m2 == 200.0
+    assert row.solar_irradiance_w_m2 == 100.0
     assert row.defrost_active == 1
 
 

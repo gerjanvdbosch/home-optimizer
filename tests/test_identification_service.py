@@ -370,6 +370,7 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert first_row.mode_off == 0
     assert first_row.hp_delta_t_c == 4.0
     assert first_row.thermal_output_estimate_kw == 2.7906666666666666
+    assert first_row.space_heating_output_estimate_kw == 2.7906666666666666
     assert first_row.cop_estimate == 2.7906666666666666 / 1.5
     assert first_row.solar_gain_proxy_w_m2 == 150.0
     assert first_row.price_import_eur_kwh == 0.25
@@ -388,6 +389,7 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert second_row.mode_space == 0
     assert second_row.mode_dhw == 1
     assert second_row.mode_off == 0
+    assert second_row.space_heating_output_estimate_kw == 0.0
     assert second_row.defrost_active == 1
     assert second_row.dhw_draw_proxy_c == 0.0
     assert second_row.dhw_draw_detected == 0
@@ -401,6 +403,7 @@ def test_identification_dataset_service_builds_fifteen_minute_rows_with_validati
     assert third_row.mode_space == 0
     assert third_row.mode_dhw == 0
     assert third_row.mode_off == 1
+    assert third_row.space_heating_output_estimate_kw == 0.0
     assert third_row.booster_heater_active == 1
     assert third_row.dhw_draw_proxy_c == 0.0
     assert third_row.is_valid_for_room_identification is False

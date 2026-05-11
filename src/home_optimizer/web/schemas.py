@@ -150,6 +150,7 @@ class IdentificationDatasetRowResponse(BaseModel):
     flow_l_min: float | None = None
     hp_delta_t_c: float | None = None
     thermal_output_estimate_kw: float | None = None
+    space_heating_output_estimate_kw: float | None = None
     cop_estimate: float | None = None
     solar_irradiance_w_m2: float | None = None
     solar_gain_proxy_w_m2: float | None = None
@@ -214,6 +215,8 @@ class TrainRoomModelResponse(BaseModel):
     interval_minutes: int
     sample_count: int
     is_active: bool
+    fit_quality: str | None = None
+    fit_quality_reasons: list[str] = []
     aggregate_metrics: list[HorizonMetricResponse]
     segment_metrics: list[SegmentValidationResponse]
     test_aggregate_metrics: list[HorizonMetricResponse] = []
