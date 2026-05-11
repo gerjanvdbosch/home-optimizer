@@ -68,6 +68,8 @@ RC_VALIDITY_COLUMN = "is_valid_for_room_rc_identification"
 RC_EXCLUSION_REASONS_COLUMN = "room_rc_exclusion_reasons"
 OBJECTIVE_FAILURE_LOSS = 1e12
 DISABLED_MASS_OUTDOOR_RESISTANCE_OHM = 1e12
+DEGRADED_MIN_USABLE_SEQUENCE_COUNT = 2
+DEGRADED_DROPPED_SEQUENCE_FRACTION_THRESHOLD = 0.5
 
 
 @dataclass
@@ -1560,6 +1562,19 @@ class RoomRC2StatePhysicalModel:
                 hits.append(f"{name}@max")
         return hits
 
+    def _mass_capacity_ratio(self, params: RoomRC2StateParams) -> float:
+        if params.C_air <= 0.0:
+            return float("inf")
+        return float(params.C_mass / params.C_air)
+
+    def _dropped_sequence_fraction(
+        self, sequence_diagnostics: TrainingSequenceDiagnostics
+    ) -> float:
+        total = sequence_diagnostics.total_valid_sequence_count
+        if total <= 0:
+            return 0.0
+        return float(sequence_diagnostics.dropped_short_sequence_count / total)
+
     def _training_diagnostics_summary(
         self,
         *,
@@ -1575,6 +1590,8 @@ class RoomRC2StatePhysicalModel:
                 valid_counts[name] += int(np.sum(mask))
         warnings = list(diagnostics.warnings)
         bound_hits = self._parameters_at_bounds(params)
+        mass_capacity_ratio = self._mass_capacity_ratio(params)
+        dropped_sequence_fraction = self._dropped_sequence_fraction(sequence_diagnostics)
         if sequence_diagnostics.dropped_short_sequence_count > 0:
             warnings.append(
                 "short_sequences_dropped:"
@@ -1583,6 +1600,11 @@ class RoomRC2StatePhysicalModel:
             )
         if len(bound_hits) >= self.config.warn_bound_hit_count:
             warnings.append(f"bound_hits:{','.join(bound_hits)}")
+        if np.isclose(mass_capacity_ratio, self.config.mass_capacity_ratio_min):
+            warnings.append(
+                "weak_mass_air_separation:"
+                f"{mass_capacity_ratio:.3f}"
+            )
         return {
             "missing_counts_before": diagnostics.missing_counts_before,
             "missing_counts_after_interpolation": diagnostics.missing_counts_after_interpolation,
@@ -1595,9 +1617,13 @@ class RoomRC2StatePhysicalModel:
             "total_valid_sequence_count": sequence_diagnostics.total_valid_sequence_count,
             "usable_sequence_count": sequence_diagnostics.usable_sequence_count,
             "dropped_short_sequence_count": sequence_diagnostics.dropped_short_sequence_count,
+            "dropped_sequence_count": sequence_diagnostics.dropped_short_sequence_count,
+            "dropped_sequence_fraction": dropped_sequence_fraction,
             "segment_counts_after_rc_filtering": valid_counts,
             "parameter_values": params.to_dict(),
+            "c_mass_air_ratio": mass_capacity_ratio,
             "parameters_at_bounds": bound_hits,
+            "bound_hits_excluding_fixed_parameters": bound_hits,
             "warnings": warnings,
             "invalid_rc_reasons_top": (
                 prepared.loc[~prepared[RC_VALIDITY_COLUMN], RC_EXCLUSION_REASONS_COLUMN]
@@ -1620,14 +1646,16 @@ class RoomRC2StatePhysicalModel:
     ) -> tuple[str, list[str]]:
         reasons: list[str] = []
         bound_hits = self._parameters_at_bounds(params)
+        dropped_sequence_fraction = self._dropped_sequence_fraction(sequence_diagnostics)
         if not optimizer_success:
             reasons.append("optimizer_not_converged")
         if len(bound_hits) >= self.config.warn_bound_hit_count:
             reasons.append("multiple_bound_hits")
-        if sequence_diagnostics.dropped_short_sequence_count > 0:
+        if (
+            sequence_diagnostics.usable_sequence_count < DEGRADED_MIN_USABLE_SEQUENCE_COUNT
+            or dropped_sequence_fraction > DEGRADED_DROPPED_SEQUENCE_FRACTION_THRESHOLD
+        ):
             reasons.append("short_sequences_dropped")
-        if params.C_mass < (self.config.mass_capacity_ratio_min * params.C_air):
-            reasons.append("weak_mass_air_separation")
         if train_loss > max(self.config.huber_delta_c, 0.1):
             reasons.append("elevated_train_loss")
         return ("good" if not reasons else "degraded"), reasons

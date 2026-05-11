@@ -14,6 +14,7 @@ from home_optimizer.features.modeling.room_rc import (
     RoomRcTrainer,
     RoomRC2StateParams,
     RoomRC2StatePhysicalModel,
+    TrainingSequenceDiagnostics,
 )
 from home_optimizer.features.dataset.models import MpcDatasetRow
 
@@ -225,7 +226,61 @@ def test_fit_reports_rc_diagnostics() -> None:
     assert diagnostics["sample_count_after_filtering"] < 40
     assert "missing_counts_before" in diagnostics
     assert "parameters_at_bounds" in diagnostics
+    assert "bound_hits_excluding_fixed_parameters" in diagnostics
+    assert "c_mass_air_ratio" in diagnostics
+    assert "dropped_sequence_fraction" in diagnostics
     assert report["fit_quality"] in {"good", "degraded"}
+
+
+def test_fixed_off_parameters_do_not_count_as_bound_hits() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    params = RoomRC2StateParams(
+        R_mass_out=model.config.disabled_mass_outdoor_resistance_ohm,
+        eta_solar_mass=0.0,
+        b_hour_sin_mass=0.0,
+        b_hour_cos_mass=0.0,
+    )
+    hits = model._parameters_at_bounds(params)
+    assert all("R_mass_out" not in hit for hit in hits)
+    assert all("eta_solar_mass" not in hit for hit in hits)
+    assert all("b_hour_sin_mass" not in hit for hit in hits)
+    assert all("b_hour_cos_mass" not in hit for hit in hits)
+
+
+def test_short_sequences_are_warning_only_when_fragmentation_is_modest() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    fit_quality, reasons = model._fit_quality(
+        optimizer_success=True,
+        train_loss=0.01,
+        params=RoomRC2StateParams(),
+        sequence_diagnostics=TrainingSequenceDiagnostics(
+            min_sequence_length=10,
+            total_valid_sequence_count=5,
+            usable_sequence_count=3,
+            dropped_short_sequence_count=2,
+            usable_sample_count=300,
+        ),
+    )
+    assert fit_quality == "good"
+    assert "short_sequences_dropped" not in reasons
+
+
+def test_short_sequences_degrade_when_too_few_usable_sequences_remain() -> None:
+    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    fit_quality, reasons = model._fit_quality(
+        optimizer_success=True,
+        train_loss=0.01,
+        params=RoomRC2StateParams(),
+        sequence_diagnostics=TrainingSequenceDiagnostics(
+            min_sequence_length=10,
+            total_valid_sequence_count=3,
+            usable_sequence_count=1,
+            dropped_short_sequence_count=2,
+            usable_sample_count=120,
+        ),
+    )
+    assert fit_quality == "degraded"
+    assert "short_sequences_dropped" in reasons
 
 
 def test_room_rc_trainer_uses_space_heating_output_not_total_thermal_output() -> None:
