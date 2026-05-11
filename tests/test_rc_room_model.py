@@ -88,6 +88,16 @@ def test_matrix_discretization_shapes_and_stability() -> None:
     assert max(abs(np.linalg.eigvals(A_d))) < 1.0
 
 
+def test_default_config_disables_mass_solar_and_mass_hour_freedom() -> None:
+    config = RoomRC2StateConfig()
+    bounds = config.bounds()
+    assert bounds[7] == (0.0, 0.0)
+    assert bounds[11] == (0.0, 0.0)
+    assert bounds[12] == (0.0, 0.0)
+    assert config.eta_internal_min == 0.0
+    assert config.eta_internal_max == 0.2
+
+
 def test_predict_one_step_returns_expected_columns() -> None:
     model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
     df = build_dataframe(24)
@@ -191,6 +201,7 @@ def test_fit_reports_rc_diagnostics() -> None:
     assert diagnostics["sample_count_after_filtering"] < 40
     assert "missing_counts_before" in diagnostics
     assert "parameters_at_bounds" in diagnostics
+    assert report["fit_quality"] in {"good", "degraded"}
 
 
 def test_fit_rejects_fragmented_short_sequences() -> None:

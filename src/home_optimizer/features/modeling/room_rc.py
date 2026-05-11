@@ -146,8 +146,8 @@ class RoomRC2StateConfig:
     eta_solar_air_max: float = 1.5
     eta_solar_mass_min: float = 0.0
     eta_solar_mass_max: float = 1.5
-    eta_internal_min: float = -0.2
-    eta_internal_max: float = 0.5
+    eta_internal_min: float = 0.0
+    eta_internal_max: float = 0.2
     hour_coeff_min: float = -0.5
     hour_coeff_max: float = 0.5
     initial_mass_offset_min: float = -5.0
@@ -156,6 +156,9 @@ class RoomRC2StateConfig:
     heating_off_threshold_kw: float = 0.3
     warn_missing_fraction: float = 0.2
     warn_bound_hit_count: int = 2
+    fit_eta_solar_mass: bool = False
+    fit_mass_hour_terms: bool = False
+    mass_capacity_ratio_min: float = 3.0
 
     def __post_init__(self) -> None:
         if self.interval_minutes <= 0:
@@ -178,6 +181,16 @@ class RoomRC2StateConfig:
         return self.interval_minutes / 60.0
 
     def bounds(self) -> list[tuple[float, float]]:
+        eta_solar_mass_bounds = (
+            (0.0, 0.0)
+            if not self.fit_eta_solar_mass
+            else (self.eta_solar_mass_min, self.eta_solar_mass_max)
+        )
+        mass_hour_bounds = (
+            (0.0, 0.0)
+            if not self.fit_mass_hour_terms
+            else (self.hour_coeff_min, self.hour_coeff_max)
+        )
         return [
             (self.R_air_out_min, self.R_air_out_max),
             (self.R_air_mass_min, self.R_air_mass_max),
@@ -186,12 +199,12 @@ class RoomRC2StateConfig:
             (self.C_mass_min, self.C_mass_max),
             (self.eta_heat_min, self.eta_heat_max),
             (self.eta_solar_air_min, self.eta_solar_air_max),
-            (self.eta_solar_mass_min, self.eta_solar_mass_max),
+            eta_solar_mass_bounds,
             (self.eta_internal_min, self.eta_internal_max),
             (self.hour_coeff_min, self.hour_coeff_max),
             (self.hour_coeff_min, self.hour_coeff_max),
-            (self.hour_coeff_min, self.hour_coeff_max),
-            (self.hour_coeff_min, self.hour_coeff_max),
+            mass_hour_bounds,
+            mass_hour_bounds,
             (self.initial_mass_offset_min, self.initial_mass_offset_max),
         ]
 
@@ -205,7 +218,7 @@ class RoomRC2StateParams:
     C_mass: float = 50.0
     eta_heat: float = 0.9
     eta_solar_air: float = 0.2
-    eta_solar_mass: float = 0.5
+    eta_solar_mass: float = 0.0
     eta_internal: float = 0.1
     b_hour_sin_air: float = 0.0
     b_hour_cos_air: float = 0.0
@@ -319,8 +332,8 @@ class RoomRcConfig(ValidationConfig):
     eta_solar_air_max: float = 1.5
     eta_solar_mass_min: float = 0.0
     eta_solar_mass_max: float = 1.5
-    eta_internal_min: float = -0.2
-    eta_internal_max: float = 0.5
+    eta_internal_min: float = 0.0
+    eta_internal_max: float = 0.2
     hour_coeff_min: float = -0.5
     hour_coeff_max: float = 0.5
     initial_mass_offset_min: float = -5.0
@@ -329,6 +342,9 @@ class RoomRcConfig(ValidationConfig):
     heating_off_threshold_kw: float = Field(default=0.05, ge=0.0)
     warn_missing_fraction: float = Field(default=0.2, ge=0.0, le=1.0)
     warn_bound_hit_count: int = Field(default=2, ge=1)
+    fit_eta_solar_mass: bool = False
+    fit_mass_hour_terms: bool = False
+    mass_capacity_ratio_min: float = Field(default=3.0, ge=1.0)
     notes: str = Field(
         default="Physical 2-state RC room model with exact discretization and Kalman-filtered mass state."
     )
@@ -400,6 +416,9 @@ class RoomRcConfig(ValidationConfig):
             heating_off_threshold_kw=self.heating_off_threshold_kw,
             warn_missing_fraction=self.warn_missing_fraction,
             warn_bound_hit_count=self.warn_bound_hit_count,
+            fit_eta_solar_mass=self.fit_eta_solar_mass,
+            fit_mass_hour_terms=self.fit_mass_hour_terms,
+            mass_capacity_ratio_min=self.mass_capacity_ratio_min,
         )
 
 
@@ -627,6 +646,12 @@ class RoomRC2StatePhysicalModel:
                 f"{result.message}"
             )
         self.params = fitted_params
+        fit_quality, fit_quality_reasons = self._fit_quality(
+            optimizer_success=bool(result.success),
+            train_loss=train_loss,
+            params=self.params,
+            sequence_diagnostics=sequence_diagnostics,
+        )
 
         validation_metrics = None
         if validation_df is not None:
@@ -647,6 +672,8 @@ class RoomRC2StatePhysicalModel:
             "optimizer_message": str(result.message),
             "optimizer_iterations": int(getattr(result, "nit", 0)),
             "final_train_loss": train_loss,
+            "fit_quality": fit_quality,
+            "fit_quality_reasons": fit_quality_reasons,
             "validation_metrics": validation_metrics,
             "rc_diagnostics": self._training_diagnostics_summary(
                 prepared=prepared,
@@ -669,6 +696,8 @@ class RoomRC2StatePhysicalModel:
             "optimizer_success": bool(result.success),
             "optimizer_message": str(result.message),
             "final_train_loss": train_loss,
+            "fit_quality": fit_quality,
+            "fit_quality_reasons": fit_quality_reasons,
             "params": self.params.to_dict(),
             "validation_metrics": validation_metrics,
             "rc_diagnostics": self.training_metadata["rc_diagnostics"],
@@ -1360,8 +1389,11 @@ class RoomRC2StatePhysicalModel:
             + (params.b_hour_sin_mass**2)
             + (params.b_hour_cos_mass**2)
         )
-        if params.C_mass <= params.C_air:
-            penalty += self.config.physical_penalty_weight * ((params.C_air - params.C_mass + 1e-6) ** 2)
+        min_mass_capacity = self.config.mass_capacity_ratio_min * params.C_air
+        if params.C_mass < min_mass_capacity:
+            penalty += self.config.physical_penalty_weight * (
+                (min_mass_capacity - params.C_mass + 1e-6) ** 2
+            )
         _, _, A_d, _ = self.params_to_matrices(params)
         spectral_radius = max(abs(np.linalg.eigvals(A_d)))
         if spectral_radius >= 1.0:
@@ -1498,6 +1530,8 @@ class RoomRC2StatePhysicalModel:
         vector = params.to_vector()
         names = list(params.to_dict().keys())
         for name, value, (lower, upper) in zip(names, vector, self.config.bounds(), strict=False):
+            if np.isclose(lower, upper):
+                continue
             if np.isclose(value, lower):
                 hits.append(f"{name}@min")
             elif np.isclose(value, upper):
@@ -1553,6 +1587,28 @@ class RoomRC2StatePhysicalModel:
                 else {}
             ),
         }
+
+    def _fit_quality(
+        self,
+        *,
+        optimizer_success: bool,
+        train_loss: float,
+        params: RoomRC2StateParams,
+        sequence_diagnostics: TrainingSequenceDiagnostics,
+    ) -> tuple[str, list[str]]:
+        reasons: list[str] = []
+        bound_hits = self._parameters_at_bounds(params)
+        if not optimizer_success:
+            reasons.append("optimizer_not_converged")
+        if len(bound_hits) >= self.config.warn_bound_hit_count:
+            reasons.append("multiple_bound_hits")
+        if sequence_diagnostics.dropped_short_sequence_count > 0:
+            reasons.append("short_sequences_dropped")
+        if params.C_mass < (self.config.mass_capacity_ratio_min * params.C_air):
+            reasons.append("weak_mass_air_separation")
+        if train_loss > max(self.config.huber_delta_c, 0.1):
+            reasons.append("elevated_train_loss")
+        return ("good" if not reasons else "degraded"), reasons
 
 
 class RoomRcTrainer:
