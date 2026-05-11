@@ -19,15 +19,16 @@ from home_optimizer.features.modeling import (
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import room_model_catalog_response, train_room_model_response
 from home_optimizer.web.ports import WebAppContainer
+from home_optimizer.web.query_params import FlexibleDatetime
 from home_optimizer.web.schemas import RoomModelCatalogResponse, TrainRoomModelResponse
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
-StartTimeQuery = Annotated[datetime, Query(alias="start_time")]
-EndTimeQuery = Annotated[datetime, Query(alias="end_time")]
-OptionalStartTimeQuery = Annotated[datetime | None, Query(alias="validation_start_time")]
-OptionalEndTimeQuery = Annotated[datetime | None, Query(alias="validation_end_time")]
-OptionalTestStartTimeQuery = Annotated[datetime | None, Query(alias="test_start_time")]
-OptionalTestEndTimeQuery = Annotated[datetime | None, Query(alias="test_end_time")]
+StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
+EndTimeQuery = Annotated[FlexibleDatetime, Query(alias="end_time")]
+OptionalStartTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="validation_start_time")]
+OptionalEndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="validation_end_time")]
+OptionalTestStartTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="test_start_time")]
+OptionalTestEndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="test_end_time")]
 IntervalQuery = Annotated[int, Query(alias="interval_minutes", ge=1, le=60)]
 TrainingWindowQuery = Annotated[int | None, Query(alias="training_window_rows", gt=1)]
 ValidationWindowQuery = Annotated[int, Query(alias="validation_window_rows", gt=1)]

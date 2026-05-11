@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -10,11 +10,12 @@ from home_optimizer.features.identification.service import DailyKpiService, Iden
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import baseline_kpi_summary_response, daily_kpi_response, identification_dataset_response
 from home_optimizer.web.ports import WebAppContainer
+from home_optimizer.web.query_params import FlexibleDatetime
 from home_optimizer.web.schemas import BaselineKpiSummaryResponse, DailyKpiResponse, IdentificationDatasetResponse
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
-StartTimeQuery = Annotated[datetime, Query(alias="start_time")]
-EndTimeQuery = Annotated[datetime, Query(alias="end_time")]
+StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
+EndTimeQuery = Annotated[FlexibleDatetime, Query(alias="end_time")]
 IntervalQuery = Annotated[int, Query(alias="interval_minutes", ge=1, le=60)]
 ChartDateQuery = Annotated[date, Query(alias="date")]
 SummaryStartDateQuery = Annotated[date, Query(alias="start_date")]
@@ -27,8 +28,8 @@ def create_identification_router(settings: AppSettings) -> APIRouter:
     @router.get("/api/identification", response_model=IdentificationDatasetResponse)
     def get_identification_dataset(
         container: ContainerDependency,
-        start_time: StartTimeQuery = datetime(2026, 2, 8, 0, 0, 0, tzinfo=datetime.now().astimezone().tzinfo),
-        end_time: EndTimeQuery = datetime(2026, 5, 8, 23, 59, 0, tzinfo=datetime.now().astimezone().tzinfo),
+        start_time: StartTimeQuery,
+        end_time: EndTimeQuery,
         interval_minutes: IntervalQuery = 15,
     ) -> IdentificationDatasetResponse:
         service = IdentificationDatasetService(container.dataset_repository, settings)
@@ -52,8 +53,8 @@ def create_identification_router(settings: AppSettings) -> APIRouter:
     @router.get("/api/kpi-summary", response_model=BaselineKpiSummaryResponse)
     def get_baseline_kpi_summary(
         container: ContainerDependency,
-        start_date: SummaryStartDateQuery = date(2026, 2, 8),
-        end_date: SummaryEndDateQuery = date(2026, 5, 8),
+        start_date: SummaryStartDateQuery,
+        end_date: SummaryEndDateQuery,
     ) -> BaselineKpiSummaryResponse:
         return baseline_kpi_summary_response(
             DailyKpiService(container.time_series_read_repository, settings).get_baseline_summary(
