@@ -385,7 +385,9 @@ if (trainStartDateInput) {
 }
 
 if (trainEndDateInput) {
-  trainEndDateInput.value = localDateValue(new Date());
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  trainEndDateInput.value = localDateValue(yesterday);
 }
 
 if (trainModelTypeSelect) {
