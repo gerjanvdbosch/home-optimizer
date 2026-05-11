@@ -374,16 +374,16 @@ function handleSimulationError(error) {
 }
 
 if (anchorTimeInput) {
-  anchorTimeInput.value = localInputValue(new Date("2026-05-07T22:00:00Z"));
+  anchorTimeInput.value = localInputValue(new Date());
   syncSimulationDateLabel(new Date(anchorTimeInput.value));
 }
 
 if (trainStartDateInput) {
-  trainStartDateInput.value = localDateValue(new Date("2026-02-08T00:00:00Z"));
+  trainStartDateInput.value = localDateValue(new Date("2026-04-16T00:00:00Z"));
 }
 
 if (trainEndDateInput) {
-  trainEndDateInput.value = localDateValue(new Date("2026-05-08T23:59:00Z"));
+  trainEndDateInput.value = localDateValue(new Date());
 }
 
 if (trainModelTypeSelect) {
