@@ -374,8 +374,10 @@ function handleSimulationError(error) {
 }
 
 if (anchorTimeInput) {
-  anchorTimeInput.value = localInputValue(new Date());
-  syncSimulationDateLabel(new Date(anchorTimeInput.value));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  anchorTimeInput.value = localInputValue(today);
+  syncSimulationDateLabel(today);
 }
 
 if (trainStartDateInput) {

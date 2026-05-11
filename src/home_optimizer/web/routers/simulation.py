@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,10 +15,9 @@ from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.schemas import RoomSimulationResponse
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
-AnchorTimeQuery = Annotated[datetime, Query(alias="anchor_time")]
+AnchorTimeQuery = Annotated[datetime | None, Query(alias="anchor_time")]
 HorizonStepsQuery = Annotated[int, Query(alias="horizon_steps", ge=1, le=288)]
 ModelIdQuery = Annotated[str | None, Query(alias="model_id")]
-DEFAULT_SIMULATION_ANCHOR_TIME = datetime(2026, 5, 7, 0, 0, 0, tzinfo=timezone.utc)
 
 
 def create_simulation_router(settings: AppSettings) -> APIRouter:
@@ -35,10 +34,13 @@ def create_simulation_router(settings: AppSettings) -> APIRouter:
     @router.get("/api/simulate/room", response_model=RoomSimulationResponse)
     def simulate_room(
         container: ContainerDependency,
-        anchor_time: AnchorTimeQuery = DEFAULT_SIMULATION_ANCHOR_TIME,
+        anchor_time: AnchorTimeQuery = None,
         horizon_steps: HorizonStepsQuery = 144,
         model_id: ModelIdQuery = None,
     ) -> RoomSimulationResponse:
+        if anchor_time is None:
+            today = date.today()
+            anchor_time = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
         version = (
             container.model_version_repository.get_room_model_version(model_id)
             if model_id
