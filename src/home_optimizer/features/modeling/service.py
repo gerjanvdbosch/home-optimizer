@@ -15,7 +15,7 @@ from home_optimizer.features.modeling.room_arx import (
     RoomArxModel,
     RoomArxTrainer,
 )
-from home_optimizer.features.modeling.room_rc import (
+from home_optimizer.features.modeling.room_2r2c import (
     ROOM_RC_MODEL_KIND,
     RoomRcConfig,
     RoomRcModel,
