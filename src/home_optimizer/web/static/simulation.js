@@ -237,7 +237,7 @@ async function runTrain() {
       params.set("start_time", `${trainStartDateInput.value}T00:00:00Z`);
     }
     if (trainEndDateInput?.value) {
-      params.set("end_time", `${trainEndDateInput.value}T23:59:00Z`);
+      params.set("end_time", `${trainEndDateInput.value}T00:00:00Z`);
     }
     if (trainModelTypeSelect?.value) {
       params.set("model_type", trainModelTypeSelect.value);
