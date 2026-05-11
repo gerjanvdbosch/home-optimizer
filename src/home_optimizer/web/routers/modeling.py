@@ -19,24 +19,22 @@ from home_optimizer.features.modeling import (
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import room_model_catalog_response, train_room_model_response
 from home_optimizer.web.ports import WebAppContainer
-from home_optimizer.web.query_params import FlexibleDatetime
+from home_optimizer.web.query_params import FlexibleDatetime, FlexibleEndDatetime
 from home_optimizer.web.schemas import RoomModelCatalogResponse, TrainRoomModelResponse
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
-EndTimeQuery = Annotated[FlexibleDatetime, Query(alias="end_time")]
+EndTimeQuery = Annotated[FlexibleEndDatetime, Query(alias="end_time")]
 OptionalStartTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="validation_start_time")]
-OptionalEndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="validation_end_time")]
+OptionalEndTimeQuery = Annotated[FlexibleEndDatetime | None, Query(alias="validation_end_time")]
 OptionalTestStartTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="test_start_time")]
-OptionalTestEndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="test_end_time")]
+OptionalTestEndTimeQuery = Annotated[FlexibleEndDatetime | None, Query(alias="test_end_time")]
 IntervalQuery = Annotated[int, Query(alias="interval_minutes", ge=1, le=60)]
 TrainingWindowQuery = Annotated[int | None, Query(alias="training_window_rows", gt=1)]
 ValidationWindowQuery = Annotated[int, Query(alias="validation_window_rows", gt=1)]
 MinTrainRowsQuery = Annotated[int, Query(alias="min_train_rows", gt=1)]
 ActivateQuery = Annotated[bool, Query(alias="activate")]
 ModelTypeQuery = Annotated[str, Query(alias="model_type")]
-DEFAULT_TRAIN_START_TIME = datetime(2026, 4, 16, 0, 0, 0, tzinfo=timezone.utc)
-DEFAULT_TRAIN_END_TIME = datetime(2026, 5, 7, 23, 59, 0, tzinfo=timezone.utc)
 
 
 def _slice_dataset(dataset: MpcDataset, start_index: int, end_exclusive: int) -> MpcDataset:
@@ -91,8 +89,8 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
     @router.post("/api/train", response_model=TrainRoomModelResponse)
     def train_room_model(
         container: ContainerDependency,
-        start_time: StartTimeQuery = DEFAULT_TRAIN_START_TIME,
-        end_time: EndTimeQuery = DEFAULT_TRAIN_END_TIME,
+        start_time: StartTimeQuery,
+        end_time: EndTimeQuery,
         validation_start_time: OptionalStartTimeQuery = None,
         validation_end_time: OptionalEndTimeQuery = None,
         test_start_time: OptionalTestStartTimeQuery = None,
@@ -156,7 +154,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
                     dataset, config
                 )
                 test_start_time = auto_test_dataset.start_time_utc
-                test_end_time = auto_test_dataset.end_time_utc
+                test_end_time = min(auto_test_dataset.end_time_utc, end_time)
 
             model = modeling_service.fit_room_model(train_dataset, config=config)
             validation_report = modeling_service.validation_report_for_model(

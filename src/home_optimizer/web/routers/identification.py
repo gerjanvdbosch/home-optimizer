@@ -10,12 +10,12 @@ from home_optimizer.features.identification.service import DailyKpiService, Iden
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import baseline_kpi_summary_response, daily_kpi_response, identification_dataset_response
 from home_optimizer.web.ports import WebAppContainer
-from home_optimizer.web.query_params import FlexibleDatetime
+from home_optimizer.web.query_params import FlexibleDatetime, FlexibleEndDatetime
 from home_optimizer.web.schemas import BaselineKpiSummaryResponse, DailyKpiResponse, IdentificationDatasetResponse
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
-EndTimeQuery = Annotated[FlexibleDatetime, Query(alias="end_time")]
+EndTimeQuery = Annotated[FlexibleEndDatetime, Query(alias="end_time")]
 IntervalQuery = Annotated[int, Query(alias="interval_minutes", ge=1, le=60)]
 ChartDateQuery = Annotated[date, Query(alias="date")]
 SummaryStartDateQuery = Annotated[date, Query(alias="start_date")]
