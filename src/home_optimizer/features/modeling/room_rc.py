@@ -26,7 +26,7 @@ from home_optimizer.features.modeling.models import (
 
 LOGGER = logging.getLogger(__name__)
 
-MODEL_TYPE = "physical_2state_rc"
+MODEL_TYPE = "room_2r2c"
 ROOM_RC_MODEL_KIND = MODEL_TYPE
 STATE_DIM = 2
 INPUT_COLUMNS = (
