@@ -299,7 +299,7 @@ class RoomRcConfig(ValidationConfig):
     g_glass: float = Field(default=0.50, ge=0.0)
     shutter_mode: str = Field(default="open_percent")
     alpha_solar: float = Field(default=0.85, ge=0.0, le=0.99)
-    alpha_heat: float = Field(default=0.95, ge=0.0, le=0.99)
+    alpha_heat: float = Field(default=0.70, ge=0.0, le=0.99)
     use_segment_weights: bool = True
     use_huber_loss: bool = True
     huber_delta_c: float = Field(default=0.25, gt=0.0)
@@ -550,7 +550,7 @@ class RoomRC2StatePhysicalModel:
             [
                 [
                     (1.0 / r_air_out) / c_air,
-                    params.eta_heat / c_air,
+                    0.0,  # heating_kw_eff niet direct naar lucht
                     params.eta_solar_air / c_air,
                     0.0,
                     params.eta_internal / c_air,
@@ -559,7 +559,7 @@ class RoomRC2StatePhysicalModel:
                 ],
                 [
                     (1.0 / r_mass_out) / c_mass,
-                    0.0,
+                    params.eta_heat / c_mass,  # heating_kw_eff naar massa/vloer
                     0.0,
                     params.eta_solar_mass / c_mass,
                     0.0,
