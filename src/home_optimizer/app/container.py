@@ -16,15 +16,16 @@ from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
 from home_optimizer.features.history.weather_import_service import WeatherImportService
+from home_optimizer.features.mpc import SpaceHeatingMpcPlanningService
 from home_optimizer.features.pricing import (
     ElectricityPriceService,
     electricity_price_refresh_interval_seconds,
 )
 from home_optimizer.features.telemetry.service import TelemetryService
+from home_optimizer.infrastructure.database.dataset_repository import DatasetRepository
 from home_optimizer.infrastructure.database.electricity_price_repository import (
     ElectricityPriceRepository,
 )
-from home_optimizer.infrastructure.database.dataset_repository import DatasetRepository
 from home_optimizer.infrastructure.database.forecast_repository import ForecastRepository
 from home_optimizer.infrastructure.database.model_version_repository import (
     ModelVersionRepository,
@@ -65,6 +66,7 @@ class AppContainer:
     forecast_service: OpenMeteoForecastService
     forecast_scheduler: ForecastScheduler
     model_version_repository: ModelVersionRepository
+    space_heating_mpc_planning_service: SpaceHeatingMpcPlanningService
 
     def close(self) -> None:
         self.home_assistant.close()
@@ -140,6 +142,11 @@ def build_container(
         forecast_service,
         interval_seconds=settings.forecast_poll_interval_seconds,
     )
+    space_heating_mpc_planning_service = SpaceHeatingMpcPlanningService(
+        samples_reader=dataset_repository,
+        active_room_model_reader=model_version_repository,
+        target_schedule=settings.room_target,
+    )
 
     return AppContainer(
         settings=settings,
@@ -162,4 +169,5 @@ def build_container(
         forecast_service=forecast_service,
         forecast_scheduler=forecast_scheduler,
         model_version_repository=model_version_repository,
+        space_heating_mpc_planning_service=space_heating_mpc_planning_service,
     )

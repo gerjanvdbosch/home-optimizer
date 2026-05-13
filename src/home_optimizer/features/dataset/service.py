@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain import (
     BOOSTER_HEATER_ACTIVE,
     DEFROST_ACTIVE,
@@ -45,6 +45,9 @@ from home_optimizer.domain.pricing import (
 from home_optimizer.domain.time import parse_datetime
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow, MpcDatasetSummary
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
+
+if TYPE_CHECKING:
+    from home_optimizer.app.settings import AppSettings
 
 _OCCUPIED_MARGIN_C = 0.25
 _DHW_DRAW_DROP_THRESHOLD_C = 0.75

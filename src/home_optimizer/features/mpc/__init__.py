@@ -21,6 +21,7 @@ from .models import (
     MpcPlanStep,
     MpcProblem,
 )
+from .planning_service import SpaceHeatingMpcPlanningService
 from .space_heating_mpc import SpaceHeatingMpcSolver
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     "MpcProblem",
     "SpaceHeatingMpcBacktestRunner",
     "SpaceHeatingMpcControllerService",
+    "SpaceHeatingMpcPlanningService",
     "SpaceHeatingMpcSolver",
     "to_control_model",
 ]

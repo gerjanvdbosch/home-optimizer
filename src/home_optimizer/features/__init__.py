@@ -37,6 +37,7 @@ from .mpc import (
     MpcPlan,
     SpaceHeatingMpcBacktestRunner,
     SpaceHeatingMpcControllerService,
+    SpaceHeatingMpcPlanningService,
     SpaceHeatingMpcSolver,
     to_control_model,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "SegmentValidationReport",
     "SpaceHeatingMpcBacktestRunner",
     "SpaceHeatingMpcControllerService",
+    "SpaceHeatingMpcPlanningService",
     "SpaceHeatingMpcSolver",
     "RoomModelingService",
     "StoredModelVersion",
