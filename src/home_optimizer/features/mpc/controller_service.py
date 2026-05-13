@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Callable
 
+from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
+from home_optimizer.features.mpc.control_model import to_control_model
+from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.models import (
+    ControlModelConversionOptions,
     LinearThermalControlModel,
     MpcControllerRequest,
+    MpcHorizonBuildRequest,
     MpcHorizonStep,
     MpcInitialState,
     MpcPlan,
@@ -21,11 +26,13 @@ class SpaceHeatingMpcControllerService:
         control_model_provider: Callable[[], LinearThermalControlModel] | None = None,
         horizon_provider: Callable[[], list[MpcHorizonStep]] | None = None,
         initial_state_provider: Callable[[], MpcInitialState] | None = None,
+        horizon_builder: MpcHorizonBuilder | None = None,
     ) -> None:
         self.solver = solver or SpaceHeatingMpcSolver()
         self.control_model_provider = control_model_provider
         self.horizon_provider = horizon_provider
         self.initial_state_provider = initial_state_provider
+        self.horizon_builder = horizon_builder or MpcHorizonBuilder()
 
     def plan(
         self,
@@ -49,6 +56,25 @@ class SpaceHeatingMpcControllerService:
             max_solver_seconds=request.max_solver_seconds,
         )
         return self.solver.solve(problem)
+
+    def build_horizon(self, request: MpcHorizonBuildRequest) -> list[MpcHorizonStep]:
+        return self.horizon_builder.build(request)
+
+    def plan_from_source_model(
+        self,
+        request: MpcControllerRequest,
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        initial_state: MpcInitialState,
+        horizon: list[MpcHorizonStep] | None = None,
+        conversion_options: ControlModelConversionOptions | None = None,
+    ) -> MpcPlan:
+        return self.plan(
+            request,
+            control_model=to_control_model(source_model, options=conversion_options),
+            initial_state=initial_state,
+            horizon=horizon,
+        )
 
     def _resolve_control_model(
         self,

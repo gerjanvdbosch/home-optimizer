@@ -4,7 +4,10 @@ from datetime import datetime
 
 from pydantic import Field, model_validator
 
+from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.pricing import PriceInterval
+from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 
 
 class LinearThermalControlModel(DomainModel):
@@ -134,6 +137,36 @@ class MpcControllerRequest(DomainModel):
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
     max_solver_seconds: float | None = Field(default=None, gt=0.0)
+
+
+class ControlModelConversionOptions(DomainModel):
+    solar_gain_input_scale: float = Field(default=1.0, gt=0.0)
+
+
+class MpcHorizonBuildRequest(DomainModel):
+    start_time_utc: datetime
+    horizon_steps: int = Field(gt=0)
+    interval_minutes: int = Field(gt=0)
+    target_schedule: list[TemperatureTargetWindow]
+    forecast_entries: list[ForecastEntry] = Field(default_factory=list)
+    price_intervals: list[PriceInterval] = Field(default_factory=list)
+    default_effective_heating_kw: float = Field(ge=0.0)
+    outdoor_temperature_name: str = "temperature"
+    solar_gain_name: str = "gti_living_room_windows_adjusted"
+    solar_gain_input_scale: float = Field(default=1.0, gt=0.0)
+    default_occupied: float = Field(default=0.0, ge=0.0, le=1.0)
+    fallback_temp_min_c: float | None = None
+    fallback_temp_max_c: float | None = None
+
+    @model_validator(mode="after")
+    def _validate_fallback_bounds(self) -> "MpcHorizonBuildRequest":
+        if (
+            self.fallback_temp_min_c is not None
+            and self.fallback_temp_max_c is not None
+            and self.fallback_temp_min_c > self.fallback_temp_max_c
+        ):
+            raise ValueError("fallback_temp_min_c cannot be greater than fallback_temp_max_c")
+        return self
 
 
 class MpcBacktestStepResult(DomainModel):

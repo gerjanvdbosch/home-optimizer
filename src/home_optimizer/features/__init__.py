@@ -22,10 +22,15 @@ from .modeling import (
     StoredModelVersionSummary,
 )
 from .mpc import (
+    DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME,
+    DEFAULT_SOLAR_GAIN_FORECAST_NAME,
+    ControlModelConversionOptions,
     LinearThermalControlModel,
     MpcBacktestResult,
     MpcConstraints,
     MpcControllerRequest,
+    MpcHorizonBuilder,
+    MpcHorizonBuildRequest,
     MpcHorizonStep,
     MpcInitialState,
     MpcObjectiveWeights,
@@ -33,6 +38,7 @@ from .mpc import (
     SpaceHeatingMpcBacktestRunner,
     SpaceHeatingMpcControllerService,
     SpaceHeatingMpcSolver,
+    to_control_model,
 )
 from .pricing import ElectricityPriceService
 from .simulation import RoomSimulationResult, RoomSimulationService
@@ -40,6 +46,9 @@ from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [
     "DailyKpiService",
+    "ControlModelConversionOptions",
+    "DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME",
+    "DEFAULT_SOLAR_GAIN_FORECAST_NAME",
     "HistoryImportRequest",
     "HistoryImportResult",
     "HistoryImportService",
@@ -51,6 +60,8 @@ __all__ = [
     "MpcBacktestResult",
     "MpcConstraints",
     "MpcControllerRequest",
+    "MpcHorizonBuildRequest",
+    "MpcHorizonBuilder",
     "MpcHorizonStep",
     "MpcInitialState",
     "MpcObjectiveWeights",
@@ -72,4 +83,5 @@ __all__ = [
     "RoomSimulationResult",
     "RoomSimulationService",
     "TelemetryService",
+    "to_control_model",
 ]
