@@ -168,6 +168,8 @@ class FakeSpaceHeatingMpcPlanningService:
                     start=(index == 0),
                     stop=False,
                     predicted_room_temp_c=20.0 + (0.1 * index),
+                    temp_min_c=19.0,
+                    temp_max_c=21.0,
                     slack_low_c=0.0,
                     slack_high_c=0.0,
                     effective_heating_kw=float(default_effective_heating_kw or 2.0),
@@ -730,10 +732,26 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
     assert payload["termination_condition"] == "optimal"
     assert payload["feasible"] is True
     assert payload["objective_value"] == 123.4
+    assert payload["summary"]["start_count"] == 1
+    assert payload["summary"]["runtime_steps"] == 2
     assert len(payload["steps"]) == 4
     assert payload["steps"][0]["timestamp_utc"] == "2026-04-25T12:00:00Z"
     assert payload["steps"][0]["hp_on"] is True
+    assert payload["steps"][0]["temp_min_c"] == 19.0
+    assert payload["steps"][0]["temp_max_c"] == 21.0
     assert payload["steps"][0]["effective_heating_kw"] == 2.5
+
+
+def test_mpc_page_renders_navigation_and_controls() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get("/mpc")
+
+    assert response.status_code == 200
+    assert "Space-Heating MPC" in response.text
+    assert 'href="./mpc"' in response.text
+    assert 'id="mpc-plan-button"' in response.text
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:

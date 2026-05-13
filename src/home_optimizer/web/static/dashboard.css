@@ -114,6 +114,10 @@ body {
   height: 300px;
 }
 
+.chart-wrap-tall {
+  height: 420px;
+}
+
 button {
   border: none;
   border-radius: 4px;
@@ -201,6 +205,28 @@ pre {
   border-radius: 4px;
   color: var(--ha-text);
   background: #fafafa;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.summary-table th,
+.summary-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ha-border);
+  text-align: left;
+}
+
+.summary-table th {
+  width: 220px;
+  color: var(--ha-secondary);
+  font-weight: 500;
 }
 
 @media (max-width: 760px) {

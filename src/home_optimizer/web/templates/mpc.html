@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>$title</title>
+    <link rel="stylesheet" href="static/dashboard.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-group">
+          <h1>$title</h1>
+          <span>Discrete compressor planning</span>
+        </div>
+        <div class="topbar-actions">
+          <nav class="page-nav" aria-label="Pagina navigatie">
+            <a class="page-link" href="./">Dashboard</a>
+            <a class="page-link" href="./simulation">Simulation</a>
+            <a class="page-link is-active" href="./mpc">MPC</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>MPC instellingen</h2>
+          <p>$database_path</p>
+        </div>
+        <div class="actions">
+          <label>
+            Starttijd
+            <input id="mpc-start-time" type="datetime-local" />
+          </label>
+          <label>
+            Horizon (steps)
+            <input id="mpc-horizon-steps" type="number" min="1" max="288" value="36" />
+          </label>
+          <label>
+            Interval (min)
+            <input id="mpc-interval-minutes" type="number" min="1" max="60" value="15" />
+          </label>
+          <label>
+            Heating kW
+            <input id="mpc-heating-kw" type="number" min="0" step="0.1" value="2.5" />
+          </label>
+          <button id="mpc-plan-button" type="button">Bereken plan</button>
+          <div id="mpc-status" class="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="charts" aria-label="MPC plan visualisatie">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Temperatuur en comfortband</h2>
+            <span id="mpc-chart-summary">-</span>
+          </div>
+          <div class="chart-wrap chart-wrap-tall" id="mpc-plan-chart"></div>
+        </article>
+      </section>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Plan samenvatting</h2>
+          <p>Solverstatus, doelwaarde en discrete events.</p>
+        </div>
+        <div class="table-wrap">
+          <table class="summary-table">
+            <tbody>
+              <tr><th>Status</th><td id="mpc-summary-status">-</td></tr>
+              <tr><th>Termination</th><td id="mpc-summary-termination">-</td></tr>
+              <tr><th>Objective</th><td id="mpc-summary-objective">-</td></tr>
+              <tr><th>Solve time</th><td id="mpc-summary-solve-time">-</td></tr>
+              <tr><th>Starts</th><td id="mpc-summary-starts">-</td></tr>
+              <tr><th>Stops</th><td id="mpc-summary-stops">-</td></tr>
+              <tr><th>Comfort violations</th><td id="mpc-summary-violations">-</td></tr>
+              <tr><th>Slack usage</th><td id="mpc-summary-slack">-</td></tr>
+              <tr><th>Runtime steps</th><td id="mpc-summary-runtime">-</td></tr>
+              <tr><th>Estimated cost</th><td id="mpc-summary-cost">-</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="plotly.js"></script>
+    <script src="static/mpc.js"></script>
+  </body>
+</html>

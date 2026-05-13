@@ -3,13 +3,19 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from home_optimizer.app import AppSettings
 from home_optimizer.features.mpc import MpcPlan
 from home_optimizer.web.dependencies import get_container
+from home_optimizer.web.pages import build_dashboard_view_model, render_template
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.query_params import FlexibleDatetime
-from home_optimizer.web.schemas import MpcPlanResponse, MpcPlanStepResponse
+from home_optimizer.web.schemas import (
+    MpcPlanResponse,
+    MpcPlanStepResponse,
+    MpcPlanSummaryResponse,
+)
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
@@ -26,12 +32,30 @@ MaxSolverSecondsQuery = Annotated[
 
 
 def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
+    summary = MpcPlanSummaryResponse(
+        step_count=len(plan.steps),
+        start_count=sum(1 for step in plan.steps if step.start),
+        stop_count=sum(1 for step in plan.steps if step.stop),
+        comfort_violation_count=sum(
+            1
+            for step in plan.steps
+            if step.slack_low_c > 0.0 or step.slack_high_c > 0.0
+        ),
+        slack_usage_count=sum(
+            1
+            for step in plan.steps
+            if step.slack_low_c > 0.0 or step.slack_high_c > 0.0
+        ),
+        runtime_steps=sum(1 for step in plan.steps if step.hp_on),
+        estimated_energy_cost_eur=sum(step.estimated_energy_cost_eur for step in plan.steps),
+    )
     return MpcPlanResponse(
         status=plan.status,
         termination_condition=plan.termination_condition,
         feasible=plan.feasible,
         objective_value=plan.objective_value,
         solve_time_seconds=plan.solve_time_seconds,
+        summary=summary,
         steps=[
             MpcPlanStepResponse(
                 timestamp_utc=step.timestamp_utc,
@@ -39,6 +63,8 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
                 start=step.start,
                 stop=step.stop,
                 predicted_room_temp_c=step.predicted_room_temp_c,
+                temp_min_c=step.temp_min_c,
+                temp_max_c=step.temp_max_c,
                 slack_low_c=step.slack_low_c,
                 slack_high_c=step.slack_high_c,
                 effective_heating_kw=step.effective_heating_kw,
@@ -52,6 +78,14 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
 
 def create_mpc_router(settings: AppSettings) -> APIRouter:
     router = APIRouter()
+
+    @router.get("/mpc", response_class=HTMLResponse)
+    def mpc_page() -> HTMLResponse:
+        view_model = build_dashboard_view_model(
+            settings,
+            title="Space-Heating MPC",
+        )
+        return HTMLResponse(render_template("mpc.html", view_model))
 
     @router.get("/api/mpc/space-heating/plan", response_model=MpcPlanResponse)
     def plan_space_heating(

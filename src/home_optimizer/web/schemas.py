@@ -267,10 +267,22 @@ class MpcPlanStepResponse(BaseModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    temp_min_c: float
+    temp_max_c: float
     slack_low_c: float
     slack_high_c: float
     effective_heating_kw: float
     price_eur_kwh: float
+    estimated_energy_cost_eur: float
+
+
+class MpcPlanSummaryResponse(BaseModel):
+    step_count: int
+    start_count: int
+    stop_count: int
+    comfort_violation_count: int
+    slack_usage_count: int
+    runtime_steps: int
     estimated_energy_cost_eur: float
 
 
@@ -280,4 +292,5 @@ class MpcPlanResponse(BaseModel):
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
+    summary: MpcPlanSummaryResponse
     steps: list[MpcPlanStepResponse]

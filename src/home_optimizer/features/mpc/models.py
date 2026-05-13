@@ -115,6 +115,8 @@ class MpcPlanStep(DomainModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    temp_min_c: float
+    temp_max_c: float
     slack_low_c: float = 0.0
     slack_high_c: float = 0.0
     effective_heating_kw: float = 0.0

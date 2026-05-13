@@ -71,6 +71,8 @@ class SpaceHeatingMpcSolver:
                     start=bool(round(pyo.value(model.start[index]))),
                     stop=bool(round(pyo.value(model.stop[index]))),
                     predicted_room_temp_c=float(pyo.value(model.room_temp[index])),
+                    temp_min_c=horizon_step.temp_min_c,
+                    temp_max_c=horizon_step.temp_max_c,
                     slack_low_c=float(pyo.value(model.slack_low[index])),
                     slack_high_c=float(pyo.value(model.slack_high[index])),
                     effective_heating_kw=effective_heating_kw,
