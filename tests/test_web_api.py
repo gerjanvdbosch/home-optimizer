@@ -25,10 +25,11 @@ from home_optimizer.features.modeling import (
     ROOM_RC_MODEL_KIND,
     RoomArxConfig,
     RoomRcModel,
-    StoredModelVersionSummary,
     StoredModelVersion,
+    StoredModelVersionSummary,
     TrainedLinearRoomModel,
 )
+from home_optimizer.features.mpc import MpcPlan, MpcPlanStep
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
@@ -138,6 +139,44 @@ class FakeModelVersionRepository:
             )
             for version in versions
         ]
+
+
+class FakeSpaceHeatingMpcPlanningService:
+    def plan(
+        self,
+        *,
+        start_time_utc: datetime,
+        interval_minutes: int | None = None,
+        horizon_steps: int = 36,
+        default_effective_heating_kw: float | None = None,
+        max_solver_seconds: float | None = None,
+    ) -> MpcPlan:
+        resolved_interval_minutes = interval_minutes or 15
+        return MpcPlan(
+            status="ok",
+            termination_condition="optimal",
+            feasible=True,
+            objective_value=123.4,
+            solve_time_seconds=0.05,
+            steps=[
+                MpcPlanStep(
+                    timestamp_utc=(
+                        start_time_utc
+                        + timedelta(minutes=resolved_interval_minutes * index)
+                    ),
+                    hp_on=(index % 2 == 0),
+                    start=(index == 0),
+                    stop=False,
+                    predicted_room_temp_c=20.0 + (0.1 * index),
+                    slack_low_c=0.0,
+                    slack_high_c=0.0,
+                    effective_heating_kw=float(default_effective_heating_kw or 2.0),
+                    price_eur_kwh=0.245,
+                    estimated_energy_cost_eur=0.01 * (index + 1),
+                )
+                for index in range(horizon_steps)
+            ],
+        )
 
 
 def build_half_hourly_series(
@@ -361,8 +400,13 @@ class FakeDatasetRepository:
 
         for index, timestamp in enumerate(points):
             timestamp_text = timestamp.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
-            def add_row(name: str, **kwargs: object) -> None:
-                row = _sample_row(timestamp_text, name, **kwargs)
+            def add_row(
+                name: str,
+                *,
+                _timestamp_text: str = timestamp_text,
+                **kwargs: object,
+            ) -> None:
+                row = _sample_row(_timestamp_text, name, **kwargs)
                 row[timestamp_key] = row.pop("timestamp_15m_utc")
                 rows.append(row)
 
@@ -550,6 +594,7 @@ class FakeContainer:
         self.time_series_read_repository = FakeTimeSeriesReadRepository()
         self.weather_import_service = FakeWeatherImportService()
         self.model_version_repository = FakeModelVersionRepository()
+        self.space_heating_mpc_planning_service = FakeSpaceHeatingMpcPlanningService()
         self.telemetry_scheduler = FakeScheduler()
         self.electricity_price_scheduler = FakeScheduler()
         self.forecast_scheduler = FakeScheduler()
@@ -663,6 +708,32 @@ def test_simulation_page_and_api_return_room_horizon() -> None:
     assert "solar_gain_proxy" in payload
     assert "shutter_position" in payload
     assert "thermal_output_estimate" in payload
+
+
+def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/mpc/space-heating/plan",
+            params={
+                "start_time": "2026-04-25T12:00:00+00:00",
+                "horizon_steps": 4,
+                "interval_minutes": 15,
+                "default_effective_heating_kw": 2.5,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["termination_condition"] == "optimal"
+    assert payload["feasible"] is True
+    assert payload["objective_value"] == 123.4
+    assert len(payload["steps"]) == 4
+    assert payload["steps"][0]["timestamp_utc"] == "2026-04-25T12:00:00Z"
+    assert payload["steps"][0]["hp_on"] is True
+    assert payload["steps"][0]["effective_heating_kw"] == 2.5
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:

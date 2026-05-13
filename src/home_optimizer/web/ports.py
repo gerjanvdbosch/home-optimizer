@@ -8,6 +8,7 @@ import pandas as pd
 from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.modeling import StoredModelVersion
+from home_optimizer.features.mpc import MpcPlan
 
 
 class ClosableGateway(Protocol):
@@ -73,6 +74,18 @@ class ModelVersionWriter(Protocol):
     def list_room_model_versions(self) -> list[object]: ...
 
 
+class SpaceHeatingMpcPlanningRunner(Protocol):
+    def plan(
+        self,
+        *,
+        start_time_utc: datetime,
+        interval_minutes: int | None = None,
+        horizon_steps: int = 36,
+        default_effective_heating_kw: float | None = None,
+        max_solver_seconds: float | None = None,
+    ) -> MpcPlan: ...
+
+
 class DatasetFrameReader(Protocol):
     def read_samples(
         self,
@@ -117,5 +130,8 @@ class WebAppContainer(Protocol):
 
     @property
     def model_version_repository(self) -> ModelVersionWriter: ...
+
+    @property
+    def space_heating_mpc_planning_service(self) -> SpaceHeatingMpcPlanningRunner: ...
 
     def close(self) -> None: ...

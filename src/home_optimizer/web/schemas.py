@@ -259,3 +259,25 @@ class RoomSimulationResponse(BaseModel):
     solar_irradiance: ChartSeriesResponse
     solar_gain_proxy: ChartSeriesResponse
     shutter_position: ChartSeriesResponse
+
+
+class MpcPlanStepResponse(BaseModel):
+    timestamp_utc: datetime
+    hp_on: bool
+    start: bool
+    stop: bool
+    predicted_room_temp_c: float
+    slack_low_c: float
+    slack_high_c: float
+    effective_heating_kw: float
+    price_eur_kwh: float
+    estimated_energy_cost_eur: float
+
+
+class MpcPlanResponse(BaseModel):
+    status: str
+    termination_condition: str
+    feasible: bool
+    objective_value: float | None = None
+    solve_time_seconds: float | None = None
+    steps: list[MpcPlanStepResponse]
