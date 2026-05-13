@@ -7,9 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from home_optimizer.features.modeling.room_rc import (
+from home_optimizer.features.modeling.room_2r2c import (
     RC_VALIDITY_COLUMN,
-    RoomRC2StateConfig,
     RoomRcConfig,
     RoomRcTrainer,
     RoomRC2StateParams,
@@ -45,7 +44,7 @@ def build_dataframe(row_count: int = 72) -> pd.DataFrame:
 
 
 def test_solar_calculation_uses_8m2_glass_and_g_value() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     df = pd.DataFrame(
         [
             {
@@ -64,20 +63,20 @@ def test_solar_calculation_uses_8m2_glass_and_g_value() -> None:
 
 
 def test_shutter_open_percent_maps_100_to_one_and_0_to_zero() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig(shutter_mode="open_percent"))
+    model = RoomRC2StatePhysicalModel(RoomRcConfig(shutter_mode="open_percent"))
     assert model._shutter_factor_from_position(100.0) == 1.0
     assert model._shutter_factor_from_position(0.0) == 0.0
 
 
 def test_shutter_closed_percent_maps_100_to_zero_and_0_to_one() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig(shutter_mode="closed_percent"))
+    model = RoomRC2StatePhysicalModel(RoomRcConfig(shutter_mode="closed_percent"))
     assert model._shutter_factor_from_position(100.0) == 0.0
     assert model._shutter_factor_from_position(0.0) == 1.0
 
 
 def test_shutter_factor_is_clamped() -> None:
-    model_open = RoomRC2StatePhysicalModel(RoomRC2StateConfig(shutter_mode="open_percent"))
-    model_closed = RoomRC2StatePhysicalModel(RoomRC2StateConfig(shutter_mode="closed_percent"))
+    model_open = RoomRC2StatePhysicalModel(RoomRcConfig(shutter_mode="open_percent"))
+    model_closed = RoomRC2StatePhysicalModel(RoomRcConfig(shutter_mode="closed_percent"))
     assert model_open._shutter_factor_from_position(-10.0) == 0.0
     assert model_open._shutter_factor_from_position(150.0) == 1.0
     assert model_closed._shutter_factor_from_position(-10.0) == 1.0
@@ -85,7 +84,7 @@ def test_shutter_factor_is_clamped() -> None:
 
 
 def test_matrix_discretization_shapes_and_stability() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     _, _, A_d, B_d = model.params_to_matrices(RoomRC2StateParams())
     assert A_d.shape == (2, 2)
     assert B_d.shape == (2, 7)
@@ -93,7 +92,7 @@ def test_matrix_discretization_shapes_and_stability() -> None:
 
 
 def test_default_config_disables_mass_solar_and_mass_hour_freedom() -> None:
-    config = RoomRC2StateConfig()
+    config = RoomRcConfig()
     bounds = config.bounds()
     assert config.R_air_out_max == 100.0
     assert config.R_mass_out_max == 100.0
@@ -110,13 +109,13 @@ def test_default_config_disables_mass_solar_and_mass_hour_freedom() -> None:
 
 
 def test_mass_outdoor_resistance_can_be_enabled_explicitly() -> None:
-    config = RoomRC2StateConfig(fit_mass_outdoor_resistance=True)
+    config = RoomRcConfig(fit_mass_outdoor_resistance=True)
     bounds = config.bounds()
     assert bounds[2] == (config.R_mass_out_min, config.R_mass_out_max)
 
 
 def test_default_config_disables_direct_mass_outdoor_conductance() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     params = RoomRC2StateParams(R_mass_out=20.0)
     F, G, _, _ = model.params_to_matrices(params)
     assert abs(F[1, 1] + (1.0 / params.R_air_mass) / params.C_mass) < 1e-12
@@ -124,7 +123,7 @@ def test_default_config_disables_direct_mass_outdoor_conductance() -> None:
 
 
 def test_predict_one_step_returns_expected_columns() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     df = build_dataframe(24)
     prediction = model.predict_one_step(df)
     assert {
@@ -140,7 +139,7 @@ def test_predict_one_step_returns_expected_columns() -> None:
 
 
 def test_evaluate_returns_json_serializable_dict() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     df = build_dataframe(80)
     metrics = model.evaluate(df, horizons=(1, 6))
     json.dumps(metrics)
@@ -148,7 +147,7 @@ def test_evaluate_returns_json_serializable_dict() -> None:
 
 
 def test_save_load_preserves_parameters_and_predictions(tmp_path) -> None:
-    config = RoomRC2StateConfig()
+    config = RoomRcConfig()
     model = RoomRC2StatePhysicalModel(config)
     params = RoomRC2StateParams(
         R_air_out=4.0,
@@ -181,7 +180,7 @@ def test_save_load_preserves_parameters_and_predictions(tmp_path) -> None:
 
 
 def test_rc_validity_marks_missing_heating_invalid_without_explicit_off() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     df = build_dataframe(12)
     df.loc[3, "heating_kw"] = np.nan
     prepared = model.prepare_features(df)
@@ -189,7 +188,7 @@ def test_rc_validity_marks_missing_heating_invalid_without_explicit_off() -> Non
 
 
 def test_rc_validity_allows_missing_heating_when_explicit_off() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     df = build_dataframe(12)
     df["mode_off"] = 0
     df["hp_electric_power_kw"] = 1.0
@@ -203,7 +202,7 @@ def test_rc_validity_allows_missing_heating_when_explicit_off() -> None:
 
 def test_prepare_features_interpolates_10_minute_irradiance_gaps() -> None:
     model = RoomRC2StatePhysicalModel(
-        RoomRC2StateConfig(interval_minutes=10, max_irradiance_interpolation_gap_minutes=30)
+        RoomRcConfig(interval_minutes=10, max_irradiance_interpolation_gap_minutes=30)
     )
     df = pd.DataFrame(
         [
@@ -217,7 +216,7 @@ def test_prepare_features_interpolates_10_minute_irradiance_gaps() -> None:
 
 
 def test_fit_reports_rc_diagnostics() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5))
+    model = RoomRC2StatePhysicalModel(RoomRcConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5))
     df = build_dataframe(40)
     df.loc[:5, "heating_kw"] = np.nan
     report = model.fit(df, horizons=(1, 6))
@@ -233,7 +232,7 @@ def test_fit_reports_rc_diagnostics() -> None:
 
 
 def test_fixed_off_parameters_do_not_count_as_bound_hits() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     params = RoomRC2StateParams(
         R_mass_out=model.config.disabled_mass_outdoor_resistance_ohm,
         eta_solar_mass=0.0,
@@ -248,7 +247,7 @@ def test_fixed_off_parameters_do_not_count_as_bound_hits() -> None:
 
 
 def test_short_sequences_are_warning_only_when_fragmentation_is_modest() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     fit_quality, reasons = model._fit_quality(
         optimizer_success=True,
         train_loss=0.01,
@@ -266,7 +265,7 @@ def test_short_sequences_are_warning_only_when_fragmentation_is_modest() -> None
 
 
 def test_short_sequences_degrade_when_too_few_usable_sequences_remain() -> None:
-    model = RoomRC2StatePhysicalModel(RoomRC2StateConfig())
+    model = RoomRC2StatePhysicalModel(RoomRcConfig())
     fit_quality, reasons = model._fit_quality(
         optimizer_success=True,
         train_loss=0.01,
@@ -302,7 +301,7 @@ def test_room_rc_trainer_uses_space_heating_output_not_total_thermal_output() ->
 
 def test_fit_rejects_fragmented_short_sequences() -> None:
     model = RoomRC2StatePhysicalModel(
-        RoomRC2StateConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5)
+        RoomRcConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5)
     )
     df = build_dataframe(30)
     df["mode_off"] = 0
@@ -317,7 +316,7 @@ def test_fit_rejects_fragmented_short_sequences() -> None:
 
 def test_fit_rejects_nonfinite_objective(monkeypatch: pytest.MonkeyPatch) -> None:
     model = RoomRC2StatePhysicalModel(
-        RoomRC2StateConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5)
+        RoomRcConfig(min_train_rows=10, min_valid_train_rows=10, optimizer_maxiter=5)
     )
     df = build_dataframe(40)
 
