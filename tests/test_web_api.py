@@ -158,6 +158,7 @@ class FakeSpaceHeatingMpcPlanningService:
             feasible=True,
             objective_value=123.4,
             solve_time_seconds=0.05,
+            heating_explanation="Heating scheduled to prevent comfort-min violation at 18:00.",
             objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=0.0,
                 comfort_high=0.0,
@@ -748,6 +749,10 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
     assert payload["objective_breakdown"]["runtime"] == 0.4
     assert payload["objective_breakdown"]["energy"] == 3.0
     assert payload["objective_breakdown"]["total"] == 253.4
+    assert (
+        payload["heating_explanation"]
+        == "Heating scheduled to prevent comfort-min violation at 18:00."
+    )
     assert payload["summary"]["start_count"] == 1
     assert payload["summary"]["runtime_steps"] == 2
     assert len(payload["steps"]) == 4
@@ -772,6 +777,7 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert 'id="mpc-next-day"' in response.text
     assert 'id="mpc-selected-date"' in response.text
     assert 'id="mpc-summary-objective-energy"' in response.text
+    assert 'id="mpc-heating-explanation"' in response.text
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:

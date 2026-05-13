@@ -156,6 +156,7 @@ class MpcPlan(DomainModel):
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
+    heating_explanation: str | None = None
     objective_breakdown: MpcObjectiveBreakdown = Field(
         default_factory=MpcObjectiveBreakdown
     )

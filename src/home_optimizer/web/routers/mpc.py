@@ -56,6 +56,7 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
         feasible=plan.feasible,
         objective_value=plan.objective_value,
         solve_time_seconds=plan.solve_time_seconds,
+        heating_explanation=plan.heating_explanation,
         objective_breakdown=MpcObjectiveBreakdownResponse(
             comfort_low=plan.objective_breakdown.comfort_low,
             comfort_high=plan.objective_breakdown.comfort_high,

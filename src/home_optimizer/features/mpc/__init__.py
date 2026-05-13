@@ -1,6 +1,7 @@
 from .backtest import SpaceHeatingMpcBacktestRunner
 from .control_model import to_control_model
 from .controller_service import SpaceHeatingMpcControllerService
+from .explain import explain_heating_plan
 from .horizon_builder import (
     DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME,
     DEFAULT_SOLAR_GAIN_FORECAST_NAME,
@@ -47,5 +48,6 @@ __all__ = [
     "SpaceHeatingMpcControllerService",
     "SpaceHeatingMpcPlanningService",
     "SpaceHeatingMpcSolver",
+    "explain_heating_plan",
     "to_control_model",
 ]

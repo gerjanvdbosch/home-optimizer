@@ -40,6 +40,7 @@ from .mpc import (
     SpaceHeatingMpcControllerService,
     SpaceHeatingMpcPlanningService,
     SpaceHeatingMpcSolver,
+    explain_heating_plan,
     to_control_model,
 )
 from .pricing import ElectricityPriceService
@@ -87,5 +88,6 @@ __all__ = [
     "RoomSimulationResult",
     "RoomSimulationService",
     "TelemetryService",
+    "explain_heating_plan",
     "to_control_model",
 ]

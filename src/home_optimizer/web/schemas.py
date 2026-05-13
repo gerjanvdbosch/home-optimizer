@@ -304,6 +304,7 @@ class MpcPlanResponse(BaseModel):
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
+    heating_explanation: str | None = None
     objective_breakdown: MpcObjectiveBreakdownResponse
     summary: MpcPlanSummaryResponse
     steps: list[MpcPlanStepResponse]

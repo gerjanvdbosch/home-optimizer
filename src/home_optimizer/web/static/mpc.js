@@ -68,6 +68,7 @@ const nextDayButton = document.getElementById("mpc-next-day");
 const selectedDateNode = document.getElementById("mpc-selected-date");
 const statusNode = document.getElementById("mpc-status");
 const chartSummaryNode = document.getElementById("mpc-chart-summary");
+const heatingExplanationNode = document.getElementById("mpc-heating-explanation");
 const chartNode = document.getElementById("mpc-plan-chart");
 
 const summaryNodes = {
@@ -127,6 +128,9 @@ function setSummaryValue(node, value) {
 }
 
 function updateSummary(payload) {
+  if (heatingExplanationNode) {
+    heatingExplanationNode.textContent = payload.heating_explanation || "-";
+  }
   setSummaryValue(summaryNodes.status, payload.status);
   setSummaryValue(summaryNodes.termination, payload.termination_condition);
   setSummaryValue(summaryNodes.objective, formatNumber(payload.objective_value, 3));

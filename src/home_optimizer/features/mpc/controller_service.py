@@ -4,6 +4,7 @@ from typing import Callable
 
 from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
 from home_optimizer.features.mpc.control_model import to_control_model
+from home_optimizer.features.mpc.explain import explain_heating_plan
 from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
@@ -55,7 +56,17 @@ class SpaceHeatingMpcControllerService:
             objective_weights=request.objective_weights,
             max_solver_seconds=request.max_solver_seconds,
         )
-        return self.solver.solve(problem)
+        plan = self.solver.solve(problem)
+        return plan.model_copy(
+            update={
+                "heating_explanation": explain_heating_plan(
+                    plan=plan,
+                    control_model=resolved_control_model,
+                    initial_state=resolved_initial_state,
+                    horizon=resolved_horizon,
+                )
+            }
+        )
 
     def build_horizon(self, request: MpcHorizonBuildRequest) -> list[MpcHorizonStep]:
         return self.horizon_builder.build(request)
