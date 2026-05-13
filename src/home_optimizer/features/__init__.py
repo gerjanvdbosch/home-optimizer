@@ -14,12 +14,25 @@ from .identification import (
 )
 from .modeling import (
     RoomArxConfig,
-    RoomRcConfig,
     RoomModelingService,
     RoomModelValidationReport,
+    RoomRcConfig,
     SegmentValidationReport,
     StoredModelVersion,
     StoredModelVersionSummary,
+)
+from .mpc import (
+    LinearThermalControlModel,
+    MpcBacktestResult,
+    MpcConstraints,
+    MpcControllerRequest,
+    MpcHorizonStep,
+    MpcInitialState,
+    MpcObjectiveWeights,
+    MpcPlan,
+    SpaceHeatingMpcBacktestRunner,
+    SpaceHeatingMpcControllerService,
+    SpaceHeatingMpcSolver,
 )
 from .pricing import ElectricityPriceService
 from .simulation import RoomSimulationResult, RoomSimulationService
@@ -34,10 +47,21 @@ __all__ = [
     "IdentificationDatasetRow",
     "IdentificationDatasetService",
     "IdentificationDatasetSummary",
+    "LinearThermalControlModel",
+    "MpcBacktestResult",
+    "MpcConstraints",
+    "MpcControllerRequest",
+    "MpcHorizonStep",
+    "MpcInitialState",
+    "MpcObjectiveWeights",
+    "MpcPlan",
     "RoomArxConfig",
     "RoomRcConfig",
     "RoomModelValidationReport",
     "SegmentValidationReport",
+    "SpaceHeatingMpcBacktestRunner",
+    "SpaceHeatingMpcControllerService",
+    "SpaceHeatingMpcSolver",
     "RoomModelingService",
     "StoredModelVersion",
     "StoredModelVersionSummary",

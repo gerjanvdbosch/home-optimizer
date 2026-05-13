@@ -24,6 +24,8 @@ dependencies = [
   "APScheduler>=3.10",
   "PyYAML>=6.0",
   "websocket-client>=1.7",
+  "pyomo>=6.8",
+  "highspy>=1.8",
 ]
 
 [project.optional-dependencies]
