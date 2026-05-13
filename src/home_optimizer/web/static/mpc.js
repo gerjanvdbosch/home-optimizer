@@ -74,6 +74,14 @@ const summaryNodes = {
   status: document.getElementById("mpc-summary-status"),
   termination: document.getElementById("mpc-summary-termination"),
   objective: document.getElementById("mpc-summary-objective"),
+  objectiveComfortLow: document.getElementById("mpc-summary-objective-comfort-low"),
+  objectiveComfortHigh: document.getElementById("mpc-summary-objective-comfort-high"),
+  objectiveComfortTotal: document.getElementById("mpc-summary-objective-comfort-total"),
+  objectiveTracking: document.getElementById("mpc-summary-objective-tracking"),
+  objectiveTerminal: document.getElementById("mpc-summary-objective-terminal"),
+  objectiveStart: document.getElementById("mpc-summary-objective-start"),
+  objectiveRuntime: document.getElementById("mpc-summary-objective-runtime"),
+  objectiveEnergy: document.getElementById("mpc-summary-objective-energy"),
   solveTime: document.getElementById("mpc-summary-solve-time"),
   starts: document.getElementById("mpc-summary-starts"),
   stops: document.getElementById("mpc-summary-stops"),
@@ -122,6 +130,38 @@ function updateSummary(payload) {
   setSummaryValue(summaryNodes.status, payload.status);
   setSummaryValue(summaryNodes.termination, payload.termination_condition);
   setSummaryValue(summaryNodes.objective, formatNumber(payload.objective_value, 3));
+  setSummaryValue(
+    summaryNodes.objectiveComfortLow,
+    formatNumber(payload.objective_breakdown?.comfort_low, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveComfortHigh,
+    formatNumber(payload.objective_breakdown?.comfort_high, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveComfortTotal,
+    formatNumber(payload.objective_breakdown?.comfort_total, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveTracking,
+    formatNumber(payload.objective_breakdown?.temperature_tracking, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveTerminal,
+    formatNumber(payload.objective_breakdown?.terminal, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveStart,
+    formatNumber(payload.objective_breakdown?.start, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveRuntime,
+    formatNumber(payload.objective_breakdown?.runtime, 3),
+  );
+  setSummaryValue(
+    summaryNodes.objectiveEnergy,
+    formatNumber(payload.objective_breakdown?.energy, 3),
+  );
   setSummaryValue(summaryNodes.solveTime, `${formatNumber(payload.solve_time_seconds, 3)} s`);
   setSummaryValue(summaryNodes.starts, String(payload.summary.start_count));
   setSummaryValue(summaryNodes.stops, String(payload.summary.stop_count));

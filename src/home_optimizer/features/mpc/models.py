@@ -124,12 +124,41 @@ class MpcPlanStep(DomainModel):
     estimated_energy_cost_eur: float = 0.0
 
 
+class MpcObjectiveBreakdown(DomainModel):
+    comfort_low: float = 0.0
+    comfort_high: float = 0.0
+    temperature_tracking: float = 0.0
+    terminal: float = 0.0
+    start: float = 0.0
+    runtime: float = 0.0
+    energy: float = 0.0
+
+    @property
+    def comfort_total(self) -> float:
+        return self.comfort_low + self.comfort_high
+
+    @property
+    def total(self) -> float:
+        return (
+            self.comfort_low
+            + self.comfort_high
+            + self.temperature_tracking
+            + self.terminal
+            + self.start
+            + self.runtime
+            + self.energy
+        )
+
+
 class MpcPlan(DomainModel):
     status: str
     termination_condition: str
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
+    objective_breakdown: MpcObjectiveBreakdown = Field(
+        default_factory=MpcObjectiveBreakdown
+    )
     steps: list[MpcPlanStep] = Field(default_factory=list)
 
 

@@ -3,7 +3,12 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
-from home_optimizer.features.mpc.models import MpcPlan, MpcPlanStep, MpcProblem
+from home_optimizer.features.mpc.models import (
+    MpcObjectiveBreakdown,
+    MpcPlan,
+    MpcPlanStep,
+    MpcProblem,
+)
 
 
 def _load_pyomo() -> Any:
@@ -50,9 +55,19 @@ class SpaceHeatingMpcSolver:
                 termination_condition=termination_condition,
                 feasible=False,
                 solve_time_seconds=solve_time_seconds,
+                objective_breakdown=MpcObjectiveBreakdown(),
                 steps=[],
             )
 
+        objective_breakdown = MpcObjectiveBreakdown(
+            comfort_low=float(pyo.value(model.comfort_low_term)),
+            comfort_high=float(pyo.value(model.comfort_high_term)),
+            temperature_tracking=0.0,
+            terminal=0.0,
+            start=float(pyo.value(model.start_term)),
+            runtime=float(pyo.value(model.runtime_term)),
+            energy=float(pyo.value(model.energy_term)),
+        )
         objective_value = float(pyo.value(model.objective))
         steps: list[MpcPlanStep] = []
         for index, horizon_step in enumerate(problem.horizon):
@@ -87,6 +102,7 @@ class SpaceHeatingMpcSolver:
             feasible=True,
             objective_value=objective_value,
             solve_time_seconds=solve_time_seconds,
+            objective_breakdown=objective_breakdown,
             steps=steps,
         )
 
@@ -248,8 +264,19 @@ class SpaceHeatingMpcSolver:
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
+        model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
+        model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
+        model.start_term = pyo.Expression(expr=start_term)
+        model.energy_term = pyo.Expression(expr=energy_term)
+        model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
-            expr=comfort_low_term + comfort_high_term + start_term + energy_term + runtime_term,
+            expr=(
+                model.comfort_low_term
+                + model.comfort_high_term
+                + model.start_term
+                + model.energy_term
+                + model.runtime_term
+            ),
             sense=pyo.minimize,
         )
         return model

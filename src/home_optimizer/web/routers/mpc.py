@@ -12,6 +12,7 @@ from home_optimizer.web.pages import build_dashboard_view_model, render_template
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.query_params import FlexibleDatetime
 from home_optimizer.web.schemas import (
+    MpcObjectiveBreakdownResponse,
     MpcPlanResponse,
     MpcPlanStepResponse,
     MpcPlanSummaryResponse,
@@ -55,6 +56,17 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
         feasible=plan.feasible,
         objective_value=plan.objective_value,
         solve_time_seconds=plan.solve_time_seconds,
+        objective_breakdown=MpcObjectiveBreakdownResponse(
+            comfort_low=plan.objective_breakdown.comfort_low,
+            comfort_high=plan.objective_breakdown.comfort_high,
+            comfort_total=plan.objective_breakdown.comfort_total,
+            temperature_tracking=plan.objective_breakdown.temperature_tracking,
+            terminal=plan.objective_breakdown.terminal,
+            start=plan.objective_breakdown.start,
+            runtime=plan.objective_breakdown.runtime,
+            energy=plan.objective_breakdown.energy,
+            total=plan.objective_breakdown.total,
+        ),
         summary=summary,
         steps=[
             MpcPlanStepResponse(

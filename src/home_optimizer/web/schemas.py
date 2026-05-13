@@ -276,6 +276,18 @@ class MpcPlanStepResponse(BaseModel):
     estimated_energy_cost_eur: float
 
 
+class MpcObjectiveBreakdownResponse(BaseModel):
+    comfort_low: float
+    comfort_high: float
+    comfort_total: float
+    temperature_tracking: float
+    terminal: float
+    start: float
+    runtime: float
+    energy: float
+    total: float
+
+
 class MpcPlanSummaryResponse(BaseModel):
     step_count: int
     start_count: int
@@ -292,5 +304,6 @@ class MpcPlanResponse(BaseModel):
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
+    objective_breakdown: MpcObjectiveBreakdownResponse
     summary: MpcPlanSummaryResponse
     steps: list[MpcPlanStepResponse]

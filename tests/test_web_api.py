@@ -29,7 +29,7 @@ from home_optimizer.features.modeling import (
     StoredModelVersionSummary,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.mpc import MpcPlan, MpcPlanStep
+from home_optimizer.features.mpc import MpcObjectiveBreakdown, MpcPlan, MpcPlanStep
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
@@ -158,6 +158,15 @@ class FakeSpaceHeatingMpcPlanningService:
             feasible=True,
             objective_value=123.4,
             solve_time_seconds=0.05,
+            objective_breakdown=MpcObjectiveBreakdown(
+                comfort_low=0.0,
+                comfort_high=0.0,
+                temperature_tracking=0.0,
+                terminal=0.0,
+                start=250.0,
+                runtime=0.4,
+                energy=3.0,
+            ),
             steps=[
                 MpcPlanStep(
                     timestamp_utc=(
@@ -732,6 +741,13 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
     assert payload["termination_condition"] == "optimal"
     assert payload["feasible"] is True
     assert payload["objective_value"] == 123.4
+    assert payload["objective_breakdown"]["comfort_total"] == 0.0
+    assert payload["objective_breakdown"]["temperature_tracking"] == 0.0
+    assert payload["objective_breakdown"]["terminal"] == 0.0
+    assert payload["objective_breakdown"]["start"] == 250.0
+    assert payload["objective_breakdown"]["runtime"] == 0.4
+    assert payload["objective_breakdown"]["energy"] == 3.0
+    assert payload["objective_breakdown"]["total"] == 253.4
     assert payload["summary"]["start_count"] == 1
     assert payload["summary"]["runtime_steps"] == 2
     assert len(payload["steps"]) == 4
@@ -755,6 +771,7 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert 'id="mpc-previous-day"' in response.text
     assert 'id="mpc-next-day"' in response.text
     assert 'id="mpc-selected-date"' in response.text
+    assert 'id="mpc-summary-objective-energy"' in response.text
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:
