@@ -23,7 +23,7 @@ function formatNumber(value, digits = 2) {
 }
 
 function lineTrace(x, y, name, color, options = {}) {
-  return {
+  const trace = {
     x,
     y,
     name,
@@ -35,12 +35,19 @@ function lineTrace(x, y, name, color, options = {}) {
       ...(options.dash ? { dash: options.dash } : {}),
       ...(options.shape ? { shape: options.shape } : {}),
     },
-    marker: options.marker || undefined,
-    fill: options.fill || undefined,
-    fillcolor: options.fillcolor || undefined,
     yaxis: options.yaxis || "y",
     hovertemplate: options.hovertemplate || `%{x|%d-%m %H:%M}<br>%{y:.2f}<extra>${name}</extra>`,
   };
+  if (options.marker) {
+    trace.marker = options.marker;
+  }
+  if (options.fill) {
+    trace.fill = options.fill;
+  }
+  if (options.fillcolor) {
+    trace.fillcolor = options.fillcolor;
+  }
+  return trace;
 }
 
 const startTimeInput = document.getElementById("mpc-start-time");

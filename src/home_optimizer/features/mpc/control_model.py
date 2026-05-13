@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
 from home_optimizer.features.modeling.room_2r2c import (
     RoomRC2StateParams,
@@ -51,18 +53,24 @@ def _rc_to_control_model(
 ) -> LinearThermalControlModel:
     physical = RoomRC2StatePhysicalModel(model.config.with_interval_minutes(model.interval_minutes))
     params = RoomRC2StateParams.from_dict(model.params)
-    _, _, a_discrete, b_discrete = physical.params_to_matrices(params)
     solar_scale = options.solar_gain_input_scale
+    f_matrix, g_matrix, a_discrete, _ = physical.params_to_matrices(params)
+    steady_state_gain = -np.linalg.inv(f_matrix) @ g_matrix
+    dominant_eigenvalue = float(np.max(np.abs(np.linalg.eigvals(a_discrete))))
+    one_minus_a = max(1e-6, 1.0 - dominant_eigenvalue)
+
     return LinearThermalControlModel(
-        a=float(a_discrete[0, 0] + a_discrete[0, 1]),
-        b_out=float(b_discrete[0, 0]),
-        b_solar=float((b_discrete[0, 2] + b_discrete[0, 3]) / solar_scale),
-        b_heat=float(b_discrete[0, 1]),
-        b_occ=float(b_discrete[0, 4]),
+        a=dominant_eigenvalue,
+        b_out=float(steady_state_gain[0, 0] * one_minus_a),
+        b_solar=float(
+            (steady_state_gain[0, 2] + steady_state_gain[0, 3]) * one_minus_a / solar_scale
+        ),
+        b_heat=float(steady_state_gain[0, 1] * one_minus_a),
+        b_occ=float(steady_state_gain[0, 4] * one_minus_a),
         c=0.0,
         notes=(
-            "Approximate 1-state control model reduced from 2R2C by collapsing mass-state "
-            "feedback into the room-temperature coefficient and omitting hourly bias terms."
+            "Approximate 1-state control model reduced from 2R2C using the dominant discrete "
+            "time constant and steady-state gains of the physical state-space model."
         ),
     )
 
