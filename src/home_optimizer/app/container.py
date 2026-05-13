@@ -124,6 +124,7 @@ def build_container(
         pricing=settings.electricity_pricing,
         repository=electricity_price_repository,
         gateway=nordpool,
+        fixed_horizon_days=2,
     )
     electricity_price_scheduler = ElectricityPriceScheduler(
         electricity_price_service,
