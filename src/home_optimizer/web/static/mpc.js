@@ -9,6 +9,14 @@ function mpcLocalInputValue(date) {
   return localDate.toISOString().slice(0, 16);
 }
 
+function formatMpcDisplayDate(date) {
+  return new Intl.DateTimeFormat("nl-NL", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
 function mpcChartTimestamp(timestamp) {
   const date = new Date(timestamp);
   const localTimestamp = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
@@ -55,6 +63,9 @@ const horizonStepsInput = document.getElementById("mpc-horizon-steps");
 const intervalMinutesInput = document.getElementById("mpc-interval-minutes");
 const heatingKwInput = document.getElementById("mpc-heating-kw");
 const planButton = document.getElementById("mpc-plan-button");
+const previousDayButton = document.getElementById("mpc-previous-day");
+const nextDayButton = document.getElementById("mpc-next-day");
+const selectedDateNode = document.getElementById("mpc-selected-date");
 const statusNode = document.getElementById("mpc-status");
 const chartSummaryNode = document.getElementById("mpc-chart-summary");
 const chartNode = document.getElementById("mpc-plan-chart");
@@ -76,6 +87,29 @@ function setBusy(isBusy) {
   if (planButton) {
     planButton.disabled = isBusy;
   }
+  if (previousDayButton) {
+    previousDayButton.disabled = isBusy;
+  }
+  if (nextDayButton) {
+    nextDayButton.disabled = isBusy;
+  }
+}
+
+function syncMpcDateLabel(anchorTime) {
+  if (selectedDateNode) {
+    selectedDateNode.textContent = formatMpcDisplayDate(anchorTime);
+  }
+}
+
+function shiftMpcDay(days) {
+  if (!startTimeInput?.value) {
+    return;
+  }
+  const startTime = new Date(startTimeInput.value);
+  startTime.setDate(startTime.getDate() + days);
+  startTimeInput.value = mpcLocalInputValue(startTime);
+  syncMpcDateLabel(startTime);
+  loadPlan().catch(() => {});
 }
 
 function setSummaryValue(node, value) {
@@ -248,8 +282,10 @@ async function loadPlan() {
   }
 
   try {
+    const startTime = new Date(startTimeInput.value);
+    syncMpcDateLabel(startTime);
     const params = new URLSearchParams({
-      start_time: new Date(startTimeInput.value).toISOString(),
+      start_time: startTime.toISOString(),
       horizon_steps: String(Number(horizonStepsInput?.value || "36")),
       interval_minutes: String(Number(intervalMinutesInput?.value || "15")),
       default_effective_heating_kw: String(Number(heatingKwInput?.value || "2.5")),
@@ -281,10 +317,21 @@ function initializeMpcPage() {
     const now = new Date();
     now.setMinutes(0, 0, 0);
     startTimeInput.value = mpcLocalInputValue(now);
+    syncMpcDateLabel(now);
   }
   if (planButton) {
     planButton.addEventListener("click", () => {
       loadPlan().catch(() => {});
+    });
+  }
+  if (previousDayButton) {
+    previousDayButton.addEventListener("click", () => {
+      shiftMpcDay(-1);
+    });
+  }
+  if (nextDayButton) {
+    nextDayButton.addEventListener("click", () => {
+      shiftMpcDay(1);
     });
   }
   loadPlan().catch(() => {});

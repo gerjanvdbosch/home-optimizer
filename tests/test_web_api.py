@@ -752,6 +752,9 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert "Space-Heating MPC" in response.text
     assert 'href="./mpc"' in response.text
     assert 'id="mpc-plan-button"' in response.text
+    assert 'id="mpc-previous-day"' in response.text
+    assert 'id="mpc-next-day"' in response.text
+    assert 'id="mpc-selected-date"' in response.text
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:
