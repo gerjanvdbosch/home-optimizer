@@ -88,6 +88,39 @@
 
       <section class="panel import-panel">
         <div>
+          <h2>Model metrics</h2>
+          <p>Validatie en segmentprestaties van het geselecteerde model uit de database.</p>
+        </div>
+        <div class="actions">
+          <div><strong>Type:</strong> <span id="model-detail-type">-</span></div>
+          <div><strong>Interval:</strong> <span id="model-detail-interval">-</span></div>
+          <div><strong>Samples:</strong> <span id="model-detail-samples">-</span></div>
+          <div><strong>Status:</strong> <span id="model-detail-active">-</span></div>
+          <div><strong>Fit quality:</strong> <span id="model-detail-fit-quality">-</span></div>
+          <div><strong>Reasons:</strong> <span id="model-detail-fit-reasons">-</span></div>
+        </div>
+        <div class="table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Horizon</th>
+                <th>MAE</th>
+                <th>RMSE</th>
+                <th>Bias</th>
+                <th>P95 abs</th>
+                <th>Samples</th>
+              </tr>
+            </thead>
+            <tbody id="model-aggregate-metrics-body"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <div id="model-segment-metrics-body"></div>
+        </div>
+      </section>
+
+      <section class="panel import-panel">
+        <div>
           <h2>Model training</h2>
           <p>Train een nieuw room-model op een gekozen datumbereik.</p>
         </div>

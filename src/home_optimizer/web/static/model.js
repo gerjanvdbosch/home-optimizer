@@ -110,6 +110,14 @@ const trainStatus = document.getElementById("train-status");
 const trainResult = document.getElementById("train-result");
 const simulationSummary = document.getElementById("simulation-summary");
 const simulationModelId = document.getElementById("simulation-model-id");
+const modelDetailType = document.getElementById("model-detail-type");
+const modelDetailInterval = document.getElementById("model-detail-interval");
+const modelDetailSamples = document.getElementById("model-detail-samples");
+const modelDetailActive = document.getElementById("model-detail-active");
+const modelDetailFitQuality = document.getElementById("model-detail-fit-quality");
+const modelDetailFitReasons = document.getElementById("model-detail-fit-reasons");
+const modelAggregateMetricsBody = document.getElementById("model-aggregate-metrics-body");
+const modelSegmentMetricsBody = document.getElementById("model-segment-metrics-body");
 const roomChart = document.getElementById("simulation-room-chart");
 const errorChart = document.getElementById("simulation-error-chart");
 const solarChart = document.getElementById("simulation-solar-chart");
@@ -167,6 +175,121 @@ function modelLabel(model) {
   return `${model.model_type} | ${model.model_id}${activeSuffix}`;
 }
 
+function formatMetricValue(value, digits = 3) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return Number(value).toFixed(digits);
+}
+
+function buildMetricRows(metrics) {
+  return (metrics || [])
+    .map(
+      (metric) => `
+        <tr>
+          <td>${metric.horizon_minutes} min</td>
+          <td>${formatMetricValue(metric.mae_c)}</td>
+          <td>${formatMetricValue(metric.rmse_c)}</td>
+          <td>${formatMetricValue(metric.bias_c)}</td>
+          <td>${formatMetricValue(metric.p95_abs_error_c)}</td>
+          <td>${metric.sample_count ?? "-"}</td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+function renderModelMetricDetails(payload) {
+  if (modelDetailType) {
+    modelDetailType.textContent = payload.model_type || "-";
+  }
+  if (modelDetailInterval) {
+    modelDetailInterval.textContent = payload.interval_minutes ? `${payload.interval_minutes} min` : "-";
+  }
+  if (modelDetailSamples) {
+    modelDetailSamples.textContent = String(payload.sample_count ?? "-");
+  }
+  if (modelDetailActive) {
+    modelDetailActive.textContent = payload.is_active ? "active" : "inactive";
+  }
+  if (modelDetailFitQuality) {
+    modelDetailFitQuality.textContent = payload.fit_quality || "-";
+  }
+  if (modelDetailFitReasons) {
+    modelDetailFitReasons.textContent = (payload.fit_quality_reasons || []).join(", ") || "-";
+  }
+
+  if (modelAggregateMetricsBody) {
+    modelAggregateMetricsBody.innerHTML = "";
+    for (const metric of payload.aggregate_metrics || []) {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${metric.horizon_minutes} min</td>
+        <td>${formatMetricValue(metric.mae_c)}</td>
+        <td>${formatMetricValue(metric.rmse_c)}</td>
+        <td>${formatMetricValue(metric.bias_c)}</td>
+        <td>${formatMetricValue(metric.p95_abs_error_c)}</td>
+        <td>${metric.sample_count ?? "-"}</td>
+      `;
+      modelAggregateMetricsBody.append(row);
+    }
+    if (!modelAggregateMetricsBody.children.length) {
+      const row = document.createElement("tr");
+      row.innerHTML = '<td colspan="6">Geen aggregate metrics beschikbaar</td>';
+      modelAggregateMetricsBody.append(row);
+    }
+  }
+
+  if (modelSegmentMetricsBody) {
+    modelSegmentMetricsBody.innerHTML = "";
+    for (const segment of payload.segment_metrics || []) {
+      const card = document.createElement("section");
+      card.className = "panel";
+      card.innerHTML = `
+        <div class="panel-heading">
+          <h2>${segment.segment_name}</h2>
+          <span>${segment.description}</span>
+        </div>
+        <div class="table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Horizon</th>
+                <th>MAE</th>
+                <th>RMSE</th>
+                <th>Bias</th>
+                <th>P95 abs</th>
+                <th>Samples</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${buildMetricRows(segment.metrics) || '<tr><td colspan="6">Geen segment metrics beschikbaar</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+      modelSegmentMetricsBody.append(card);
+    }
+    if (!modelSegmentMetricsBody.children.length) {
+      const empty = document.createElement("div");
+      empty.textContent = "Geen segment metrics beschikbaar";
+      modelSegmentMetricsBody.append(empty);
+    }
+  }
+}
+
+async function loadSelectedModelDetails() {
+  if (!simulationModelSelect?.value) {
+    return;
+  }
+  const response = await fetch(modelApiUrl(`api/models/room/${encodeURIComponent(simulationModelSelect.value)}`));
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || "Kon modeldetails niet laden.");
+  }
+  renderModelMetricDetails(payload);
+}
+
 function populateSimulationModelSelect(models) {
   if (!simulationModelSelect) {
     return;
@@ -218,6 +341,7 @@ async function refreshRoomModels() {
     throw new Error(payload.detail || "Kon modellijst niet laden.");
   }
   populateSimulationModelSelect(payload.models || []);
+  await loadSelectedModelDetails();
 }
 
 async function runTrain() {
@@ -265,6 +389,7 @@ async function runTrain() {
     if (simulationModelSelect && payload.model_id) {
       simulationModelSelect.value = payload.model_id;
     }
+    await loadSelectedModelDetails();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Modeltraining mislukt.";
     if (trainStatus) {
@@ -400,6 +525,7 @@ if (simulateButton) {
   });
 }
 simulationModelSelect?.addEventListener("change", () => {
+  loadSelectedModelDetails().catch(handleSimulationError);
   loadSimulation().catch(handleSimulationError);
 });
 

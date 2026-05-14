@@ -21,13 +21,17 @@ from home_optimizer.domain import (
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.modeling import (
+    HorizonMetric,
     ROOM_ARX_MODEL_KIND,
     ROOM_RC_MODEL_KIND,
     RoomArxConfig,
+    RoomModelValidationReport,
     RoomRcModel,
+    SegmentValidationReport,
     StoredModelVersion,
     StoredModelVersionSummary,
     TrainedLinearRoomModel,
+    ValidationFoldResult,
 )
 from home_optimizer.features.mpc import MpcObjectiveBreakdown, MpcPlan, MpcPlanStep
 from home_optimizer.web import create_app
@@ -76,6 +80,26 @@ class FakeWeatherImportService:
 class FakeModelVersionRepository:
     def __init__(self) -> None:
         self.saved_versions: list[StoredModelVersion] = []
+        validation_metrics = [
+            HorizonMetric(
+                horizon_steps=1,
+                horizon_minutes=15,
+                sample_count=100,
+                mae_c=0.12,
+                rmse_c=0.18,
+                bias_c=0.01,
+                p95_abs_error_c=0.30,
+            ),
+            HorizonMetric(
+                horizon_steps=4,
+                horizon_minutes=60,
+                sample_count=96,
+                mae_c=0.28,
+                rmse_c=0.36,
+                bias_c=0.02,
+                p95_abs_error_c=0.55,
+            ),
+        ]
         self.active_version = StoredModelVersion(
             model_id="room-model-active",
             model_type=ROOM_ARX_MODEL_KIND,
@@ -109,7 +133,38 @@ class FakeModelVersionRepository:
                 coefficients=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 sample_count=100,
             ),
-            validation_report=None,
+            validation_report=RoomModelValidationReport(
+                interval_minutes=15,
+                config=RoomArxConfig(
+                    room_temperature_lags=[0],
+                    outdoor_temperature_lags=[0],
+                    thermal_output_lags=[0],
+                    solar_gain_lags=[0],
+                    shutter_position_lags=[0],
+                    solar_shutter_interaction_lags=[0],
+                    occupied_flag_lags=[0],
+                    min_train_rows=10,
+                    validation_window_rows=10,
+                ),
+                folds=[
+                    ValidationFoldResult(
+                        train_start_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
+                        train_end_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
+                        validate_start_utc=datetime(2026, 5, 8, 0, 0, tzinfo=timezone.utc),
+                        validate_end_utc=datetime(2026, 5, 8, 23, 45, tzinfo=timezone.utc),
+                        training_sample_count=100,
+                        metrics=validation_metrics,
+                    )
+                ],
+                aggregate_metrics=validation_metrics,
+                segment_metrics=[
+                    SegmentValidationReport(
+                        segment_name="daytime",
+                        description="Rows with daytime solar exposure.",
+                        metrics=validation_metrics,
+                    )
+                ],
+            ),
         )
 
     def save_room_model_version(self, version: StoredModelVersion) -> None:
@@ -955,6 +1010,22 @@ def test_room_model_catalog_endpoint_lists_models() -> None:
     assert {model["model_type"] for model in payload["models"]} >= {
         ROOM_ARX_MODEL_KIND,
     }
+
+
+def test_room_model_detail_endpoint_returns_metrics_and_segments() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get("/api/models/room/room-model-active")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_id"] == "room-model-active"
+    assert payload["interval_minutes"] == 15
+    assert len(payload["aggregate_metrics"]) == 2
+    assert payload["aggregate_metrics"][0]["mae_c"] == 0.12
+    assert len(payload["segment_metrics"]) == 1
+    assert payload["segment_metrics"][0]["segment_name"] == "daytime"
 
 
 def test_simulate_room_endpoint_supports_explicit_model_id() -> None:

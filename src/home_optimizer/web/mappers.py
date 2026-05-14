@@ -33,6 +33,7 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetSummaryResponse,
     RoomSimulationResponse,
     RoomModelCatalogResponse,
+    RoomModelVersionDetailResponse,
     RoomModelVersionSummaryResponse,
     SegmentValidationResponse,
     TrainRoomModelResponse,
@@ -177,6 +178,40 @@ def room_model_catalog_response(
             room_model_version_summary_response(summary)
             for summary in summaries
         ]
+    )
+
+
+def room_model_version_detail_response(
+    version: StoredModelVersion,
+) -> RoomModelVersionDetailResponse:
+    training_metadata = getattr(version.model, "training_metadata", {}) or {}
+    validation_report = version.validation_report
+    return RoomModelVersionDetailResponse(
+        model_id=version.model_id,
+        model_type=version.model_type,
+        created_at_utc=version.created_at_utc,
+        trained_from_utc=version.model.trained_from_utc,
+        trained_to_utc=version.model.trained_to_utc,
+        interval_minutes=version.model.interval_minutes,
+        sample_count=version.model.sample_count,
+        is_active=version.is_active,
+        fit_quality=training_metadata.get("fit_quality"),
+        fit_quality_reasons=list(training_metadata.get("fit_quality_reasons", [])),
+        aggregate_metrics=[
+            HorizonMetricResponse(**metric.model_dump())
+            for metric in (validation_report.aggregate_metrics if validation_report is not None else [])
+        ],
+        segment_metrics=[
+            SegmentValidationResponse(
+                segment_name=segment.segment_name,
+                description=segment.description,
+                metrics=[
+                    HorizonMetricResponse(**metric.model_dump())
+                    for metric in segment.metrics
+                ],
+            )
+            for segment in (validation_report.segment_metrics if validation_report is not None else [])
+        ],
     )
 
 

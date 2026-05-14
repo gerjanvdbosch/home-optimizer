@@ -17,10 +17,18 @@ from home_optimizer.features.modeling import (
     StoredModelVersion,
 )
 from home_optimizer.web.dependencies import get_container
-from home_optimizer.web.mappers import room_model_catalog_response, train_room_model_response
+from home_optimizer.web.mappers import (
+    room_model_catalog_response,
+    room_model_version_detail_response,
+    train_room_model_response,
+)
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.query_params import FlexibleDatetime
-from home_optimizer.web.schemas import RoomModelCatalogResponse, TrainRoomModelResponse
+from home_optimizer.web.schemas import (
+    RoomModelCatalogResponse,
+    RoomModelVersionDetailResponse,
+    TrainRoomModelResponse,
+)
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
@@ -85,6 +93,16 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         return room_model_catalog_response(
             container.model_version_repository.list_room_model_versions()
         )
+
+    @router.get("/api/models/room/{model_id}", response_model=RoomModelVersionDetailResponse)
+    def get_room_model(
+        container: ContainerDependency,
+        model_id: str,
+    ) -> RoomModelVersionDetailResponse:
+        version = container.model_version_repository.get_room_model_version(model_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="room model not found")
+        return room_model_version_detail_response(version)
 
     @router.post("/api/train", response_model=TrainRoomModelResponse)
     def train_room_model(

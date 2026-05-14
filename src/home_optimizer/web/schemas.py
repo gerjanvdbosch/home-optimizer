@@ -244,6 +244,21 @@ class RoomModelCatalogResponse(BaseModel):
     models: list[RoomModelVersionSummaryResponse]
 
 
+class RoomModelVersionDetailResponse(BaseModel):
+    model_id: str
+    model_type: str
+    created_at_utc: datetime
+    trained_from_utc: datetime
+    trained_to_utc: datetime
+    interval_minutes: int
+    sample_count: int
+    is_active: bool
+    fit_quality: str | None = None
+    fit_quality_reasons: list[str] = []
+    aggregate_metrics: list[HorizonMetricResponse] = []
+    segment_metrics: list[SegmentValidationResponse] = []
+
+
 class RoomSimulationResponse(BaseModel):
     model_id: str
     anchor_time_utc: datetime
