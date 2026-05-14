@@ -12,6 +12,7 @@ from .dataset_resampling import (
     dataset_text_signal_spec,
 )
 from .forecast import ForecastEntry
+from .forecast_resampling import latest_forecast_entries, resample_forecast_entries
 from .kpis import BaselineKpiSummary, DailyKpis, classify_hp_mode, compute_baseline_kpi_summary, compute_daily_kpis
 from .location import Location, parse_location
 from .models import DomainModel
@@ -121,6 +122,8 @@ __all__ = [
     "FORECAST_DIFFUSE_RADIATION",
     "FORECAST_DIRECT_RADIATION",
     "ForecastEntry",
+    "latest_forecast_entries",
+    "resample_forecast_entries",
     "FORECAST_HUMIDITY",
     "FORECAST_TEMPERATURE",
     "FORECAST_WIND",

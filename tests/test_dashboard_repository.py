@@ -85,6 +85,55 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
     assert series[2].points == [NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=220.0)]
 
 
+def test_time_series_read_repository_resamples_forecast_series_to_configured_interval(tmp_path) -> None:
+    database = Database(str(tmp_path / "dashboard_resampled.sqlite"))
+    database.init_schema()
+    repository = TimeSeriesReadRepository(database, forecast_interval_minutes=10)
+
+    with database.session() as session:
+        session.add_all(
+            [
+                ForecastValue(
+                    created_at_utc="2026-04-25T11:00:00+00:00",
+                    forecast_time_utc="2026-04-26T12:00:00+00:00",
+                    name="temperature",
+                    source="openmeteo",
+                    unit="°C",
+                    value=12.0,
+                ),
+                ForecastValue(
+                    created_at_utc="2026-04-25T11:00:00+00:00",
+                    forecast_time_utc="2026-04-26T12:15:00+00:00",
+                    name="temperature",
+                    source="openmeteo",
+                    unit="°C",
+                    value=15.0,
+                ),
+                ForecastValue(
+                    created_at_utc="2026-04-25T11:00:00+00:00",
+                    forecast_time_utc="2026-04-26T12:30:00+00:00",
+                    name="temperature",
+                    source="openmeteo",
+                    unit="°C",
+                    value=18.0,
+                ),
+            ]
+        )
+        session.commit()
+
+    series = repository.read_forecast_series(
+        names=["temperature"],
+        start_time=datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 4, 26, 12, 30, tzinfo=timezone.utc),
+    )
+
+    assert series[0].points == [
+        NumericPoint(timestamp="2026-04-26T12:00:00+00:00", value=12.0),
+        NumericPoint(timestamp="2026-04-26T12:10:00+00:00", value=14.0),
+        NumericPoint(timestamp="2026-04-26T12:20:00+00:00", value=16.0),
+    ]
+
+
 def test_time_series_read_repository_returns_sample_time_range(tmp_path) -> None:
     database = Database(str(tmp_path / "dashboard.sqlite"))
     database.init_schema()
@@ -185,4 +234,3 @@ def test_time_series_read_repository_reads_electricity_price_intervals_as_quarte
         NumericPoint(timestamp="2026-04-25T00:30:00+00:00", value=0.32),
         NumericPoint(timestamp="2026-04-25T00:45:00+00:00", value=0.32),
     ]
-

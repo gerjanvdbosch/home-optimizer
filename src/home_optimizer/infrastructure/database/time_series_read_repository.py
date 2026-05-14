@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 
 from home_optimizer.domain import (
     ELECTRICITY_PRICE,
+    ForecastEntry,
     NumericPoint,
     NumericSeries,
     TextPoint,
     TextSeries,
     merge_numeric_with_fallback,
+    latest_forecast_entries,
     merge_text_with_fallback,
+    resample_forecast_entries,
 )
 from home_optimizer.domain.pricing import (
     PriceInterval,
@@ -27,10 +30,13 @@ from home_optimizer.infrastructure.database.orm_models import (
 )
 from home_optimizer.infrastructure.database.session import Database
 
+_FORECAST_SOURCE_INTERVAL_MINUTES = 15
+
 
 class TimeSeriesReadRepository:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, forecast_interval_minutes: int = 10) -> None:
         self.database = database
+        self.forecast_interval_minutes = forecast_interval_minutes
 
     def read_series(
         self,
@@ -204,30 +210,95 @@ class TimeSeriesReadRepository:
         if not names:
             return []
 
-        with self.database.session() as session:
-            latest_subquery = (
-                select(
-                    ForecastValue.name.label("name"),
-                    ForecastValue.forecast_time_utc.label("forecast_time_utc"),
-                    func.max(ForecastValue.created_at_utc).label("latest_created_at"),
+        entries = self._read_latest_forecast_entries(
+            names=names,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        points_by_name = {name: [] for name in names}
+        units_by_name: dict[str, str | None] = {
+            name: None for name in names
+        }
+
+        for entry in entries:
+            points_by_name[entry.name].append(
+                NumericPoint(
+                    timestamp=normalize_utc_timestamp(entry.forecast_time_utc),
+                    value=float(entry.value),
                 )
-                .where(
-                    ForecastValue.name.in_(names),
-                    ForecastValue.forecast_time_utc >= normalize_utc_timestamp(start_time),
-                    ForecastValue.forecast_time_utc < normalize_utc_timestamp(end_time),
-                    ForecastValue.created_at_utc <= ForecastValue.forecast_time_utc,
-                )
-                .group_by(
-                    ForecastValue.name,
-                    ForecastValue.forecast_time_utc,
-                )
-                .subquery()
             )
+            units_by_name[entry.name] = units_by_name[entry.name] or entry.unit
+
+        return [
+            NumericSeries(
+                name=name,
+                unit=units_by_name[name],
+                points=points_by_name[name],
+            )
+            for name in names
+        ]
+
+    def _read_latest_forecast_entries(
+        self,
+        *,
+        names: list[str] | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        sources: list[str] | None = None,
+        created_at_start_time: datetime | None = None,
+        created_at_end_time: datetime | None = None,
+    ) -> list[ForecastEntry]:
+        query_start_time = (
+            start_time - timedelta(minutes=_FORECAST_SOURCE_INTERVAL_MINUTES)
+            if start_time is not None
+            else None
+        )
+        query_end_time = (
+            end_time + timedelta(minutes=_FORECAST_SOURCE_INTERVAL_MINUTES)
+            if end_time is not None
+            else None
+        )
+
+        with self.database.session() as session:
+            latest_subquery = select(
+                ForecastValue.name.label("name"),
+                ForecastValue.forecast_time_utc.label("forecast_time_utc"),
+                func.max(ForecastValue.created_at_utc).label("latest_created_at"),
+            ).where(ForecastValue.created_at_utc <= ForecastValue.forecast_time_utc)
+
+            if names:
+                latest_subquery = latest_subquery.where(ForecastValue.name.in_(names))
+            if sources:
+                latest_subquery = latest_subquery.where(ForecastValue.source.in_(sources))
+            if query_start_time is not None:
+                latest_subquery = latest_subquery.where(
+                    ForecastValue.forecast_time_utc >= normalize_utc_timestamp(query_start_time)
+                )
+            if query_end_time is not None:
+                latest_subquery = latest_subquery.where(
+                    ForecastValue.forecast_time_utc < normalize_utc_timestamp(query_end_time)
+                )
+            if created_at_start_time is not None:
+                latest_subquery = latest_subquery.where(
+                    ForecastValue.created_at_utc
+                    >= normalize_utc_timestamp(created_at_start_time)
+                )
+            if created_at_end_time is not None:
+                latest_subquery = latest_subquery.where(
+                    ForecastValue.created_at_utc < normalize_utc_timestamp(created_at_end_time)
+                )
+
+            latest_subquery = latest_subquery.group_by(
+                ForecastValue.name,
+                ForecastValue.forecast_time_utc,
+            ).subquery()
 
             rows = session.execute(
                 select(
-                    ForecastValue.name,
+                    ForecastValue.created_at_utc,
                     ForecastValue.forecast_time_utc,
+                    ForecastValue.name,
+                    ForecastValue.source,
                     ForecastValue.unit,
                     ForecastValue.value,
                 )
@@ -245,34 +316,30 @@ class TimeSeriesReadRepository:
                         )
                     ),
                 )
-                .order_by(
-                    ForecastValue.name,
-                    ForecastValue.forecast_time_utc,
-                )
+                .order_by(ForecastValue.name, ForecastValue.forecast_time_utc)
             ).all()
 
-        points_by_name = {name: [] for name in names}
-        units_by_name: dict[str, str | None] = {
-            name: None for name in names
-        }
-
-        for name, timestamp, unit, value in rows:
-            points_by_name[name].append(
-                NumericPoint(
-                    timestamp=timestamp,
+        latest_entries = latest_forecast_entries(
+            [
+                ForecastEntry(
+                    created_at_utc=parse_datetime(created_at_utc),
+                    forecast_time_utc=parse_datetime(forecast_time_utc),
+                    name=str(name),
                     value=float(value),
+                    unit=str(unit) if unit is not None else None,
+                    source=str(source),
                 )
-            )
-            units_by_name[name] = units_by_name[name] or unit
-
-        return [
-            NumericSeries(
-                name=name,
-                unit=units_by_name[name],
-                points=points_by_name[name],
-            )
-            for name in names
-        ]
+                for created_at_utc, forecast_time_utc, name, source, unit, value in rows
+            ]
+        )
+        if start_time is None or end_time is None:
+            return latest_entries
+        return resample_forecast_entries(
+            latest_entries,
+            start_time=start_time,
+            end_time=end_time,
+            interval_minutes=self.forecast_interval_minutes,
+        )
 
     def read_electricity_price_series(
         self,

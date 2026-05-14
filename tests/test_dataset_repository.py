@@ -135,7 +135,7 @@ def test_dataset_repository_falls_back_to_15m_when_1m_is_empty(tmp_path) -> None
     assert frame.iloc[0]["mean_real"] == 20.5
 
 
-def test_dataset_repository_reads_raw_forecast_values_as_dataframe(tmp_path) -> None:
+def test_dataset_repository_reads_forecast_values_as_dataframe(tmp_path) -> None:
     database = Database(str(tmp_path / "dataset_repository_forecast.sqlite"))
     database.init_schema()
     repository = DatasetRepository(database)
@@ -173,6 +173,58 @@ def test_dataset_repository_reads_raw_forecast_values_as_dataframe(tmp_path) -> 
         "value",
     ]
     assert frame.iloc[0]["value"] == 5.5
+
+
+def test_dataset_repository_resamples_forecast_values_to_configured_interval(tmp_path) -> None:
+    database = Database(str(tmp_path / "dataset_repository_forecast_resampled.sqlite"))
+    database.init_schema()
+    repository = DatasetRepository(database, forecast_interval_minutes=10)
+
+    with database.session() as session:
+        session.execute(
+            insert(ForecastValue),
+            [
+                {
+                    "created_at_utc": "2026-02-08T00:00:00Z",
+                    "forecast_time_utc": "2026-02-08T01:00:00Z",
+                    "name": "temperature",
+                    "source": "openmeteo",
+                    "unit": "°C",
+                    "value": 6.0,
+                },
+                {
+                    "created_at_utc": "2026-02-08T00:00:00Z",
+                    "forecast_time_utc": "2026-02-08T01:15:00Z",
+                    "name": "temperature",
+                    "source": "openmeteo",
+                    "unit": "°C",
+                    "value": 9.0,
+                },
+                {
+                    "created_at_utc": "2026-02-08T00:00:00Z",
+                    "forecast_time_utc": "2026-02-08T01:30:00Z",
+                    "name": "temperature",
+                    "source": "openmeteo",
+                    "unit": "°C",
+                    "value": 12.0,
+                },
+            ],
+        )
+        session.commit()
+
+    frame = repository.read_forecast_values(
+        start_time=datetime(2026, 2, 8, 1, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 2, 8, 1, 30, tzinfo=timezone.utc),
+        names=["temperature"],
+        sources=["openmeteo"],
+    )
+
+    assert list(frame["forecast_time_utc"]) == [
+        "2026-02-08T01:00:00+00:00",
+        "2026-02-08T01:10:00+00:00",
+        "2026-02-08T01:20:00+00:00",
+    ]
+    assert list(frame["value"]) == [6.0, 8.0, 10.0]
 
 
 def test_dataset_repository_reads_overlapping_price_intervals_as_dataframe(tmp_path) -> None:

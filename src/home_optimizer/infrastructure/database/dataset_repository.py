@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 from sqlalchemy import Select, select
 from sqlalchemy.orm import InstrumentedAttribute
 
+from home_optimizer.domain import ForecastEntry, latest_forecast_entries, resample_forecast_entries
+from home_optimizer.domain.time import parse_datetime
 from home_optimizer.domain.time import normalize_utc_timestamp
 from home_optimizer.infrastructure.database.orm_models import (
     ElectricityPriceIntervalValue,
@@ -16,6 +18,7 @@ from home_optimizer.infrastructure.database.orm_models import (
 from home_optimizer.infrastructure.database.session import Database
 
 _COVERAGE_TOLERANCE_MINUTES = 2
+_FORECAST_SOURCE_INTERVAL_MINUTES = 15
 
 
 def _frame_covers_range(
@@ -39,8 +42,9 @@ def _frame_covers_range(
 
 
 class DatasetRepository:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, forecast_interval_minutes: int = 10) -> None:
         self.database = database
+        self.forecast_interval_minutes = forecast_interval_minutes
 
     def read_samples(
         self,
@@ -145,15 +149,25 @@ class DatasetRepository:
         created_at_start_time: datetime | None = None,
         created_at_end_time: datetime | None = None,
     ) -> pd.DataFrame:
+        query_start_time = (
+            start_time - timedelta(minutes=_FORECAST_SOURCE_INTERVAL_MINUTES)
+            if start_time is not None
+            else None
+        )
+        query_end_time = (
+            end_time + timedelta(minutes=_FORECAST_SOURCE_INTERVAL_MINUTES)
+            if end_time is not None
+            else None
+        )
         statement: Select[tuple[object]] = select(ForecastValue)
 
-        if start_time is not None:
+        if query_start_time is not None:
             statement = statement.where(
-                ForecastValue.forecast_time_utc >= normalize_utc_timestamp(start_time)
+                ForecastValue.forecast_time_utc >= normalize_utc_timestamp(query_start_time)
             )
-        if end_time is not None:
+        if query_end_time is not None:
             statement = statement.where(
-                ForecastValue.forecast_time_utc < normalize_utc_timestamp(end_time)
+                ForecastValue.forecast_time_utc < normalize_utc_timestamp(query_end_time)
             )
         if created_at_start_time is not None:
             statement = statement.where(
@@ -176,7 +190,53 @@ class DatasetRepository:
         )
 
         with self.database.session() as session:
-            return pd.read_sql(statement, session.connection())
+            frame = pd.read_sql(statement, session.connection())
+
+        if frame.empty:
+            return frame
+
+        latest_entries = latest_forecast_entries(
+            [
+                ForecastEntry(
+                    created_at_utc=parse_datetime(str(row["created_at_utc"])),
+                    forecast_time_utc=parse_datetime(str(row["forecast_time_utc"])),
+                    name=str(row["name"]),
+                    value=float(row["value"]),
+                    unit=str(row["unit"]) if row["unit"] is not None else None,
+                    source=str(row["source"]),
+                )
+                for row in frame.to_dict(orient="records")
+            ]
+        )
+        if start_time is not None and end_time is not None:
+            latest_entries = resample_forecast_entries(
+                latest_entries,
+                start_time=start_time,
+                end_time=end_time,
+                interval_minutes=self.forecast_interval_minutes,
+            )
+
+        return pd.DataFrame(
+            [
+                {
+                    "created_at_utc": normalize_utc_timestamp(entry.created_at_utc),
+                    "forecast_time_utc": normalize_utc_timestamp(entry.forecast_time_utc),
+                    "name": entry.name,
+                    "source": entry.source,
+                    "unit": entry.unit,
+                    "value": entry.value,
+                }
+                for entry in latest_entries
+            ],
+            columns=[
+                "created_at_utc",
+                "forecast_time_utc",
+                "name",
+                "source",
+                "unit",
+                "value",
+            ],
+        )
 
     def read_electricity_price_intervals(
         self,

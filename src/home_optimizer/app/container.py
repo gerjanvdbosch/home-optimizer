@@ -95,8 +95,14 @@ def build_container(
     )
     history_import_repository = TimeSeriesWriteRepository(database, source=history_source)
     telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
-    dataset_repository = DatasetRepository(database)
-    time_series_read_repository = TimeSeriesReadRepository(database)
+    dataset_repository = DatasetRepository(
+        database,
+        forecast_interval_minutes=settings.forecast_interval_minutes,
+    )
+    time_series_read_repository = TimeSeriesReadRepository(
+        database,
+        forecast_interval_minutes=settings.forecast_interval_minutes,
+    )
     electricity_price_repository = ElectricityPriceRepository(database)
     forecast_repository = ForecastRepository(database)
     model_version_repository = ModelVersionRepository(database)
