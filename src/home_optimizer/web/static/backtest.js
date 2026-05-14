@@ -82,7 +82,6 @@ const runButton = document.getElementById("backtest-run-button");
 const statusNode = document.getElementById("backtest-status");
 const summaryCaptionNode = document.getElementById("backtest-summary-caption");
 const summaryBody = document.getElementById("backtest-summary-body");
-const stepsBody = document.getElementById("backtest-steps-body");
 const temperatureSummaryNode = document.getElementById("backtest-temp-summary");
 const switchSummaryNode = document.getElementById("backtest-switch-summary");
 const costSummaryNode = document.getElementById("backtest-cost-summary");
@@ -150,23 +149,6 @@ function renderSummary(payload) {
   summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen`;
 }
 
-function renderStepTable(payload) {
-  stepsBody.innerHTML = (payload.steps || []).map((step) => `
-    <tr>
-      <td>${chartTimestamp(step.timestamp_utc).slice(5, 16).replace("T", " ")}</td>
-      <td>${step.mpc_hp_on ? "on" : "off"}</td>
-      <td>${step.historical_hp_on ? "on" : "off"}</td>
-      <td>${formatNumber(step.simulated_next_room_temp_c)}</td>
-      <td>${formatNumber(step.historical_next_room_temp_c)}</td>
-      <td>${formatNumber(step.temp_min_c)} - ${formatNumber(step.temp_max_c)}</td>
-      <td>${formatNumber(step.slack_low_c)} / ${formatNumber(step.slack_high_c)}</td>
-      <td>${formatNumber(step.price_eur_kwh, 3)}</td>
-      <td>${formatNumber(step.estimated_mpc_energy_cost_eur, 3)}</td>
-      <td>${formatNumber(step.estimated_historical_energy_cost_eur, 3)}</td>
-      <td>${step.feasible ? "yes" : "no"}</td>
-    </tr>
-  `).join("");
-}
 
 function renderCharts(payload) {
   const timestamps = payload.steps.map((step) => chartTimestamp(step.timestamp_utc));
@@ -265,7 +247,6 @@ async function loadBacktest() {
       throw new Error(payload.detail || "Backtest request mislukt");
     }
     renderSummary(payload);
-    renderStepTable(payload);
     renderCharts(payload);
     statusNode.className = "status success";
     statusNode.textContent = "Backtest geladen";
