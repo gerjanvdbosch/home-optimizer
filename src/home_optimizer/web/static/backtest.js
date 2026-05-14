@@ -90,6 +90,9 @@ const temperatureChart = document.getElementById("backtest-temperature-chart");
 const switchChart = document.getElementById("backtest-switch-chart");
 const costChart = document.getElementById("backtest-cost-chart");
 const comfortChart = document.getElementById("backtest-comfort-chart");
+const previousDayButton = document.getElementById("backtest-previous-day");
+const nextDayButton = document.getElementById("backtest-next-day");
+const backtestSelectedDate = document.getElementById("backtest-selected-date");
 
 function setControlsDisabled(disabled) {
   if (runButton) {
@@ -107,6 +110,12 @@ function setControlsDisabled(disabled) {
   if (horizonStepsInput) {
     horizonStepsInput.disabled = disabled;
   }
+  if (previousDayButton) {
+    previousDayButton.disabled = disabled;
+  }
+  if (nextDayButton) {
+    nextDayButton.disabled = disabled;
+  }
 }
 
 async function loadModels() {
@@ -115,16 +124,44 @@ async function loadModels() {
     throw new Error("Kon modellijst niet laden");
   }
   const payload = await response.json();
+  const models = payload.models || [];
+  const previousValue = modelSelect.value;
   modelSelect.innerHTML = "";
-  for (const model of payload.models || []) {
+
+  if (!models.length) {
     const option = document.createElement("option");
-    option.value = model.model_id;
-    option.textContent = `${model.model_type} | ${model.model_id}${model.is_active ? " active" : ""}`;
-    if (model.is_active) {
-      option.selected = true;
-    }
+    option.value = "";
+    option.textContent = "Geen modellen beschikbaar";
     modelSelect.append(option);
+    modelSelect.disabled = true;
+    return;
   }
+
+  modelSelect.disabled = false;
+  const modelsByType = new Map();
+  for (const model of models) {
+    const entries = modelsByType.get(model.model_type) || [];
+    entries.push(model);
+    modelsByType.set(model.model_type, entries);
+  }
+
+  for (const [modelType, typeModels] of modelsByType.entries()) {
+    const group = document.createElement("optgroup");
+    group.label = modelType;
+    for (const model of typeModels) {
+      const option = document.createElement("option");
+      option.value = model.model_id;
+      option.textContent = `${model.model_type} | ${model.model_id}${model.is_active ? " active" : ""}`;
+      group.append(option);
+    }
+    modelSelect.append(group);
+  }
+
+  const selectedValue =
+    models.some((m) => m.model_id === previousValue)
+      ? previousValue
+      : (models.find((m) => m.is_active)?.model_id || models[0].model_id);
+  modelSelect.value = selectedValue;
 }
 
 function renderSummary(payload) {
@@ -258,12 +295,47 @@ async function loadBacktest() {
   }
 }
 
+function midnightOf(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function formatBacktestDisplayDate(startDate) {
+  return startDate.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function syncBacktestDateLabel(startDate) {
+  if (backtestSelectedDate) {
+    backtestSelectedDate.textContent = formatBacktestDisplayDate(startDate);
+  }
+}
+
+function setBacktestDateRange(startDate) {
+  const start = midnightOf(startDate);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  startTimeInput.value = localInputValue(start);
+  endTimeInput.value = localInputValue(end);
+  syncBacktestDateLabel(start);
+}
+
+function shiftBacktestDay(days) {
+  if (!startTimeInput?.value) {
+    return;
+  }
+  const current = midnightOf(new Date(startTimeInput.value));
+  current.setDate(current.getDate() + days);
+  setBacktestDateRange(current);
+  loadBacktest().catch((error) => {
+    statusNode.className = "status error";
+    statusNode.textContent = error instanceof Error ? error.message : String(error);
+  });
+}
+
 async function initializeBacktestPage() {
-  const now = new Date();
-  const endTime = new Date(now.getTime() - (now.getMinutes() % 10) * 60 * 1000);
-  const startTime = new Date(endTime.getTime() - (24 * 60 * 60 * 1000));
-  startTimeInput.value = localInputValue(startTime);
-  endTimeInput.value = localInputValue(endTime);
+  const yesterday = midnightOf(new Date());
+  yesterday.setDate(yesterday.getDate() - 1);
+  setBacktestDateRange(yesterday);
   await loadModels();
   await loadBacktest();
 }
@@ -275,6 +347,14 @@ if (runButton) {
       statusNode.textContent = error instanceof Error ? error.message : String(error);
     });
   });
+}
+
+if (previousDayButton) {
+  previousDayButton.addEventListener("click", () => shiftBacktestDay(-1));
+}
+
+if (nextDayButton) {
+  nextDayButton.addEventListener("click", () => shiftBacktestDay(1));
 }
 
 initializeBacktestPage().catch((error) => {
