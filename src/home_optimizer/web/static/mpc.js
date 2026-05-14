@@ -435,7 +435,6 @@ function initializeMpcPage() {
   }
   if (modelSelect) {
     modelSelect.addEventListener("change", () => {
-      applySelectedModelInterval(modelsById);
       loadPlan().catch(() => {});
     });
   }
