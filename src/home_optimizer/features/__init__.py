@@ -17,6 +17,8 @@ from .modeling import (
     RoomModelingService,
     RoomModelValidationReport,
     RoomRcConfig,
+    RoomSimulationResult,
+    RoomSimulationService,
     SegmentValidationReport,
     StoredModelVersion,
     StoredModelVersionSummary,
@@ -48,7 +50,6 @@ from .mpc import (
     to_control_model,
 )
 from .pricing import ElectricityPriceService
-from .simulation import RoomSimulationResult, RoomSimulationService
 from .telemetry import LiveMeasurement, TelemetryService
 
 __all__ = [

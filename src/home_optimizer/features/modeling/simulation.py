@@ -6,8 +6,10 @@ from home_optimizer.app.settings import AppSettings
 from home_optimizer.domain import NumericPoint, NumericSeries, normalize_utc_timestamp
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset import MpcDatasetService
-from home_optimizer.features.modeling import RoomModelingService, RoomRcModel, TrainedLinearRoomModel
-from home_optimizer.features.simulation.models import RoomSimulationResult
+from home_optimizer.features.modeling.models import RoomSimulationResult
+from home_optimizer.features.modeling.room_2r2c import RoomRcModel
+from home_optimizer.features.modeling.models import TrainedLinearRoomModel
+from home_optimizer.features.modeling.service import RoomModelingService
 
 
 def _empty_series(name: str, unit: str | None) -> NumericSeries:
@@ -173,3 +175,4 @@ class RoomSimulationService:
                 points=shutter_points,
             ),
         )
+

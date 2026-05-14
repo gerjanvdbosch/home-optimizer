@@ -15,11 +15,11 @@ from home_optimizer.features.identification import (
 )
 from home_optimizer.features.modeling import (
     RoomModelValidationReport,
+    RoomSimulationResult,
     StoredModelVersion,
     StoredModelVersionSummary,
 )
 from home_optimizer.features.mpc import MpcBacktestResult, MpcBacktestSummary
-from home_optimizer.features.simulation import RoomSimulationResult
 from home_optimizer.web.schemas import (
     BaselineKpiSummaryResponse,
     ChartPointResponse,

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from home_optimizer.app import AppSettings
-from home_optimizer.features.simulation import RoomSimulationService
+from home_optimizer.features.modeling import RoomSimulationService
 from home_optimizer.web.dependencies import get_container
 from home_optimizer.web.mappers import room_simulation_response
 from home_optimizer.web.pages import build_dashboard_view_model, render_template
