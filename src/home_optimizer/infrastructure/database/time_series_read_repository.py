@@ -34,9 +34,9 @@ _FORECAST_SOURCE_INTERVAL_MINUTES = 15
 
 
 class TimeSeriesReadRepository:
-    def __init__(self, database: Database, *, forecast_interval_minutes: int = 10) -> None:
+    def __init__(self, database: Database, *, mpc_interval_minutes: int = 10) -> None:
         self.database = database
-        self.forecast_interval_minutes = forecast_interval_minutes
+        self.mpc_interval_minutes = mpc_interval_minutes
 
     def read_series(
         self,
@@ -338,7 +338,7 @@ class TimeSeriesReadRepository:
             latest_entries,
             start_time=start_time,
             end_time=end_time,
-            interval_minutes=self.forecast_interval_minutes,
+            interval_minutes=self.mpc_interval_minutes,
         )
 
     def read_electricity_price_series(

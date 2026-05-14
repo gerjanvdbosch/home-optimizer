@@ -21,7 +21,7 @@ class AppSettings(DomainModel):
     history_import_chunk_days: int = Field(default=3, gt=0)
     history_import_max_days_back: int = Field(default=10, gt=0)
     forecast_poll_interval_seconds: int = Field(default=3600, gt=0)
-    forecast_interval_minutes: int = Field(default=10, gt=0, le=60)
+    mpc_interval_minutes: int = Field(default=10, gt=0, le=60)
     pv_tilt: float | None = Field(default=None, ge=0, le=90)
     pv_azimuth: float | None = Field(default=None, ge=0, lt=360)
     living_room_window_azimuth: float | None = Field(default=None, ge=0, lt=360)

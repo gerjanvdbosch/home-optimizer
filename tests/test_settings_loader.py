@@ -85,5 +85,4 @@ def test_app_settings_defaults_to_dynamic_pricing() -> None:
     )
 
     assert settings.electricity_pricing == DynamicPricing()
-    assert settings.forecast_interval_minutes == 10
-
+    assert settings.mpc_interval_minutes == 10

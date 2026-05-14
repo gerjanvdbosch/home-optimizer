@@ -88,7 +88,7 @@ def test_time_series_read_repository_reads_latest_forecast_batch(tmp_path) -> No
 def test_time_series_read_repository_resamples_forecast_series_to_configured_interval(tmp_path) -> None:
     database = Database(str(tmp_path / "dashboard_resampled.sqlite"))
     database.init_schema()
-    repository = TimeSeriesReadRepository(database, forecast_interval_minutes=10)
+    repository = TimeSeriesReadRepository(database, mpc_interval_minutes=10)
 
     with database.session() as session:
         session.add_all(

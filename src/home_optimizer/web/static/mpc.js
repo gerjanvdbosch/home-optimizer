@@ -61,7 +61,6 @@ function lineTrace(x, y, name, color, options = {}) {
 const startTimeInput = document.getElementById("mpc-start-time");
 const modelSelect = document.getElementById("mpc-model-select");
 const horizonStepsInput = document.getElementById("mpc-horizon-steps");
-const intervalMinutesInput = document.getElementById("mpc-interval-minutes");
 const heatingKwInput = document.getElementById("mpc-heating-kw");
 const planButton = document.getElementById("mpc-plan-button");
 const previousDayButton = document.getElementById("mpc-previous-day");
@@ -136,16 +135,6 @@ function modelLabel(model) {
   return `${model.model_type} | ${model.model_id}${activeSuffix}`;
 }
 
-function applySelectedModelInterval(modelsById) {
-  if (!modelSelect || !intervalMinutesInput) {
-    return;
-  }
-  const selectedModel = modelsById.get(modelSelect.value);
-  if (selectedModel?.interval_minutes) {
-    intervalMinutesInput.value = String(selectedModel.interval_minutes);
-  }
-}
-
 function populateMpcModelSelect(models) {
   if (!modelSelect) {
     return new Map();
@@ -188,7 +177,6 @@ function populateMpcModelSelect(models) {
     modelsById.has(previousValue)
       ? previousValue
       : (models.find((model) => model.is_active)?.model_id || models[0].model_id);
-  applySelectedModelInterval(modelsById);
   return modelsById;
 }
 
@@ -405,7 +393,6 @@ async function loadPlan() {
     const params = new URLSearchParams({
       start_time: startTime.toISOString(),
       horizon_steps: String(Number(horizonStepsInput?.value || "144")),
-      interval_minutes: String(Number(intervalMinutesInput?.value || "10")),
       default_effective_heating_kw: String(Number(heatingKwInput?.value || "3.5")),
     });
     if (modelSelect?.value) {

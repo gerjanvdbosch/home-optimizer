@@ -178,7 +178,7 @@ def test_dataset_repository_reads_forecast_values_as_dataframe(tmp_path) -> None
 def test_dataset_repository_resamples_forecast_values_to_configured_interval(tmp_path) -> None:
     database = Database(str(tmp_path / "dataset_repository_forecast_resampled.sqlite"))
     database.init_schema()
-    repository = DatasetRepository(database, forecast_interval_minutes=10)
+    repository = DatasetRepository(database, mpc_interval_minutes=10)
 
     with database.session() as session:
         session.execute(

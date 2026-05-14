@@ -33,11 +33,13 @@ class SpaceHeatingMpcPlanningService:
         samples_reader: DatasetSampleFrameReader,
         active_room_model_reader: ActiveRoomModelReaderPort,
         target_schedule: list[TemperatureTargetWindow],
+        default_interval_minutes: int = 10,
         controller: SpaceHeatingMpcControllerService | None = None,
     ) -> None:
         self.samples_reader = samples_reader
         self.active_room_model_reader = active_room_model_reader
         self.target_schedule = list(target_schedule)
+        self.default_interval_minutes = default_interval_minutes
         self.controller = controller or SpaceHeatingMpcControllerService()
 
     def plan(
@@ -64,7 +66,7 @@ class SpaceHeatingMpcPlanningService:
             raise ValueError("Active room model has an unsupported type for MPC planning")
 
         resolved_start_time = ensure_utc(start_time_utc)
-        resolved_interval_minutes = interval_minutes or source_model.interval_minutes
+        resolved_interval_minutes = interval_minutes or self.default_interval_minutes
         resolved_constraints = constraints or MpcConstraints()
         resolved_weights = objective_weights or MpcObjectiveWeights()
 

@@ -29,7 +29,7 @@ OptionalStartTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="validat
 OptionalEndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="validation_end_time")]
 OptionalTestStartTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="test_start_time")]
 OptionalTestEndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="test_end_time")]
-IntervalQuery = Annotated[int, Query(alias="interval_minutes", ge=1, le=60)]
+IntervalQuery = Annotated[int | None, Query(alias="interval_minutes", ge=1, le=60)]
 TrainingWindowQuery = Annotated[int | None, Query(alias="training_window_rows", gt=1)]
 ValidationWindowQuery = Annotated[int, Query(alias="validation_window_rows", gt=1)]
 MinTrainRowsQuery = Annotated[int, Query(alias="min_train_rows", gt=1)]
@@ -95,7 +95,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         validation_end_time: OptionalEndTimeQuery = None,
         test_start_time: OptionalTestStartTimeQuery = None,
         test_end_time: OptionalTestEndTimeQuery = None,
-        interval_minutes: IntervalQuery = 10,
+        interval_minutes: IntervalQuery = None,
         training_window_rows: TrainingWindowQuery = None,
         validation_window_rows: ValidationWindowQuery = 144,
         min_train_rows: MinTrainRowsQuery = 96,
@@ -107,6 +107,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
             settings,
         )
         modeling_service = RoomModelingService()
+        resolved_interval_minutes = interval_minutes or settings.mpc_interval_minutes
         if model_type == ROOM_ARX_MODEL_KIND:
             config = RoomArxConfig(
                 min_train_rows=min_train_rows,
@@ -141,14 +142,14 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
             dataset = dataset_service.build_dataset(
                 start_time=start_time,
                 end_time=end_time,
-                interval_minutes=interval_minutes,
+                interval_minutes=resolved_interval_minutes,
             )
             if validation_start_time is not None and validation_end_time is not None:
                 train_dataset = dataset
                 validation_dataset = dataset_service.build_dataset(
                     start_time=validation_start_time,
                     end_time=validation_end_time,
-                    interval_minutes=interval_minutes,
+                    interval_minutes=resolved_interval_minutes,
                 )
             else:
                 train_dataset, validation_dataset, auto_test_dataset = _auto_split_dataset(
@@ -171,7 +172,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
                     test_dataset = dataset_service.build_dataset(
                         start_time=test_start_time,
                         end_time=test_end_time,
-                        interval_minutes=interval_minutes,
+                        interval_minutes=resolved_interval_minutes,
                     )
                 test_report = modeling_service.validation_report_for_model(
                     test_dataset,

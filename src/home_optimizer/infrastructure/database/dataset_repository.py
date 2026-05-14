@@ -42,9 +42,9 @@ def _frame_covers_range(
 
 
 class DatasetRepository:
-    def __init__(self, database: Database, *, forecast_interval_minutes: int = 10) -> None:
+    def __init__(self, database: Database, *, mpc_interval_minutes: int = 10) -> None:
         self.database = database
-        self.forecast_interval_minutes = forecast_interval_minutes
+        self.mpc_interval_minutes = mpc_interval_minutes
 
     def read_samples(
         self,
@@ -213,7 +213,7 @@ class DatasetRepository:
                 latest_entries,
                 start_time=start_time,
                 end_time=end_time,
-                interval_minutes=self.forecast_interval_minutes,
+                interval_minutes=self.mpc_interval_minutes,
             )
 
         return pd.DataFrame(

@@ -152,7 +152,7 @@ class FakeSpaceHeatingMpcPlanningService:
         default_effective_heating_kw: float | None = None,
         max_solver_seconds: float | None = None,
     ) -> MpcPlan:
-        resolved_interval_minutes = interval_minutes or 10
+        resolved_interval_minutes = interval_minutes or 12
         return MpcPlan(
             status="ok",
             termination_condition="optimal",
@@ -644,6 +644,7 @@ def build_test_app(
                 {"time": "21:00", "target": 50.0, "low_margin": 2.0, "high_margin": 5.0},
                 {"time": "21:01", "target": 20.0, "low_margin": 5.0, "high_margin": 30.0},
             ],
+            "mpc_interval_minutes": 12,
         }
     )
     app = create_app(
@@ -733,7 +734,6 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
                 "start_time": "2026-04-25T12:00:00+00:00",
                 "model_id": "room-model-active",
                 "horizon_steps": 4,
-                "interval_minutes": 10,
                 "default_effective_heating_kw": 2.5,
             },
         )
@@ -782,7 +782,7 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert 'id="mpc-summary-objective-energy"' in response.text
     assert 'id="mpc-heating-explanation"' in response.text
     assert 'id="mpc-horizon-steps" type="number" min="1" max="288" value="144"' in response.text
-    assert 'id="mpc-interval-minutes" type="number" min="1" max="60" value="10"' in response.text
+    assert 'id="mpc-interval-minutes"' not in response.text
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:
@@ -863,6 +863,25 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert len(payload["test_aggregate_metrics"]) == 5
     assert app.state.container.model_version_repository.saved_versions
     assert app.state.container.model_version_repository.saved_versions[0].is_active is True
+
+
+def test_train_endpoint_defaults_to_mpc_interval_setting() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/train",
+            params={
+                "start_time": "2026-04-25T00:00:00+00:00",
+                "end_time": "2026-04-26T00:00:00+00:00",
+                "min_train_rows": 20,
+                "validation_window_rows": 24,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["interval_minutes"] == 12
 
 
 def test_train_endpoint_supports_physical_rc_room_model() -> None:

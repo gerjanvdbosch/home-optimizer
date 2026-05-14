@@ -97,11 +97,11 @@ def build_container(
     telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
     dataset_repository = DatasetRepository(
         database,
-        forecast_interval_minutes=settings.forecast_interval_minutes,
+        mpc_interval_minutes=settings.mpc_interval_minutes,
     )
     time_series_read_repository = TimeSeriesReadRepository(
         database,
-        forecast_interval_minutes=settings.forecast_interval_minutes,
+        mpc_interval_minutes=settings.mpc_interval_minutes,
     )
     electricity_price_repository = ElectricityPriceRepository(database)
     forecast_repository = ForecastRepository(database)
@@ -153,6 +153,7 @@ def build_container(
         samples_reader=dataset_repository,
         active_room_model_reader=model_version_repository,
         target_schedule=settings.room_target,
+        default_interval_minutes=settings.mpc_interval_minutes,
     )
 
     return AppContainer(
