@@ -7,6 +7,7 @@ from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.explain import explain_heating_plan
 from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.models import (
+    ControlModelKind,
     ControlModelConversionOptions,
     LinearThermalControlModel,
     MpcControllerRequest,
@@ -15,6 +16,8 @@ from home_optimizer.features.mpc.models import (
     MpcInitialState,
     MpcPlan,
     MpcProblem,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
 )
 from home_optimizer.features.mpc.space_heating_mpc import SpaceHeatingMpcSolver
 
@@ -24,9 +27,15 @@ class SpaceHeatingMpcControllerService:
         self,
         *,
         solver: SpaceHeatingMpcSolver | None = None,
-        control_model_provider: Callable[[], LinearThermalControlModel] | None = None,
+        control_model_provider: Callable[
+            [],
+            LinearThermalControlModel | Rc2StateThermalControlModel,
+        ] | None = None,
         horizon_provider: Callable[[], list[MpcHorizonStep]] | None = None,
-        initial_state_provider: Callable[[], MpcInitialState] | None = None,
+        initial_state_provider: Callable[
+            [],
+            MpcInitialState | Rc2StateMpcInitialState,
+        ] | None = None,
         horizon_builder: MpcHorizonBuilder | None = None,
     ) -> None:
         self.solver = solver or SpaceHeatingMpcSolver()
@@ -39,8 +48,8 @@ class SpaceHeatingMpcControllerService:
         self,
         request: MpcControllerRequest,
         *,
-        control_model: LinearThermalControlModel | None = None,
-        initial_state: MpcInitialState | None = None,
+        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None = None,
+        initial_state: MpcInitialState | Rc2StateMpcInitialState | None = None,
         horizon: list[MpcHorizonStep] | None = None,
     ) -> MpcPlan:
         resolved_control_model = self._resolve_control_model(control_model)
@@ -76,21 +85,26 @@ class SpaceHeatingMpcControllerService:
         request: MpcControllerRequest,
         *,
         source_model: TrainedLinearRoomModel | RoomRcModel,
-        initial_state: MpcInitialState,
+        initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: list[MpcHorizonStep] | None = None,
         conversion_options: ControlModelConversionOptions | None = None,
+        control_model_kind: ControlModelKind = "linear_1state",
     ) -> MpcPlan:
         return self.plan(
             request,
-            control_model=to_control_model(source_model, options=conversion_options),
+            control_model=to_control_model(
+                source_model,
+                options=conversion_options,
+                control_model_kind=control_model_kind,
+            ),
             initial_state=initial_state,
             horizon=horizon,
         )
 
     def _resolve_control_model(
         self,
-        control_model: LinearThermalControlModel | None,
-    ) -> LinearThermalControlModel:
+        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None,
+    ) -> LinearThermalControlModel | Rc2StateThermalControlModel:
         if control_model is not None:
             return control_model
         if self.control_model_provider is None:
@@ -101,8 +115,8 @@ class SpaceHeatingMpcControllerService:
 
     def _resolve_initial_state(
         self,
-        initial_state: MpcInitialState | None,
-    ) -> MpcInitialState:
+        initial_state: MpcInitialState | Rc2StateMpcInitialState | None,
+    ) -> MpcInitialState | Rc2StateMpcInitialState:
         if initial_state is not None:
             return initial_state
         if self.initial_state_provider is None:

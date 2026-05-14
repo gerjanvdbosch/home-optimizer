@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -39,6 +40,56 @@ class LinearThermalControlModel(DomainModel):
             + (self.b_occ * occupied)
             + self.c
         )
+
+
+class Rc2StateThermalControlModel(DomainModel):
+    a11: float
+    a12: float
+    a21: float
+    a22: float
+    b_out_room: float
+    b_out_mass: float
+    b_heat_room: float = 0.0
+    b_heat_mass: float
+    b_solar_room: float
+    b_solar_mass: float = 0.0
+    b_occ_room: float
+    b_occ_mass: float = 0.0
+    c_room: float = 0.0
+    c_mass: float = 0.0
+    notes: str = Field(
+        default="Control-oriented 2-state room/mass thermal model for space-heating MPC."
+    )
+
+    def predict_next_state(
+        self,
+        *,
+        room_temp_c: float,
+        mass_temp_c: float,
+        outdoor_temp_c: float,
+        solar_gain_kw: float,
+        heating_effect_kw: float,
+        occupied: float,
+    ) -> tuple[float, float]:
+        next_room_temp_c = float(
+            (self.a11 * room_temp_c)
+            + (self.a12 * mass_temp_c)
+            + (self.b_out_room * outdoor_temp_c)
+            + (self.b_heat_room * heating_effect_kw)
+            + (self.b_solar_room * solar_gain_kw)
+            + (self.b_occ_room * occupied)
+            + self.c_room
+        )
+        next_mass_temp_c = float(
+            (self.a21 * room_temp_c)
+            + (self.a22 * mass_temp_c)
+            + (self.b_out_mass * outdoor_temp_c)
+            + (self.b_heat_mass * heating_effect_kw)
+            + (self.b_solar_mass * solar_gain_kw)
+            + (self.b_occ_mass * occupied)
+            + self.c_mass
+        )
+        return next_room_temp_c, next_mass_temp_c
 
 
 class MpcHorizonStep(DomainModel):
@@ -90,6 +141,10 @@ class MpcInitialState(DomainModel):
         return self
 
 
+class Rc2StateMpcInitialState(MpcInitialState):
+    mass_temp_c: float
+
+
 class MpcConstraints(DomainModel):
     min_on_steps: int = Field(default=1, ge=1)
     min_off_steps: int = Field(default=1, ge=1)
@@ -105,8 +160,8 @@ class MpcObjectiveWeights(DomainModel):
 
 class MpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
-    control_model: LinearThermalControlModel
-    initial_state: MpcInitialState
+    control_model: Rc2StateThermalControlModel | LinearThermalControlModel
+    initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
@@ -119,6 +174,11 @@ class MpcProblem(DomainModel):
         timestamps = [step.timestamp_utc for step in self.horizon]
         if timestamps != sorted(timestamps):
             raise ValueError("horizon timestamps must be sorted ascending")
+        if isinstance(self.control_model, Rc2StateThermalControlModel) and not isinstance(
+            self.initial_state,
+            Rc2StateMpcInitialState,
+        ):
+            raise ValueError("Rc2StateThermalControlModel requires Rc2StateMpcInitialState")
         return self
 
     @property
@@ -190,6 +250,9 @@ class MpcControllerRequest(DomainModel):
 
 class ControlModelConversionOptions(DomainModel):
     solar_gain_input_scale: float = Field(default=1.0, gt=0.0)
+
+
+ControlModelKind = Literal["linear_1state", "rc_2state"]
 
 
 class MpcHorizonBuildRequest(DomainModel):

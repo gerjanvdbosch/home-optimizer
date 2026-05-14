@@ -8,14 +8,16 @@ from home_optimizer.features.mpc.models import (
     MpcHorizonStep,
     MpcInitialState,
     MpcPlan,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
 )
 
 
 def explain_heating_plan(
     *,
     plan: MpcPlan,
-    control_model: LinearThermalControlModel,
-    initial_state: MpcInitialState,
+    control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+    initial_state: MpcInitialState | Rc2StateMpcInitialState,
     horizon: list[MpcHorizonStep],
 ) -> str | None:
     if not plan.steps:
@@ -54,8 +56,8 @@ def explain_heating_plan(
 
 def rollout_without_heating(
     *,
-    control_model: LinearThermalControlModel,
-    initial_state: MpcInitialState,
+    control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+    initial_state: MpcInitialState | Rc2StateMpcInitialState,
     horizon: list[MpcHorizonStep],
 ) -> list[float]:
     if not horizon:
@@ -63,14 +65,29 @@ def rollout_without_heating(
 
     predicted_temperatures = [initial_state.room_temp_c]
     current_temp_c = initial_state.room_temp_c
+    current_mass_temp_c = (
+        initial_state.mass_temp_c if isinstance(initial_state, Rc2StateMpcInitialState) else None
+    )
     for step in horizon[:-1]:
-        current_temp_c = control_model.predict_next_temperature(
-            room_temp_c=current_temp_c,
-            outdoor_temp_c=step.outdoor_temp_c,
-            solar_gain_kw=step.solar_gain_kw,
-            heating_effect_kw=0.0,
-            occupied=step.occupied,
-        )
+        if isinstance(control_model, Rc2StateThermalControlModel):
+            if current_mass_temp_c is None:
+                raise ValueError("Rc2StateThermalControlModel requires Rc2StateMpcInitialState")
+            current_temp_c, current_mass_temp_c = control_model.predict_next_state(
+                room_temp_c=current_temp_c,
+                mass_temp_c=current_mass_temp_c,
+                outdoor_temp_c=step.outdoor_temp_c,
+                solar_gain_kw=step.solar_gain_kw,
+                heating_effect_kw=0.0,
+                occupied=step.occupied,
+            )
+        else:
+            current_temp_c = control_model.predict_next_temperature(
+                room_temp_c=current_temp_c,
+                outdoor_temp_c=step.outdoor_temp_c,
+                solar_gain_kw=step.solar_gain_kw,
+                heating_effect_kw=0.0,
+                occupied=step.occupied,
+            )
         predicted_temperatures.append(current_temp_c)
     return predicted_temperatures
 

@@ -16,6 +16,8 @@ from home_optimizer.features.mpc import (
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     SpaceHeatingMpcControllerService,
     to_control_model,
 )
@@ -53,7 +55,7 @@ def test_to_control_model_from_arx_aggregates_matching_coefficients() -> None:
     assert control_model.c == pytest.approx(1.25)
 
 
-def test_to_control_model_from_room_rc_matches_reduced_discrete_terms() -> None:
+def test_to_control_model_from_room_rc_matches_dominant_mode_projection() -> None:
     room_rc_model = RoomRcModel(
         trained_from_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
         trained_to_utc=datetime(2026, 1, 2, tzinfo=timezone.utc),
@@ -65,18 +67,49 @@ def test_to_control_model_from_room_rc_matches_reduced_discrete_terms() -> None:
 
     control_model = to_control_model(room_rc_model)
     physical = RoomRC2StatePhysicalModel(RoomRcConfig(interval_minutes=10))
-    f_matrix, g_matrix, a_discrete, _ = physical.params_to_matrices(RoomRC2StateParams())
-    steady_state_gain = -np.linalg.inv(f_matrix) @ g_matrix
-    dominant_eigenvalue = float(np.max(np.abs(np.linalg.eigvals(a_discrete))))
-    one_minus_a = 1.0 - dominant_eigenvalue
+    _, _, a_discrete, b_discrete = physical.params_to_matrices(RoomRC2StateParams())
+    eigenvalues, right_eigenvectors = np.linalg.eig(a_discrete)
+    dominant_index = int(np.argmax(np.abs(eigenvalues)))
+    dominant_eigenvalue = float(np.real_if_close(eigenvalues[dominant_index]))
+    dominant_right = np.real_if_close(right_eigenvectors[:, dominant_index]).astype(float)
+    dominant_right = dominant_right / dominant_right[0]
+
+    left_eigenvalues, left_eigenvectors = np.linalg.eig(a_discrete.T)
+    left_index = int(np.argmin(np.abs(left_eigenvalues - eigenvalues[dominant_index])))
+    dominant_left = np.real_if_close(left_eigenvectors[:, left_index]).astype(float)
+    dominant_left = dominant_left / float(dominant_left @ dominant_right)
+    reduced_inputs = dominant_left @ b_discrete
 
     assert control_model.a == pytest.approx(dominant_eigenvalue)
-    assert control_model.b_out == pytest.approx(float(steady_state_gain[0, 0] * one_minus_a))
-    assert control_model.b_heat == pytest.approx(float(steady_state_gain[0, 1] * one_minus_a))
-    assert control_model.b_solar == pytest.approx(
-        float((steady_state_gain[0, 2] + steady_state_gain[0, 3]) * one_minus_a)
+    assert control_model.b_out == pytest.approx(float(reduced_inputs[0]))
+    assert control_model.b_heat == pytest.approx(float(reduced_inputs[1]))
+    assert control_model.b_solar == pytest.approx(float(reduced_inputs[2] + reduced_inputs[3]))
+    assert control_model.b_occ == pytest.approx(float(reduced_inputs[4]))
+
+
+def test_to_control_model_from_room_rc_supports_exact_2state_conversion() -> None:
+    params = RoomRC2StateParams()
+    room_rc_model = RoomRcModel(
+        trained_from_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        trained_to_utc=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        interval_minutes=10,
+        config=RoomRcConfig(),
+        params=params.to_dict(),
+        sample_count=100,
     )
-    assert control_model.b_occ == pytest.approx(float(steady_state_gain[0, 4] * one_minus_a))
+
+    control_model = to_control_model(room_rc_model, control_model_kind="rc_2state")
+
+    assert isinstance(control_model, Rc2StateThermalControlModel)
+    physical = RoomRC2StatePhysicalModel(RoomRcConfig(interval_minutes=10))
+    _, _, a_discrete, b_discrete = physical.params_to_matrices(params)
+    assert control_model.a11 == pytest.approx(float(a_discrete[0, 0]))
+    assert control_model.a12 == pytest.approx(float(a_discrete[0, 1]))
+    assert control_model.a21 == pytest.approx(float(a_discrete[1, 0]))
+    assert control_model.a22 == pytest.approx(float(a_discrete[1, 1]))
+    assert control_model.b_out_room == pytest.approx(float(b_discrete[0, 0]))
+    assert control_model.b_out_mass == pytest.approx(float(b_discrete[1, 0]))
+    assert control_model.b_heat_mass == pytest.approx(float(b_discrete[1, 1]))
 
 
 def test_room_rc_control_model_allows_heating_to_raise_predicted_temperature() -> None:
@@ -113,6 +146,47 @@ def test_room_rc_control_model_allows_heating_to_raise_predicted_temperature() -
     assert plan.feasible is True
     heated_steps = [step for step in plan.steps if step.hp_on]
     assert heated_steps
-    assert max(
-        step.predicted_room_temp_c for step in heated_steps
-    ) > heated_steps[0].predicted_room_temp_c
+    assert max(step.predicted_room_temp_c for step in plan.steps[1:]) > plan.steps[0].predicted_room_temp_c
+
+
+def test_room_rc_2state_control_model_allows_heating_to_raise_predicted_temperature() -> None:
+    start_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    room_rc_model = RoomRcModel(
+        trained_from_utc=start_time,
+        trained_to_utc=start_time + timedelta(days=1),
+        interval_minutes=10,
+        config=RoomRcConfig(),
+        params=RoomRC2StateParams().to_dict(),
+        sample_count=100,
+    )
+
+    plan = SpaceHeatingMpcControllerService().plan_from_source_model(
+        MpcControllerRequest(
+            interval_minutes=10,
+            horizon=[
+                MpcHorizonStep(
+                    timestamp_utc=start_time + timedelta(minutes=10 * step),
+                    outdoor_temp_c=5.0,
+                    solar_gain_kw=0.0,
+                    effective_heating_kw_forecast=2.5,
+                    occupied=0.0,
+                    temp_min_c=20.0,
+                    temp_max_c=21.0,
+                )
+                for step in range(12)
+            ],
+        ),
+        source_model=room_rc_model,
+        initial_state=Rc2StateMpcInitialState(
+            room_temp_c=18.0,
+            mass_temp_c=18.0,
+            hp_on=False,
+            off_steps=1,
+        ),
+        control_model_kind="rc_2state",
+    )
+
+    assert plan.feasible is True
+    heated_steps = [step for step in plan.steps if step.hp_on]
+    assert heated_steps
+    assert heated_steps[0].start is True

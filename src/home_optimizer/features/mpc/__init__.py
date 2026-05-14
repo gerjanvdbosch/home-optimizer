@@ -8,6 +8,7 @@ from .horizon_builder import (
     MpcHorizonBuilder,
 )
 from .models import (
+    ControlModelKind,
     ControlModelConversionOptions,
     LinearThermalControlModel,
     MpcBacktestResult,
@@ -22,12 +23,15 @@ from .models import (
     MpcPlan,
     MpcPlanStep,
     MpcProblem,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
 )
 from .planning_service import SpaceHeatingMpcPlanningService
 from .space_heating_mpc import SpaceHeatingMpcSolver
 
 __all__ = [
     "ControlModelConversionOptions",
+    "ControlModelKind",
     "DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME",
     "DEFAULT_SOLAR_GAIN_FORECAST_NAME",
     "LinearThermalControlModel",
@@ -44,6 +48,8 @@ __all__ = [
     "MpcPlan",
     "MpcPlanStep",
     "MpcProblem",
+    "Rc2StateMpcInitialState",
+    "Rc2StateThermalControlModel",
     "SpaceHeatingMpcBacktestRunner",
     "SpaceHeatingMpcControllerService",
     "SpaceHeatingMpcPlanningService",

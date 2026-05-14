@@ -24,6 +24,7 @@ from .modeling import (
 from .mpc import (
     DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME,
     DEFAULT_SOLAR_GAIN_FORECAST_NAME,
+    ControlModelKind,
     ControlModelConversionOptions,
     LinearThermalControlModel,
     MpcBacktestResult,
@@ -36,6 +37,8 @@ from .mpc import (
     MpcObjectiveBreakdown,
     MpcObjectiveWeights,
     MpcPlan,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     SpaceHeatingMpcBacktestRunner,
     SpaceHeatingMpcControllerService,
     SpaceHeatingMpcPlanningService,
@@ -50,6 +53,7 @@ from .telemetry import LiveMeasurement, TelemetryService
 __all__ = [
     "DailyKpiService",
     "ControlModelConversionOptions",
+    "ControlModelKind",
     "DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME",
     "DEFAULT_SOLAR_GAIN_FORECAST_NAME",
     "HistoryImportRequest",
@@ -70,6 +74,8 @@ __all__ = [
     "MpcObjectiveBreakdown",
     "MpcObjectiveWeights",
     "MpcPlan",
+    "Rc2StateMpcInitialState",
+    "Rc2StateThermalControlModel",
     "RoomArxConfig",
     "RoomRcConfig",
     "RoomModelValidationReport",

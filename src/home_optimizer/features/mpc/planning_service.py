@@ -11,8 +11,10 @@ from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
+from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams
 from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
 from home_optimizer.features.mpc.models import (
+    ControlModelKind,
     ControlModelConversionOptions,
     MpcConstraints,
     MpcControllerRequest,
@@ -20,6 +22,7 @@ from home_optimizer.features.mpc.models import (
     MpcInitialState,
     MpcObjectiveWeights,
     MpcPlan,
+    Rc2StateMpcInitialState,
 )
 from home_optimizer.features.mpc.ports import ActiveRoomModelReaderPort
 
@@ -50,6 +53,7 @@ class SpaceHeatingMpcPlanningService:
         default_effective_heating_kw: float | None = None,
         max_solver_seconds: float | None = None,
         conversion_options: ControlModelConversionOptions | None = None,
+        control_model_kind: ControlModelKind | None = None,
     ) -> MpcPlan:
         version = self._resolve_room_model_version(model_id)
         if version is None:
@@ -60,6 +64,10 @@ class SpaceHeatingMpcPlanningService:
         source_model = version.model
         if not isinstance(source_model, (TrainedLinearRoomModel, RoomRcModel)):
             raise ValueError("Active room model has an unsupported type for MPC planning")
+        resolved_control_model_kind = self._resolve_control_model_kind(
+            source_model=source_model,
+            control_model_kind=control_model_kind,
+        )
 
         resolved_start_time = ensure_utc(start_time_utc)
         resolved_interval_minutes = interval_minutes or source_model.interval_minutes
@@ -78,7 +86,11 @@ class SpaceHeatingMpcPlanningService:
             interval_minutes=resolved_interval_minutes,
             history_rows=history_rows,
         )
-        initial_state = self._initial_state_from_rows(initial_rows)
+        initial_state = self._initial_state_from_rows(
+            initial_rows,
+            source_model=source_model,
+            control_model_kind=resolved_control_model_kind,
+        )
         effective_heating_kw = self._resolve_effective_heating_kw(
             initial_rows,
             fallback_kw=default_effective_heating_kw,
@@ -132,6 +144,7 @@ class SpaceHeatingMpcPlanningService:
             initial_state=initial_state,
             horizon=horizon,
             conversion_options=conversion_options,
+            control_model_kind=resolved_control_model_kind,
         )
 
     def _resolve_room_model_version(self, model_id: str | None) -> StoredModelVersion | None:
@@ -212,7 +225,13 @@ class SpaceHeatingMpcPlanningService:
             )
         return intervals
 
-    def _initial_state_from_rows(self, rows: list[MpcDatasetRow]) -> MpcInitialState:
+    def _initial_state_from_rows(
+        self,
+        rows: list[MpcDatasetRow],
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        control_model_kind: ControlModelKind,
+    ) -> MpcInitialState | Rc2StateMpcInitialState:
         latest = rows[-1]
         if latest.room_temperature_c is None:
             raise ValueError(
@@ -224,12 +243,36 @@ class SpaceHeatingMpcPlanningService:
             if self._row_hp_on(row) != latest_hp_on:
                 break
             contiguous_steps += 1
-        return MpcInitialState(
+        base_state = MpcInitialState(
             room_temp_c=float(latest.room_temperature_c),
             hp_on=latest_hp_on,
             on_steps=contiguous_steps if latest_hp_on else 0,
             off_steps=contiguous_steps if not latest_hp_on else 0,
         )
+        if control_model_kind != "rc_2state":
+            return base_state
+        if not isinstance(source_model, RoomRcModel):
+            raise ValueError("rc_2state MPC requires a room_2r2c source model")
+        params = RoomRC2StateParams.from_dict(source_model.params)
+        return Rc2StateMpcInitialState(
+            room_temp_c=base_state.room_temp_c,
+            mass_temp_c=base_state.room_temp_c + params.initial_mass_offset_c,
+            hp_on=base_state.hp_on,
+            on_steps=base_state.on_steps,
+            off_steps=base_state.off_steps,
+        )
+
+    def _resolve_control_model_kind(
+        self,
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        control_model_kind: ControlModelKind | None,
+    ) -> ControlModelKind:
+        if control_model_kind is not None:
+            return control_model_kind
+        if isinstance(source_model, RoomRcModel):
+            return "rc_2state"
+        return "linear_1state"
 
     def _resolve_effective_heating_kw(
         self,

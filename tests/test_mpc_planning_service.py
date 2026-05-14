@@ -7,8 +7,9 @@ from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.modeling.models import StoredModelVersion
+from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams, RoomRcConfig, RoomRcModel
 from home_optimizer.features.modeling.room_arx import RoomArxConfig, RoomArxModel
-from home_optimizer.features.mpc import SpaceHeatingMpcPlanningService
+from home_optimizer.features.mpc import MpcPlan, Rc2StateMpcInitialState, SpaceHeatingMpcPlanningService
 
 
 class _UnusedSamplesReader:
@@ -134,3 +135,82 @@ def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkey
     assert len(plan.steps) == 6
     assert plan.steps[0].timestamp_utc == start_time
     assert plan.steps[1].timestamp_utc == start_time + timedelta(minutes=10)
+
+
+def test_space_heating_mpc_planning_service_uses_2state_initial_state_for_room_rc(
+    monkeypatch,
+) -> None:
+    start_time = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
+    source_model = RoomRcModel(
+        trained_from_utc=start_time - timedelta(days=1),
+        trained_to_utc=start_time,
+        interval_minutes=10,
+        config=RoomRcConfig(),
+        params=RoomRC2StateParams(initial_mass_offset_c=1.5).to_dict(),
+        sample_count=100,
+    )
+    version = StoredModelVersion(
+        model_id="active-room-rc-model",
+        model_type="room_2r2c",
+        created_at_utc=start_time,
+        is_active=True,
+        model=source_model,
+    )
+    service = SpaceHeatingMpcPlanningService(
+        samples_reader=_UnusedSamplesReader(),
+        active_room_model_reader=_StaticActiveRoomModelReader(version),
+        target_schedule=[
+            TemperatureTargetWindow(time=time(0, 0), target=20.0, low_margin=0.5, high_margin=1.0)
+        ],
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_load_initial_rows",
+        lambda **kwargs: [
+            MpcDatasetRow(
+                timestamp_utc=start_time - timedelta(minutes=10),
+                room_temperature_c=19.0,
+                mode_space=0,
+                mode_off=1,
+                space_heating_output_estimate_kw=0.0,
+            ),
+            MpcDatasetRow(
+                timestamp_utc=start_time,
+                room_temperature_c=19.4,
+                mode_space=0,
+                mode_off=1,
+                space_heating_output_estimate_kw=0.0,
+            ),
+        ],
+    )
+    monkeypatch.setattr(service, "_load_forecast_entries", lambda **kwargs: [])
+    monkeypatch.setattr(service, "_load_price_intervals", lambda **kwargs: [])
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        service.controller,
+        "plan_from_source_model",
+        lambda request, **kwargs: captured.update(
+            {"request": request, **kwargs}
+        )
+        or MpcPlan(
+            status="ok",
+            termination_condition="optimal",
+            feasible=True,
+            steps=[],
+        ),
+    )
+
+    plan = service.plan(
+        start_time_utc=start_time,
+        horizon_steps=4,
+        default_effective_heating_kw=2.0,
+    )
+
+    assert plan.feasible is True
+    assert captured["control_model_kind"] == "rc_2state"
+    assert isinstance(captured["initial_state"], Rc2StateMpcInitialState)
+    assert captured["initial_state"].room_temp_c == 19.4
+    assert captured["initial_state"].mass_temp_c == 20.9
