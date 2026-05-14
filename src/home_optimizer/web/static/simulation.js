@@ -391,7 +391,7 @@ if (trainEndDateInput) {
 }
 
 if (trainModelTypeSelect) {
-  trainModelTypeSelect.value = "room_arx";
+  trainModelTypeSelect.value = "room_2r2c";
 }
 
 if (simulateButton) {
