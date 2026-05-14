@@ -65,18 +65,9 @@ class MpcHorizonBuilder:
                     effective_heating_kw_forecast=request.default_effective_heating_kw,
                     hp_electric_power_forecast_kw=request.default_hp_electric_power_kw,
                     pv_available_power_forecast_kw=float(
-                        request.pv_power_forecast_by_timestamp.get(
-                            timestamp_utc,
-                            pv_by_timestamp.get(timestamp_utc, 0.0)
-                            * request.pv_power_input_scale,
-                        )
+                        pv_by_timestamp.get(timestamp_utc, 0.0) * request.pv_power_input_scale
                     ),
-                    base_load_power_forecast_kw=float(
-                        request.base_load_power_forecast_by_timestamp.get(
-                            timestamp_utc,
-                            request.default_base_load_power_kw,
-                        )
-                    ),
+                    base_load_power_forecast_kw=request.default_base_load_power_kw,
                     occupied=request.default_occupied,
                     temp_min_c=float(temp_min_c),
                     temp_max_c=float(temp_max_c),

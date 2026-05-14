@@ -106,7 +106,6 @@ def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkey
             for step in range(6)
         ],
     )
-    monkeypatch.setattr(service, "_load_history_rows", lambda **kwargs: [])
     monkeypatch.setattr(
         service,
         "_load_price_intervals",
