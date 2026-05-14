@@ -199,6 +199,8 @@ class MpcHorizonBuildRequest(DomainModel):
     target_schedule: list[TemperatureTargetWindow]
     forecast_entries: list[ForecastEntry] = Field(default_factory=list)
     price_intervals: list[PriceInterval] = Field(default_factory=list)
+    pv_power_forecast_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    base_load_power_forecast_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
     default_effective_heating_kw: float = Field(ge=0.0)
     outdoor_temperature_name: str = "temperature"
     solar_gain_name: str = "gti_living_room_windows_adjusted"

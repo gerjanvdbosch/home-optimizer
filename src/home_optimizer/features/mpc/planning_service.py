@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from statistics import median
 
 from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
@@ -22,6 +23,9 @@ from home_optimizer.features.mpc.models import (
     MpcPlan,
 )
 from home_optimizer.features.mpc.ports import ActiveRoomModelReaderPort
+
+_SITE_FORECAST_LOOKBACK_DAYS = 14
+_MIN_PV_GTI_W_M2 = 25.0
 
 
 class SpaceHeatingMpcPlanningService:
@@ -91,10 +95,24 @@ class SpaceHeatingMpcPlanningService:
             interval_minutes=resolved_interval_minutes,
             horizon_steps=horizon_steps,
         )
-        pv_power_input_scale = self._infer_pv_power_input_scale(
-            initial_rows,
-            forecast_entries=forecast_entries,
+        site_history_rows = self._load_history_rows(
             start_time_utc=resolved_start_time,
+            interval_minutes=resolved_interval_minutes,
+            days=_SITE_FORECAST_LOOKBACK_DAYS,
+        )
+        pv_power_forecast_by_timestamp = self._build_pv_power_forecast_by_timestamp(
+            resolved_start_time=resolved_start_time,
+            interval_minutes=resolved_interval_minutes,
+            horizon_steps=horizon_steps,
+            history_rows=site_history_rows,
+            forecast_entries=forecast_entries,
+        )
+        base_load_power_forecast_by_timestamp = self._build_base_load_power_forecast_by_timestamp(
+            resolved_start_time=resolved_start_time,
+            interval_minutes=resolved_interval_minutes,
+            horizon_steps=horizon_steps,
+            history_rows=site_history_rows,
+            fallback_kw=base_load_power_kw,
         )
 
         horizon = self.controller.build_horizon(
@@ -109,11 +127,12 @@ class SpaceHeatingMpcPlanningService:
                     interval_minutes=resolved_interval_minutes,
                     horizon_steps=horizon_steps,
                 ),
+                pv_power_forecast_by_timestamp=pv_power_forecast_by_timestamp,
+                base_load_power_forecast_by_timestamp=base_load_power_forecast_by_timestamp,
                 default_effective_heating_kw=effective_heating_kw,
                 default_hp_electric_power_kw=hp_electric_power_kw,
                 default_base_load_power_kw=base_load_power_kw,
                 default_export_price_eur_kwh=export_price_eur_kwh,
-                pv_power_input_scale=pv_power_input_scale,
             )
         )
 
@@ -204,6 +223,24 @@ class SpaceHeatingMpcPlanningService:
             )
         return intervals
 
+    def _load_history_rows(
+        self,
+        *,
+        start_time_utc: datetime,
+        interval_minutes: int,
+        days: int,
+    ) -> list[MpcDatasetRow]:
+        dataset_service = MpcDatasetService(
+            self.samples_reader,
+            _MpcDatasetSettings(self.target_schedule),
+        )
+        dataset = dataset_service.build_dataset(
+            start_time=start_time_utc - timedelta(days=days),
+            end_time=start_time_utc,
+            interval_minutes=interval_minutes,
+        )
+        return [row for row in dataset.rows if row.timestamp_utc < start_time_utc]
+
     def _initial_state_from_rows(self, rows: list[MpcDatasetRow]) -> MpcInitialState:
         latest = rows[-1]
         if latest.room_temperature_c is None:
@@ -272,10 +309,11 @@ class SpaceHeatingMpcPlanningService:
     @staticmethod
     def _resolve_base_load_power_kw(rows: list[MpcDatasetRow]) -> float:
         base_load_values = [
-            (
+            max(
+                0.0,
                 float(row.net_power_kw)
                 + float(row.pv_output_power_kw or 0.0)
-                - float(row.hp_electric_power_kw or 0.0)
+                - float(row.hp_electric_power_kw or 0.0),
             )
             for row in rows
             if row.net_power_kw is not None
@@ -284,21 +322,81 @@ class SpaceHeatingMpcPlanningService:
             return 0.0
         return float(sum(base_load_values) / len(base_load_values))
 
-    @staticmethod
-    def _infer_pv_power_input_scale(
-        rows: list[MpcDatasetRow],
+    def _build_pv_power_forecast_by_timestamp(
+        self,
         *,
+        resolved_start_time: datetime,
+        interval_minutes: int,
+        horizon_steps: int,
+        history_rows: list[MpcDatasetRow],
         forecast_entries: list[ForecastEntry],
-        start_time_utc: datetime,
-    ) -> float:
-        latest_row = rows[-1]
-        latest_pv_output_kw = float(latest_row.pv_output_power_kw or 0.0)
-        if latest_pv_output_kw <= 0.0:
-            return 0.0
+    ) -> dict[datetime, float]:
+        gti_by_forecast_time = self._latest_forecast_values_by_time(
+            forecast_entries,
+            name=GTI_PV,
+        )
+        pv_power_per_gti_values = [
+            float(row.pv_output_power_kw) / gti_by_forecast_time[row.timestamp_utc]
+            for row in history_rows
+            if row.pv_output_power_kw is not None
+            and row.pv_output_power_kw >= 0.0
+            and gti_by_forecast_time.get(row.timestamp_utc, 0.0) >= _MIN_PV_GTI_W_M2
+        ]
+        if not pv_power_per_gti_values:
+            return {}
 
+        pv_power_per_gti = float(median(pv_power_per_gti_values))
+        forecast_by_timestamp: dict[datetime, float] = {}
+        for step_index in range(horizon_steps):
+            timestamp_utc = resolved_start_time + timedelta(minutes=interval_minutes * step_index)
+            gti_value = gti_by_forecast_time.get(timestamp_utc, 0.0)
+            forecast_by_timestamp[timestamp_utc] = max(0.0, pv_power_per_gti * gti_value)
+        return forecast_by_timestamp
+
+    @staticmethod
+    def _build_base_load_power_forecast_by_timestamp(
+        *,
+        resolved_start_time: datetime,
+        interval_minutes: int,
+        horizon_steps: int,
+        history_rows: list[MpcDatasetRow],
+        fallback_kw: float,
+    ) -> dict[datetime, float]:
+        base_load_by_slot: dict[int, list[float]] = {}
+        all_values: list[float] = []
+        for row in history_rows:
+            if row.net_power_kw is None:
+                continue
+            base_load_kw = max(
+                0.0,
+                float(row.net_power_kw)
+                + float(row.pv_output_power_kw or 0.0)
+                - float(row.hp_electric_power_kw or 0.0),
+            )
+            slot = ((row.timestamp_utc.hour * 60) + row.timestamp_utc.minute) // interval_minutes
+            base_load_by_slot.setdefault(slot, []).append(base_load_kw)
+            all_values.append(base_load_kw)
+
+        overall_default = float(median(all_values)) if all_values else float(fallback_kw)
+        forecast_by_timestamp: dict[datetime, float] = {}
+        for step_index in range(horizon_steps):
+            timestamp_utc = resolved_start_time + timedelta(minutes=interval_minutes * step_index)
+            slot = ((timestamp_utc.hour * 60) + timestamp_utc.minute) // interval_minutes
+            slot_values = base_load_by_slot.get(slot)
+            forecast_by_timestamp[timestamp_utc] = (
+                float(median(slot_values)) if slot_values else overall_default
+            )
+        return forecast_by_timestamp
+
+    @staticmethod
+    def _latest_forecast_values_by_time(
+        forecast_entries: list[ForecastEntry],
+        *,
+        name: str,
+    ) -> dict[datetime, float]:
         latest_created_by_forecast_time: dict[datetime, tuple[datetime, float]] = {}
         for entry in forecast_entries:
-            if entry.name != GTI_PV:
+            if entry.name != name:
                 continue
             forecast_time_utc = ensure_utc(entry.forecast_time_utc)
             created_at_utc = ensure_utc(entry.created_at_utc)
@@ -308,11 +406,10 @@ class SpaceHeatingMpcPlanningService:
                     created_at_utc,
                     float(entry.value),
                 )
-
-        start_forecast_value = latest_created_by_forecast_time.get(start_time_utc)
-        if start_forecast_value is None or start_forecast_value[1] <= 0.0:
-            return 0.0
-        return latest_pv_output_kw / start_forecast_value[1]
+        return {
+            forecast_time_utc: value
+            for forecast_time_utc, (_, value) in latest_created_by_forecast_time.items()
+        }
 
     @staticmethod
     def _row_hp_on(row: MpcDatasetRow) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
 
+from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
@@ -85,3 +86,43 @@ def test_mpc_horizon_builder_uses_latest_forecast_targets_and_prices() -> None:
     assert horizon[0].import_price_eur_kwh == 0.30
     assert horizon[0].export_price_eur_kwh == 0.0
     assert horizon[0].occupied == 1.0
+
+
+def test_mpc_horizon_builder_prefers_explicit_site_power_forecasts() -> None:
+    start_time = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
+    horizon = MpcHorizonBuilder().build(
+        MpcHorizonBuildRequest(
+            start_time_utc=start_time,
+            horizon_steps=2,
+            interval_minutes=15,
+            target_schedule=[
+                TemperatureTargetWindow(
+                    time=time(0, 0),
+                    target=19.0,
+                    low_margin=0.5,
+                    high_margin=1.0,
+                )
+            ],
+            default_effective_heating_kw=2.5,
+            default_hp_electric_power_kw=1.1,
+            default_base_load_power_kw=0.2,
+            pv_power_input_scale=0.5,
+            forecast_entries=[
+                ForecastEntry(
+                    created_at_utc=start_time - timedelta(hours=1),
+                    forecast_time_utc=start_time,
+                    name=GTI_PV,
+                    value=100.0,
+                    unit="W/m2",
+                    source="test",
+                )
+            ],
+            pv_power_forecast_by_timestamp={start_time: 1.8},
+            base_load_power_forecast_by_timestamp={start_time: 0.7},
+        )
+    )
+
+    assert horizon[0].pv_available_power_forecast_kw == 1.8
+    assert horizon[0].base_load_power_forecast_kw == 0.7
+    assert horizon[1].pv_available_power_forecast_kw == 0.0
+    assert horizon[1].base_load_power_forecast_kw == 0.2
