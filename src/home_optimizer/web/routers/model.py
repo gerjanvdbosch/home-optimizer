@@ -20,16 +20,16 @@ HorizonStepsQuery = Annotated[int, Query(alias="horizon_steps", ge=1, le=288)]
 ModelIdQuery = Annotated[str | None, Query(alias="model_id")]
 
 
-def create_simulation_router(settings: AppSettings) -> APIRouter:
+def create_model_router(settings: AppSettings) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/simulation", response_class=HTMLResponse)
-    def simulation_page() -> HTMLResponse:
+    @router.get("/model", response_class=HTMLResponse)
+    def model_page() -> HTMLResponse:
         view_model = build_dashboard_view_model(
             settings,
-            title="Room Simulation",
+            title="Room Model",
         )
-        return HTMLResponse(render_template("simulation.html", view_model))
+        return HTMLResponse(render_template("model.html", view_model))
 
     @router.get("/api/simulate/room", response_model=RoomSimulationResponse)
     def simulate_room(

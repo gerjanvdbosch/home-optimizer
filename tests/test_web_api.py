@@ -669,7 +669,7 @@ def wait_for_job(client: TestClient, job_id: str) -> dict:
     raise AssertionError("history import job did not finish")
 
 
-def test_dashboard_shows_import_button_without_simulation_link() -> None:
+def test_dashboard_shows_import_button_without_model_link() -> None:
     app, gateway = build_test_app(imported_rows={"room_temperature": 3})
 
     with TestClient(app) as client:
@@ -697,11 +697,11 @@ def test_removed_routes_return_404() -> None:
         assert client.post("/api/mpc/thermostat-setpoint", json={}).status_code == 404
 
 
-def test_simulation_page_and_api_return_room_horizon() -> None:
+def test_model_page_and_api_return_room_horizon() -> None:
     app, _ = build_test_app(imported_rows={})
 
     with TestClient(app) as client:
-        page_response = client.get("/simulation")
+        page_response = client.get("/model")
         api_response = client.get(
             "/api/simulate/room",
             params={
@@ -712,6 +712,7 @@ def test_simulation_page_and_api_return_room_horizon() -> None:
 
     assert page_response.status_code == 200
     assert "Room temp horizon" in page_response.text
+    assert 'href="./model"' in page_response.text
     assert api_response.status_code == 200
     payload = api_response.json()
     assert payload["model_id"] == "room-model-active"

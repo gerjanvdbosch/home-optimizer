@@ -1,7 +1,7 @@
-const simulationBaseUrl = new URL(".", window.location.href);
+const modelBaseUrl = new URL(".", window.location.href);
 
-function simulationApiUrl(path) {
-  return new URL(path, simulationBaseUrl).toString();
+function modelApiUrl(path) {
+  return new URL(path, modelBaseUrl).toString();
 }
 
 function localInputValue(date) {
@@ -212,7 +212,7 @@ function populateSimulationModelSelect(models) {
 }
 
 async function refreshRoomModels() {
-  const response = await fetch(simulationApiUrl("api/models/room"));
+  const response = await fetch(modelApiUrl("api/models/room"));
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(payload.detail || "Kon modellijst niet laden.");
@@ -244,7 +244,7 @@ async function runTrain() {
     }
     params.set("activate", trainActivateInput?.checked ? "true" : "false");
 
-    const response = await fetch(simulationApiUrl(`api/train?${params.toString()}`), {
+    const response = await fetch(modelApiUrl(`api/train?${params.toString()}`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
@@ -297,7 +297,7 @@ async function loadSimulation() {
       params.set("model_id", simulationModelSelect.value);
     }
 
-    const response = await fetch(simulationApiUrl(`api/simulate/room?${params.toString()}`));
+    const response = await fetch(modelApiUrl(`api/simulate/room?${params.toString()}`));
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload.detail || "Simulatie mislukt.");

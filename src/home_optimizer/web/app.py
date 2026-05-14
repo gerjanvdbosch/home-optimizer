@@ -17,9 +17,9 @@ from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.routers.dashboard import create_dashboard_router
 from home_optimizer.web.routers.history_import import create_history_import_router
 from home_optimizer.web.routers.identification import create_identification_router
+from home_optimizer.web.routers.model import create_model_router
 from home_optimizer.web.routers.modeling import create_modeling_router
 from home_optimizer.web.routers.mpc import create_mpc_router
-from home_optimizer.web.routers.simulation import create_simulation_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -70,7 +70,7 @@ def create_app(
     app.include_router(create_history_import_router(settings))
     app.include_router(create_identification_router(settings))
     app.include_router(create_mpc_router(settings))
-    app.include_router(create_simulation_router(settings))
+    app.include_router(create_model_router(settings))
     app.include_router(create_modeling_router(settings))
 
     return app
