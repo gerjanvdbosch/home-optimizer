@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.models import DomainModel
+from home_optimizer.domain.names import GTI_PV
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 
@@ -45,16 +46,32 @@ class MpcHorizonStep(DomainModel):
     outdoor_temp_c: float
     solar_gain_kw: float = 0.0
     effective_heating_kw_forecast: float = Field(ge=0.0)
+    hp_electric_power_forecast_kw: float = Field(default=0.0, ge=0.0)
+    pv_available_power_forecast_kw: float = Field(default=0.0, ge=0.0)
+    base_load_power_forecast_kw: float = Field(default=0.0, ge=0.0)
     occupied: float = Field(default=0.0, ge=0.0, le=1.0)
     temp_min_c: float
     temp_max_c: float
     price_eur_kwh: float = 0.0
+    import_price_eur_kwh: float = 0.0
+    export_price_eur_kwh: float = 0.0
     realized_room_temp_c: float | None = None
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> "MpcHorizonStep":
         if self.temp_min_c > self.temp_max_c:
             raise ValueError("temp_min_c cannot be greater than temp_max_c")
+        if (
+            self.hp_electric_power_forecast_kw == 0.0
+            and self.effective_heating_kw_forecast > 0.0
+        ):
+            object.__setattr__(
+                self,
+                "hp_electric_power_forecast_kw",
+                self.effective_heating_kw_forecast,
+            )
+        if self.import_price_eur_kwh == 0.0 and self.price_eur_kwh > 0.0:
+            object.__setattr__(self, "import_price_eur_kwh", self.price_eur_kwh)
         return self
 
 
@@ -185,7 +202,12 @@ class MpcHorizonBuildRequest(DomainModel):
     default_effective_heating_kw: float = Field(ge=0.0)
     outdoor_temperature_name: str = "temperature"
     solar_gain_name: str = "gti_living_room_windows_adjusted"
+    pv_power_name: str = GTI_PV
     solar_gain_input_scale: float = Field(default=1.0, gt=0.0)
+    pv_power_input_scale: float = Field(default=0.0, ge=0.0)
+    default_hp_electric_power_kw: float = Field(default=0.0, ge=0.0)
+    default_base_load_power_kw: float = Field(default=0.0)
+    default_export_price_eur_kwh: float = Field(default=0.0, ge=0.0)
     default_occupied: float = Field(default=0.0, ge=0.0, le=1.0)
     fallback_temp_min_c: float | None = None
     fallback_temp_max_c: float | None = None

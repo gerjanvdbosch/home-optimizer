@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
@@ -79,6 +80,22 @@ class SpaceHeatingMpcPlanningService:
             initial_rows,
             fallback_kw=default_effective_heating_kw,
         )
+        hp_electric_power_kw = self._resolve_hp_electric_power_kw(
+            initial_rows,
+            fallback_kw=effective_heating_kw,
+        )
+        export_price_eur_kwh = self._resolve_export_price_eur_kwh(initial_rows)
+        base_load_power_kw = self._resolve_base_load_power_kw(initial_rows)
+        forecast_entries = self._load_forecast_entries(
+            start_time_utc=resolved_start_time,
+            interval_minutes=resolved_interval_minutes,
+            horizon_steps=horizon_steps,
+        )
+        pv_power_input_scale = self._infer_pv_power_input_scale(
+            initial_rows,
+            forecast_entries=forecast_entries,
+            start_time_utc=resolved_start_time,
+        )
 
         horizon = self.controller.build_horizon(
             MpcHorizonBuildRequest(
@@ -86,17 +103,17 @@ class SpaceHeatingMpcPlanningService:
                 horizon_steps=horizon_steps,
                 interval_minutes=resolved_interval_minutes,
                 target_schedule=self.target_schedule,
-                forecast_entries=self._load_forecast_entries(
-                    start_time_utc=resolved_start_time,
-                    interval_minutes=resolved_interval_minutes,
-                    horizon_steps=horizon_steps,
-                ),
+                forecast_entries=forecast_entries,
                 price_intervals=self._load_price_intervals(
                     start_time_utc=resolved_start_time,
                     interval_minutes=resolved_interval_minutes,
                     horizon_steps=horizon_steps,
                 ),
                 default_effective_heating_kw=effective_heating_kw,
+                default_hp_electric_power_kw=hp_electric_power_kw,
+                default_base_load_power_kw=base_load_power_kw,
+                default_export_price_eur_kwh=export_price_eur_kwh,
+                pv_power_input_scale=pv_power_input_scale,
             )
         )
 
@@ -225,6 +242,77 @@ class SpaceHeatingMpcPlanningService:
         raise ValueError(
             "Unable to infer effective heating kW; provide default_effective_heating_kw"
         )
+
+    def _resolve_hp_electric_power_kw(
+        self,
+        rows: list[MpcDatasetRow],
+        *,
+        fallback_kw: float,
+    ) -> float:
+        electric_power_values = [
+            float(row.hp_electric_power_kw)
+            for row in rows
+            if row.hp_electric_power_kw is not None and row.hp_electric_power_kw > 0.0
+        ]
+        if electric_power_values:
+            return float(sum(electric_power_values) / len(electric_power_values))
+        return float(fallback_kw)
+
+    @staticmethod
+    def _resolve_export_price_eur_kwh(rows: list[MpcDatasetRow]) -> float:
+        export_price_values = [
+            float(row.price_export_eur_kwh)
+            for row in rows
+            if row.price_export_eur_kwh is not None and row.price_export_eur_kwh >= 0.0
+        ]
+        if not export_price_values:
+            return 0.0
+        return float(export_price_values[-1])
+
+    @staticmethod
+    def _resolve_base_load_power_kw(rows: list[MpcDatasetRow]) -> float:
+        base_load_values = [
+            (
+                float(row.net_power_kw)
+                + float(row.pv_output_power_kw or 0.0)
+                - float(row.hp_electric_power_kw or 0.0)
+            )
+            for row in rows
+            if row.net_power_kw is not None
+        ]
+        if not base_load_values:
+            return 0.0
+        return float(sum(base_load_values) / len(base_load_values))
+
+    @staticmethod
+    def _infer_pv_power_input_scale(
+        rows: list[MpcDatasetRow],
+        *,
+        forecast_entries: list[ForecastEntry],
+        start_time_utc: datetime,
+    ) -> float:
+        latest_row = rows[-1]
+        latest_pv_output_kw = float(latest_row.pv_output_power_kw or 0.0)
+        if latest_pv_output_kw <= 0.0:
+            return 0.0
+
+        latest_created_by_forecast_time: dict[datetime, tuple[datetime, float]] = {}
+        for entry in forecast_entries:
+            if entry.name != GTI_PV:
+                continue
+            forecast_time_utc = ensure_utc(entry.forecast_time_utc)
+            created_at_utc = ensure_utc(entry.created_at_utc)
+            existing = latest_created_by_forecast_time.get(forecast_time_utc)
+            if existing is None or created_at_utc >= existing[0]:
+                latest_created_by_forecast_time[forecast_time_utc] = (
+                    created_at_utc,
+                    float(entry.value),
+                )
+
+        start_forecast_value = latest_created_by_forecast_time.get(start_time_utc)
+        if start_forecast_value is None or start_forecast_value[1] <= 0.0:
+            return 0.0
+        return latest_pv_output_kw / start_forecast_value[1]
 
     @staticmethod
     def _row_hp_on(row: MpcDatasetRow) -> bool:

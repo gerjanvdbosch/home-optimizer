@@ -39,6 +39,10 @@ class MpcHorizonBuilder:
             request,
             request.solar_gain_name,
         )
+        pv_by_timestamp = self._forecast_values_by_timestamp(
+            request,
+            request.pv_power_name,
+        )
         price_by_timestamp = self._price_values_by_timestamp(request)
 
         horizon: list[MpcHorizonStep] = []
@@ -59,10 +63,17 @@ class MpcHorizonBuilder:
                         solar_by_timestamp.get(timestamp_utc, 0.0) * request.solar_gain_input_scale
                     ),
                     effective_heating_kw_forecast=request.default_effective_heating_kw,
+                    hp_electric_power_forecast_kw=request.default_hp_electric_power_kw,
+                    pv_available_power_forecast_kw=float(
+                        pv_by_timestamp.get(timestamp_utc, 0.0) * request.pv_power_input_scale
+                    ),
+                    base_load_power_forecast_kw=request.default_base_load_power_kw,
                     occupied=request.default_occupied,
                     temp_min_c=float(temp_min_c),
                     temp_max_c=float(temp_max_c),
                     price_eur_kwh=float(price_by_timestamp.get(timestamp_utc, 0.0)),
+                    import_price_eur_kwh=float(price_by_timestamp.get(timestamp_utc, 0.0)),
+                    export_price_eur_kwh=request.default_export_price_eur_kwh,
                 )
             )
         return horizon

@@ -79,4 +79,9 @@ def test_mpc_horizon_builder_uses_latest_forecast_targets_and_prices() -> None:
     assert horizon[1].price_eur_kwh == 0.30
     assert horizon[2].price_eur_kwh == 0.0
     assert horizon[0].effective_heating_kw_forecast == 2.5
+    assert horizon[0].hp_electric_power_forecast_kw == 2.5
+    assert horizon[0].pv_available_power_forecast_kw == 0.0
+    assert horizon[0].base_load_power_forecast_kw == 0.0
+    assert horizon[0].import_price_eur_kwh == 0.30
+    assert horizon[0].export_price_eur_kwh == 0.0
     assert horizon[0].occupied == 1.0

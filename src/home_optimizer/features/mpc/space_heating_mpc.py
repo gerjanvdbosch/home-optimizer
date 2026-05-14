@@ -4,6 +4,7 @@ from time import perf_counter
 from typing import Any
 
 from home_optimizer.features.mpc.models import (
+    MpcHorizonStep,
     MpcObjectiveBreakdown,
     MpcPlan,
     MpcPlanStep,
@@ -66,18 +67,22 @@ class SpaceHeatingMpcSolver:
             terminal=0.0,
             start=float(pyo.value(model.start_term)),
             runtime=float(pyo.value(model.runtime_term)),
-            energy=float(pyo.value(model.energy_term)),
+            energy=float(pyo.value(model.energy_term - model.energy_baseline_term)),
         )
         objective_value = float(pyo.value(model.objective))
         steps: list[MpcPlanStep] = []
         for index, horizon_step in enumerate(problem.horizon):
             hp_on = bool(round(pyo.value(model.hp_on[index])))
             effective_heating_kw = float(horizon_step.effective_heating_kw_forecast * hp_on)
-            estimated_energy_cost = float(
-                problem.objective_weights.energy
-                * horizon_step.price_eur_kwh
-                * effective_heating_kw
+            site_energy_cost = float(
+                (
+                    (horizon_step.import_price_eur_kwh * pyo.value(model.grid_import[index]))
+                    - (horizon_step.export_price_eur_kwh * pyo.value(model.grid_export[index]))
+                )
                 * problem.dt_hours
+            )
+            baseline_energy_cost = float(
+                _baseline_site_energy_cost(horizon_step) * problem.dt_hours
             )
             steps.append(
                 MpcPlanStep(
@@ -91,8 +96,8 @@ class SpaceHeatingMpcSolver:
                     slack_low_c=float(pyo.value(model.slack_low[index])),
                     slack_high_c=float(pyo.value(model.slack_high[index])),
                     effective_heating_kw=effective_heating_kw,
-                    price_eur_kwh=horizon_step.price_eur_kwh,
-                    estimated_energy_cost_eur=estimated_energy_cost,
+                    price_eur_kwh=horizon_step.import_price_eur_kwh,
+                    estimated_energy_cost_eur=site_energy_cost - baseline_energy_cost,
                 )
             )
 
@@ -151,6 +156,8 @@ class SpaceHeatingMpcSolver:
         model.hp_on = pyo.Var(model.T, domain=pyo.Binary)
         model.start = pyo.Var(model.T, domain=pyo.Binary)
         model.stop = pyo.Var(model.T, domain=pyo.Binary)
+        model.grid_import = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.grid_export = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.room_temp = pyo.Var(model.T, domain=pyo.Reals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
@@ -201,6 +208,15 @@ class SpaceHeatingMpcSolver:
         model.start_stop_mutex = pyo.Constraint(
             model.T,
             rule=lambda model_ref, t: model_ref.start[t] + model_ref.stop[t] <= 1,
+        )
+        model.grid_balance = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: (
+                model_ref.grid_import[t] - model_ref.grid_export[t]
+                == problem.horizon[t].base_load_power_forecast_kw
+                + (problem.horizon[t].hp_electric_power_forecast_kw * model_ref.hp_on[t])
+                - problem.horizon[t].pv_available_power_forecast_kw
+            ),
         )
 
         if problem.constraints.min_on_steps > 1:
@@ -255,10 +271,17 @@ class SpaceHeatingMpcSolver:
         )
         energy_term = sum(
             problem.objective_weights.energy
-            * problem.horizon[t].price_eur_kwh
-            * problem.horizon[t].effective_heating_kw_forecast
             * problem.dt_hours
-            * model.hp_on[t]
+            * (
+                (problem.horizon[t].import_price_eur_kwh * model.grid_import[t])
+                - (problem.horizon[t].export_price_eur_kwh * model.grid_export[t])
+            )
+            for t in range(horizon_size)
+        )
+        energy_baseline_term = sum(
+            problem.objective_weights.energy
+            * problem.dt_hours
+            * _baseline_site_energy_cost(problem.horizon[t])
             for t in range(horizon_size)
         )
         runtime_term = sum(
@@ -268,15 +291,29 @@ class SpaceHeatingMpcSolver:
         model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
         model.start_term = pyo.Expression(expr=start_term)
         model.energy_term = pyo.Expression(expr=energy_term)
+        model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
                 model.comfort_low_term
                 + model.comfort_high_term
                 + model.start_term
-                + model.energy_term
+                + (model.energy_term - model.energy_baseline_term)
                 + model.runtime_term
             ),
             sense=pyo.minimize,
         )
         return model
+
+
+def _baseline_site_energy_cost(horizon_step: MpcHorizonStep) -> float:
+    baseline_net_power_kw = (
+        horizon_step.base_load_power_forecast_kw
+        - horizon_step.pv_available_power_forecast_kw
+    )
+    baseline_import_kw = max(baseline_net_power_kw, 0.0)
+    baseline_export_kw = max(-baseline_net_power_kw, 0.0)
+    return float(
+        (horizon_step.import_price_eur_kwh * baseline_import_kw)
+        - (horizon_step.export_price_eur_kwh * baseline_export_kw)
+    )
