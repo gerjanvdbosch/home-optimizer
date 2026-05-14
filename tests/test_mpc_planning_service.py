@@ -127,3 +127,5 @@ def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkey
 
     assert plan.feasible is True
     assert len(plan.steps) == 6
+    assert plan.steps[0].timestamp_utc == start_time
+    assert plan.steps[1].timestamp_utc == start_time + timedelta(minutes=10)

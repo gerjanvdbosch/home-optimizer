@@ -330,9 +330,9 @@ async function loadPlan() {
     syncMpcDateLabel(startTime);
     const params = new URLSearchParams({
       start_time: startTime.toISOString(),
-      horizon_steps: String(Number(horizonStepsInput?.value || "36")),
-      interval_minutes: String(Number(intervalMinutesInput?.value || "15")),
-      default_effective_heating_kw: String(Number(heatingKwInput?.value || "2.5")),
+      horizon_steps: String(Number(horizonStepsInput?.value || "144")),
+      interval_minutes: String(Number(intervalMinutesInput?.value || "10")),
+      default_effective_heating_kw: String(Number(heatingKwInput?.value || "3.5")),
     });
     const response = await fetch(mpcApiUrl(`api/mpc/space-heating/plan?${params.toString()}`));
     const payload = await response.json();

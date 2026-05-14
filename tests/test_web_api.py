@@ -151,7 +151,7 @@ class FakeSpaceHeatingMpcPlanningService:
         default_effective_heating_kw: float | None = None,
         max_solver_seconds: float | None = None,
     ) -> MpcPlan:
-        resolved_interval_minutes = interval_minutes or 15
+        resolved_interval_minutes = interval_minutes or 10
         return MpcPlan(
             status="ok",
             termination_condition="optimal",
@@ -731,7 +731,7 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
             params={
                 "start_time": "2026-04-25T12:00:00+00:00",
                 "horizon_steps": 4,
-                "interval_minutes": 15,
+                "interval_minutes": 10,
                 "default_effective_heating_kw": 2.5,
             },
         )
@@ -778,6 +778,8 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert 'id="mpc-selected-date"' in response.text
     assert 'id="mpc-summary-objective-energy"' in response.text
     assert 'id="mpc-heating-explanation"' in response.text
+    assert 'id="mpc-horizon-steps" type="number" min="1" max="288" value="144"' in response.text
+    assert 'id="mpc-interval-minutes" type="number" min="1" max="60" value="10"' in response.text
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:
