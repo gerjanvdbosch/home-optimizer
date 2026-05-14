@@ -8,7 +8,7 @@ import pandas as pd
 from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.modeling import StoredModelVersion
-from home_optimizer.features.mpc import MpcPlan
+from home_optimizer.features.mpc import ControlModelKind, MpcPlan
 
 
 class ClosableGateway(Protocol):
@@ -80,6 +80,7 @@ class SpaceHeatingMpcPlanningRunner(Protocol):
         *,
         start_time_utc: datetime,
         model_id: str | None = None,
+        control_model_kind: ControlModelKind | None = None,
         interval_minutes: int | None = None,
         horizon_steps: int = 36,
         default_effective_heating_kw: float | None = None,
