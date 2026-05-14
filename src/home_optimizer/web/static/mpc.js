@@ -59,6 +59,7 @@ function lineTrace(x, y, name, color, options = {}) {
 }
 
 const startTimeInput = document.getElementById("mpc-start-time");
+const modelSelect = document.getElementById("mpc-model-select");
 const horizonStepsInput = document.getElementById("mpc-horizon-steps");
 const intervalMinutesInput = document.getElementById("mpc-interval-minutes");
 const heatingKwInput = document.getElementById("mpc-heating-kw");
@@ -102,6 +103,9 @@ function setBusy(isBusy) {
   if (nextDayButton) {
     nextDayButton.disabled = isBusy;
   }
+  if (modelSelect) {
+    modelSelect.disabled = isBusy || modelSelect.options.length <= 1;
+  }
 }
 
 function syncMpcDateLabel(anchorTime) {
@@ -125,6 +129,76 @@ function setSummaryValue(node, value) {
   if (node) {
     node.textContent = value;
   }
+}
+
+function modelLabel(model) {
+  const activeSuffix = model.is_active ? " active" : "";
+  return `${model.model_type} | ${model.model_id}${activeSuffix}`;
+}
+
+function applySelectedModelInterval(modelsById) {
+  if (!modelSelect || !intervalMinutesInput) {
+    return;
+  }
+  const selectedModel = modelsById.get(modelSelect.value);
+  if (selectedModel?.interval_minutes) {
+    intervalMinutesInput.value = String(selectedModel.interval_minutes);
+  }
+}
+
+function populateMpcModelSelect(models) {
+  if (!modelSelect) {
+    return new Map();
+  }
+
+  const previousValue = modelSelect.value;
+  modelSelect.innerHTML = "";
+
+  if (!models.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Geen modellen beschikbaar";
+    modelSelect.append(option);
+    modelSelect.disabled = true;
+    return new Map();
+  }
+
+  const modelsById = new Map(models.map((model) => [model.model_id, model]));
+  const modelsByType = new Map();
+  for (const model of models) {
+    const entries = modelsByType.get(model.model_type) || [];
+    entries.push(model);
+    modelsByType.set(model.model_type, entries);
+  }
+
+  for (const [modelType, typeModels] of modelsByType.entries()) {
+    const group = document.createElement("optgroup");
+    group.label = modelType;
+    for (const model of typeModels) {
+      const option = document.createElement("option");
+      option.value = model.model_id;
+      option.textContent = modelLabel(model);
+      group.append(option);
+    }
+    modelSelect.append(group);
+  }
+
+  modelSelect.disabled = false;
+  modelSelect.value =
+    modelsById.has(previousValue)
+      ? previousValue
+      : (models.find((model) => model.is_active)?.model_id || models[0].model_id);
+  applySelectedModelInterval(modelsById);
+  return modelsById;
+}
+
+async function refreshMpcModels() {
+  const response = await fetch(mpcApiUrl("api/models/room"));
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || "Kon modellijst niet laden.");
+  }
+  return populateMpcModelSelect(payload.models || []);
 }
 
 function updateSummary(payload) {
@@ -334,6 +408,9 @@ async function loadPlan() {
       interval_minutes: String(Number(intervalMinutesInput?.value || "10")),
       default_effective_heating_kw: String(Number(heatingKwInput?.value || "3.5")),
     });
+    if (modelSelect?.value) {
+      params.set("model_id", modelSelect.value);
+    }
     const response = await fetch(mpcApiUrl(`api/mpc/space-heating/plan?${params.toString()}`));
     const payload = await response.json();
     if (!response.ok) {
@@ -363,8 +440,15 @@ function initializeMpcPage() {
     startTimeInput.value = mpcLocalInputValue(now);
     syncMpcDateLabel(now);
   }
+  let modelsById = new Map();
   if (planButton) {
     planButton.addEventListener("click", () => {
+      loadPlan().catch(() => {});
+    });
+  }
+  if (modelSelect) {
+    modelSelect.addEventListener("change", () => {
+      applySelectedModelInterval(modelsById);
       loadPlan().catch(() => {});
     });
   }
@@ -378,7 +462,18 @@ function initializeMpcPage() {
       shiftMpcDay(1);
     });
   }
-  loadPlan().catch(() => {});
+  refreshMpcModels()
+    .then((nextModelsById) => {
+      modelsById = nextModelsById;
+      return loadPlan();
+    })
+    .catch((error) => {
+      if (statusNode) {
+        statusNode.textContent =
+          error instanceof Error ? error.message : "MPC-plan kon niet worden geladen.";
+        statusNode.className = "status error";
+      }
+    });
 }
 
 initializeMpcPage();

@@ -146,6 +146,7 @@ class FakeSpaceHeatingMpcPlanningService:
         self,
         *,
         start_time_utc: datetime,
+        model_id: str | None = None,
         interval_minutes: int | None = None,
         horizon_steps: int = 36,
         default_effective_heating_kw: float | None = None,
@@ -730,6 +731,7 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
             "/api/mpc/space-heating/plan",
             params={
                 "start_time": "2026-04-25T12:00:00+00:00",
+                "model_id": "room-model-active",
                 "horizon_steps": 4,
                 "interval_minutes": 10,
                 "default_effective_heating_kw": 2.5,
@@ -776,6 +778,7 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert 'id="mpc-previous-day"' in response.text
     assert 'id="mpc-next-day"' in response.text
     assert 'id="mpc-selected-date"' in response.text
+    assert 'id="mpc-model-select"' in response.text
     assert 'id="mpc-summary-objective-energy"' in response.text
     assert 'id="mpc-heating-explanation"' in response.text
     assert 'id="mpc-horizon-steps" type="number" min="1" max="288" value="144"' in response.text

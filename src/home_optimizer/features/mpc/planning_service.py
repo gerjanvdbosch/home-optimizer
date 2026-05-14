@@ -42,6 +42,7 @@ class SpaceHeatingMpcPlanningService:
         self,
         *,
         start_time_utc: datetime,
+        model_id: str | None = None,
         interval_minutes: int | None = None,
         horizon_steps: int = 36,
         constraints: MpcConstraints | None = None,
@@ -50,8 +51,10 @@ class SpaceHeatingMpcPlanningService:
         max_solver_seconds: float | None = None,
         conversion_options: ControlModelConversionOptions | None = None,
     ) -> MpcPlan:
-        version = self.active_room_model_reader.get_active_room_model_version()
+        version = self._resolve_room_model_version(model_id)
         if version is None:
+            if model_id:
+                raise ValueError(f"Unknown room model version: {model_id}")
             raise ValueError("No active room model is available for MPC planning")
 
         source_model = version.model
@@ -130,6 +133,11 @@ class SpaceHeatingMpcPlanningService:
             horizon=horizon,
             conversion_options=conversion_options,
         )
+
+    def _resolve_room_model_version(self, model_id: str | None) -> StoredModelVersion | None:
+        if model_id is not None:
+            return self.active_room_model_reader.get_room_model_version(model_id)
+        return self.active_room_model_reader.get_active_room_model_version()
 
     def _load_initial_rows(
         self,

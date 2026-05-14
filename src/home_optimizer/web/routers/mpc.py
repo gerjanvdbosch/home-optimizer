@@ -22,6 +22,7 @@ ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
 HorizonStepsQuery = Annotated[int, Query(alias="horizon_steps", ge=1, le=288)]
 IntervalQuery = Annotated[int | None, Query(alias="interval_minutes", ge=1, le=60)]
+ModelIdQuery = Annotated[str | None, Query(alias="model_id")]
 HeatingKwQuery = Annotated[
     float | None,
     Query(alias="default_effective_heating_kw", ge=0.0),
@@ -104,6 +105,7 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
     def plan_space_heating(
         container: ContainerDependency,
         start_time: StartTimeQuery,
+        model_id: ModelIdQuery = None,
         horizon_steps: HorizonStepsQuery = 36,
         interval_minutes: IntervalQuery = None,
         default_effective_heating_kw: HeatingKwQuery = None,
@@ -112,6 +114,7 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
         try:
             plan = container.space_heating_mpc_planning_service.plan(
                 start_time_utc=start_time,
+                model_id=model_id,
                 interval_minutes=interval_minutes,
                 horizon_steps=horizon_steps,
                 default_effective_heating_kw=default_effective_heating_kw,

@@ -19,6 +19,11 @@ class _StaticActiveRoomModelReader:
     def __init__(self, version: StoredModelVersion) -> None:
         self.version = version
 
+    def get_room_model_version(self, model_id: str) -> StoredModelVersion | None:
+        if self.version.model_id == model_id:
+            return self.version
+        return None
+
     def get_active_room_model_version(self) -> StoredModelVersion | None:
         return self.version
 
