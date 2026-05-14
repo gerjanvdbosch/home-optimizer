@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc, parse_datetime
-from home_optimizer.features.dataset import MpcDatasetService
-from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
-from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
-from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams
+from home_optimizer.features.modeling import RoomRcModel, StoredModelVersion, TrainedLinearRoomModel
 from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
+from home_optimizer.features.mpc.exogenous_features import (
+    solar_gain_proxy_to_kw,
+    trailing_exp_filter,
+)
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
     MpcConstraints,
@@ -24,6 +24,7 @@ from home_optimizer.features.mpc.models import (
     Rc2StateMpcInitialState,
 )
 from home_optimizer.features.mpc.ports import ActiveRoomModelReaderPort
+from home_optimizer.features.mpc.preparation import SpaceHeatingMpcPreparationService
 
 
 class SpaceHeatingMpcPlanningService:
@@ -41,6 +42,11 @@ class SpaceHeatingMpcPlanningService:
         self.target_schedule = list(target_schedule)
         self.default_interval_minutes = default_interval_minutes
         self.controller = controller or SpaceHeatingMpcControllerService()
+        self.preparation = SpaceHeatingMpcPreparationService(
+            samples_reader=samples_reader,
+            active_room_model_reader=active_room_model_reader,
+            target_schedule=target_schedule,
+        )
 
     def plan(
         self,
@@ -77,6 +83,10 @@ class SpaceHeatingMpcPlanningService:
             )
             + 1
         )
+        history_rows = self.preparation.history_rows_for_initial_state(
+            source_model,
+            minimum_history_rows=history_rows,
+        )
         initial_rows = self._load_initial_rows(
             start_time_utc=resolved_start_time,
             interval_minutes=resolved_interval_minutes,
@@ -106,6 +116,21 @@ class SpaceHeatingMpcPlanningService:
             forecast_entries=forecast_entries,
             start_time_utc=resolved_start_time,
         )
+        initial_filtered_solar_gain_kw = 0.0
+        solar_gain_filter_alpha = 0.0
+        local_timezone: str | None = None
+        if isinstance(source_model, RoomRcModel):
+            solar_gain_history_kw = [
+                self._row_solar_gain_kw(row, source_model=source_model)
+                for row in initial_rows
+                if row.timestamp_utc < resolved_start_time
+            ]
+            solar_gain_filter_alpha = source_model.config.alpha_solar
+            initial_filtered_solar_gain_kw = trailing_exp_filter(
+                solar_gain_history_kw,
+                alpha=solar_gain_filter_alpha,
+            )
+            local_timezone = source_model.config.local_timezone
 
         horizon = self.controller.build_horizon(
             MpcHorizonBuildRequest(
@@ -124,6 +149,9 @@ class SpaceHeatingMpcPlanningService:
                 default_base_load_power_kw=base_load_power_kw,
                 default_export_price_eur_kwh=export_price_eur_kwh,
                 pv_power_input_scale=pv_power_input_scale,
+                solar_gain_filter_alpha=solar_gain_filter_alpha,
+                initial_filtered_solar_gain_kw=initial_filtered_solar_gain_kw,
+                local_timezone=local_timezone,
             )
         )
 
@@ -142,9 +170,7 @@ class SpaceHeatingMpcPlanningService:
         )
 
     def _resolve_room_model_version(self, model_id: str | None) -> StoredModelVersion | None:
-        if model_id is not None:
-            return self.active_room_model_reader.get_room_model_version(model_id)
-        return self.active_room_model_reader.get_active_room_model_version()
+        return self.preparation.resolve_room_model_version(model_id)
 
     def _load_initial_rows(
         self,
@@ -152,20 +178,55 @@ class SpaceHeatingMpcPlanningService:
         start_time_utc: datetime,
         interval_minutes: int,
         history_rows: int,
-    ) -> list[MpcDatasetRow]:
-        dataset_service = MpcDatasetService(
-            self.samples_reader,
-            _MpcDatasetSettings(self.target_schedule),
-        )
-        dataset = dataset_service.build_dataset(
-            start_time=start_time_utc - timedelta(minutes=interval_minutes * history_rows),
-            end_time=start_time_utc + timedelta(minutes=interval_minutes),
+    ):
+        return self.preparation.load_initial_rows(
+            start_time_utc=start_time_utc,
             interval_minutes=interval_minutes,
+            history_rows=history_rows,
         )
-        rows = [row for row in dataset.rows if row.timestamp_utc <= start_time_utc]
-        if not rows:
-            raise ValueError("No dataset rows available to estimate MPC initial state")
-        return rows
+
+    def _initial_state_from_rows(
+        self,
+        rows,
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+    ) -> MpcInitialState | Rc2StateMpcInitialState:
+        return self.preparation.initial_state_from_rows(rows, source_model=source_model)
+
+    def _resolve_effective_heating_kw(
+        self,
+        rows,
+        *,
+        fallback_kw: float | None,
+    ) -> float:
+        return self.preparation.resolve_effective_heating_kw(rows, fallback_kw=fallback_kw)
+
+    def _resolve_hp_electric_power_kw(
+        self,
+        rows,
+        *,
+        fallback_kw: float,
+    ) -> float:
+        return self.preparation.resolve_hp_electric_power_kw(rows, fallback_kw=fallback_kw)
+
+    def _resolve_export_price_eur_kwh(self, rows) -> float:
+        return self.preparation.resolve_export_price_eur_kwh(rows)
+
+    def _resolve_base_load_power_kw(self, rows) -> float:
+        return self.preparation.resolve_base_load_power_kw(rows)
+
+    def _infer_pv_power_input_scale(
+        self,
+        rows,
+        *,
+        forecast_entries: list[ForecastEntry],
+        start_time_utc: datetime,
+    ) -> float:
+        return self.preparation.infer_pv_power_input_scale(
+            rows,
+            forecast_entries=forecast_entries,
+            start_time_utc=start_time_utc,
+        )
 
     def _load_forecast_entries(
         self,
@@ -219,143 +280,23 @@ class SpaceHeatingMpcPlanningService:
             )
         return intervals
 
-    def _initial_state_from_rows(
-        self,
-        rows: list[MpcDatasetRow],
+    @staticmethod
+    def _row_solar_gain_kw(
+        row,
         *,
-        source_model: TrainedLinearRoomModel | RoomRcModel,
-    ) -> MpcInitialState | Rc2StateMpcInitialState:
-        latest = rows[-1]
-        if latest.room_temperature_c is None:
-            raise ValueError(
-                "Latest dataset row is missing room_temperature_c for MPC initial state"
+        source_model: RoomRcModel,
+    ) -> float:
+        solar_gain_proxy_w_m2 = row.solar_gain_proxy_w_m2
+        if solar_gain_proxy_w_m2 is None:
+            irradiance_w_m2 = float(row.solar_irradiance_w_m2 or 0.0)
+            shutter_fraction = 1.0
+            if row.shutter_position_pct is not None:
+                shutter_fraction = min(max(float(row.shutter_position_pct) / 100.0, 0.0), 1.0)
+            solar_gain_proxy_w_m2 = irradiance_w_m2 * shutter_fraction
+        return float(
+            solar_gain_proxy_to_kw(
+                float(solar_gain_proxy_w_m2 or 0.0),
+                glass_area_m2=source_model.config.glass_area_m2,
+                g_glass=source_model.config.g_glass,
             )
-        latest_hp_on = self._row_hp_on(latest)
-        contiguous_steps = 0
-        for row in reversed(rows):
-            if self._row_hp_on(row) != latest_hp_on:
-                break
-            contiguous_steps += 1
-        base_state = MpcInitialState(
-            room_temp_c=float(latest.room_temperature_c),
-            hp_on=latest_hp_on,
-            on_steps=contiguous_steps if latest_hp_on else 0,
-            off_steps=contiguous_steps if not latest_hp_on else 0,
         )
-        if not isinstance(source_model, RoomRcModel):
-            return base_state
-        params = RoomRC2StateParams.from_dict(source_model.params)
-        return Rc2StateMpcInitialState(
-            room_temp_c=base_state.room_temp_c,
-            mass_temp_c=base_state.room_temp_c + params.initial_mass_offset_c,
-            hp_on=base_state.hp_on,
-            on_steps=base_state.on_steps,
-            off_steps=base_state.off_steps,
-        )
-
-    def _resolve_effective_heating_kw(
-        self,
-        rows: list[MpcDatasetRow],
-        *,
-        fallback_kw: float | None,
-    ) -> float:
-        heating_values = [
-            float(row.space_heating_output_estimate_kw)
-            for row in rows
-            if row.space_heating_output_estimate_kw is not None
-            and row.space_heating_output_estimate_kw > 0.0
-        ]
-        if heating_values:
-            return float(sum(heating_values) / len(heating_values))
-        if fallback_kw is not None:
-            return float(fallback_kw)
-        raise ValueError(
-            "Unable to infer effective heating kW; provide default_effective_heating_kw"
-        )
-
-    def _resolve_hp_electric_power_kw(
-        self,
-        rows: list[MpcDatasetRow],
-        *,
-        fallback_kw: float,
-    ) -> float:
-        electric_power_values = [
-            float(row.hp_electric_power_kw)
-            for row in rows
-            if row.hp_electric_power_kw is not None and row.hp_electric_power_kw > 0.0
-        ]
-        if electric_power_values:
-            return float(sum(electric_power_values) / len(electric_power_values))
-        return float(fallback_kw)
-
-    @staticmethod
-    def _resolve_export_price_eur_kwh(rows: list[MpcDatasetRow]) -> float:
-        export_price_values = [
-            float(row.price_export_eur_kwh)
-            for row in rows
-            if row.price_export_eur_kwh is not None and row.price_export_eur_kwh >= 0.0
-        ]
-        if not export_price_values:
-            return 0.0
-        return float(export_price_values[-1])
-
-    @staticmethod
-    def _resolve_base_load_power_kw(rows: list[MpcDatasetRow]) -> float:
-        base_load_values = [
-            (
-                float(row.net_power_kw)
-                + float(row.pv_output_power_kw or 0.0)
-                - float(row.hp_electric_power_kw or 0.0)
-            )
-            for row in rows
-            if row.net_power_kw is not None
-        ]
-        if not base_load_values:
-            return 0.0
-        return float(sum(base_load_values) / len(base_load_values))
-
-    @staticmethod
-    def _infer_pv_power_input_scale(
-        rows: list[MpcDatasetRow],
-        *,
-        forecast_entries: list[ForecastEntry],
-        start_time_utc: datetime,
-    ) -> float:
-        latest_row = rows[-1]
-        latest_pv_output_kw = float(latest_row.pv_output_power_kw or 0.0)
-        if latest_pv_output_kw <= 0.0:
-            return 0.0
-
-        latest_created_by_forecast_time: dict[datetime, tuple[datetime, float]] = {}
-        for entry in forecast_entries:
-            if entry.name != GTI_PV:
-                continue
-            forecast_time_utc = ensure_utc(entry.forecast_time_utc)
-            created_at_utc = ensure_utc(entry.created_at_utc)
-            existing = latest_created_by_forecast_time.get(forecast_time_utc)
-            if existing is None or created_at_utc >= existing[0]:
-                latest_created_by_forecast_time[forecast_time_utc] = (
-                    created_at_utc,
-                    float(entry.value),
-                )
-
-        start_forecast_value = latest_created_by_forecast_time.get(start_time_utc)
-        if start_forecast_value is None or start_forecast_value[1] <= 0.0:
-            return 0.0
-        return latest_pv_output_kw / start_forecast_value[1]
-
-    @staticmethod
-    def _row_hp_on(row: MpcDatasetRow) -> bool:
-        heating_output_kw = float(row.space_heating_output_estimate_kw or 0.0)
-        return bool(row.mode_space) and not bool(row.mode_off) and heating_output_kw > 0.0
-
-
-class _MpcDatasetSettings:
-    def __init__(self, target_schedule: list[TemperatureTargetWindow]) -> None:
-        self.room_target = list(target_schedule)
-        self.dhw_target: list[TemperatureTargetWindow] = []
-        self.electricity_pricing = _DynamicPricingLike()
-
-
-class _DynamicPricingLike:
-    mode = "dynamic"

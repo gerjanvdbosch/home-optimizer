@@ -62,15 +62,21 @@ def _rc_to_2state_control_model(
         b_out_mass=float(b_discrete[1, 0]),
         b_heat_room=float(b_discrete[0, 1]),
         b_heat_mass=float(b_discrete[1, 1]),
-        b_solar_room=float((b_discrete[0, 2] + b_discrete[0, 3]) / solar_scale),
-        b_solar_mass=float((b_discrete[1, 2] + b_discrete[1, 3]) / solar_scale),
+        b_solar_direct_room=float(b_discrete[0, 2] / solar_scale),
+        b_solar_filtered_room=float(b_discrete[0, 3] / solar_scale),
+        b_solar_direct_mass=float(b_discrete[1, 2] / solar_scale),
+        b_solar_filtered_mass=float(b_discrete[1, 3] / solar_scale),
         b_occ_room=float(b_discrete[0, 4]),
         b_occ_mass=float(b_discrete[1, 4]),
+        b_hour_sin_room=float(b_discrete[0, 5]),
+        b_hour_cos_room=float(b_discrete[0, 6]),
+        b_hour_sin_mass=float(b_discrete[1, 5]),
+        b_hour_cos_mass=float(b_discrete[1, 6]),
         c_room=0.0,
         c_mass=0.0,
         notes=(
             "Control-oriented 2-state model taken directly from the exact discrete 2R2C room "
-            "dynamics used during physical forecasting."
+            "dynamics, including separate direct/filtered solar inputs and diurnal terms."
         ),
     )
 

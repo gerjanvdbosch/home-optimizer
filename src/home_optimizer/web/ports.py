@@ -8,7 +8,7 @@ import pandas as pd
 from home_optimizer.domain import NumericSeries, TextSeries
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.modeling import StoredModelVersion
-from home_optimizer.features.mpc import MpcPlan
+from home_optimizer.features.mpc import MpcBacktestResult, MpcPlan
 
 
 class ClosableGateway(Protocol):
@@ -87,6 +87,18 @@ class SpaceHeatingMpcPlanningRunner(Protocol):
     ) -> MpcPlan: ...
 
 
+class SpaceHeatingMpcBacktestRunner(Protocol):
+    def run(
+        self,
+        *,
+        start_time_utc: datetime,
+        end_time_utc: datetime,
+        model_id: str | None = None,
+        horizon_steps: int = 36,
+        max_solver_seconds: float | None = None,
+    ) -> MpcBacktestResult: ...
+
+
 class DatasetFrameReader(Protocol):
     def read_samples(
         self,
@@ -134,5 +146,8 @@ class WebAppContainer(Protocol):
 
     @property
     def space_heating_mpc_planning_service(self) -> SpaceHeatingMpcPlanningRunner: ...
+
+    @property
+    def space_heating_mpc_backtest_service(self) -> SpaceHeatingMpcBacktestRunner: ...
 
     def close(self) -> None: ...

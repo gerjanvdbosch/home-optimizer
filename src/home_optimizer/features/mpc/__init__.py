@@ -1,4 +1,5 @@
 from .backtest import SpaceHeatingMpcBacktestRunner
+from .backtest_service import SpaceHeatingMpcBacktestService
 from .control_model import to_control_model
 from .controller_service import SpaceHeatingMpcControllerService
 from .explain import explain_heating_plan
@@ -12,6 +13,7 @@ from .models import (
     LinearThermalControlModel,
     MpcBacktestResult,
     MpcBacktestStepResult,
+    MpcBacktestSummary,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonBuildRequest,
@@ -35,6 +37,7 @@ __all__ = [
     "LinearThermalControlModel",
     "MpcBacktestResult",
     "MpcBacktestStepResult",
+    "MpcBacktestSummary",
     "MpcConstraints",
     "MpcControllerRequest",
     "MpcHorizonBuildRequest",
@@ -49,6 +52,7 @@ __all__ = [
     "Rc2StateMpcInitialState",
     "Rc2StateThermalControlModel",
     "SpaceHeatingMpcBacktestRunner",
+    "SpaceHeatingMpcBacktestService",
     "SpaceHeatingMpcControllerService",
     "SpaceHeatingMpcPlanningService",
     "SpaceHeatingMpcSolver",

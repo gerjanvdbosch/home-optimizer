@@ -8,6 +8,10 @@ from home_optimizer.domain.names import (
 )
 from home_optimizer.domain.series_transforms import build_daily_target_band_series
 from home_optimizer.domain.time import ensure_utc, parse_datetime
+from home_optimizer.features.mpc.exogenous_features import (
+    continue_exp_filter,
+    local_hour_sin_cos,
+)
 from home_optimizer.features.mpc.models import MpcHorizonBuildRequest, MpcHorizonStep
 
 
@@ -44,10 +48,27 @@ class MpcHorizonBuilder:
             request.pv_power_name,
         )
         price_by_timestamp = self._price_values_by_timestamp(request)
+        solar_direct_by_timestamp = {
+            timestamp_utc: float(value * request.solar_gain_input_scale)
+            for timestamp_utc, value in solar_by_timestamp.items()
+        }
+        ordered_timestamps = [
+            start_time_utc + (interval * step_index)
+            for step_index in range(request.horizon_steps)
+        ]
+        solar_direct_values = [
+            float(solar_direct_by_timestamp.get(timestamp_utc, 0.0))
+            for timestamp_utc in ordered_timestamps
+        ]
+        solar_filtered_values = continue_exp_filter(
+            solar_direct_values,
+            alpha=request.solar_gain_filter_alpha,
+            initial_filtered_value=request.initial_filtered_solar_gain_kw,
+        )
 
         horizon: list[MpcHorizonStep] = []
         for step_index in range(request.horizon_steps):
-            timestamp_utc = start_time_utc + (interval * step_index)
+            timestamp_utc = ordered_timestamps[step_index]
             temp_min_c = min_by_timestamp.get(timestamp_utc, request.fallback_temp_min_c)
             temp_max_c = max_by_timestamp.get(timestamp_utc, request.fallback_temp_max_c)
             if temp_min_c is None or temp_max_c is None:
@@ -55,13 +76,16 @@ class MpcHorizonBuilder:
                     "Missing target temperature bounds for MPC horizon step "
                     f"at {timestamp_utc.isoformat()}"
                 )
+            hour_sin, hour_cos = local_hour_sin_cos(
+                timestamp_utc,
+                local_timezone=request.local_timezone,
+            )
             horizon.append(
                 MpcHorizonStep(
                     timestamp_utc=timestamp_utc,
                     outdoor_temp_c=float(outdoor_by_timestamp.get(timestamp_utc, 0.0)),
-                    solar_gain_kw=float(
-                        solar_by_timestamp.get(timestamp_utc, 0.0) * request.solar_gain_input_scale
-                    ),
+                    solar_gain_kw=solar_direct_values[step_index],
+                    solar_gain_mass_kw=solar_filtered_values[step_index],
                     effective_heating_kw_forecast=request.default_effective_heating_kw,
                     hp_electric_power_forecast_kw=request.default_hp_electric_power_kw,
                     pv_available_power_forecast_kw=float(
@@ -69,6 +93,8 @@ class MpcHorizonBuilder:
                     ),
                     base_load_power_forecast_kw=request.default_base_load_power_kw,
                     occupied=request.default_occupied,
+                    hour_sin=hour_sin,
+                    hour_cos=hour_cos,
                     temp_min_c=float(temp_min_c),
                     temp_max_c=float(temp_max_c),
                     price_eur_kwh=float(price_by_timestamp.get(timestamp_utc, 0.0)),

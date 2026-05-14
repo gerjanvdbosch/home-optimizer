@@ -77,8 +77,11 @@ def rollout_without_heating(
                 mass_temp_c=current_mass_temp_c,
                 outdoor_temp_c=step.outdoor_temp_c,
                 solar_gain_kw=step.solar_gain_kw,
+                solar_gain_mass_kw=float(step.solar_gain_mass_kw),
                 heating_effect_kw=0.0,
                 occupied=step.occupied,
+                hour_sin=step.hour_sin,
+                hour_cos=step.hour_cos,
             )
         else:
             current_temp_c = control_model.predict_next_temperature(

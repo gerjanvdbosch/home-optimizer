@@ -16,7 +16,10 @@ from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
 from home_optimizer.features.history.weather_import_service import WeatherImportService
-from home_optimizer.features.mpc import SpaceHeatingMpcPlanningService
+from home_optimizer.features.mpc import (
+    SpaceHeatingMpcBacktestService,
+    SpaceHeatingMpcPlanningService,
+)
 from home_optimizer.features.pricing import (
     ElectricityPriceService,
     electricity_price_refresh_interval_seconds,
@@ -67,6 +70,7 @@ class AppContainer:
     forecast_scheduler: ForecastScheduler
     model_version_repository: ModelVersionRepository
     space_heating_mpc_planning_service: SpaceHeatingMpcPlanningService
+    space_heating_mpc_backtest_service: SpaceHeatingMpcBacktestService
 
     def close(self) -> None:
         self.home_assistant.close()
@@ -155,6 +159,12 @@ def build_container(
         target_schedule=settings.room_target,
         default_interval_minutes=settings.mpc_interval_minutes,
     )
+    space_heating_mpc_backtest_service = SpaceHeatingMpcBacktestService(
+        samples_reader=dataset_repository,
+        active_room_model_reader=model_version_repository,
+        target_schedule=settings.room_target,
+        default_interval_minutes=settings.mpc_interval_minutes,
+    )
 
     return AppContainer(
         settings=settings,
@@ -178,4 +188,5 @@ def build_container(
         forecast_scheduler=forecast_scheduler,
         model_version_repository=model_version_repository,
         space_heating_mpc_planning_service=space_heating_mpc_planning_service,
+        space_heating_mpc_backtest_service=space_heating_mpc_backtest_service,
     )

@@ -14,6 +14,7 @@ from home_optimizer.app.history_import_jobs import HistoryImportJobRunner
 from home_optimizer.app.settings import AppSettings
 from home_optimizer.web.cache import NO_CACHE_HEADERS
 from home_optimizer.web.ports import WebAppContainer
+from home_optimizer.web.routers.backtest import create_backtest_router
 from home_optimizer.web.routers.dashboard import create_dashboard_router
 from home_optimizer.web.routers.history_import import create_history_import_router
 from home_optimizer.web.routers.identification import create_identification_router
@@ -67,6 +68,7 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(create_dashboard_router(settings))
+    app.include_router(create_backtest_router(settings))
     app.include_router(create_history_import_router(settings))
     app.include_router(create_identification_router(settings))
     app.include_router(create_mpc_router(settings))

@@ -345,8 +345,14 @@ class SpaceHeatingMpcSolver:
                     * step.effective_heating_kw_forecast
                     * model_ref.hp_on[t]
                 )
-                + (problem.control_model.b_solar_room * step.solar_gain_kw)
+                + (problem.control_model.b_solar_direct_room * step.solar_gain_kw)
+                + (
+                    problem.control_model.b_solar_filtered_room
+                    * float(step.solar_gain_mass_kw)
+                )
                 + (problem.control_model.b_occ_room * step.occupied)
+                + (problem.control_model.b_hour_sin_room * step.hour_sin)
+                + (problem.control_model.b_hour_cos_room * step.hour_cos)
                 + problem.control_model.c_room
             )
 
@@ -361,8 +367,14 @@ class SpaceHeatingMpcSolver:
                     * step.effective_heating_kw_forecast
                     * model_ref.hp_on[t]
                 )
-                + (problem.control_model.b_solar_mass * step.solar_gain_kw)
+                + (problem.control_model.b_solar_direct_mass * step.solar_gain_kw)
+                + (
+                    problem.control_model.b_solar_filtered_mass
+                    * float(step.solar_gain_mass_kw)
+                )
                 + (problem.control_model.b_occ_mass * step.occupied)
+                + (problem.control_model.b_hour_sin_mass * step.hour_sin)
+                + (problem.control_model.b_hour_cos_mass * step.hour_cos)
                 + problem.control_model.c_mass
             )
 

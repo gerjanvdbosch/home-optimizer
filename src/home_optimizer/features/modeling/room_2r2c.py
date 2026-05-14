@@ -1658,6 +1658,30 @@ class RoomRcTrainer:
             prediction_origin_index=prediction_origin_index,
         )
 
+    def estimate_current_state(
+        self,
+        model: RoomRcModel,
+        rows: list[MpcDatasetRow],
+    ) -> tuple[float, float]:
+        prepared = self.prepare(rows, model.config)
+        return self.estimate_current_state_prepared(model, prepared)
+
+    def estimate_current_state_prepared(
+        self,
+        model: RoomRcModel,
+        prepared: PreparedRoomRcData,
+    ) -> tuple[float, float]:
+        if prepared.frame.empty:
+            raise ValueError("Cannot estimate current state from an empty prepared dataset")
+        physical = self._physical_from_model(model)
+        cache = physical._build_sequence_cache(prepared.frame)
+        filtered_states, _ = physical._estimate_filtered_states(
+            cache,
+            RoomRC2StateParams.from_dict(model.params),
+        )
+        room_temp_c, mass_temp_c = filtered_states[-1]
+        return float(room_temp_c), float(mass_temp_c)
+
     def simulate_horizon_prepared(
         self,
         model: RoomRcModel,

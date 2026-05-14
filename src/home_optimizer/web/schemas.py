@@ -323,3 +323,62 @@ class MpcPlanResponse(BaseModel):
     objective_breakdown: MpcObjectiveBreakdownResponse
     summary: MpcPlanSummaryResponse
     steps: list[MpcPlanStepResponse]
+
+
+class MpcBacktestSummaryResponse(BaseModel):
+    comfort_violation_minutes: int
+    degree_minutes_below_comfort: float
+    degree_minutes_above_comfort: float
+    starts_per_day: float
+    runtime_minutes: int
+    estimated_energy_cost_eur: float
+    average_solver_runtime_seconds: float
+    infeasible_count: int
+    slack_usage_count: int
+
+
+class MpcBacktestDeltaResponse(BaseModel):
+    comfort_violation_minutes: int
+    degree_minutes_below_comfort: float
+    degree_minutes_above_comfort: float
+    starts_per_day: float
+    runtime_minutes: int
+    estimated_energy_cost_eur: float
+    average_solver_runtime_seconds: float
+    infeasible_count: int
+    slack_usage_count: int
+
+
+class MpcBacktestStepResponse(BaseModel):
+    timestamp_utc: datetime
+    mpc_hp_on: bool
+    historical_hp_on: bool
+    start: bool
+    stop: bool
+    predicted_next_room_temp_c: float
+    simulated_next_room_temp_c: float
+    historical_next_room_temp_c: float | None = None
+    temp_min_c: float
+    temp_max_c: float
+    slack_low_c: float
+    slack_high_c: float
+    price_eur_kwh: float
+    estimated_mpc_energy_cost_eur: float
+    estimated_historical_energy_cost_eur: float
+    solve_time_seconds: float | None = None
+    feasible: bool
+
+
+class MpcBacktestResponse(BaseModel):
+    model_id: str
+    model_type: str
+    start_time_utc: datetime
+    end_time_utc: datetime
+    interval_minutes: int
+    horizon_steps: int
+    step_count: int
+    mpc_summary: MpcBacktestSummaryResponse
+    historical_summary: MpcBacktestSummaryResponse
+    delta: MpcBacktestDeltaResponse
+    total_solver_runtime_seconds: float
+    steps: list[MpcBacktestStepResponse]

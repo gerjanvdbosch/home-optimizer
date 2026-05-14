@@ -49,10 +49,16 @@ class Rc2StateThermalControlModel(DomainModel):
     b_out_mass: float
     b_heat_room: float = 0.0
     b_heat_mass: float
-    b_solar_room: float
-    b_solar_mass: float = 0.0
+    b_solar_direct_room: float
+    b_solar_filtered_room: float = 0.0
+    b_solar_direct_mass: float = 0.0
+    b_solar_filtered_mass: float = 0.0
     b_occ_room: float
     b_occ_mass: float = 0.0
+    b_hour_sin_room: float = 0.0
+    b_hour_cos_room: float = 0.0
+    b_hour_sin_mass: float = 0.0
+    b_hour_cos_mass: float = 0.0
     c_room: float = 0.0
     c_mass: float = 0.0
     notes: str = Field(
@@ -66,16 +72,22 @@ class Rc2StateThermalControlModel(DomainModel):
         mass_temp_c: float,
         outdoor_temp_c: float,
         solar_gain_kw: float,
+        solar_gain_mass_kw: float,
         heating_effect_kw: float,
         occupied: float,
+        hour_sin: float,
+        hour_cos: float,
     ) -> tuple[float, float]:
         next_room_temp_c = float(
             (self.a11 * room_temp_c)
             + (self.a12 * mass_temp_c)
             + (self.b_out_room * outdoor_temp_c)
             + (self.b_heat_room * heating_effect_kw)
-            + (self.b_solar_room * solar_gain_kw)
+            + (self.b_solar_direct_room * solar_gain_kw)
+            + (self.b_solar_filtered_room * solar_gain_mass_kw)
             + (self.b_occ_room * occupied)
+            + (self.b_hour_sin_room * hour_sin)
+            + (self.b_hour_cos_room * hour_cos)
             + self.c_room
         )
         next_mass_temp_c = float(
@@ -83,8 +95,11 @@ class Rc2StateThermalControlModel(DomainModel):
             + (self.a22 * mass_temp_c)
             + (self.b_out_mass * outdoor_temp_c)
             + (self.b_heat_mass * heating_effect_kw)
-            + (self.b_solar_mass * solar_gain_kw)
+            + (self.b_solar_direct_mass * solar_gain_kw)
+            + (self.b_solar_filtered_mass * solar_gain_mass_kw)
             + (self.b_occ_mass * occupied)
+            + (self.b_hour_sin_mass * hour_sin)
+            + (self.b_hour_cos_mass * hour_cos)
             + self.c_mass
         )
         return next_room_temp_c, next_mass_temp_c
@@ -94,11 +109,14 @@ class MpcHorizonStep(DomainModel):
     timestamp_utc: datetime
     outdoor_temp_c: float
     solar_gain_kw: float = 0.0
+    solar_gain_mass_kw: float | None = None
     effective_heating_kw_forecast: float = Field(ge=0.0)
     hp_electric_power_forecast_kw: float = Field(default=0.0, ge=0.0)
     pv_available_power_forecast_kw: float = Field(default=0.0, ge=0.0)
     base_load_power_forecast_kw: float = Field(default=0.0, ge=0.0)
     occupied: float = Field(default=0.0, ge=0.0, le=1.0)
+    hour_sin: float = 0.0
+    hour_cos: float = 0.0
     temp_min_c: float
     temp_max_c: float
     price_eur_kwh: float = 0.0
@@ -121,6 +139,8 @@ class MpcHorizonStep(DomainModel):
             )
         if self.import_price_eur_kwh == 0.0 and self.price_eur_kwh > 0.0:
             object.__setattr__(self, "import_price_eur_kwh", self.price_eur_kwh)
+        if self.solar_gain_mass_kw is None:
+            object.__setattr__(self, "solar_gain_mass_kw", self.solar_gain_kw)
         return self
 
 
@@ -262,11 +282,14 @@ class MpcHorizonBuildRequest(DomainModel):
     solar_gain_name: str = "gti_living_room_windows_adjusted"
     pv_power_name: str = GTI_PV
     solar_gain_input_scale: float = Field(default=1.0, gt=0.0)
+    solar_gain_filter_alpha: float = Field(default=0.0, ge=0.0, lt=1.0)
+    initial_filtered_solar_gain_kw: float = 0.0
     pv_power_input_scale: float = Field(default=0.0, ge=0.0)
     default_hp_electric_power_kw: float = Field(default=0.0, ge=0.0)
     default_base_load_power_kw: float = Field(default=0.0)
     default_export_price_eur_kwh: float = Field(default=0.0, ge=0.0)
     default_occupied: float = Field(default=0.0, ge=0.0, le=1.0)
+    local_timezone: str | None = None
     fallback_temp_min_c: float | None = None
     fallback_temp_max_c: float | None = None
 
@@ -283,29 +306,44 @@ class MpcHorizonBuildRequest(DomainModel):
 
 class MpcBacktestStepResult(DomainModel):
     timestamp_utc: datetime
-    hp_on: bool
+    mpc_hp_on: bool
+    historical_hp_on: bool
     start: bool
     stop: bool
     predicted_next_room_temp_c: float
-    realized_next_room_temp_c: float
+    simulated_next_room_temp_c: float
+    historical_next_room_temp_c: float | None = None
     temp_min_c: float
     temp_max_c: float
     slack_low_c: float
     slack_high_c: float
-    estimated_energy_cost_eur: float
+    price_eur_kwh: float
+    estimated_mpc_energy_cost_eur: float
+    estimated_historical_energy_cost_eur: float
     solve_time_seconds: float | None = None
     feasible: bool = True
 
 
-class MpcBacktestResult(DomainModel):
-    step_results: list[MpcBacktestStepResult]
+class MpcBacktestSummary(DomainModel):
     comfort_violation_minutes: int
     degree_minutes_below_comfort: float
     degree_minutes_above_comfort: float
     starts_per_day: float
     runtime_minutes: int
     estimated_energy_cost_eur: float
+    average_solver_runtime_seconds: float = 0.0
+    infeasible_count: int = 0
+    slack_usage_count: int = 0
+
+
+class MpcBacktestResult(DomainModel):
+    model_id: str
+    model_type: str
+    start_time_utc: datetime
+    end_time_utc: datetime
+    interval_minutes: int
+    horizon_steps: int
+    step_results: list[MpcBacktestStepResult]
+    mpc_summary: MpcBacktestSummary
+    historical_summary: MpcBacktestSummary
     total_solver_runtime_seconds: float
-    average_solver_runtime_seconds: float
-    infeasible_count: int
-    slack_usage_count: int

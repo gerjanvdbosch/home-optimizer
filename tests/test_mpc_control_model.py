@@ -76,7 +76,18 @@ def test_to_control_model_from_room_rc_defaults_to_exact_2state_conversion() -> 
     assert control_model.a22 == pytest.approx(float(a_discrete[1, 1]))
     assert control_model.b_out_room == pytest.approx(float(b_discrete[0, 0]))
     assert control_model.b_out_mass == pytest.approx(float(b_discrete[1, 0]))
+    assert control_model.b_heat_room == pytest.approx(float(b_discrete[0, 1]))
     assert control_model.b_heat_mass == pytest.approx(float(b_discrete[1, 1]))
+    assert control_model.b_solar_direct_room == pytest.approx(float(b_discrete[0, 2]))
+    assert control_model.b_solar_filtered_room == pytest.approx(float(b_discrete[0, 3]))
+    assert control_model.b_solar_direct_mass == pytest.approx(float(b_discrete[1, 2]))
+    assert control_model.b_solar_filtered_mass == pytest.approx(float(b_discrete[1, 3]))
+    assert control_model.b_hour_sin_room == pytest.approx(float(b_discrete[0, 5]))
+    assert control_model.b_hour_cos_room == pytest.approx(float(b_discrete[0, 6]))
+    assert control_model.b_hour_sin_mass == pytest.approx(float(b_discrete[1, 5]))
+    assert control_model.b_hour_cos_mass == pytest.approx(float(b_discrete[1, 6]))
+
+
 def test_room_rc_control_model_keeps_heating_active_under_comfort_pressure() -> None:
     start_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     room_rc_model = RoomRcModel(

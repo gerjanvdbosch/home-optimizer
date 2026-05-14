@@ -18,6 +18,7 @@ from home_optimizer.features.modeling import (
     StoredModelVersion,
     StoredModelVersionSummary,
 )
+from home_optimizer.features.mpc import MpcBacktestResult, MpcBacktestSummary
 from home_optimizer.features.simulation import RoomSimulationResult
 from home_optimizer.web.schemas import (
     BaselineKpiSummaryResponse,
@@ -31,6 +32,10 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetResponse,
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
+    MpcBacktestDeltaResponse,
+    MpcBacktestResponse,
+    MpcBacktestStepResponse,
+    MpcBacktestSummaryResponse,
     RoomSimulationResponse,
     RoomModelCatalogResponse,
     RoomModelVersionDetailResponse,
@@ -231,4 +236,58 @@ def room_simulation_response(result: RoomSimulationResult) -> RoomSimulationResp
         solar_irradiance=series_response(result.solar_irradiance),
         solar_gain_proxy=series_response(result.solar_gain_proxy),
         shutter_position=series_response(result.shutter_position),
+    )
+
+
+def mpc_backtest_summary_response(summary: MpcBacktestSummary) -> MpcBacktestSummaryResponse:
+    return MpcBacktestSummaryResponse(**summary.model_dump())
+
+
+def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
+    mpc_summary = mpc_backtest_summary_response(result.mpc_summary)
+    historical_summary = mpc_backtest_summary_response(result.historical_summary)
+    return MpcBacktestResponse(
+        model_id=result.model_id,
+        model_type=result.model_type,
+        start_time_utc=result.start_time_utc,
+        end_time_utc=result.end_time_utc,
+        interval_minutes=result.interval_minutes,
+        horizon_steps=result.horizon_steps,
+        step_count=len(result.step_results),
+        mpc_summary=mpc_summary,
+        historical_summary=historical_summary,
+        delta=MpcBacktestDeltaResponse(
+            comfort_violation_minutes=(
+                result.mpc_summary.comfort_violation_minutes
+                - result.historical_summary.comfort_violation_minutes
+            ),
+            degree_minutes_below_comfort=(
+                result.mpc_summary.degree_minutes_below_comfort
+                - result.historical_summary.degree_minutes_below_comfort
+            ),
+            degree_minutes_above_comfort=(
+                result.mpc_summary.degree_minutes_above_comfort
+                - result.historical_summary.degree_minutes_above_comfort
+            ),
+            starts_per_day=(
+                result.mpc_summary.starts_per_day
+                - result.historical_summary.starts_per_day
+            ),
+            runtime_minutes=(
+                result.mpc_summary.runtime_minutes
+                - result.historical_summary.runtime_minutes
+            ),
+            estimated_energy_cost_eur=(
+                result.mpc_summary.estimated_energy_cost_eur
+                - result.historical_summary.estimated_energy_cost_eur
+            ),
+            average_solver_runtime_seconds=result.mpc_summary.average_solver_runtime_seconds,
+            infeasible_count=result.mpc_summary.infeasible_count,
+            slack_usage_count=result.mpc_summary.slack_usage_count,
+        ),
+        total_solver_runtime_seconds=result.total_solver_runtime_seconds,
+        steps=[
+            MpcBacktestStepResponse(**step.model_dump())
+            for step in result.step_results
+        ],
     )

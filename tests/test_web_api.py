@@ -34,6 +34,11 @@ from home_optimizer.features.modeling import (
     ValidationFoldResult,
 )
 from home_optimizer.features.mpc import MpcObjectiveBreakdown, MpcPlan, MpcPlanStep
+from home_optimizer.features.mpc import (
+    MpcBacktestResult,
+    MpcBacktestStepResult,
+    MpcBacktestSummary,
+)
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 
@@ -244,6 +249,89 @@ class FakeSpaceHeatingMpcPlanningService:
                 )
                 for index in range(horizon_steps)
             ],
+        )
+
+
+class FakeSpaceHeatingMpcBacktestService:
+    def run(
+        self,
+        *,
+        start_time_utc: datetime,
+        end_time_utc: datetime,
+        model_id: str | None = None,
+        horizon_steps: int = 36,
+        max_solver_seconds: float | None = None,
+    ) -> MpcBacktestResult:
+        return MpcBacktestResult(
+            model_id=model_id or "room-model-active",
+            model_type=ROOM_ARX_MODEL_KIND,
+            start_time_utc=start_time_utc,
+            end_time_utc=end_time_utc,
+            interval_minutes=12,
+            horizon_steps=horizon_steps,
+            step_results=[
+                MpcBacktestStepResult(
+                    timestamp_utc=start_time_utc,
+                    mpc_hp_on=True,
+                    historical_hp_on=False,
+                    start=True,
+                    stop=False,
+                    predicted_next_room_temp_c=20.2,
+                    simulated_next_room_temp_c=20.2,
+                    historical_next_room_temp_c=19.8,
+                    temp_min_c=19.0,
+                    temp_max_c=21.0,
+                    slack_low_c=0.0,
+                    slack_high_c=0.0,
+                    price_eur_kwh=0.245,
+                    estimated_mpc_energy_cost_eur=0.12,
+                    estimated_historical_energy_cost_eur=0.09,
+                    solve_time_seconds=0.07,
+                    feasible=True,
+                ),
+                MpcBacktestStepResult(
+                    timestamp_utc=start_time_utc + timedelta(minutes=12),
+                    mpc_hp_on=False,
+                    historical_hp_on=True,
+                    start=False,
+                    stop=True,
+                    predicted_next_room_temp_c=20.0,
+                    simulated_next_room_temp_c=20.0,
+                    historical_next_room_temp_c=20.3,
+                    temp_min_c=19.0,
+                    temp_max_c=21.0,
+                    slack_low_c=0.0,
+                    slack_high_c=0.1,
+                    price_eur_kwh=0.255,
+                    estimated_mpc_energy_cost_eur=0.05,
+                    estimated_historical_energy_cost_eur=0.11,
+                    solve_time_seconds=0.08,
+                    feasible=False,
+                ),
+            ],
+            mpc_summary=MpcBacktestSummary(
+                comfort_violation_minutes=12,
+                degree_minutes_below_comfort=3.0,
+                degree_minutes_above_comfort=0.0,
+                starts_per_day=1.5,
+                runtime_minutes=12,
+                estimated_energy_cost_eur=0.17,
+                average_solver_runtime_seconds=0.075,
+                infeasible_count=1,
+                slack_usage_count=1,
+            ),
+            historical_summary=MpcBacktestSummary(
+                comfort_violation_minutes=0,
+                degree_minutes_below_comfort=0.0,
+                degree_minutes_above_comfort=1.2,
+                starts_per_day=0.5,
+                runtime_minutes=12,
+                estimated_energy_cost_eur=0.20,
+                average_solver_runtime_seconds=0.0,
+                infeasible_count=0,
+                slack_usage_count=0,
+            ),
+            total_solver_runtime_seconds=0.15,
         )
 
 
@@ -663,6 +751,7 @@ class FakeContainer:
         self.weather_import_service = FakeWeatherImportService()
         self.model_version_repository = FakeModelVersionRepository()
         self.space_heating_mpc_planning_service = FakeSpaceHeatingMpcPlanningService()
+        self.space_heating_mpc_backtest_service = FakeSpaceHeatingMpcBacktestService()
         self.telemetry_scheduler = FakeScheduler()
         self.electricity_price_scheduler = FakeScheduler()
         self.forecast_scheduler = FakeScheduler()
@@ -839,6 +928,52 @@ def test_mpc_page_renders_navigation_and_controls() -> None:
     assert 'id="mpc-heating-explanation"' in response.text
     assert 'id="mpc-horizon-steps" type="number" min="1" max="288" value="144"' in response.text
     assert 'id="mpc-interval-minutes"' not in response.text
+
+
+def test_backtest_page_renders_navigation_and_controls() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get("/backtest")
+
+    assert response.status_code == 200
+    assert "MPC Backtest" in response.text
+    assert 'href="./backtest"' in response.text
+    assert 'id="backtest-run-button"' in response.text
+    assert 'id="backtest-start-time"' in response.text
+    assert 'id="backtest-end-time"' in response.text
+    assert 'id="backtest-model-select"' in response.text
+    assert 'id="backtest-temperature-chart"' in response.text
+    assert 'id="backtest-cost-chart"' in response.text
+
+
+def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
+    app, _ = build_test_app(imported_rows={})
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/backtest/space-heating",
+            params={
+                "start_time": "2026-04-25T12:00:00+00:00",
+                "end_time": "2026-04-25T12:24:00+00:00",
+                "model_id": "room-model-active",
+                "horizon_steps": 4,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_id"] == "room-model-active"
+    assert payload["interval_minutes"] == 12
+    assert payload["horizon_steps"] == 4
+    assert payload["step_count"] == 2
+    assert payload["mpc_summary"]["infeasible_count"] == 1
+    assert payload["historical_summary"]["estimated_energy_cost_eur"] == 0.2
+    assert payload["delta"]["estimated_energy_cost_eur"] == pytest.approx(-0.03, abs=1e-9)
+    assert payload["delta"]["runtime_minutes"] == 0
+    assert payload["steps"][0]["mpc_hp_on"] is True
+    assert payload["steps"][0]["historical_hp_on"] is False
+    assert payload["steps"][1]["feasible"] is False
 
 
 def test_identification_endpoint_returns_dataset_and_summary() -> None:

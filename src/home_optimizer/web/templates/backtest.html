@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>$title</title>
+    <link rel="stylesheet" href="static/dashboard.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="title-group">
+          <h1>$title</h1>
+          <span>Closed-loop MPC replay met historische vergelijking</span>
+        </div>
+        <div class="topbar-actions">
+          <nav class="page-nav" aria-label="Pagina navigatie">
+            <a class="page-link" href="./">Dashboard</a>
+            <a class="page-link" href="./model">Model</a>
+            <a class="page-link" href="./mpc">MPC</a>
+            <a class="page-link is-active" href="./backtest">Backtest</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Backtest instellingen</h2>
+          <p>$database_path</p>
+        </div>
+        <div class="actions">
+          <label>
+            Starttijd
+            <input id="backtest-start-time" type="datetime-local" />
+          </label>
+          <label>
+            Eindtijd
+            <input id="backtest-end-time" type="datetime-local" />
+          </label>
+          <label>
+            Model
+            <select id="backtest-model-select"></select>
+          </label>
+          <label>
+            Horizon (steps)
+            <input id="backtest-horizon-steps" type="number" min="1" max="288" value="36" />
+          </label>
+          <button id="backtest-run-button" type="button">Run backtest</button>
+          <div id="backtest-status" class="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Samenvatting</h2>
+          <p id="backtest-summary-caption">-</p>
+        </div>
+        <div class="table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>MPC backtest</th>
+                <th>Werkelijkheid</th>
+                <th>Delta</th>
+              </tr>
+            </thead>
+            <tbody id="backtest-summary-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="charts" aria-label="Backtest visualisatie">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Temperatuur en comfortband</h2>
+            <span id="backtest-temp-summary">-</span>
+          </div>
+          <div class="chart-wrap chart-wrap-tall" id="backtest-temperature-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Warmtepomp vergelijking</h2>
+            <span id="backtest-switch-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="backtest-switch-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Kost en prijs</h2>
+            <span id="backtest-cost-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="backtest-cost-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Comfort en slack</h2>
+            <span id="backtest-comfort-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="backtest-comfort-chart"></div>
+        </article>
+      </section>
+
+      <section class="panel import-panel">
+        <div>
+          <h2>Step details</h2>
+          <p>Per stap de MPC-run naast de historische werkelijkheid.</p>
+        </div>
+        <div class="table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Tijd</th>
+                <th>MPC on</th>
+                <th>Hist on</th>
+                <th>Sim temp</th>
+                <th>Hist temp</th>
+                <th>Band</th>
+                <th>Slack</th>
+                <th>Prijs</th>
+                <th>MPC kost</th>
+                <th>Hist kost</th>
+                <th>Feasible</th>
+              </tr>
+            </thead>
+            <tbody id="backtest-steps-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="plotly.js"></script>
+    <script src="static/backtest.js"></script>
+  </body>
+</html>
