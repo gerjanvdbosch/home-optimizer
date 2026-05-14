@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import numpy as np
 import pytest
 
 from home_optimizer.features.modeling import RoomRcConfig, RoomRcModel
@@ -55,39 +54,7 @@ def test_to_control_model_from_arx_aggregates_matching_coefficients() -> None:
     assert control_model.c == pytest.approx(1.25)
 
 
-def test_to_control_model_from_room_rc_matches_dominant_mode_projection() -> None:
-    room_rc_model = RoomRcModel(
-        trained_from_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        trained_to_utc=datetime(2026, 1, 2, tzinfo=timezone.utc),
-        interval_minutes=10,
-        config=RoomRcConfig(),
-        params=RoomRC2StateParams().to_dict(),
-        sample_count=100,
-    )
-
-    control_model = to_control_model(room_rc_model)
-    physical = RoomRC2StatePhysicalModel(RoomRcConfig(interval_minutes=10))
-    _, _, a_discrete, b_discrete = physical.params_to_matrices(RoomRC2StateParams())
-    eigenvalues, right_eigenvectors = np.linalg.eig(a_discrete)
-    dominant_index = int(np.argmax(np.abs(eigenvalues)))
-    dominant_eigenvalue = float(np.real_if_close(eigenvalues[dominant_index]))
-    dominant_right = np.real_if_close(right_eigenvectors[:, dominant_index]).astype(float)
-    dominant_right = dominant_right / dominant_right[0]
-
-    left_eigenvalues, left_eigenvectors = np.linalg.eig(a_discrete.T)
-    left_index = int(np.argmin(np.abs(left_eigenvalues - eigenvalues[dominant_index])))
-    dominant_left = np.real_if_close(left_eigenvectors[:, left_index]).astype(float)
-    dominant_left = dominant_left / float(dominant_left @ dominant_right)
-    reduced_inputs = dominant_left @ b_discrete
-
-    assert control_model.a == pytest.approx(dominant_eigenvalue)
-    assert control_model.b_out == pytest.approx(float(reduced_inputs[0]))
-    assert control_model.b_heat == pytest.approx(float(reduced_inputs[1]))
-    assert control_model.b_solar == pytest.approx(float(reduced_inputs[2] + reduced_inputs[3]))
-    assert control_model.b_occ == pytest.approx(float(reduced_inputs[4]))
-
-
-def test_to_control_model_from_room_rc_supports_exact_2state_conversion() -> None:
+def test_to_control_model_from_room_rc_defaults_to_exact_2state_conversion() -> None:
     params = RoomRC2StateParams()
     room_rc_model = RoomRcModel(
         trained_from_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -98,7 +65,7 @@ def test_to_control_model_from_room_rc_supports_exact_2state_conversion() -> Non
         sample_count=100,
     )
 
-    control_model = to_control_model(room_rc_model, control_model_kind="rc_2state")
+    control_model = to_control_model(room_rc_model)
 
     assert isinstance(control_model, Rc2StateThermalControlModel)
     physical = RoomRC2StatePhysicalModel(RoomRcConfig(interval_minutes=10))
@@ -110,9 +77,7 @@ def test_to_control_model_from_room_rc_supports_exact_2state_conversion() -> Non
     assert control_model.b_out_room == pytest.approx(float(b_discrete[0, 0]))
     assert control_model.b_out_mass == pytest.approx(float(b_discrete[1, 0]))
     assert control_model.b_heat_mass == pytest.approx(float(b_discrete[1, 1]))
-
-
-def test_room_rc_control_model_allows_heating_to_raise_predicted_temperature() -> None:
+def test_room_rc_control_model_keeps_heating_active_under_comfort_pressure() -> None:
     start_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     room_rc_model = RoomRcModel(
         trained_from_utc=start_time,
@@ -140,13 +105,19 @@ def test_room_rc_control_model_allows_heating_to_raise_predicted_temperature() -
             ],
         ),
         control_model=to_control_model(room_rc_model),
-        initial_state=MpcInitialState(room_temp_c=18.0, hp_on=False, off_steps=1),
+        initial_state=Rc2StateMpcInitialState(
+            room_temp_c=18.0,
+            mass_temp_c=18.0,
+            hp_on=False,
+            off_steps=1,
+        ),
     )
 
     assert plan.feasible is True
     heated_steps = [step for step in plan.steps if step.hp_on]
     assert heated_steps
-    assert max(step.predicted_room_temp_c for step in plan.steps[1:]) > plan.steps[0].predicted_room_temp_c
+    assert heated_steps[0].start is True
+    assert len(heated_steps) >= len(plan.steps) - 1
 
 
 def test_room_rc_2state_control_model_allows_heating_to_raise_predicted_temperature() -> None:
@@ -183,7 +154,6 @@ def test_room_rc_2state_control_model_allows_heating_to_raise_predicted_temperat
             hp_on=False,
             off_steps=1,
         ),
-        control_model_kind="rc_2state",
     )
 
     assert plan.feasible is True

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-
 from pydantic import Field, model_validator
 
 from home_optimizer.domain.forecast import ForecastEntry
@@ -250,9 +248,6 @@ class MpcControllerRequest(DomainModel):
 
 class ControlModelConversionOptions(DomainModel):
     solar_gain_input_scale: float = Field(default=1.0, gt=0.0)
-
-
-ControlModelKind = Literal["linear_1state", "rc_2state"]
 
 
 class MpcHorizonBuildRequest(DomainModel):

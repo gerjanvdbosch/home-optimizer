@@ -210,7 +210,6 @@ def test_space_heating_mpc_planning_service_uses_2state_initial_state_for_room_r
     )
 
     assert plan.feasible is True
-    assert captured["control_model_kind"] == "rc_2state"
     assert isinstance(captured["initial_state"], Rc2StateMpcInitialState)
     assert captured["initial_state"].room_temp_c == 19.4
     assert captured["initial_state"].mass_temp_c == 20.9

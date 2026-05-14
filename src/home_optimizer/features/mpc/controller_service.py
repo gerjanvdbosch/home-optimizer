@@ -7,7 +7,6 @@ from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.explain import explain_heating_plan
 from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.models import (
-    ControlModelKind,
     ControlModelConversionOptions,
     LinearThermalControlModel,
     MpcControllerRequest,
@@ -88,14 +87,12 @@ class SpaceHeatingMpcControllerService:
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: list[MpcHorizonStep] | None = None,
         conversion_options: ControlModelConversionOptions | None = None,
-        control_model_kind: ControlModelKind = "linear_1state",
     ) -> MpcPlan:
         return self.plan(
             request,
             control_model=to_control_model(
                 source_model,
                 options=conversion_options,
-                control_model_kind=control_model_kind,
             ),
             initial_state=initial_state,
             horizon=horizon,

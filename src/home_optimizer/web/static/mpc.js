@@ -60,7 +60,6 @@ function lineTrace(x, y, name, color, options = {}) {
 
 const startTimeInput = document.getElementById("mpc-start-time");
 const modelSelect = document.getElementById("mpc-model-select");
-const controlModelKindSelect = document.getElementById("mpc-control-model-kind");
 const horizonStepsInput = document.getElementById("mpc-horizon-steps");
 const intervalMinutesInput = document.getElementById("mpc-interval-minutes");
 const heatingKwInput = document.getElementById("mpc-heating-kw");
@@ -107,9 +106,6 @@ function setBusy(isBusy) {
   if (modelSelect) {
     modelSelect.disabled = isBusy || modelSelect.options.length <= 1;
   }
-  if (controlModelKindSelect) {
-    controlModelKindSelect.disabled = isBusy;
-  }
 }
 
 function syncMpcDateLabel(anchorTime) {
@@ -147,10 +143,6 @@ function applySelectedModelInterval(modelsById) {
   const selectedModel = modelsById.get(modelSelect.value);
   if (selectedModel?.interval_minutes) {
     intervalMinutesInput.value = String(selectedModel.interval_minutes);
-  }
-  if (controlModelKindSelect) {
-    controlModelKindSelect.value =
-      selectedModel?.model_type === "room_2r2c" ? "rc_2state" : "linear_1state";
   }
 }
 
@@ -419,9 +411,6 @@ async function loadPlan() {
     if (modelSelect?.value) {
       params.set("model_id", modelSelect.value);
     }
-    if (controlModelKindSelect?.value) {
-      params.set("control_model_kind", controlModelKindSelect.value);
-    }
     const response = await fetch(mpcApiUrl(`api/mpc/space-heating/plan?${params.toString()}`));
     const payload = await response.json();
     if (!response.ok) {
@@ -460,11 +449,6 @@ function initializeMpcPage() {
   if (modelSelect) {
     modelSelect.addEventListener("change", () => {
       applySelectedModelInterval(modelsById);
-      loadPlan().catch(() => {});
-    });
-  }
-  if (controlModelKindSelect) {
-    controlModelKindSelect.addEventListener("change", () => {
       loadPlan().catch(() => {});
     });
   }
