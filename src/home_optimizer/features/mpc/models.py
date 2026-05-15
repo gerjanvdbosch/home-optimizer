@@ -177,14 +177,23 @@ class MpcConstraints(DomainModel):
 class MpcObjectiveWeights(DomainModel):
     comfort_low: float = Field(default=10_000.0, ge=0.0)
     comfort_high: float = Field(default=10_000.0, ge=0.0)
+    active_comfort_high: float | None = Field(default=None, ge=0.0)
+    passive_comfort_high: float = Field(default=100.0, ge=0.0)
     tracking_under_target: float = Field(default=25.0, ge=0.0)
     tracking_over_target: float = Field(default=0.5, ge=0.0)
     unnecessary_heating: float = Field(default=4.0, ge=0.0)
+    q_heat_eff_active_threshold_kw: float = Field(default=0.1, ge=0.0)
     terminal: float = Field(default=8.0, ge=0.0)
     start: float = Field(default=50.0, ge=0.0)
     energy: float = Field(default=1.0, ge=0.0)
     pv_self_consumption: float = Field(default=0.5, ge=0.0)
     runtime: float = Field(default=0.05, ge=0.0)
+
+    @model_validator(mode="after")
+    def _resolve_active_comfort_high(self) -> "MpcObjectiveWeights":
+        if self.active_comfort_high is None:
+            object.__setattr__(self, "active_comfort_high", self.comfort_high)
+        return self
 
 
 class MpcProblem(DomainModel):
@@ -234,7 +243,8 @@ class MpcPlanStep(DomainModel):
 
 class MpcObjectiveBreakdown(DomainModel):
     comfort_low: float = 0.0
-    comfort_high: float = 0.0
+    active_comfort_high: float = 0.0
+    passive_comfort_high: float = 0.0
     tracking_under_target: float = 0.0
     tracking_over_target: float = 0.0
     unnecessary_heating: float = 0.0
@@ -243,6 +253,10 @@ class MpcObjectiveBreakdown(DomainModel):
     runtime: float = 0.0
     energy_cost: float = 0.0
     pv_self_consumption_reward: float = 0.0
+
+    @property
+    def comfort_high(self) -> float:
+        return self.active_comfort_high + self.passive_comfort_high
 
     @property
     def comfort_total(self) -> float:

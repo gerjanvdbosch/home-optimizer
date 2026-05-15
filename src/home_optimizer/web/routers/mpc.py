@@ -60,6 +60,8 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
         heating_explanation=plan.heating_explanation,
         objective_breakdown=MpcObjectiveBreakdownResponse(
             comfort_low=plan.objective_breakdown.comfort_low,
+            active_comfort_high_cost=plan.objective_breakdown.active_comfort_high,
+            passive_comfort_high_cost=plan.objective_breakdown.passive_comfort_high,
             comfort_high=plan.objective_breakdown.comfort_high,
             comfort_total=plan.objective_breakdown.comfort_total,
             tracking_under_target=plan.objective_breakdown.tracking_under_target,

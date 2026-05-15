@@ -25,7 +25,7 @@ class _StaticPlanController:
             feasible=True,
             objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=1.0,
-                comfort_high=2.0,
+                active_comfort_high=2.0,
                 tracking_under_target=1.0,
                 tracking_over_target=2.0,
                 terminal=4.0,

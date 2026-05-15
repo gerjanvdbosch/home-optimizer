@@ -55,6 +55,7 @@ class SpaceHeatingMpcBacktestRunner:
         resolved_constraints = constraints or MpcConstraints()
         resolved_weights = objective_weights or MpcObjectiveWeights()
         current_state = initial_state
+        historical_q_heat_eff_kw = initial_state.q_heat_eff_kw
         step_results: list[MpcBacktestStepResult] = []
         infeasible_count = 0
         total_solver_runtime_seconds = 0.0
@@ -126,6 +127,12 @@ class SpaceHeatingMpcBacktestRunner:
                 current_step.timestamp_utc,
                 current_step.effective_heating_kw_forecast > 0.0,
             )
+            historical_q_heat_eff_kw = self._apply_heat_actuator(
+                control_model=control_model,
+                previous_q_heat_eff_kw=historical_q_heat_eff_kw,
+                commanded_hp_on=historical_hp_on,
+                current_step=current_step,
+            )
 
             step_results.append(
                 MpcBacktestStepResult(
@@ -145,6 +152,7 @@ class SpaceHeatingMpcBacktestRunner:
                         else float(current_step.target_temp_c or current_step.temp_min_c)
                     ),
                     q_heat_eff_kw=q_heat_eff_kw,
+                    historical_q_heat_eff_kw=historical_q_heat_eff_kw,
                     predicted_next_room_temp_c=predicted_next_temp,
                     simulated_next_room_temp_c=predicted_next_temp,
                     historical_next_room_temp_c=next_step.realized_room_temp_c,
@@ -185,6 +193,7 @@ class SpaceHeatingMpcBacktestRunner:
                         else float(current_step.target_temp_c or current_step.temp_min_c)
                     ),
                     hp_on=applied_hp_on,
+                    q_heat_eff_kw=q_heat_eff_kw,
                     start=start,
                     slack_low_c=slack_low_c,
                     slack_high_c=slack_high_c,
@@ -227,6 +236,7 @@ class SpaceHeatingMpcBacktestRunner:
                 step_results,
                 interval_minutes=interval_minutes,
                 mode="mpc",
+                q_heat_eff_active_threshold_kw=resolved_weights.q_heat_eff_active_threshold_kw,
                 infeasible_count=infeasible_count,
                 slack_usage_count=slack_usage_count,
                 average_solver_runtime_seconds=average_solver_runtime,
@@ -235,6 +245,7 @@ class SpaceHeatingMpcBacktestRunner:
                 step_results,
                 interval_minutes=interval_minutes,
                 mode="historical",
+                q_heat_eff_active_threshold_kw=resolved_weights.q_heat_eff_active_threshold_kw,
             ),
             mpc_objective_breakdown=executed_path_objective_breakdown,
             solver_objective_breakdown=solver_cumulative_objective_breakdown,
@@ -248,7 +259,8 @@ class SpaceHeatingMpcBacktestRunner:
     ) -> MpcObjectiveBreakdown:
         return MpcObjectiveBreakdown(
             comfort_low=left.comfort_low + right.comfort_low,
-            comfort_high=left.comfort_high + right.comfort_high,
+            active_comfort_high=left.active_comfort_high + right.active_comfort_high,
+            passive_comfort_high=left.passive_comfort_high + right.passive_comfort_high,
             tracking_under_target=(
                 left.tracking_under_target + right.tracking_under_target
             ),
@@ -274,6 +286,7 @@ class SpaceHeatingMpcBacktestRunner:
         planned_room_temp_c: float,
         useful_preheat_target_c: float,
         hp_on: bool,
+        q_heat_eff_kw: float,
         start: bool,
         slack_low_c: float,
         slack_high_c: float,
@@ -282,6 +295,9 @@ class SpaceHeatingMpcBacktestRunner:
     ) -> MpcObjectiveBreakdown:
         tracking_under_c = max(useful_preheat_target_c - planned_room_temp_c, 0.0)
         tracking_over_c = max(planned_room_temp_c - useful_preheat_target_c, 0.0)
+        active_heating = hp_on or (
+            q_heat_eff_kw > objective_weights.q_heat_eff_active_threshold_kw
+        )
         pv_surplus_kw = max(
             0.0,
             current_step.pv_available_power_forecast_kw - current_step.base_load_power_forecast_kw,
@@ -296,10 +312,17 @@ class SpaceHeatingMpcBacktestRunner:
                 * (interval_minutes / 60.0)
                 * slack_low_c
             ),
-            comfort_high=(
-                objective_weights.comfort_high
+            active_comfort_high=(
+                float(objective_weights.active_comfort_high or 0.0)
                 * (interval_minutes / 60.0)
                 * slack_high_c
+                * float(int(active_heating))
+            ),
+            passive_comfort_high=(
+                objective_weights.passive_comfort_high
+                * (interval_minutes / 60.0)
+                * slack_high_c
+                * float(int(not active_heating))
             ),
             tracking_under_target=objective_weights.tracking_under_target * tracking_under_c,
             tracking_over_target=objective_weights.tracking_over_target * tracking_over_c,
@@ -466,6 +489,7 @@ class SpaceHeatingMpcBacktestRunner:
         *,
         interval_minutes: int,
         mode: str,
+        q_heat_eff_active_threshold_kw: float = 0.1,
         infeasible_count: int = 0,
         slack_usage_count: int = 0,
         average_solver_runtime_seconds: float = 0.0,
@@ -474,6 +498,8 @@ class SpaceHeatingMpcBacktestRunner:
         comfort_violation_minutes = 0
         degree_minutes_below = 0.0
         degree_minutes_above = 0.0
+        active_comfort_high_degree_minutes = 0.0
+        passive_comfort_high_degree_minutes = 0.0
         runtime_minutes = 0
         energy_cost = 0.0
         starts = 0
@@ -481,6 +507,7 @@ class SpaceHeatingMpcBacktestRunner:
 
         for step in step_results:
             hp_on = step.mpc_hp_on if mode == "mpc" else step.historical_hp_on
+            q_heat_eff_kw = step.q_heat_eff_kw if mode == "mpc" else step.historical_q_heat_eff_kw
             room_temp = (
                 step.simulated_next_room_temp_c
                 if mode == "mpc"
@@ -504,11 +531,18 @@ class SpaceHeatingMpcBacktestRunner:
                 comfort_violation_minutes += interval_minutes
             degree_minutes_below += below_comfort * interval_minutes
             degree_minutes_above += above_comfort * interval_minutes
+            if above_comfort > 0.0:
+                if hp_on or q_heat_eff_kw > q_heat_eff_active_threshold_kw:
+                    active_comfort_high_degree_minutes += above_comfort * interval_minutes
+                else:
+                    passive_comfort_high_degree_minutes += above_comfort * interval_minutes
 
         return MpcBacktestSummary(
             comfort_violation_minutes=comfort_violation_minutes,
             degree_minutes_below_comfort=degree_minutes_below,
             degree_minutes_above_comfort=degree_minutes_above,
+            active_comfort_high_degree_minutes=active_comfort_high_degree_minutes,
+            passive_comfort_high_degree_minutes=passive_comfort_high_degree_minutes,
             starts_per_day=starts / simulated_days,
             runtime_minutes=runtime_minutes,
             estimated_energy_cost_eur=energy_cost,

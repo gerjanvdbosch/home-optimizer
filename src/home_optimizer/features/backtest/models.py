@@ -15,6 +15,7 @@ class MpcBacktestStepResult(DomainModel):
     planned_room_temp_c: float = 0.0
     useful_preheat_target_c: float = 0.0
     q_heat_eff_kw: float = 0.0
+    historical_q_heat_eff_kw: float = 0.0
     predicted_next_room_temp_c: float
     simulated_next_room_temp_c: float
     historical_next_room_temp_c: float | None = None
@@ -33,6 +34,8 @@ class MpcBacktestSummary(DomainModel):
     comfort_violation_minutes: int
     degree_minutes_below_comfort: float
     degree_minutes_above_comfort: float
+    active_comfort_high_degree_minutes: float = 0.0
+    passive_comfort_high_degree_minutes: float = 0.0
     starts_per_day: float
     runtime_minutes: int
     estimated_energy_cost_eur: float

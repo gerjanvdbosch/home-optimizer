@@ -295,6 +295,8 @@ class MpcPlanStepResponse(BaseModel):
 
 class MpcObjectiveBreakdownResponse(BaseModel):
     comfort_low: float
+    active_comfort_high_cost: float
+    passive_comfort_high_cost: float
     comfort_high: float
     comfort_total: float
     tracking_under_target: float
@@ -335,6 +337,8 @@ class MpcBacktestSummaryResponse(BaseModel):
     comfort_violation_minutes: int
     degree_minutes_below_comfort: float
     degree_minutes_above_comfort: float
+    active_comfort_high_degree_minutes: float
+    passive_comfort_high_degree_minutes: float
     starts_per_day: float
     runtime_minutes: int
     estimated_energy_cost_eur: float
@@ -347,6 +351,8 @@ class MpcBacktestDeltaResponse(BaseModel):
     comfort_violation_minutes: int
     degree_minutes_below_comfort: float
     degree_minutes_above_comfort: float
+    active_comfort_high_degree_minutes: float
+    passive_comfort_high_degree_minutes: float
     starts_per_day: float
     runtime_minutes: int
     estimated_energy_cost_eur: float

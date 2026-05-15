@@ -174,6 +174,8 @@ function renderSummary(payload) {
     ["Comfort violation (min)", payload.mpc_summary.comfort_violation_minutes, payload.historical_summary.comfort_violation_minutes, payload.delta.comfort_violation_minutes],
     ["Degree-min below", payload.mpc_summary.degree_minutes_below_comfort, payload.historical_summary.degree_minutes_below_comfort, payload.delta.degree_minutes_below_comfort],
     ["Degree-min above", payload.mpc_summary.degree_minutes_above_comfort, payload.historical_summary.degree_minutes_above_comfort, payload.delta.degree_minutes_above_comfort],
+    ["Active high deg-min", payload.mpc_summary.active_comfort_high_degree_minutes, payload.historical_summary.active_comfort_high_degree_minutes, payload.delta.active_comfort_high_degree_minutes],
+    ["Passive high deg-min", payload.mpc_summary.passive_comfort_high_degree_minutes, payload.historical_summary.passive_comfort_high_degree_minutes, payload.delta.passive_comfort_high_degree_minutes],
     ["Infeasible", payload.mpc_summary.infeasible_count, payload.historical_summary.infeasible_count, payload.delta.infeasible_count],
     ["Avg solve time (s)", payload.mpc_summary.average_solver_runtime_seconds, payload.historical_summary.average_solver_runtime_seconds, payload.delta.average_solver_runtime_seconds],
   ];
@@ -209,6 +211,8 @@ function renderSummary(payload) {
 function objectiveBreakdownRows(breakdown) {
   return [
     ["Comfort low", breakdown.comfort_low],
+    ["Active comfort-high cost", breakdown.active_comfort_high_cost],
+    ["Passive comfort-high cost", breakdown.passive_comfort_high_cost],
     ["Comfort high", breakdown.comfort_high],
     ["Comfort total", breakdown.comfort_total],
     ["Tracking under target", breakdown.tracking_under_target],
@@ -216,7 +220,7 @@ function objectiveBreakdownRows(breakdown) {
     ["Target tracking total", breakdown.temperature_tracking],
     ["Energy cost", breakdown.energy_cost],
     ["PV self-consumption reward", breakdown.pv_self_consumption_reward],
-    ["Unnecessary heating", breakdown.unnecessary_heating],
+    ["Unnecessary heating cost", breakdown.unnecessary_heating],
     ["Terminal cost", breakdown.terminal_cost],
     ["Start penalty", breakdown.start_penalty],
     ["Runtime", breakdown.runtime],

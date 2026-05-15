@@ -20,7 +20,9 @@ from home_optimizer.features.mpc.models import (
 class _ObjectiveContext:
     useful_preheat_targets_c: list[float]
     pv_self_consumable_kw: list[float]
+    comfort_high_big_m_c: list[float]
     unnecessary_heating_big_m_c: list[float]
+    q_heat_eff_big_m_kw: float
     terminal_target_c: float
 
 
@@ -74,7 +76,8 @@ class SpaceHeatingMpcSolver:
 
         objective_breakdown = MpcObjectiveBreakdown(
             comfort_low=float(pyo.value(model.comfort_low_term)),
-            comfort_high=float(pyo.value(model.comfort_high_term)),
+            active_comfort_high=float(pyo.value(model.active_comfort_high_term)),
+            passive_comfort_high=float(pyo.value(model.passive_comfort_high_term)),
             tracking_under_target=float(pyo.value(model.tracking_under_target_term)),
             tracking_over_target=float(pyo.value(model.tracking_over_target_term)),
             unnecessary_heating=float(pyo.value(model.unnecessary_heating_term)),
@@ -186,6 +189,9 @@ class SpaceHeatingMpcSolver:
         model.q_heat_eff = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.active_comfort_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.passive_comfort_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.active_heating_state = pyo.Var(model.T, domain=pyo.Binary)
         model.track_under = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.track_over = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.unnecessary_heat_excess = pyo.Var(model.T, domain=pyo.NonNegativeReals)
@@ -204,12 +210,22 @@ class SpaceHeatingMpcSolver:
                 for index in range(horizon_size)
             },
         )
+        model.comfort_high_big_m = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.comfort_high_big_m_c[index]
+                for index in range(horizon_size)
+            },
+        )
         model.pv_self_consumable_kw = pyo.Param(
             model.T,
             initialize={
                 index: objective_context.pv_self_consumable_kw[index]
                 for index in range(horizon_size)
             },
+        )
+        model.q_heat_eff_active_big_m = pyo.Param(
+            initialize=objective_context.q_heat_eff_big_m_kw
         )
         model.terminal_target = pyo.Param(initialize=objective_context.terminal_target_c)
 
@@ -261,6 +277,31 @@ class SpaceHeatingMpcSolver:
 
         model.comfort_low = pyo.Constraint(model.T, rule=comfort_low_rule)
         model.comfort_high = pyo.Constraint(model.T, rule=comfort_high_rule)
+        model.comfort_high_split = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.slack_high[t]
+            == model_ref.active_comfort_high[t] + model_ref.passive_comfort_high[t],
+        )
+        model.active_heating_from_hp = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.active_heating_state[t] >= model_ref.hp_on[t],
+        )
+        model.active_heating_from_q = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.q_heat_eff[t]
+            <= problem.objective_weights.q_heat_eff_active_threshold_kw
+            + (model_ref.q_heat_eff_active_big_m * model_ref.active_heating_state[t]),
+        )
+        model.active_comfort_high_gate = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.active_comfort_high[t]
+            <= (model_ref.comfort_high_big_m[t] * model_ref.active_heating_state[t]),
+        )
+        model.passive_comfort_high_gate = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.passive_comfort_high[t]
+            <= (model_ref.comfort_high_big_m[t] * (1 - model_ref.active_heating_state[t])),
+        )
         model.tracking_under = pyo.Constraint(
             model.T,
             rule=lambda model_ref, t: model_ref.track_under[t]
@@ -351,10 +392,16 @@ class SpaceHeatingMpcSolver:
             * model.slack_low[t]
             for t in range(horizon_size)
         )
-        comfort_high_term = sum(
-            problem.objective_weights.comfort_high
+        active_comfort_high_term = sum(
+            float(problem.objective_weights.active_comfort_high or 0.0)
             * problem.dt_hours
-            * model.slack_high[t]
+            * model.active_comfort_high[t]
+            for t in range(horizon_size)
+        )
+        passive_comfort_high_term = sum(
+            problem.objective_weights.passive_comfort_high
+            * problem.dt_hours
+            * model.passive_comfort_high[t]
             for t in range(horizon_size)
         )
         start_term = sum(
@@ -402,7 +449,11 @@ class SpaceHeatingMpcSolver:
         )
         terminal_term = problem.objective_weights.terminal * model.terminal_under
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
-        model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
+        model.active_comfort_high_term = pyo.Expression(expr=active_comfort_high_term)
+        model.passive_comfort_high_term = pyo.Expression(expr=passive_comfort_high_term)
+        model.comfort_high_term = pyo.Expression(
+            expr=model.active_comfort_high_term + model.passive_comfort_high_term
+        )
         model.tracking_under_target_term = pyo.Expression(expr=tracking_under_target_term)
         model.tracking_over_target_term = pyo.Expression(expr=tracking_over_target_term)
         model.unnecessary_heating_term = pyo.Expression(expr=unnecessary_heating_term)
@@ -446,6 +497,9 @@ class SpaceHeatingMpcSolver:
         model.q_heat_eff = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.active_comfort_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.passive_comfort_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.active_heating_state = pyo.Var(model.T, domain=pyo.Binary)
         model.track_under = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.track_over = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.unnecessary_heat_excess = pyo.Var(model.T, domain=pyo.NonNegativeReals)
@@ -464,12 +518,22 @@ class SpaceHeatingMpcSolver:
                 for index in range(horizon_size)
             },
         )
+        model.comfort_high_big_m = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.comfort_high_big_m_c[index]
+                for index in range(horizon_size)
+            },
+        )
         model.pv_self_consumable_kw = pyo.Param(
             model.T,
             initialize={
                 index: objective_context.pv_self_consumable_kw[index]
                 for index in range(horizon_size)
             },
+        )
+        model.q_heat_eff_active_big_m = pyo.Param(
+            initialize=objective_context.q_heat_eff_big_m_kw
         )
         model.terminal_target = pyo.Param(initialize=objective_context.terminal_target_c)
 
@@ -549,6 +613,31 @@ class SpaceHeatingMpcSolver:
 
         model.comfort_low = pyo.Constraint(model.T, rule=comfort_low_rule)
         model.comfort_high = pyo.Constraint(model.T, rule=comfort_high_rule)
+        model.comfort_high_split = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.slack_high[t]
+            == model_ref.active_comfort_high[t] + model_ref.passive_comfort_high[t],
+        )
+        model.active_heating_from_hp = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.active_heating_state[t] >= model_ref.hp_on[t],
+        )
+        model.active_heating_from_q = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.q_heat_eff[t]
+            <= problem.objective_weights.q_heat_eff_active_threshold_kw
+            + (model_ref.q_heat_eff_active_big_m * model_ref.active_heating_state[t]),
+        )
+        model.active_comfort_high_gate = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.active_comfort_high[t]
+            <= (model_ref.comfort_high_big_m[t] * model_ref.active_heating_state[t]),
+        )
+        model.passive_comfort_high_gate = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.passive_comfort_high[t]
+            <= (model_ref.comfort_high_big_m[t] * (1 - model_ref.active_heating_state[t])),
+        )
         model.tracking_under = pyo.Constraint(
             model.T,
             rule=lambda model_ref, t: model_ref.track_under[t]
@@ -639,10 +728,16 @@ class SpaceHeatingMpcSolver:
             * model.slack_low[t]
             for t in range(horizon_size)
         )
-        comfort_high_term = sum(
-            problem.objective_weights.comfort_high
+        active_comfort_high_term = sum(
+            float(problem.objective_weights.active_comfort_high or 0.0)
             * problem.dt_hours
-            * model.slack_high[t]
+            * model.active_comfort_high[t]
+            for t in range(horizon_size)
+        )
+        passive_comfort_high_term = sum(
+            problem.objective_weights.passive_comfort_high
+            * problem.dt_hours
+            * model.passive_comfort_high[t]
             for t in range(horizon_size)
         )
         start_term = sum(
@@ -690,7 +785,11 @@ class SpaceHeatingMpcSolver:
         )
         terminal_term = problem.objective_weights.terminal * model.terminal_under
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
-        model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
+        model.active_comfort_high_term = pyo.Expression(expr=active_comfort_high_term)
+        model.passive_comfort_high_term = pyo.Expression(expr=passive_comfort_high_term)
+        model.comfort_high_term = pyo.Expression(
+            expr=model.active_comfort_high_term + model.passive_comfort_high_term
+        )
         model.tracking_under_target_term = pyo.Expression(expr=tracking_under_target_term)
         model.tracking_over_target_term = pyo.Expression(expr=tracking_over_target_term)
         model.unnecessary_heating_term = pyo.Expression(expr=unnecessary_heating_term)
@@ -809,10 +908,33 @@ class SpaceHeatingMpcSolver:
             )
             for index in range(len(problem.horizon))
         ]
+        comfort_high_big_m_c = [
+            max(
+                float(problem.horizon[index].temp_max_c - problem.horizon[index].temp_min_c),
+                max(
+                    (
+                        no_heat_rollout[future_index] - float(problem.horizon[index].temp_max_c)
+                        for future_index in range(index, len(problem.horizon))
+                    ),
+                    default=0.0,
+                ),
+                0.0,
+            )
+            for index in range(len(problem.horizon))
+        ]
+        q_heat_eff_big_m_kw = max(
+            (
+                float(step.effective_heating_kw_forecast)
+                for step in problem.horizon
+            ),
+            default=0.0,
+        )
         return _ObjectiveContext(
             useful_preheat_targets_c=useful_preheat_targets_c,
             pv_self_consumable_kw=pv_self_consumable_kw,
+            comfort_high_big_m_c=comfort_high_big_m_c,
             unnecessary_heating_big_m_c=unnecessary_heating_big_m_c,
+            q_heat_eff_big_m_kw=q_heat_eff_big_m_kw,
             terminal_target_c=useful_preheat_targets_c[-1],
         )
 

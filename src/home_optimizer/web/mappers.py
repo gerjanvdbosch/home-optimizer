@@ -249,6 +249,8 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
     historical_summary = mpc_backtest_summary_response(result.historical_summary)
     executed_breakdown = MpcObjectiveBreakdownResponse(
         comfort_low=result.mpc_objective_breakdown.comfort_low,
+        active_comfort_high_cost=result.mpc_objective_breakdown.active_comfort_high,
+        passive_comfort_high_cost=result.mpc_objective_breakdown.passive_comfort_high,
         comfort_high=result.mpc_objective_breakdown.comfort_high,
         comfort_total=result.mpc_objective_breakdown.comfort_total,
         tracking_under_target=result.mpc_objective_breakdown.tracking_under_target,
@@ -266,6 +268,8 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
     )
     solver_breakdown = MpcObjectiveBreakdownResponse(
         comfort_low=result.solver_objective_breakdown.comfort_low,
+        active_comfort_high_cost=result.solver_objective_breakdown.active_comfort_high,
+        passive_comfort_high_cost=result.solver_objective_breakdown.passive_comfort_high,
         comfort_high=result.solver_objective_breakdown.comfort_high,
         comfort_total=result.solver_objective_breakdown.comfort_total,
         tracking_under_target=result.solver_objective_breakdown.tracking_under_target,
@@ -305,6 +309,14 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
             degree_minutes_above_comfort=(
                 result.mpc_summary.degree_minutes_above_comfort
                 - result.historical_summary.degree_minutes_above_comfort
+            ),
+            active_comfort_high_degree_minutes=(
+                result.mpc_summary.active_comfort_high_degree_minutes
+                - result.historical_summary.active_comfort_high_degree_minutes
+            ),
+            passive_comfort_high_degree_minutes=(
+                result.mpc_summary.passive_comfort_high_degree_minutes
+                - result.historical_summary.passive_comfort_high_degree_minutes
             ),
             starts_per_day=(
                 result.mpc_summary.starts_per_day
