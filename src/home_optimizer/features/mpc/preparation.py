@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
+from home_optimizer.domain.pricing import ElectricityPricingConfig
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset import MpcDatasetService
@@ -26,10 +27,12 @@ class SpaceHeatingMpcPreparationService:
         samples_reader: DatasetSampleFrameReader,
         active_room_model_reader: ActiveRoomModelReaderPort,
         target_schedule: list[TemperatureTargetWindow],
+        electricity_pricing: ElectricityPricingConfig | None = None,
     ) -> None:
         self.samples_reader = samples_reader
         self.active_room_model_reader = active_room_model_reader
         self.target_schedule = list(target_schedule)
+        self.electricity_pricing = electricity_pricing or _DynamicPricingLike()
 
     def resolve_room_model_version(self, model_id: str | None) -> StoredModelVersion | None:
         if model_id is not None:
@@ -62,7 +65,10 @@ class SpaceHeatingMpcPreparationService:
     ) -> MpcDataset:
         dataset_service = MpcDatasetService(
             self.samples_reader,
-            _MpcDatasetSettings(self.target_schedule),
+            _MpcDatasetSettings(
+                self.target_schedule,
+                electricity_pricing=self.electricity_pricing,
+            ),
         )
         return dataset_service.build_dataset(
             start_time=start_time,
@@ -222,11 +228,17 @@ class SpaceHeatingMpcPreparationService:
             row.space_heating_output_estimate_kw
         ) <= 0.0
 
+
 class _MpcDatasetSettings:
-    def __init__(self, target_schedule: list[TemperatureTargetWindow]) -> None:
+    def __init__(
+        self,
+        target_schedule: list[TemperatureTargetWindow],
+        *,
+        electricity_pricing: ElectricityPricingConfig,
+    ) -> None:
         self.room_target = list(target_schedule)
         self.dhw_target: list[TemperatureTargetWindow] = []
-        self.electricity_pricing = _DynamicPricingLike()
+        self.electricity_pricing = electricity_pricing
 
 
 class _DynamicPricingLike:

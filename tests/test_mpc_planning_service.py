@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta, timezone
 
 from home_optimizer.domain.forecast import ForecastEntry
+from home_optimizer.domain.pricing import FixedPricing
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
+from home_optimizer.features.dataset.models import MpcDataset
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.modeling.models import StoredModelVersion
 from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams, RoomRcConfig, RoomRcModel
@@ -15,6 +17,7 @@ from home_optimizer.features.mpc import (
     Rc2StateMpcInitialState,
     SpaceHeatingMpcPlanningService,
 )
+from home_optimizer.features.mpc.preparation import SpaceHeatingMpcPreparationService
 
 
 class _UnusedSamplesReader:
@@ -32,6 +35,58 @@ class _StaticActiveRoomModelReader:
 
     def get_active_room_model_version(self) -> StoredModelVersion | None:
         return self.version
+
+
+class _UnusedActiveRoomModelReader:
+    def get_room_model_version(self, model_id: str) -> StoredModelVersion | None:
+        return None
+
+    def get_active_room_model_version(self) -> StoredModelVersion | None:
+        return None
+
+
+def test_mpc_preparation_uses_configured_fixed_pricing_for_dataset_build(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturingDatasetService:
+        def __init__(self, samples_reader, settings) -> None:
+            captured["pricing_mode"] = settings.electricity_pricing.mode
+            captured["feed_in_tariff"] = getattr(settings.electricity_pricing, "feed_in_tariff", None)
+
+        def build_dataset(self, *, start_time, end_time, interval_minutes) -> MpcDataset:
+            return MpcDataset(
+                interval_minutes=interval_minutes,
+                start_time_utc=start_time,
+                end_time_utc=end_time,
+                rows=[],
+            )
+
+    monkeypatch.setattr(
+        "home_optimizer.features.mpc.preparation.MpcDatasetService",
+        _CapturingDatasetService,
+    )
+
+    preparation = SpaceHeatingMpcPreparationService(
+        samples_reader=_UnusedSamplesReader(),
+        active_room_model_reader=_UnusedActiveRoomModelReader(),
+        target_schedule=[
+            TemperatureTargetWindow(time=time(0, 0), target=20.0, low_margin=0.5, high_margin=1.0)
+        ],
+        electricity_pricing=FixedPricing(
+            peak_price=0.30,
+            off_peak_price=0.20,
+            feed_in_tariff=0.08,
+        ),
+    )
+
+    preparation.build_dataset(
+        start_time=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+        interval_minutes=10,
+    )
+
+    assert captured["pricing_mode"] == "fixed"
+    assert captured["feed_in_tariff"] == 0.08
 
 
 def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkeypatch) -> None:

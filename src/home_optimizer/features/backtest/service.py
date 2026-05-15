@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from home_optimizer.domain.pricing import ElectricityPricingConfig
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.backtest.models import MpcBacktestResult
@@ -33,6 +34,7 @@ class SpaceHeatingMpcBacktestService:
         samples_reader: DatasetSampleFrameReader,
         active_room_model_reader: ActiveRoomModelReaderPort,
         target_schedule: list[TemperatureTargetWindow],
+        electricity_pricing: ElectricityPricingConfig | None = None,
         default_interval_minutes: int = 10,
         runner: SpaceHeatingMpcBacktestRunner | None = None,
     ) -> None:
@@ -41,6 +43,7 @@ class SpaceHeatingMpcBacktestService:
             samples_reader=samples_reader,
             active_room_model_reader=active_room_model_reader,
             target_schedule=target_schedule,
+            electricity_pricing=electricity_pricing,
         )
         self.runner = runner or SpaceHeatingMpcBacktestRunner()
 

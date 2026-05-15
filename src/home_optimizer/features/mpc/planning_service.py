@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from home_optimizer.domain.forecast import ForecastEntry
+from home_optimizer.domain.pricing import ElectricityPricingConfig
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc, parse_datetime
@@ -34,6 +35,7 @@ class SpaceHeatingMpcPlanningService:
         samples_reader: DatasetSampleFrameReader,
         active_room_model_reader: ActiveRoomModelReaderPort,
         target_schedule: list[TemperatureTargetWindow],
+        electricity_pricing: ElectricityPricingConfig | None = None,
         default_interval_minutes: int = 10,
         controller: SpaceHeatingMpcControllerService | None = None,
     ) -> None:
@@ -46,6 +48,7 @@ class SpaceHeatingMpcPlanningService:
             samples_reader=samples_reader,
             active_room_model_reader=active_room_model_reader,
             target_schedule=target_schedule,
+            electricity_pricing=electricity_pricing,
         )
 
     def plan(

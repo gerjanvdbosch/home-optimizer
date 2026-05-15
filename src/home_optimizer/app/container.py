@@ -155,12 +155,14 @@ def build_container(
         samples_reader=dataset_repository,
         active_room_model_reader=model_version_repository,
         target_schedule=settings.room_target,
+        electricity_pricing=settings.electricity_pricing,
         default_interval_minutes=settings.mpc_interval_minutes,
     )
     space_heating_mpc_backtest_service = SpaceHeatingMpcBacktestService(
         samples_reader=dataset_repository,
         active_room_model_reader=model_version_repository,
         target_schedule=settings.room_target,
+        electricity_pricing=settings.electricity_pricing,
         default_interval_minutes=settings.mpc_interval_minutes,
     )
 
