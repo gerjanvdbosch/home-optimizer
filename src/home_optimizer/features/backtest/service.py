@@ -156,6 +156,7 @@ class SpaceHeatingMpcBacktestService:
             max_solver_seconds=max_solver_seconds,
             historical_hp_on_by_timestamp=historical_hp_on_by_timestamp,
             historical_energy_cost_by_timestamp=historical_energy_cost_by_timestamp,
+            exogenous_mode="perfect_foresight",
         )
 
     def _build_timeline(
@@ -215,10 +216,15 @@ class SpaceHeatingMpcBacktestService:
                     outdoor_temp_c=float(row.outdoor_temperature_c or 0.0),
                     solar_gain_kw=solar_direct_values[index],
                     solar_gain_mass_kw=solar_filtered_values[index],
+                    solar_irradiance_forecast_w_m2=float(row.solar_irradiance_w_m2 or 0.0),
+                    solar_irradiance_realized_w_m2=float(row.solar_irradiance_w_m2 or 0.0),
+                    solar_gain_realized_kw=solar_direct_values[index],
                     effective_heating_kw_forecast=effective_heating_kw,
                     hp_electric_power_forecast_kw=hp_electric_power_kw,
                     pv_available_power_forecast_kw=pv_output_kw,
+                    pv_available_power_realized_kw=pv_output_kw,
                     base_load_power_forecast_kw=base_load_power_kw,
+                    base_load_power_realized_kw=base_load_power_kw,
                     occupied=float(row.occupied_flag),
                     hour_sin=hour_sin,
                     hour_cos=hour_cos,

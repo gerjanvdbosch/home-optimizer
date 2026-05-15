@@ -87,10 +87,16 @@ const solverObjectiveBody = document.getElementById("backtest-solver-objective-b
 const temperatureSummaryNode = document.getElementById("backtest-temp-summary");
 const switchSummaryNode = document.getElementById("backtest-switch-summary");
 const costSummaryNode = document.getElementById("backtest-cost-summary");
+const pvSummaryNode = document.getElementById("backtest-pv-summary");
+const pvSurplusSummaryNode = document.getElementById("backtest-pv-surplus-summary");
+const pvCaptureSummaryNode = document.getElementById("backtest-pv-capture-summary");
 const comfortSummaryNode = document.getElementById("backtest-comfort-summary");
 const temperatureChart = document.getElementById("backtest-temperature-chart");
 const switchChart = document.getElementById("backtest-switch-chart");
 const costChart = document.getElementById("backtest-cost-chart");
+const pvChart = document.getElementById("backtest-pv-chart");
+const pvSurplusChart = document.getElementById("backtest-pv-surplus-chart");
+const pvCaptureChart = document.getElementById("backtest-pv-capture-chart");
 const comfortChart = document.getElementById("backtest-comfort-chart");
 const previousDayButton = document.getElementById("backtest-previous-day");
 const nextDayButton = document.getElementById("backtest-next-day");
@@ -176,6 +182,11 @@ function renderSummary(payload) {
     ["Degree-min above", payload.mpc_summary.degree_minutes_above_comfort, payload.historical_summary.degree_minutes_above_comfort, payload.delta.degree_minutes_above_comfort],
     ["Active high deg-min", payload.mpc_summary.active_comfort_high_degree_minutes, payload.historical_summary.active_comfort_high_degree_minutes, payload.delta.active_comfort_high_degree_minutes],
     ["Passive high deg-min", payload.mpc_summary.passive_comfort_high_degree_minutes, payload.historical_summary.passive_comfort_high_degree_minutes, payload.delta.passive_comfort_high_degree_minutes],
+    ["PV surplus forecast (kWh)", payload.pv_diagnostics.forecast_pv_surplus_kwh, payload.pv_diagnostics.forecast_pv_surplus_kwh, 0],
+    ["PV surplus realized (kWh)", payload.pv_diagnostics.realized_pv_surplus_kwh, payload.pv_diagnostics.realized_pv_surplus_kwh, 0],
+    ["MPC HP energy (kWh)", payload.pv_diagnostics.mpc_hp_energy_kwh, 0, payload.pv_diagnostics.mpc_hp_energy_kwh],
+    ["Captured realized PV (kWh)", payload.pv_diagnostics.mpc_realized_pv_surplus_capture_kwh, 0, payload.pv_diagnostics.mpc_realized_pv_surplus_capture_kwh],
+    ["Capture ratio realized", payload.pv_diagnostics.mpc_realized_pv_surplus_capture_ratio, 0, payload.pv_diagnostics.mpc_realized_pv_surplus_capture_ratio],
     ["Infeasible", payload.mpc_summary.infeasible_count, payload.historical_summary.infeasible_count, payload.delta.infeasible_count],
     ["Avg solve time (s)", payload.mpc_summary.average_solver_runtime_seconds, payload.historical_summary.average_solver_runtime_seconds, payload.delta.average_solver_runtime_seconds],
   ];
@@ -205,7 +216,7 @@ function renderSummary(payload) {
       </tr>
     `).join("");
   }
-  summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen`;
+  summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen | ${payload.exogenous_mode}`;
 }
 
 function objectiveBreakdownRows(breakdown) {
@@ -238,15 +249,37 @@ function renderCharts(payload) {
   const mpcHp = payload.steps.map((step) => Number(step.mpc_hp_on));
   const historicalHp = payload.steps.map((step) => Number(step.historical_hp_on));
   const prices = payload.steps.map((step) => step.price_eur_kwh);
+  const pvForecast = payload.steps.map((step) => step.pv_forecast_kw);
+  const pvRealized = payload.steps.map((step) => step.pv_realized_kw);
+  const baseLoadForecast = payload.steps.map((step) => step.base_load_forecast_kw);
+  const baseLoadRealized = payload.steps.map((step) => step.base_load_realized_kw);
+  const pvSurplusForecast = payload.steps.map((step) => step.pv_surplus_forecast_kw);
+  const pvSurplusRealized = payload.steps.map((step) => step.pv_surplus_realized_kw);
+  const mpcHpPower = payload.steps.map((step) => step.hp_electric_power_kw * Number(step.mpc_hp_on));
   const mpcCost = [];
   const historicalCost = [];
+  const cumulativeCapturedRealized = [];
+  const cumulativeCapturedForecast = [];
   let mpcRunning = 0;
   let historicalRunning = 0;
+  let capturedRealizedRunning = 0;
+  let capturedForecastRunning = 0;
+  const dtHours = (payload.interval_minutes || 0) / 60;
   for (const step of payload.steps) {
     mpcRunning += step.estimated_mpc_energy_cost_eur;
     historicalRunning += step.estimated_historical_energy_cost_eur;
     mpcCost.push(mpcRunning);
     historicalCost.push(historicalRunning);
+    capturedRealizedRunning += Math.min(
+      step.hp_electric_power_kw * Number(step.mpc_hp_on),
+      step.pv_surplus_realized_kw,
+    ) * dtHours;
+    capturedForecastRunning += Math.min(
+      step.hp_electric_power_kw * Number(step.mpc_hp_on),
+      step.pv_surplus_forecast_kw,
+    ) * dtHours;
+    cumulativeCapturedRealized.push(capturedRealizedRunning);
+    cumulativeCapturedForecast.push(capturedForecastRunning);
   }
   const comfortBelow = payload.steps.map((step) => Math.max(step.temp_min_c - step.simulated_next_room_temp_c, 0));
   const comfortAbove = payload.steps.map((step) => Math.max(step.simulated_next_room_temp_c - step.temp_max_c, 0));
@@ -290,6 +323,39 @@ function renderCharts(payload) {
   );
 
   Plotly.react(
+    pvChart,
+    [
+      { x: timestamps, y: pvForecast, name: "PV forecast", type: "scatter", mode: "lines", line: { color: "#f9a825", width: 3 } },
+      { x: timestamps, y: pvRealized, name: "PV realized", type: "scatter", mode: "lines", line: { color: "#6d4c41", width: 2 } },
+      { x: timestamps, y: baseLoadForecast, name: "Baseload forecast", type: "scatter", mode: "lines", line: { color: "#1e88e5", dash: "dot" } },
+      { x: timestamps, y: baseLoadRealized, name: "Baseload realized", type: "scatter", mode: "lines", line: { color: "#43a047", dash: "dot" } },
+    ],
+    chartLayout("Power (kW)"),
+    { responsive: true, displayModeBar: false },
+  );
+
+  Plotly.react(
+    pvSurplusChart,
+    [
+      { x: timestamps, y: pvSurplusForecast, name: "PV surplus forecast", type: "scatter", mode: "lines", line: { color: "#fb8c00", width: 3 } },
+      { x: timestamps, y: pvSurplusRealized, name: "PV surplus realized", type: "scatter", mode: "lines", line: { color: "#43a047", width: 2 } },
+      { x: timestamps, y: mpcHpPower, name: "MPC HP power", type: "scatter", mode: "lines", yaxis: "y2", line: { color: "#03a9f4", shape: "hv" } },
+    ],
+    chartLayout("Surplus (kW)", "HP power (kW)"),
+    { responsive: true, displayModeBar: false },
+  );
+
+  Plotly.react(
+    pvCaptureChart,
+    [
+      { x: timestamps, y: cumulativeCapturedForecast, name: "Captured forecast surplus", type: "scatter", mode: "lines", line: { color: "#fb8c00", width: 3 } },
+      { x: timestamps, y: cumulativeCapturedRealized, name: "Captured realized surplus", type: "scatter", mode: "lines", line: { color: "#43a047", width: 2 } },
+    ],
+    chartLayout("Captured PV (kWh)"),
+    { responsive: true, displayModeBar: false },
+  );
+
+  Plotly.react(
     comfortChart,
     [
       { x: timestamps, y: comfortBelow, name: "Below comfort", type: "bar", marker: { color: "#1e88e5" } },
@@ -304,6 +370,9 @@ function renderCharts(payload) {
   temperatureSummaryNode.textContent = `${formatNumber(payload.delta.degree_minutes_below_comfort)} degree-min delta`;
   switchSummaryNode.textContent = `${formatNumber(payload.delta.starts_per_day)} starts/day delta`;
   costSummaryNode.textContent = `${metricDelta(payload.delta.estimated_energy_cost_eur, 3)} EUR`;
+  pvSummaryNode.textContent = `${formatNumber(payload.pv_diagnostics.forecast_pv_surplus_kwh, 2)} / ${formatNumber(payload.pv_diagnostics.realized_pv_surplus_kwh, 2)} kWh surplus`;
+  pvSurplusSummaryNode.textContent = `${formatNumber(payload.pv_diagnostics.mpc_hp_energy_during_forecast_pv_surplus_kwh, 2)} / ${formatNumber(payload.pv_diagnostics.mpc_hp_energy_during_realized_pv_surplus_kwh, 2)} kWh benut`;
+  pvCaptureSummaryNode.textContent = `${formatNumber(payload.pv_diagnostics.mpc_realized_pv_surplus_capture_ratio * 100, 1)}% realized capture`;
   comfortSummaryNode.textContent = `${payload.mpc_summary.infeasible_count} infeasible solves`;
 }
 

@@ -33,6 +33,7 @@ from home_optimizer.web.schemas import (
     IdentificationDatasetRowResponse,
     IdentificationDatasetSummaryResponse,
     MpcBacktestDeltaResponse,
+    MpcBacktestPvDiagnosticsResponse,
     MpcBacktestResponse,
     MpcBacktestStepResponse,
     MpcBacktestSummaryResponse,
@@ -286,6 +287,7 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
         total=result.solver_objective_breakdown.total,
     )
     return MpcBacktestResponse(
+        exogenous_mode=result.exogenous_mode,
         model_id=result.model_id,
         model_type=result.model_type,
         start_time_utc=result.start_time_utc,
@@ -297,6 +299,9 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
         solver_objective_breakdown=solver_breakdown,
         mpc_summary=mpc_summary,
         historical_summary=historical_summary,
+        pv_diagnostics=MpcBacktestPvDiagnosticsResponse(
+            **result.pv_diagnostics.model_dump()
+        ),
         delta=MpcBacktestDeltaResponse(
             comfort_violation_minutes=(
                 result.mpc_summary.comfort_violation_minutes

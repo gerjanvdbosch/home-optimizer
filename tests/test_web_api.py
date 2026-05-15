@@ -22,6 +22,7 @@ from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
 from home_optimizer.features.backtest.models import (
     MpcBacktestResult,
+    MpcBacktestPvDiagnostics,
     MpcBacktestStepResult,
     MpcBacktestSummary,
 )
@@ -265,6 +266,7 @@ class FakeSpaceHeatingMpcBacktestService:
         max_solver_seconds: float | None = None,
     ) -> MpcBacktestResult:
         return MpcBacktestResult(
+            exogenous_mode="perfect_foresight",
             model_id=model_id or "room-model-active",
             model_type=ROOM_ARX_MODEL_KIND,
             start_time_utc=start_time_utc,
@@ -278,6 +280,18 @@ class FakeSpaceHeatingMpcBacktestService:
                     historical_hp_on=False,
                     start=True,
                     stop=False,
+                    historical_q_heat_eff_kw=0.0,
+                    hp_electric_power_kw=2.0,
+                    pv_forecast_kw=2.0,
+                    pv_realized_kw=2.0,
+                    solar_irradiance_forecast_wm2=250.0,
+                    solar_irradiance_realized_wm2=250.0,
+                    solar_gain_forecast_kw=0.6,
+                    solar_gain_realized_kw=0.6,
+                    base_load_forecast_kw=0.7,
+                    base_load_realized_kw=0.7,
+                    pv_surplus_forecast_kw=1.3,
+                    pv_surplus_realized_kw=1.3,
                     predicted_next_room_temp_c=20.2,
                     simulated_next_room_temp_c=20.2,
                     historical_next_room_temp_c=19.8,
@@ -297,6 +311,18 @@ class FakeSpaceHeatingMpcBacktestService:
                     historical_hp_on=True,
                     start=False,
                     stop=True,
+                    historical_q_heat_eff_kw=0.0,
+                    hp_electric_power_kw=2.0,
+                    pv_forecast_kw=0.5,
+                    pv_realized_kw=0.5,
+                    solar_irradiance_forecast_wm2=50.0,
+                    solar_irradiance_realized_wm2=50.0,
+                    solar_gain_forecast_kw=0.1,
+                    solar_gain_realized_kw=0.1,
+                    base_load_forecast_kw=0.8,
+                    base_load_realized_kw=0.8,
+                    pv_surplus_forecast_kw=0.0,
+                    pv_surplus_realized_kw=0.0,
                     predicted_next_room_temp_c=20.0,
                     simulated_next_room_temp_c=20.0,
                     historical_next_room_temp_c=20.3,
@@ -336,6 +362,16 @@ class FakeSpaceHeatingMpcBacktestService:
                 average_solver_runtime_seconds=0.0,
                 infeasible_count=0,
                 slack_usage_count=0,
+            ),
+            pv_diagnostics=MpcBacktestPvDiagnostics(
+                realized_pv_surplus_kwh=0.26,
+                forecast_pv_surplus_kwh=0.26,
+                mpc_hp_energy_kwh=0.4,
+                mpc_hp_energy_during_realized_pv_surplus_kwh=0.24,
+                mpc_hp_energy_during_forecast_pv_surplus_kwh=0.24,
+                mpc_realized_pv_surplus_capture_kwh=0.24,
+                mpc_realized_pv_surplus_capture_ratio=0.9230769231,
+                mpc_forecast_pv_surplus_capture_ratio=0.9230769231,
             ),
             mpc_objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=0.0,
@@ -978,6 +1014,9 @@ def test_backtest_page_renders_navigation_and_controls() -> None:
     assert 'id="backtest-model-select"' in response.text
     assert 'id="backtest-temperature-chart"' in response.text
     assert 'id="backtest-cost-chart"' in response.text
+    assert 'id="backtest-pv-chart"' in response.text
+    assert 'id="backtest-pv-surplus-chart"' in response.text
+    assert 'id="backtest-pv-capture-chart"' in response.text
     assert 'id="backtest-objective-body"' in response.text
     assert 'id="backtest-solver-objective-body"' in response.text
 
@@ -998,6 +1037,7 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["exogenous_mode"] == "perfect_foresight"
     assert payload["model_id"] == "room-model-active"
     assert payload["interval_minutes"] == 12
     assert payload["horizon_steps"] == 4
@@ -1012,10 +1052,15 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert payload["solver_objective_breakdown"]["total"] == pytest.approx(269.9)
     assert payload["mpc_summary"]["infeasible_count"] == 1
     assert payload["historical_summary"]["estimated_energy_cost_eur"] == 0.2
+    assert payload["pv_diagnostics"]["realized_pv_surplus_kwh"] == pytest.approx(0.26)
+    assert payload["pv_diagnostics"]["mpc_realized_pv_surplus_capture_ratio"] == pytest.approx(0.9230769231)
     assert payload["delta"]["estimated_energy_cost_eur"] == pytest.approx(-0.03, abs=1e-9)
     assert payload["delta"]["runtime_minutes"] == 0
     assert payload["steps"][0]["mpc_hp_on"] is True
     assert payload["steps"][0]["q_heat_eff_kw"] == 0.0
+    assert payload["steps"][0]["pv_forecast_kw"] == 2.0
+    assert payload["steps"][0]["pv_realized_kw"] == 2.0
+    assert payload["steps"][0]["pv_surplus_forecast_kw"] == 1.3
     assert payload["steps"][0]["historical_hp_on"] is False
     assert payload["steps"][1]["feasible"] is False
 

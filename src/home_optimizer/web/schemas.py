@@ -347,6 +347,17 @@ class MpcBacktestSummaryResponse(BaseModel):
     slack_usage_count: int
 
 
+class MpcBacktestPvDiagnosticsResponse(BaseModel):
+    realized_pv_surplus_kwh: float
+    forecast_pv_surplus_kwh: float
+    mpc_hp_energy_kwh: float
+    mpc_hp_energy_during_realized_pv_surplus_kwh: float
+    mpc_hp_energy_during_forecast_pv_surplus_kwh: float
+    mpc_realized_pv_surplus_capture_kwh: float
+    mpc_realized_pv_surplus_capture_ratio: float
+    mpc_forecast_pv_surplus_capture_ratio: float
+
+
 class MpcBacktestDeltaResponse(BaseModel):
     comfort_violation_minutes: int
     degree_minutes_below_comfort: float
@@ -368,6 +379,18 @@ class MpcBacktestStepResponse(BaseModel):
     start: bool
     stop: bool
     q_heat_eff_kw: float
+    historical_q_heat_eff_kw: float
+    hp_electric_power_kw: float
+    pv_forecast_kw: float
+    pv_realized_kw: float
+    solar_irradiance_forecast_wm2: float
+    solar_irradiance_realized_wm2: float
+    solar_gain_forecast_kw: float
+    solar_gain_realized_kw: float
+    base_load_forecast_kw: float
+    base_load_realized_kw: float
+    pv_surplus_forecast_kw: float
+    pv_surplus_realized_kw: float
     predicted_next_room_temp_c: float
     simulated_next_room_temp_c: float
     historical_next_room_temp_c: float | None = None
@@ -383,6 +406,7 @@ class MpcBacktestStepResponse(BaseModel):
 
 
 class MpcBacktestResponse(BaseModel):
+    exogenous_mode: str
     model_id: str
     model_type: str
     start_time_utc: datetime
@@ -394,6 +418,7 @@ class MpcBacktestResponse(BaseModel):
     solver_objective_breakdown: MpcObjectiveBreakdownResponse
     mpc_summary: MpcBacktestSummaryResponse
     historical_summary: MpcBacktestSummaryResponse
+    pv_diagnostics: MpcBacktestPvDiagnosticsResponse
     delta: MpcBacktestDeltaResponse
     total_solver_runtime_seconds: float
     steps: list[MpcBacktestStepResponse]

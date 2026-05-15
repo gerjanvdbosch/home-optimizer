@@ -2,8 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.features.mpc.models import MpcObjectiveBreakdown
+
+
+class MpcBacktestPvDiagnostics(DomainModel):
+    realized_pv_surplus_kwh: float = 0.0
+    forecast_pv_surplus_kwh: float = 0.0
+    mpc_hp_energy_kwh: float = 0.0
+    mpc_hp_energy_during_realized_pv_surplus_kwh: float = 0.0
+    mpc_hp_energy_during_forecast_pv_surplus_kwh: float = 0.0
+    mpc_realized_pv_surplus_capture_kwh: float = 0.0
+    mpc_realized_pv_surplus_capture_ratio: float = 0.0
+    mpc_forecast_pv_surplus_capture_ratio: float = 0.0
 
 
 class MpcBacktestStepResult(DomainModel):
@@ -16,6 +29,17 @@ class MpcBacktestStepResult(DomainModel):
     useful_preheat_target_c: float = 0.0
     q_heat_eff_kw: float = 0.0
     historical_q_heat_eff_kw: float = 0.0
+    hp_electric_power_kw: float = 0.0
+    pv_forecast_kw: float = 0.0
+    pv_realized_kw: float = 0.0
+    solar_irradiance_forecast_wm2: float = 0.0
+    solar_irradiance_realized_wm2: float = 0.0
+    solar_gain_forecast_kw: float = 0.0
+    solar_gain_realized_kw: float = 0.0
+    base_load_forecast_kw: float = 0.0
+    base_load_realized_kw: float = 0.0
+    pv_surplus_forecast_kw: float = 0.0
+    pv_surplus_realized_kw: float = 0.0
     predicted_next_room_temp_c: float
     simulated_next_room_temp_c: float
     historical_next_room_temp_c: float | None = None
@@ -45,6 +69,7 @@ class MpcBacktestSummary(DomainModel):
 
 
 class MpcBacktestResult(DomainModel):
+    exogenous_mode: str = "perfect_foresight"
     model_id: str
     model_type: str
     start_time_utc: datetime
@@ -54,6 +79,9 @@ class MpcBacktestResult(DomainModel):
     step_results: list[MpcBacktestStepResult]
     mpc_summary: MpcBacktestSummary
     historical_summary: MpcBacktestSummary
+    pv_diagnostics: MpcBacktestPvDiagnostics = Field(
+        default_factory=MpcBacktestPvDiagnostics
+    )
     mpc_objective_breakdown: MpcObjectiveBreakdown
     solver_objective_breakdown: MpcObjectiveBreakdown
     total_solver_runtime_seconds: float

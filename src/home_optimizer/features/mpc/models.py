@@ -112,10 +112,15 @@ class MpcHorizonStep(DomainModel):
     outdoor_temp_c: float
     solar_gain_kw: float = 0.0
     solar_gain_mass_kw: float | None = None
+    solar_irradiance_forecast_w_m2: float = 0.0
+    solar_irradiance_realized_w_m2: float = 0.0
+    solar_gain_realized_kw: float | None = None
     effective_heating_kw_forecast: float = Field(ge=0.0)
     hp_electric_power_forecast_kw: float = Field(default=0.0, ge=0.0)
     pv_available_power_forecast_kw: float = Field(default=0.0, ge=0.0)
+    pv_available_power_realized_kw: float | None = None
     base_load_power_forecast_kw: float = Field(default=0.0, ge=0.0)
+    base_load_power_realized_kw: float | None = None
     occupied: float = Field(default=0.0, ge=0.0, le=1.0)
     hour_sin: float = 0.0
     hour_cos: float = 0.0
@@ -144,6 +149,20 @@ class MpcHorizonStep(DomainModel):
             object.__setattr__(self, "import_price_eur_kwh", self.price_eur_kwh)
         if self.solar_gain_mass_kw is None:
             object.__setattr__(self, "solar_gain_mass_kw", self.solar_gain_kw)
+        if self.solar_gain_realized_kw is None:
+            object.__setattr__(self, "solar_gain_realized_kw", self.solar_gain_kw)
+        if self.pv_available_power_realized_kw is None:
+            object.__setattr__(
+                self,
+                "pv_available_power_realized_kw",
+                self.pv_available_power_forecast_kw,
+            )
+        if self.base_load_power_realized_kw is None:
+            object.__setattr__(
+                self,
+                "base_load_power_realized_kw",
+                self.base_load_power_forecast_kw,
+            )
         if self.target_temp_c is None:
             object.__setattr__(self, "target_temp_c", (self.temp_min_c + self.temp_max_c) / 2.0)
         return self

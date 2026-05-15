@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunner
 from home_optimizer.features.mpc import (
     LinearThermalControlModel,
@@ -144,3 +146,68 @@ def test_backtest_runner_advances_2state_mass_state_across_steps() -> None:
     )
 
     assert [step.simulated_next_room_temp_c for step in result.step_results] == [30.0, 31.0]
+
+
+def test_backtest_runner_computes_pv_surplus_capture_and_safe_zero_ratio() -> None:
+    runner = SpaceHeatingMpcBacktestRunner(controller=_StaticPlanController())
+    result = runner.run(
+        model_id="room-model-v1",
+        model_type="room_arx",
+        control_model=LinearThermalControlModel(
+            a=1.0,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.0,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        timeline=[
+            MpcHorizonStep(
+                timestamp_utc=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
+                outdoor_temp_c=0.0,
+                solar_gain_kw=0.0,
+                solar_irradiance_forecast_w_m2=100.0,
+                solar_irradiance_realized_w_m2=100.0,
+                effective_heating_kw_forecast=0.0,
+                hp_electric_power_forecast_kw=2.0,
+                pv_available_power_forecast_kw=3.0,
+                pv_available_power_realized_kw=3.0,
+                base_load_power_forecast_kw=1.0,
+                base_load_power_realized_kw=1.0,
+                occupied=0.0,
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                import_price_eur_kwh=0.25,
+                export_price_eur_kwh=0.0,
+                realized_room_temp_c=20.0,
+            ),
+            MpcHorizonStep(
+                timestamp_utc=datetime(2026, 5, 14, 0, 10, tzinfo=timezone.utc),
+                outdoor_temp_c=0.0,
+                solar_gain_kw=0.0,
+                solar_irradiance_forecast_w_m2=0.0,
+                solar_irradiance_realized_w_m2=0.0,
+                effective_heating_kw_forecast=0.0,
+                hp_electric_power_forecast_kw=2.0,
+                pv_available_power_forecast_kw=0.0,
+                pv_available_power_realized_kw=0.0,
+                base_load_power_forecast_kw=1.0,
+                base_load_power_realized_kw=1.0,
+                occupied=0.0,
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                import_price_eur_kwh=0.25,
+                export_price_eur_kwh=0.0,
+                realized_room_temp_c=20.0,
+            ),
+        ],
+        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
+        interval_minutes=10,
+        horizon_steps=1,
+    )
+
+    assert result.pv_diagnostics.realized_pv_surplus_kwh == pytest.approx(2.0 * (10.0 / 60.0))
+    assert result.pv_diagnostics.forecast_pv_surplus_kwh == pytest.approx(2.0 * (10.0 / 60.0))
+    assert result.pv_diagnostics.mpc_hp_energy_kwh == pytest.approx(0.0)
+    assert result.pv_diagnostics.mpc_realized_pv_surplus_capture_ratio == pytest.approx(0.0)
+    assert result.pv_diagnostics.mpc_forecast_pv_surplus_capture_ratio == pytest.approx(0.0)

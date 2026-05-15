@@ -4,6 +4,7 @@ from datetime import datetime
 
 from home_optimizer.features.backtest.models import (
     MpcBacktestResult,
+    MpcBacktestPvDiagnostics,
     MpcBacktestStepResult,
     MpcBacktestSummary,
 )
@@ -44,6 +45,7 @@ class SpaceHeatingMpcBacktestRunner:
         max_solver_seconds: float | None = None,
         historical_hp_on_by_timestamp: dict[datetime, bool] | None = None,
         historical_energy_cost_by_timestamp: dict[datetime, float] | None = None,
+        exogenous_mode: str = "perfect_foresight",
     ) -> MpcBacktestResult:
         if interval_minutes <= 0:
             raise ValueError("interval_minutes must be greater than zero")
@@ -153,6 +155,25 @@ class SpaceHeatingMpcBacktestRunner:
                     ),
                     q_heat_eff_kw=q_heat_eff_kw,
                     historical_q_heat_eff_kw=historical_q_heat_eff_kw,
+                    hp_electric_power_kw=current_step.hp_electric_power_forecast_kw,
+                    pv_forecast_kw=current_step.pv_available_power_forecast_kw,
+                    pv_realized_kw=float(current_step.pv_available_power_realized_kw or 0.0),
+                    solar_irradiance_forecast_wm2=current_step.solar_irradiance_forecast_w_m2,
+                    solar_irradiance_realized_wm2=current_step.solar_irradiance_realized_w_m2,
+                    solar_gain_forecast_kw=current_step.solar_gain_kw,
+                    solar_gain_realized_kw=float(current_step.solar_gain_realized_kw or 0.0),
+                    base_load_forecast_kw=current_step.base_load_power_forecast_kw,
+                    base_load_realized_kw=float(current_step.base_load_power_realized_kw or 0.0),
+                    pv_surplus_forecast_kw=max(
+                        current_step.pv_available_power_forecast_kw
+                        - current_step.base_load_power_forecast_kw,
+                        0.0,
+                    ),
+                    pv_surplus_realized_kw=max(
+                        float(current_step.pv_available_power_realized_kw or 0.0)
+                        - float(current_step.base_load_power_realized_kw or 0.0),
+                        0.0,
+                    ),
                     predicted_next_room_temp_c=predicted_next_temp,
                     simulated_next_room_temp_c=predicted_next_temp,
                     historical_next_room_temp_c=next_step.realized_room_temp_c,
@@ -225,6 +246,7 @@ class SpaceHeatingMpcBacktestRunner:
 
         average_solver_runtime = total_solver_runtime_seconds / len(step_results) if step_results else 0.0
         return MpcBacktestResult(
+            exogenous_mode=exogenous_mode,
             model_id=model_id,
             model_type=model_type,
             start_time_utc=timeline[0].timestamp_utc,
@@ -246,6 +268,10 @@ class SpaceHeatingMpcBacktestRunner:
                 interval_minutes=interval_minutes,
                 mode="historical",
                 q_heat_eff_active_threshold_kw=resolved_weights.q_heat_eff_active_threshold_kw,
+            ),
+            pv_diagnostics=self._pv_diagnostics(
+                step_results,
+                interval_minutes=interval_minutes,
             ),
             mpc_objective_breakdown=executed_path_objective_breakdown,
             solver_objective_breakdown=solver_cumulative_objective_breakdown,
@@ -549,4 +575,61 @@ class SpaceHeatingMpcBacktestRunner:
             average_solver_runtime_seconds=average_solver_runtime_seconds if mode == "mpc" else 0.0,
             infeasible_count=infeasible_count if mode == "mpc" else 0,
             slack_usage_count=slack_usage_count if mode == "mpc" else 0,
+        )
+
+    @staticmethod
+    def _pv_diagnostics(
+        step_results: list[MpcBacktestStepResult],
+        *,
+        interval_minutes: int,
+    ) -> MpcBacktestPvDiagnostics:
+        dt_hours = interval_minutes / 60.0
+        realized_pv_surplus_kwh = 0.0
+        forecast_pv_surplus_kwh = 0.0
+        mpc_hp_energy_kwh = 0.0
+        mpc_hp_energy_during_realized_pv_surplus_kwh = 0.0
+        mpc_hp_energy_during_forecast_pv_surplus_kwh = 0.0
+        mpc_realized_pv_surplus_capture_kwh = 0.0
+
+        for step in step_results:
+            realized_pv_surplus_kwh += step.pv_surplus_realized_kw * dt_hours
+            forecast_pv_surplus_kwh += step.pv_surplus_forecast_kw * dt_hours
+            hp_energy_kwh = (
+                step.hp_electric_power_kw * float(int(step.mpc_hp_on)) * dt_hours
+            )
+            mpc_hp_energy_kwh += hp_energy_kwh
+            mpc_hp_energy_during_realized_pv_surplus_kwh += min(
+                step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                step.pv_surplus_realized_kw,
+            ) * dt_hours
+            mpc_hp_energy_during_forecast_pv_surplus_kwh += min(
+                step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                step.pv_surplus_forecast_kw,
+            ) * dt_hours
+            mpc_realized_pv_surplus_capture_kwh += min(
+                step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                step.pv_surplus_realized_kw,
+            ) * dt_hours
+
+        return MpcBacktestPvDiagnostics(
+            realized_pv_surplus_kwh=realized_pv_surplus_kwh,
+            forecast_pv_surplus_kwh=forecast_pv_surplus_kwh,
+            mpc_hp_energy_kwh=mpc_hp_energy_kwh,
+            mpc_hp_energy_during_realized_pv_surplus_kwh=(
+                mpc_hp_energy_during_realized_pv_surplus_kwh
+            ),
+            mpc_hp_energy_during_forecast_pv_surplus_kwh=(
+                mpc_hp_energy_during_forecast_pv_surplus_kwh
+            ),
+            mpc_realized_pv_surplus_capture_kwh=mpc_realized_pv_surplus_capture_kwh,
+            mpc_realized_pv_surplus_capture_ratio=(
+                mpc_realized_pv_surplus_capture_kwh / realized_pv_surplus_kwh
+                if realized_pv_surplus_kwh > 0.0
+                else 0.0
+            ),
+            mpc_forecast_pv_surplus_capture_ratio=(
+                mpc_hp_energy_during_forecast_pv_surplus_kwh / forecast_pv_surplus_kwh
+                if forecast_pv_surplus_kwh > 0.0
+                else 0.0
+            ),
         )
