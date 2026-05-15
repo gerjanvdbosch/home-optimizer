@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from home_optimizer.features.backtest.models import (
     MpcBacktestResult,
@@ -46,6 +47,7 @@ class SpaceHeatingMpcBacktestRunner:
         historical_hp_on_by_timestamp: dict[datetime, bool] | None = None,
         historical_energy_cost_by_timestamp: dict[datetime, float] | None = None,
         exogenous_mode: str = "perfect_foresight",
+        forecast_replay_provider: Any | None = None,
     ) -> MpcBacktestResult:
         if interval_minutes <= 0:
             raise ValueError("interval_minutes must be greater than zero")
@@ -66,11 +68,33 @@ class SpaceHeatingMpcBacktestRunner:
         executed_path_objective_breakdown = MpcObjectiveBreakdown()
         historical_hp_on_by_timestamp = historical_hp_on_by_timestamp or {}
         historical_energy_cost_by_timestamp = historical_energy_cost_by_timestamp or {}
+        missing_forecast_count = 0
+        forecast_coverage_ratio = 1.0
 
         for index in range(len(timeline) - 1):
-            horizon = timeline[index : index + horizon_steps]
+            realized_horizon = timeline[index : index + horizon_steps]
+            horizon = realized_horizon
             if not horizon:
                 break
+            forecast_issue_time_utc = horizon[0].timestamp_utc
+            forecast_age_minutes = 0.0
+            if forecast_replay_provider is not None:
+                replay_horizon = forecast_replay_provider.get_forecast_horizon(
+                    horizon[0].timestamp_utc,
+                    len(horizon),
+                    interval_minutes,
+                )
+                forecast_issue_time_utc = replay_horizon.forecast_issue_time_utc
+                forecast_age_minutes = replay_horizon.forecast_age_minutes
+                forecast_coverage_ratio = min(
+                    forecast_coverage_ratio,
+                    replay_horizon.forecast_coverage_ratio,
+                )
+                missing_forecast_count += replay_horizon.missing_forecast_count
+                horizon = self._merge_replay_horizon(
+                    realized_horizon=realized_horizon,
+                    replay_horizon=replay_horizon.horizon,
+                )
 
             request = MpcControllerRequest(
                 interval_minutes=interval_minutes,
@@ -139,6 +163,8 @@ class SpaceHeatingMpcBacktestRunner:
             step_results.append(
                 MpcBacktestStepResult(
                     timestamp_utc=current_step.timestamp_utc,
+                    forecast_issue_time_utc=forecast_issue_time_utc,
+                    forecast_age_minutes=forecast_age_minutes,
                     mpc_hp_on=applied_hp_on,
                     historical_hp_on=historical_hp_on,
                     start=start,
@@ -247,6 +273,8 @@ class SpaceHeatingMpcBacktestRunner:
         average_solver_runtime = total_solver_runtime_seconds / len(step_results) if step_results else 0.0
         return MpcBacktestResult(
             exogenous_mode=exogenous_mode,
+            missing_forecast_count=missing_forecast_count,
+            forecast_coverage_ratio=forecast_coverage_ratio if step_results else 1.0,
             model_id=model_id,
             model_type=model_type,
             start_time_utc=timeline[0].timestamp_utc,
@@ -277,6 +305,31 @@ class SpaceHeatingMpcBacktestRunner:
             solver_objective_breakdown=solver_cumulative_objective_breakdown,
             total_solver_runtime_seconds=total_solver_runtime_seconds,
         )
+
+    @staticmethod
+    def _merge_replay_horizon(
+        *,
+        realized_horizon: list[MpcHorizonStep],
+        replay_horizon: list[MpcHorizonStep],
+    ) -> list[MpcHorizonStep]:
+        merged: list[MpcHorizonStep] = []
+        for realized_step, replay_step in zip(realized_horizon, replay_horizon, strict=False):
+            merged.append(
+                realized_step.model_copy(
+                    update={
+                        "outdoor_temp_c": replay_step.outdoor_temp_c,
+                        "solar_gain_kw": replay_step.solar_gain_kw,
+                        "solar_gain_mass_kw": replay_step.solar_gain_mass_kw,
+                        "solar_irradiance_forecast_w_m2": replay_step.solar_irradiance_forecast_w_m2,
+                        "pv_available_power_forecast_kw": replay_step.pv_available_power_forecast_kw,
+                        "base_load_power_forecast_kw": replay_step.base_load_power_forecast_kw,
+                        "price_eur_kwh": replay_step.price_eur_kwh,
+                        "import_price_eur_kwh": replay_step.import_price_eur_kwh,
+                        "export_price_eur_kwh": replay_step.export_price_eur_kwh,
+                    }
+                )
+            )
+        return merged
 
     @staticmethod
     def _add_objective_breakdowns(

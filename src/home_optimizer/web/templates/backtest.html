@@ -54,6 +54,13 @@
             Horizon (steps)
             <input id="backtest-horizon-steps" type="number" min="1" max="288" value="36" />
           </label>
+          <label>
+            Exogene mode
+            <select id="backtest-exogenous-mode">
+              <option value="perfect_foresight">Perfect foresight</option>
+              <option value="forecast_replay">Forecast replay</option>
+            </select>
+          </label>
           <button id="backtest-run-button" type="button">Run backtest</button>
           <div id="backtest-status" class="status" aria-live="polite"></div>
         </div>

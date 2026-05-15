@@ -21,6 +21,8 @@ class MpcBacktestPvDiagnostics(DomainModel):
 
 class MpcBacktestStepResult(DomainModel):
     timestamp_utc: datetime
+    forecast_issue_time_utc: datetime | None = None
+    forecast_age_minutes: float = 0.0
     mpc_hp_on: bool
     historical_hp_on: bool
     start: bool
@@ -70,6 +72,8 @@ class MpcBacktestSummary(DomainModel):
 
 class MpcBacktestResult(DomainModel):
     exogenous_mode: str = "perfect_foresight"
+    missing_forecast_count: int = 0
+    forecast_coverage_ratio: float = 1.0
     model_id: str
     model_type: str
     start_time_utc: datetime

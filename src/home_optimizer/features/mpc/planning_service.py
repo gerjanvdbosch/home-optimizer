@@ -6,7 +6,7 @@ from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import ElectricityPricingConfig
 from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
-from home_optimizer.domain.time import ensure_utc, parse_datetime
+from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import RoomRcModel, StoredModelVersion, TrainedLinearRoomModel
 from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
@@ -238,24 +238,11 @@ class SpaceHeatingMpcPlanningService:
         interval_minutes: int,
         horizon_steps: int,
     ) -> list[ForecastEntry]:
-        end_time_utc = start_time_utc + timedelta(minutes=interval_minutes * horizon_steps)
-        frame = self.samples_reader.read_forecast_values(
-            start_time=start_time_utc,
-            end_time=end_time_utc,
+        return self.preparation.load_forecast_entries(
+            start_time_utc=start_time_utc,
+            interval_minutes=interval_minutes,
+            horizon_steps=horizon_steps,
         )
-        entries: list[ForecastEntry] = []
-        for row in frame.to_dict(orient="records"):
-            entries.append(
-                ForecastEntry(
-                    created_at_utc=parse_datetime(str(row["created_at_utc"])),
-                    forecast_time_utc=parse_datetime(str(row["forecast_time_utc"])),
-                    name=str(row["name"]),
-                    value=float(row["value"]),
-                    unit=str(row["unit"]) if row.get("unit") is not None else None,
-                    source=str(row["source"]),
-                )
-            )
-        return entries
 
     def _load_price_intervals(
         self,
@@ -264,24 +251,11 @@ class SpaceHeatingMpcPlanningService:
         interval_minutes: int,
         horizon_steps: int,
     ) -> list[PriceInterval]:
-        end_time_utc = start_time_utc + timedelta(minutes=interval_minutes * horizon_steps)
-        frame = self.samples_reader.read_electricity_price_intervals(
-            start_time=start_time_utc,
-            end_time=end_time_utc,
+        return self.preparation.load_price_intervals(
+            start_time_utc=start_time_utc,
+            interval_minutes=interval_minutes,
+            horizon_steps=horizon_steps,
         )
-        intervals: list[PriceInterval] = []
-        for row in frame.to_dict(orient="records"):
-            intervals.append(
-                PriceInterval(
-                    start_time_utc=parse_datetime(str(row["start_time_utc"])),
-                    end_time_utc=parse_datetime(str(row["end_time_utc"])),
-                    source=str(row["source"]),
-                    name=str(row["name"]),
-                    unit=str(row["unit"]),
-                    value=float(row["value"]),
-                )
-            )
-        return intervals
 
     @staticmethod
     def _row_solar_gain_kw(

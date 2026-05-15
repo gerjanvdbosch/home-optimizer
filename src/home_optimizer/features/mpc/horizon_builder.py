@@ -89,6 +89,9 @@ class MpcHorizonBuilder:
                     outdoor_temp_c=float(outdoor_by_timestamp.get(timestamp_utc, 0.0)),
                     solar_gain_kw=solar_direct_values[step_index],
                     solar_gain_mass_kw=solar_filtered_values[step_index],
+                    solar_irradiance_forecast_w_m2=float(
+                        solar_by_timestamp.get(timestamp_utc, 0.0)
+                    ),
                     effective_heating_kw_forecast=request.default_effective_heating_kw,
                     hp_electric_power_forecast_kw=request.default_hp_electric_power_kw,
                     pv_available_power_forecast_kw=float(

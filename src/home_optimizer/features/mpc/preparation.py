@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import ElectricityPricingConfig
+from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset import MpcDatasetService
@@ -78,6 +79,60 @@ class SpaceHeatingMpcPreparationService:
             end_time=end_time,
             interval_minutes=interval_minutes,
         )
+
+    def load_forecast_entries(
+        self,
+        *,
+        start_time_utc: datetime,
+        interval_minutes: int,
+        horizon_steps: int,
+        created_at_end_time: datetime | None = None,
+    ) -> list[ForecastEntry]:
+        end_time_utc = start_time_utc + timedelta(minutes=interval_minutes * horizon_steps)
+        frame = self.samples_reader.read_forecast_values(
+            start_time=start_time_utc,
+            end_time=end_time_utc,
+            created_at_end_time=created_at_end_time,
+        )
+        entries: list[ForecastEntry] = []
+        for row in frame.to_dict(orient="records"):
+            entries.append(
+                ForecastEntry(
+                    created_at_utc=ensure_utc(row["created_at_utc"]),
+                    forecast_time_utc=ensure_utc(row["forecast_time_utc"]),
+                    name=str(row["name"]),
+                    value=float(row["value"]),
+                    unit=str(row["unit"]) if row.get("unit") is not None else None,
+                    source=str(row["source"]),
+                )
+            )
+        return entries
+
+    def load_price_intervals(
+        self,
+        *,
+        start_time_utc: datetime,
+        interval_minutes: int,
+        horizon_steps: int,
+    ) -> list[PriceInterval]:
+        end_time_utc = start_time_utc + timedelta(minutes=interval_minutes * horizon_steps)
+        frame = self.samples_reader.read_electricity_price_intervals(
+            start_time=start_time_utc,
+            end_time=end_time_utc,
+        )
+        intervals: list[PriceInterval] = []
+        for row in frame.to_dict(orient="records"):
+            intervals.append(
+                PriceInterval(
+                    start_time_utc=ensure_utc(row["start_time_utc"]),
+                    end_time_utc=ensure_utc(row["end_time_utc"]),
+                    source=str(row["source"]),
+                    name=str(row["name"]),
+                    unit=str(row["unit"]),
+                    value=float(row["value"]),
+                )
+            )
+        return intervals
 
     def initial_state_from_rows(
         self,

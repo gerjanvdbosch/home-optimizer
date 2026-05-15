@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -20,6 +21,10 @@ EndTimeQuery = Annotated[FlexibleDatetime | None, Query(alias="end_time")]
 HorizonStepsQuery = Annotated[int, Query(alias="horizon_steps", ge=1, le=288)]
 ModelIdQuery = Annotated[str | None, Query(alias="model_id")]
 MaxSolverSecondsQuery = Annotated[float | None, Query(alias="max_solver_seconds", gt=0.0)]
+ExogenousModeQuery = Annotated[
+    Literal["perfect_foresight", "forecast_replay"],
+    Query(alias="exogenous_mode"),
+]
 
 
 def create_backtest_router(settings: AppSettings) -> APIRouter:
@@ -41,6 +46,7 @@ def create_backtest_router(settings: AppSettings) -> APIRouter:
         model_id: ModelIdQuery = None,
         horizon_steps: HorizonStepsQuery = 36,
         max_solver_seconds: MaxSolverSecondsQuery = None,
+        exogenous_mode: ExogenousModeQuery = "perfect_foresight",
     ) -> MpcBacktestResponse:
         if start_time is None:
             now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
@@ -54,6 +60,7 @@ def create_backtest_router(settings: AppSettings) -> APIRouter:
                 model_id=model_id,
                 horizon_steps=horizon_steps,
                 max_solver_seconds=max_solver_seconds,
+                exogenous_mode=exogenous_mode,
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

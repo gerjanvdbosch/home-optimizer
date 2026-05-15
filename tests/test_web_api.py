@@ -264,9 +264,10 @@ class FakeSpaceHeatingMpcBacktestService:
         model_id: str | None = None,
         horizon_steps: int = 36,
         max_solver_seconds: float | None = None,
+        exogenous_mode: str = "perfect_foresight",
     ) -> MpcBacktestResult:
         return MpcBacktestResult(
-            exogenous_mode="perfect_foresight",
+            exogenous_mode=exogenous_mode,
             model_id=model_id or "room-model-active",
             model_type=ROOM_ARX_MODEL_KIND,
             start_time_utc=start_time_utc,
@@ -1012,6 +1013,7 @@ def test_backtest_page_renders_navigation_and_controls() -> None:
     assert 'id="backtest-start-time"' in response.text
     assert 'id="backtest-end-time"' in response.text
     assert 'id="backtest-model-select"' in response.text
+    assert 'id="backtest-exogenous-mode"' in response.text
     assert 'id="backtest-temperature-chart"' in response.text
     assert 'id="backtest-cost-chart"' in response.text
     assert 'id="backtest-pv-chart"' in response.text

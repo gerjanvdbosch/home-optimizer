@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 
+from home_optimizer.domain import FORECAST_TEMPERATURE, GTI_LIVING_ROOM_WINDOWS_ADJUSTED, GTI_PV
+from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import ElectricityPricingConfig
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
@@ -10,6 +13,7 @@ from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunne
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
+from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.exogenous_features import (
     continue_exp_filter,
@@ -20,11 +24,166 @@ from home_optimizer.features.mpc.exogenous_features import (
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
     MpcConstraints,
+    MpcHorizonBuildRequest,
     MpcHorizonStep,
     MpcObjectiveWeights,
 )
 from home_optimizer.features.mpc.ports import ActiveRoomModelReaderPort
 from home_optimizer.features.mpc.preparation import SpaceHeatingMpcPreparationService
+
+
+@dataclass(frozen=True)
+class BacktestForecastReplayHorizon:
+    horizon: list[MpcHorizonStep]
+    forecast_issue_time_utc: datetime
+    forecast_age_minutes: float
+    forecast_coverage_ratio: float
+    missing_forecast_count: int
+
+
+class BacktestForecastReplayProvider:
+    def __init__(
+        self,
+        *,
+        preparation: SpaceHeatingMpcPreparationService,
+        target_schedule: list[TemperatureTargetWindow],
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        all_rows: list[MpcDatasetRow],
+        effective_heating_kw: float,
+        hp_electric_power_kw: float,
+        export_price_eur_kwh: float,
+    ) -> None:
+        self.preparation = preparation
+        self.target_schedule = list(target_schedule)
+        self.source_model = source_model
+        self.all_rows = list(all_rows)
+        self.effective_heating_kw = effective_heating_kw
+        self.hp_electric_power_kw = hp_electric_power_kw
+        self.export_price_eur_kwh = export_price_eur_kwh
+        self.horizon_builder = MpcHorizonBuilder()
+
+    def get_forecast_horizon(
+        self,
+        issue_time_utc: datetime,
+        horizon_steps: int,
+        interval_minutes: int,
+    ) -> BacktestForecastReplayHorizon:
+        resolved_issue_time = ensure_utc(issue_time_utc)
+        forecast_entries = self.preparation.load_forecast_entries(
+            start_time_utc=resolved_issue_time,
+            interval_minutes=interval_minutes,
+            horizon_steps=horizon_steps,
+            created_at_end_time=resolved_issue_time + timedelta(microseconds=1),
+        )
+        coverage_ratio, missing_count, forecast_issue_time_utc = self._forecast_coverage(
+            forecast_entries,
+            issue_time_utc=resolved_issue_time,
+            horizon_steps=horizon_steps,
+            interval_minutes=interval_minutes,
+        )
+        if missing_count > 0 or forecast_issue_time_utc is None:
+            raise ValueError(
+                "missing_forecast: archived forecast coverage is incomplete for forecast_replay"
+            )
+
+        history_rows = [
+            row for row in self.all_rows if row.timestamp_utc < resolved_issue_time
+        ]
+        base_load_forecast_kw = self.preparation.resolve_base_load_power_kw(
+            history_rows or self.all_rows[:1]
+        )
+        pv_power_input_scale = self.preparation.infer_pv_power_input_scale(
+            history_rows or self.all_rows[:1],
+            forecast_entries=forecast_entries,
+            start_time_utc=resolved_issue_time,
+        )
+        initial_filtered_solar_gain_kw = 0.0
+        solar_gain_filter_alpha = 0.0
+        local_timezone: str | None = None
+        if isinstance(self.source_model, RoomRcModel):
+            solar_gain_history_kw = [
+                SpaceHeatingMpcBacktestService._solar_gain_input(
+                    row,
+                    source_model=self.source_model,
+                )
+                for row in history_rows
+            ]
+            solar_gain_filter_alpha = self.source_model.config.alpha_solar
+            initial_filtered_solar_gain_kw = trailing_exp_filter(
+                solar_gain_history_kw,
+                alpha=solar_gain_filter_alpha,
+            )
+            local_timezone = self.source_model.config.local_timezone
+
+        horizon = self.horizon_builder.build(
+            MpcHorizonBuildRequest(
+                start_time_utc=resolved_issue_time,
+                horizon_steps=horizon_steps,
+                interval_minutes=interval_minutes,
+                target_schedule=self.target_schedule,
+                forecast_entries=forecast_entries,
+                price_intervals=self.preparation.load_price_intervals(
+                    start_time_utc=resolved_issue_time,
+                    interval_minutes=interval_minutes,
+                    horizon_steps=horizon_steps,
+                ),
+                default_effective_heating_kw=self.effective_heating_kw,
+                default_hp_electric_power_kw=self.hp_electric_power_kw,
+                default_base_load_power_kw=base_load_forecast_kw,
+                default_export_price_eur_kwh=self.export_price_eur_kwh,
+                pv_power_input_scale=pv_power_input_scale,
+                solar_gain_filter_alpha=solar_gain_filter_alpha,
+                initial_filtered_solar_gain_kw=initial_filtered_solar_gain_kw,
+                local_timezone=local_timezone,
+            )
+        )
+        forecast_age_minutes = max(
+            (resolved_issue_time - forecast_issue_time_utc).total_seconds() / 60.0,
+            0.0,
+        )
+        return BacktestForecastReplayHorizon(
+            horizon=horizon,
+            forecast_issue_time_utc=forecast_issue_time_utc,
+            forecast_age_minutes=forecast_age_minutes,
+            forecast_coverage_ratio=coverage_ratio,
+            missing_forecast_count=missing_count,
+        )
+
+    @staticmethod
+    def _forecast_coverage(
+        forecast_entries: list[ForecastEntry],
+        *,
+        issue_time_utc: datetime,
+        horizon_steps: int,
+        interval_minutes: int,
+    ) -> tuple[float, int, datetime | None]:
+        required_names = (
+            FORECAST_TEMPERATURE,
+            GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+            GTI_PV,
+        )
+        expected_keys = {
+            (
+                name,
+                issue_time_utc + timedelta(minutes=interval_minutes * step),
+            )
+            for name in required_names
+            for step in range(horizon_steps)
+        }
+        selected_keys = {
+            (entry.name, ensure_utc(entry.forecast_time_utc))
+            for entry in forecast_entries
+            if entry.name in required_names
+        }
+        expected_count = len(expected_keys)
+        actual_count = len(expected_keys & selected_keys)
+        missing_count = expected_count - actual_count
+        latest_created = max(
+            (ensure_utc(entry.created_at_utc) for entry in forecast_entries if entry.name in required_names),
+            default=None,
+        )
+        coverage_ratio = (actual_count / expected_count) if expected_count > 0 else 1.0
+        return coverage_ratio, missing_count, latest_created
 
 
 class SpaceHeatingMpcBacktestService:
@@ -39,6 +198,7 @@ class SpaceHeatingMpcBacktestService:
         runner: SpaceHeatingMpcBacktestRunner | None = None,
     ) -> None:
         self.default_interval_minutes = default_interval_minutes
+        self.target_schedule = list(target_schedule)
         self.preparation = SpaceHeatingMpcPreparationService(
             samples_reader=samples_reader,
             active_room_model_reader=active_room_model_reader,
@@ -59,6 +219,7 @@ class SpaceHeatingMpcBacktestService:
         max_solver_seconds: float | None = None,
         conversion_options: ControlModelConversionOptions | None = None,
         default_effective_heating_kw: float | None = None,
+        exogenous_mode: str = "perfect_foresight",
     ) -> MpcBacktestResult:
         resolved_start_time = ensure_utc(start_time_utc)
         resolved_end_time = ensure_utc(end_time_utc)
@@ -66,6 +227,10 @@ class SpaceHeatingMpcBacktestService:
             raise ValueError("end_time_utc must be later than start_time_utc")
         if horizon_steps <= 0:
             raise ValueError("horizon_steps must be greater than zero")
+        if exogenous_mode not in {"perfect_foresight", "forecast_replay"}:
+            raise ValueError(
+                "exogenous_mode must be one of: perfect_foresight, forecast_replay"
+            )
 
         version = self.preparation.resolve_room_model_version(model_id)
         if version is None:
@@ -140,6 +305,17 @@ class SpaceHeatingMpcBacktestService:
             )
             for row in backtest_rows
         }
+        forecast_replay_provider = None
+        if exogenous_mode == "forecast_replay":
+            forecast_replay_provider = BacktestForecastReplayProvider(
+                preparation=self.preparation,
+                target_schedule=self.target_schedule,
+                source_model=source_model,
+                all_rows=inference_rows,
+                effective_heating_kw=effective_heating_kw,
+                hp_electric_power_kw=hp_electric_power_kw,
+                export_price_eur_kwh=export_price_eur_kwh,
+            )
         return self.runner.run(
             model_id=version.model_id,
             model_type=version.model_type,
@@ -156,7 +332,8 @@ class SpaceHeatingMpcBacktestService:
             max_solver_seconds=max_solver_seconds,
             historical_hp_on_by_timestamp=historical_hp_on_by_timestamp,
             historical_energy_cost_by_timestamp=historical_energy_cost_by_timestamp,
-            exogenous_mode="perfect_foresight",
+            exogenous_mode=exogenous_mode,
+            forecast_replay_provider=forecast_replay_provider,
         )
 
     def _build_timeline(

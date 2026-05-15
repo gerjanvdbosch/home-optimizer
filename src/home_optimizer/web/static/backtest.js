@@ -78,6 +78,7 @@ const startTimeInput = document.getElementById("backtest-start-time");
 const endTimeInput = document.getElementById("backtest-end-time");
 const modelSelect = document.getElementById("backtest-model-select");
 const horizonStepsInput = document.getElementById("backtest-horizon-steps");
+const exogenousModeSelect = document.getElementById("backtest-exogenous-mode");
 const runButton = document.getElementById("backtest-run-button");
 const statusNode = document.getElementById("backtest-status");
 const summaryCaptionNode = document.getElementById("backtest-summary-caption");
@@ -117,6 +118,9 @@ function setControlsDisabled(disabled) {
   }
   if (horizonStepsInput) {
     horizonStepsInput.disabled = disabled;
+  }
+  if (exogenousModeSelect) {
+    exogenousModeSelect.disabled = disabled;
   }
   if (previousDayButton) {
     previousDayButton.disabled = disabled;
@@ -385,6 +389,7 @@ async function loadBacktest() {
       start_time: new Date(startTimeInput.value).toISOString(),
       end_time: new Date(endTimeInput.value).toISOString(),
       horizon_steps: String(Number(horizonStepsInput.value || 36)),
+      exogenous_mode: exogenousModeSelect?.value || "perfect_foresight",
     });
     if (modelSelect.value) {
       params.set("model_id", modelSelect.value);
@@ -396,8 +401,10 @@ async function loadBacktest() {
     }
     renderSummary(payload);
     renderCharts(payload);
-    statusNode.className = "status success";
-    statusNode.textContent = "Backtest geladen";
+    statusNode.className = payload.forecast_coverage_ratio < 1 ? "status error" : "status success";
+    statusNode.textContent = payload.forecast_coverage_ratio < 1
+      ? `Backtest geladen met onvolledige forecastdekking (${formatNumber(payload.forecast_coverage_ratio * 100, 1)}%)`
+      : "Backtest geladen";
   } catch (error) {
     statusNode.className = "status error";
     statusNode.textContent = error instanceof Error ? error.message : String(error);

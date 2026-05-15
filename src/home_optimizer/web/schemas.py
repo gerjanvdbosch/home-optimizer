@@ -374,6 +374,8 @@ class MpcBacktestDeltaResponse(BaseModel):
 
 class MpcBacktestStepResponse(BaseModel):
     timestamp_utc: datetime
+    forecast_issue_time_utc: datetime | None = None
+    forecast_age_minutes: float
     mpc_hp_on: bool
     historical_hp_on: bool
     start: bool
@@ -407,6 +409,8 @@ class MpcBacktestStepResponse(BaseModel):
 
 class MpcBacktestResponse(BaseModel):
     exogenous_mode: str
+    missing_forecast_count: int
+    forecast_coverage_ratio: float
     model_id: str
     model_type: str
     start_time_utc: datetime

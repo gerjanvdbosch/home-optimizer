@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
@@ -10,6 +10,7 @@ from home_optimizer.features.backtest.models import (
     MpcBacktestPvDiagnostics,
     MpcBacktestSummary,
 )
+from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunner
 from home_optimizer.features.backtest.service import SpaceHeatingMpcBacktestService
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling import (
@@ -21,10 +22,15 @@ from home_optimizer.features.modeling import (
 )
 from home_optimizer.features.mpc import MpcInitialState
 from home_optimizer.features.mpc import MpcObjectiveBreakdown
+from home_optimizer.features.mpc import MpcPlan, MpcPlanStep
 
 
 class _UnusedSamplesReader:
-    pass
+    def read_forecast_values(self, **kwargs):
+        raise NotImplementedError
+
+    def read_electricity_price_intervals(self, **kwargs):
+        raise NotImplementedError
 
 
 class _UnusedModelReader:
@@ -376,3 +382,330 @@ def test_backtest_service_perfect_foresight_sets_forecast_and_realized_exogenous
     assert captured_timeline[0].pv_available_power_forecast_kw == captured_timeline[0].pv_available_power_realized_kw
     assert captured_timeline[0].solar_irradiance_forecast_w_m2 == captured_timeline[0].solar_irradiance_realized_w_m2
     assert captured_timeline[0].base_load_power_forecast_kw == captured_timeline[0].base_load_power_realized_kw
+
+
+def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypatch) -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    end_time = datetime(2026, 1, 1, 12, 10, tzinfo=timezone.utc)
+    captured_horizons = []
+
+    class _ForecastSamplesReader(_UnusedSamplesReader):
+        def read_forecast_values(self, **kwargs):
+            return __import__("pandas").DataFrame(
+                [
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": start_time,
+                        "name": "temperature",
+                        "source": "forecast",
+                        "unit": "C",
+                        "value": 3.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": start_time,
+                        "name": "gti_living_room_windows_adjusted",
+                        "source": "forecast",
+                        "unit": "W/m2",
+                        "value": 500.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": start_time,
+                        "name": "gti_pv",
+                        "source": "forecast",
+                        "unit": "W/m2",
+                        "value": 400.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": end_time,
+                        "name": "temperature",
+                        "source": "forecast",
+                        "unit": "C",
+                        "value": 4.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": end_time,
+                        "name": "gti_living_room_windows_adjusted",
+                        "source": "forecast",
+                        "unit": "W/m2",
+                        "value": 300.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": end_time,
+                        "name": "gti_pv",
+                        "source": "forecast",
+                        "unit": "W/m2",
+                        "value": 200.0,
+                    },
+                ]
+            )
+
+        def read_electricity_price_intervals(self, **kwargs):
+            return __import__("pandas").DataFrame(
+                [
+                    {
+                        "start_time_utc": start_time,
+                        "end_time_utc": end_time + timedelta(minutes=10),
+                        "source": "price",
+                        "name": "electricity_price",
+                        "unit": "EUR/kWh",
+                        "value": 0.25,
+                    }
+                ]
+            )
+
+    class _CapturingController:
+        def plan(self, request, **kwargs) -> MpcPlan:
+            captured_horizons.append(request.horizon)
+            step = request.horizon[0]
+            return MpcPlan(
+                status="ok",
+                termination_condition="optimal",
+                feasible=True,
+                objective_breakdown=MpcObjectiveBreakdown(),
+                steps=[
+                    MpcPlanStep(
+                        timestamp_utc=step.timestamp_utc,
+                        hp_on=False,
+                        start=False,
+                        stop=False,
+                        predicted_room_temp_c=20.0,
+                        temp_min_c=step.temp_min_c,
+                        temp_max_c=step.temp_max_c,
+                        slack_low_c=0.0,
+                        slack_high_c=0.0,
+                        effective_heating_kw=0.0,
+                        price_eur_kwh=step.import_price_eur_kwh,
+                        estimated_energy_cost_eur=0.0,
+                    )
+                ],
+            )
+
+    service = SpaceHeatingMpcBacktestService(
+        samples_reader=_ForecastSamplesReader(),
+        active_room_model_reader=_UnusedModelReader(),
+        target_schedule=[
+            TemperatureTargetWindow(time=time(0, 0), target=20.0, low_margin=0.5, high_margin=1.0)
+        ],
+        default_interval_minutes=10,
+        runner=SpaceHeatingMpcBacktestRunner(controller=_CapturingController()),
+    )
+    version = StoredModelVersion(
+        model_id="room-model-active",
+        model_type="room_arx",
+        created_at_utc=start_time,
+        is_active=True,
+        model=RoomArxModel(
+            trained_from_utc=start_time,
+            trained_to_utc=end_time,
+            interval_minutes=10,
+            config=RoomArxConfig(
+                room_temperature_lags=[0],
+                outdoor_temperature_lags=[0],
+                thermal_output_lags=[0],
+                solar_gain_lags=[0],
+                occupied_flag_lags=[0],
+                shutter_position_lags=[0],
+                solar_shutter_interaction_lags=[0],
+            ),
+            feature_names=["room_temperature_lag_0"],
+            intercept=0.0,
+            coefficients=[1.0],
+            sample_count=10,
+        ),
+    )
+    rows = [
+        MpcDatasetRow(
+            timestamp_utc=start_time,
+            room_temperature_c=20.0,
+            outdoor_temperature_c=10.0,
+            room_target_min_temperature_c=19.0,
+            room_target_max_temperature_c=21.0,
+            solar_irradiance_w_m2=100.0,
+            solar_gain_proxy_w_m2=100.0,
+            pv_output_power_kw=1.0,
+            net_power_kw=0.8,
+            hp_electric_power_kw=0.5,
+            occupied_flag=0,
+            price_import_eur_kwh=0.25,
+        ),
+        MpcDatasetRow(
+            timestamp_utc=end_time,
+            room_temperature_c=20.1,
+            outdoor_temperature_c=11.0,
+            room_target_min_temperature_c=19.0,
+            room_target_max_temperature_c=21.0,
+            solar_irradiance_w_m2=120.0,
+            solar_gain_proxy_w_m2=120.0,
+            pv_output_power_kw=1.1,
+            net_power_kw=0.9,
+            hp_electric_power_kw=0.5,
+            occupied_flag=0,
+            price_import_eur_kwh=0.25,
+        ),
+    ]
+
+    monkeypatch.setattr(service.preparation, "resolve_room_model_version", lambda model_id: version)
+    monkeypatch.setattr(service.preparation, "load_initial_rows", lambda **kwargs: rows[:1])
+    monkeypatch.setattr(
+        service.preparation,
+        "initial_state_from_rows",
+        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+    )
+    monkeypatch.setattr(
+        service.preparation,
+        "build_dataset",
+        lambda **kwargs: MpcDataset(
+            interval_minutes=10,
+            start_time_utc=start_time,
+            end_time_utc=end_time,
+            rows=rows,
+        ),
+    )
+    monkeypatch.setattr(service.preparation, "resolve_effective_heating_kw", lambda rows, *, fallback_kw: 3.0)
+    monkeypatch.setattr(service.preparation, "resolve_hp_electric_power_kw", lambda rows, *, fallback_kw: 1.5)
+    monkeypatch.setattr(service.preparation, "resolve_export_price_eur_kwh", lambda rows: 0.0)
+    monkeypatch.setattr(service.preparation, "row_hp_on", lambda row: False)
+
+    result = service.run(
+        start_time_utc=start_time,
+        end_time_utc=end_time,
+        horizon_steps=2,
+        exogenous_mode="forecast_replay",
+    )
+
+    assert result.exogenous_mode == "forecast_replay"
+    assert result.forecast_coverage_ratio == pytest.approx(1.0)
+    assert result.missing_forecast_count == 0
+    assert len(captured_horizons) == 1
+    assert captured_horizons[0][0].outdoor_temp_c == 3.0
+    assert captured_horizons[0][1].pv_available_power_forecast_kw == pytest.approx(0.5)
+    assert captured_horizons[0][1].pv_available_power_forecast_kw != captured_horizons[0][1].pv_available_power_realized_kw
+    assert captured_horizons[0][0].solar_irradiance_forecast_w_m2 == 500.0
+    assert captured_horizons[0][0].solar_irradiance_realized_w_m2 == 100.0
+
+
+def test_backtest_service_forecast_replay_rejects_missing_archived_forecast(monkeypatch) -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    end_time = datetime(2026, 1, 1, 12, 10, tzinfo=timezone.utc)
+
+    class _MissingForecastSamplesReader(_UnusedSamplesReader):
+        def read_forecast_values(self, **kwargs):
+            return __import__("pandas").DataFrame([])
+
+        def read_electricity_price_intervals(self, **kwargs):
+            return __import__("pandas").DataFrame([])
+
+    service = SpaceHeatingMpcBacktestService(
+        samples_reader=_MissingForecastSamplesReader(),
+        active_room_model_reader=_UnusedModelReader(),
+        target_schedule=[
+            TemperatureTargetWindow(time=time(0, 0), target=20.0, low_margin=0.5, high_margin=1.0)
+        ],
+        default_interval_minutes=10,
+        runner=_StubRunner(),
+    )
+    version = StoredModelVersion(
+        model_id="room-model-active",
+        model_type="room_arx",
+        created_at_utc=start_time,
+        is_active=True,
+        model=RoomArxModel(
+            trained_from_utc=start_time,
+            trained_to_utc=end_time,
+            interval_minutes=10,
+            config=RoomArxConfig(
+                room_temperature_lags=[0],
+                outdoor_temperature_lags=[0],
+                thermal_output_lags=[0],
+                solar_gain_lags=[0],
+                occupied_flag_lags=[0],
+                shutter_position_lags=[0],
+                solar_shutter_interaction_lags=[0],
+            ),
+            feature_names=["room_temperature_lag_0"],
+            intercept=0.0,
+            coefficients=[1.0],
+            sample_count=10,
+        ),
+    )
+    rows = [
+        MpcDatasetRow(
+            timestamp_utc=start_time,
+            room_temperature_c=20.0,
+            outdoor_temperature_c=10.0,
+            room_target_min_temperature_c=19.0,
+            room_target_max_temperature_c=21.0,
+            occupied_flag=0,
+        ),
+        MpcDatasetRow(
+            timestamp_utc=end_time,
+            room_temperature_c=20.1,
+            outdoor_temperature_c=11.0,
+            room_target_min_temperature_c=19.0,
+            room_target_max_temperature_c=21.0,
+            occupied_flag=0,
+        ),
+    ]
+
+    monkeypatch.setattr(service.preparation, "resolve_room_model_version", lambda model_id: version)
+    monkeypatch.setattr(service.preparation, "load_initial_rows", lambda **kwargs: rows[:1])
+    monkeypatch.setattr(
+        service.preparation,
+        "initial_state_from_rows",
+        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+    )
+    monkeypatch.setattr(
+        service.preparation,
+        "build_dataset",
+        lambda **kwargs: MpcDataset(
+            interval_minutes=10,
+            start_time_utc=start_time,
+            end_time_utc=end_time,
+            rows=rows,
+        ),
+    )
+    monkeypatch.setattr(service.preparation, "resolve_effective_heating_kw", lambda rows, *, fallback_kw: 3.0)
+    monkeypatch.setattr(service.preparation, "resolve_hp_electric_power_kw", lambda rows, *, fallback_kw: 1.5)
+    monkeypatch.setattr(service.preparation, "resolve_export_price_eur_kwh", lambda rows: 0.0)
+    monkeypatch.setattr(service.preparation, "row_hp_on", lambda row: False)
+
+    class _NoopController:
+        def plan(self, request, **kwargs) -> MpcPlan:
+            step = request.horizon[0]
+            return MpcPlan(
+                status="ok",
+                termination_condition="optimal",
+                feasible=True,
+                objective_breakdown=MpcObjectiveBreakdown(),
+                steps=[
+                    MpcPlanStep(
+                        timestamp_utc=step.timestamp_utc,
+                        hp_on=False,
+                        start=False,
+                        stop=False,
+                        predicted_room_temp_c=20.0,
+                        temp_min_c=step.temp_min_c,
+                        temp_max_c=step.temp_max_c,
+                        slack_low_c=0.0,
+                        slack_high_c=0.0,
+                        effective_heating_kw=0.0,
+                        price_eur_kwh=step.import_price_eur_kwh,
+                        estimated_energy_cost_eur=0.0,
+                    )
+                ],
+            )
+
+    service.runner = SpaceHeatingMpcBacktestRunner(controller=_NoopController())
+
+    with pytest.raises(ValueError, match="missing_forecast"):
+        service.run(
+            start_time_utc=start_time,
+            end_time_utc=end_time,
+            horizon_steps=2,
+            exogenous_mode="forecast_replay",
+        )
