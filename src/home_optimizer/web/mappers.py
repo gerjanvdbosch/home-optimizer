@@ -247,6 +247,40 @@ def mpc_backtest_summary_response(summary: MpcBacktestSummary) -> MpcBacktestSum
 def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
     mpc_summary = mpc_backtest_summary_response(result.mpc_summary)
     historical_summary = mpc_backtest_summary_response(result.historical_summary)
+    executed_breakdown = MpcObjectiveBreakdownResponse(
+        comfort_low=result.mpc_objective_breakdown.comfort_low,
+        comfort_high=result.mpc_objective_breakdown.comfort_high,
+        comfort_total=result.mpc_objective_breakdown.comfort_total,
+        tracking_under_target=result.mpc_objective_breakdown.tracking_under_target,
+        tracking_over_target=result.mpc_objective_breakdown.tracking_over_target,
+        temperature_tracking=result.mpc_objective_breakdown.temperature_tracking,
+        energy_cost=result.mpc_objective_breakdown.energy_cost,
+        pv_self_consumption_reward=(
+            result.mpc_objective_breakdown.pv_self_consumption_reward
+        ),
+        unnecessary_heating=result.mpc_objective_breakdown.unnecessary_heating,
+        terminal_cost=result.mpc_objective_breakdown.terminal,
+        start_penalty=result.mpc_objective_breakdown.start,
+        runtime=result.mpc_objective_breakdown.runtime,
+        total=result.mpc_objective_breakdown.total,
+    )
+    solver_breakdown = MpcObjectiveBreakdownResponse(
+        comfort_low=result.solver_objective_breakdown.comfort_low,
+        comfort_high=result.solver_objective_breakdown.comfort_high,
+        comfort_total=result.solver_objective_breakdown.comfort_total,
+        tracking_under_target=result.solver_objective_breakdown.tracking_under_target,
+        tracking_over_target=result.solver_objective_breakdown.tracking_over_target,
+        temperature_tracking=result.solver_objective_breakdown.temperature_tracking,
+        energy_cost=result.solver_objective_breakdown.energy_cost,
+        pv_self_consumption_reward=(
+            result.solver_objective_breakdown.pv_self_consumption_reward
+        ),
+        unnecessary_heating=result.solver_objective_breakdown.unnecessary_heating,
+        terminal_cost=result.solver_objective_breakdown.terminal,
+        start_penalty=result.solver_objective_breakdown.start,
+        runtime=result.solver_objective_breakdown.runtime,
+        total=result.solver_objective_breakdown.total,
+    )
     return MpcBacktestResponse(
         model_id=result.model_id,
         model_type=result.model_type,
@@ -255,23 +289,8 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
         interval_minutes=result.interval_minutes,
         horizon_steps=result.horizon_steps,
         step_count=len(result.step_results),
-        mpc_objective_breakdown=MpcObjectiveBreakdownResponse(
-            comfort_low=result.mpc_objective_breakdown.comfort_low,
-            comfort_high=result.mpc_objective_breakdown.comfort_high,
-            comfort_total=result.mpc_objective_breakdown.comfort_total,
-            tracking_under_target=result.mpc_objective_breakdown.tracking_under_target,
-            tracking_over_target=result.mpc_objective_breakdown.tracking_over_target,
-            temperature_tracking=result.mpc_objective_breakdown.temperature_tracking,
-            energy_cost=result.mpc_objective_breakdown.energy_cost,
-            pv_self_consumption_reward=(
-                result.mpc_objective_breakdown.pv_self_consumption_reward
-            ),
-            unnecessary_heating=result.mpc_objective_breakdown.unnecessary_heating,
-            terminal_cost=result.mpc_objective_breakdown.terminal,
-            start_penalty=result.mpc_objective_breakdown.start,
-            runtime=result.mpc_objective_breakdown.runtime,
-            total=result.mpc_objective_breakdown.total,
-        ),
+        mpc_objective_breakdown=executed_breakdown,
+        solver_objective_breakdown=solver_breakdown,
         mpc_summary=mpc_summary,
         historical_summary=historical_summary,
         delta=MpcBacktestDeltaResponse(

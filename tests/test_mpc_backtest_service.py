@@ -63,6 +63,7 @@ class _StubRunner:
                 estimated_energy_cost_eur=0.0,
             ),
             mpc_objective_breakdown=MpcObjectiveBreakdown(),
+            solver_objective_breakdown=MpcObjectiveBreakdown(),
             total_solver_runtime_seconds=0.0,
         )
 

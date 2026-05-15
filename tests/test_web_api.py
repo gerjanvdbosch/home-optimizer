@@ -333,6 +333,16 @@ class FakeSpaceHeatingMpcBacktestService:
                 slack_usage_count=0,
             ),
             mpc_objective_breakdown=MpcObjectiveBreakdown(
+                comfort_low=0.0,
+                comfort_high=0.1,
+                tracking_under_target=0.3,
+                tracking_over_target=0.2,
+                terminal=0.4,
+                start=50.0,
+                runtime=0.05,
+                energy_cost=0.5,
+            ),
+            solver_objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=12.0,
                 comfort_high=1.0,
                 tracking_under_target=3.0,
@@ -962,6 +972,7 @@ def test_backtest_page_renders_navigation_and_controls() -> None:
     assert 'id="backtest-temperature-chart"' in response.text
     assert 'id="backtest-cost-chart"' in response.text
     assert 'id="backtest-objective-body"' in response.text
+    assert 'id="backtest-solver-objective-body"' in response.text
 
 
 def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
@@ -984,11 +995,14 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert payload["interval_minutes"] == 12
     assert payload["horizon_steps"] == 4
     assert payload["step_count"] == 2
-    assert payload["mpc_objective_breakdown"]["comfort_total"] == 13.0
-    assert payload["mpc_objective_breakdown"]["temperature_tracking"] == 3.5
-    assert payload["mpc_objective_breakdown"]["tracking_under_target"] == 3.0
-    assert payload["mpc_objective_breakdown"]["tracking_over_target"] == 0.5
-    assert payload["mpc_objective_breakdown"]["total"] == pytest.approx(269.9)
+    assert payload["mpc_objective_breakdown"]["comfort_total"] == 0.1
+    assert payload["mpc_objective_breakdown"]["temperature_tracking"] == 0.5
+    assert payload["mpc_objective_breakdown"]["tracking_under_target"] == 0.3
+    assert payload["mpc_objective_breakdown"]["tracking_over_target"] == 0.2
+    assert payload["mpc_objective_breakdown"]["total"] == pytest.approx(51.55)
+    assert payload["solver_objective_breakdown"]["comfort_total"] == 13.0
+    assert payload["solver_objective_breakdown"]["temperature_tracking"] == 3.5
+    assert payload["solver_objective_breakdown"]["total"] == pytest.approx(269.9)
     assert payload["mpc_summary"]["infeasible_count"] == 1
     assert payload["historical_summary"]["estimated_energy_cost_eur"] == 0.2
     assert payload["delta"]["estimated_energy_cost_eur"] == pytest.approx(-0.03, abs=1e-9)

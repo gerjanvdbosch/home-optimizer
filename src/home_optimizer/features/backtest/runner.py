@@ -59,7 +59,8 @@ class SpaceHeatingMpcBacktestRunner:
         infeasible_count = 0
         total_solver_runtime_seconds = 0.0
         slack_usage_count = 0
-        cumulative_objective_breakdown = MpcObjectiveBreakdown()
+        solver_cumulative_objective_breakdown = MpcObjectiveBreakdown()
+        executed_path_objective_breakdown = MpcObjectiveBreakdown()
         historical_hp_on_by_timestamp = historical_hp_on_by_timestamp or {}
         historical_energy_cost_by_timestamp = historical_energy_cost_by_timestamp or {}
 
@@ -81,8 +82,8 @@ class SpaceHeatingMpcBacktestRunner:
                 initial_state=current_state,
                 horizon=horizon,
             )
-            cumulative_objective_breakdown = self._add_objective_breakdowns(
-                cumulative_objective_breakdown,
+            solver_cumulative_objective_breakdown = self._add_objective_breakdowns(
+                solver_cumulative_objective_breakdown,
                 plan.objective_breakdown,
             )
 
@@ -133,6 +134,16 @@ class SpaceHeatingMpcBacktestRunner:
                     historical_hp_on=historical_hp_on,
                     start=start,
                     stop=stop,
+                    planned_room_temp_c=(
+                        first_step.predicted_room_temp_c
+                        if plan.feasible and plan.steps
+                        else current_state.room_temp_c
+                    ),
+                    useful_preheat_target_c=(
+                        first_step.useful_preheat_target_c
+                        if plan.feasible and plan.steps
+                        else float(current_step.target_temp_c or current_step.temp_min_c)
+                    ),
                     q_heat_eff_kw=q_heat_eff_kw,
                     predicted_next_room_temp_c=predicted_next_temp,
                     simulated_next_room_temp_c=predicted_next_temp,
@@ -159,10 +170,48 @@ class SpaceHeatingMpcBacktestRunner:
                     feasible=plan.feasible,
                 )
             )
+            executed_path_objective_breakdown = self._add_objective_breakdowns(
+                executed_path_objective_breakdown,
+                self._executed_step_objective_breakdown(
+                    current_step=current_step,
+                    planned_room_temp_c=(
+                        first_step.predicted_room_temp_c
+                        if plan.feasible and plan.steps
+                        else current_state.room_temp_c
+                    ),
+                    useful_preheat_target_c=(
+                        first_step.useful_preheat_target_c
+                        if plan.feasible and plan.steps
+                        else float(current_step.target_temp_c or current_step.temp_min_c)
+                    ),
+                    hp_on=applied_hp_on,
+                    start=start,
+                    slack_low_c=slack_low_c,
+                    slack_high_c=slack_high_c,
+                    interval_minutes=interval_minutes,
+                    objective_weights=resolved_weights,
+                ),
+            )
 
             current_state = self._advance_state(
                 next_state=next_state.model_copy(update={"q_heat_eff_kw": q_heat_eff_kw}),
                 hp_on=applied_hp_on,
+            )
+
+        if step_results:
+            last_step = step_results[-1]
+            executed_path_objective_breakdown = executed_path_objective_breakdown.model_copy(
+                update={
+                    "terminal": executed_path_objective_breakdown.terminal
+                    + (
+                        resolved_weights.terminal
+                        * max(
+                            last_step.useful_preheat_target_c
+                            - last_step.predicted_next_room_temp_c,
+                            0.0,
+                        )
+                    )
+                }
             )
 
         average_solver_runtime = total_solver_runtime_seconds / len(step_results) if step_results else 0.0
@@ -187,7 +236,8 @@ class SpaceHeatingMpcBacktestRunner:
                 interval_minutes=interval_minutes,
                 mode="historical",
             ),
-            mpc_objective_breakdown=cumulative_objective_breakdown,
+            mpc_objective_breakdown=executed_path_objective_breakdown,
+            solver_objective_breakdown=solver_cumulative_objective_breakdown,
             total_solver_runtime_seconds=total_solver_runtime_seconds,
         )
 
@@ -214,6 +264,55 @@ class SpaceHeatingMpcBacktestRunner:
             energy_cost=left.energy_cost + right.energy_cost,
             pv_self_consumption_reward=(
                 left.pv_self_consumption_reward + right.pv_self_consumption_reward
+            ),
+        )
+
+    @staticmethod
+    def _executed_step_objective_breakdown(
+        *,
+        current_step: MpcHorizonStep,
+        planned_room_temp_c: float,
+        useful_preheat_target_c: float,
+        hp_on: bool,
+        start: bool,
+        slack_low_c: float,
+        slack_high_c: float,
+        interval_minutes: int,
+        objective_weights: MpcObjectiveWeights,
+    ) -> MpcObjectiveBreakdown:
+        tracking_under_c = max(useful_preheat_target_c - planned_room_temp_c, 0.0)
+        tracking_over_c = max(planned_room_temp_c - useful_preheat_target_c, 0.0)
+        pv_surplus_kw = max(
+            0.0,
+            current_step.pv_available_power_forecast_kw - current_step.base_load_power_forecast_kw,
+        )
+        pv_self_consumable_kw = min(
+            current_step.hp_electric_power_forecast_kw * float(int(hp_on)),
+            pv_surplus_kw,
+        )
+        return MpcObjectiveBreakdown(
+            comfort_low=objective_weights.comfort_low * slack_low_c,
+            comfort_high=objective_weights.comfort_high * slack_high_c,
+            tracking_under_target=objective_weights.tracking_under_target * tracking_under_c,
+            tracking_over_target=objective_weights.tracking_over_target * tracking_over_c,
+            unnecessary_heating=(
+                objective_weights.unnecessary_heating
+                * tracking_over_c
+                * float(int(hp_on))
+            ),
+            terminal=0.0,
+            start=objective_weights.start * float(int(start)),
+            runtime=objective_weights.runtime * float(int(hp_on)),
+            energy_cost=objective_weights.energy
+            * SpaceHeatingMpcBacktestRunner._site_energy_cost_delta(
+                current_step=current_step,
+                hp_on=hp_on,
+                interval_minutes=interval_minutes,
+            ),
+            pv_self_consumption_reward=(
+                objective_weights.pv_self_consumption
+                * (interval_minutes / 60.0)
+                * pv_self_consumable_kw
             ),
         )
 
@@ -319,6 +418,38 @@ class SpaceHeatingMpcBacktestRunner:
                 - (current_step.export_price_eur_kwh * grid_export_kw)
             )
             * (interval_minutes / 60.0)
+        )
+
+    @staticmethod
+    def _site_energy_cost_delta(
+        *,
+        current_step: MpcHorizonStep,
+        hp_on: bool,
+        interval_minutes: int,
+    ) -> float:
+        return float(
+            SpaceHeatingMpcBacktestRunner._site_energy_cost(
+                current_step=current_step,
+                hp_on=hp_on,
+                interval_minutes=interval_minutes,
+            )
+            - (
+                SpaceHeatingMpcBacktestRunner._baseline_site_energy_cost(current_step)
+                * (interval_minutes / 60.0)
+            )
+        )
+
+    @staticmethod
+    def _baseline_site_energy_cost(current_step: MpcHorizonStep) -> float:
+        baseline_net_power_kw = (
+            current_step.base_load_power_forecast_kw
+            - current_step.pv_available_power_forecast_kw
+        )
+        baseline_import_kw = max(baseline_net_power_kw, 0.0)
+        baseline_export_kw = max(-baseline_net_power_kw, 0.0)
+        return float(
+            (current_step.import_price_eur_kwh * baseline_import_kw)
+            - (current_step.export_price_eur_kwh * baseline_export_kw)
         )
 
     @staticmethod

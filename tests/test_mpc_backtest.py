@@ -99,8 +99,9 @@ def test_backtest_runner_keeps_simulated_state_instead_of_resetting_to_historica
 
     assert [step.simulated_next_room_temp_c for step in result.step_results] == [10.0, 5.0]
     assert [step.historical_next_room_temp_c for step in result.step_results] == [50.0, 60.0]
-    assert result.mpc_objective_breakdown.total == 56.0
-    assert result.mpc_objective_breakdown.temperature_tracking == 6.0
+    assert result.mpc_objective_breakdown.total == 0.0
+    assert result.solver_objective_breakdown.total == 56.0
+    assert result.solver_objective_breakdown.temperature_tracking == 6.0
 
 
 def test_backtest_runner_advances_2state_mass_state_across_steps() -> None:

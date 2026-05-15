@@ -12,6 +12,8 @@ class MpcBacktestStepResult(DomainModel):
     historical_hp_on: bool
     start: bool
     stop: bool
+    planned_room_temp_c: float = 0.0
+    useful_preheat_target_c: float = 0.0
     q_heat_eff_kw: float = 0.0
     predicted_next_room_temp_c: float
     simulated_next_room_temp_c: float
@@ -50,4 +52,5 @@ class MpcBacktestResult(DomainModel):
     mpc_summary: MpcBacktestSummary
     historical_summary: MpcBacktestSummary
     mpc_objective_breakdown: MpcObjectiveBreakdown
+    solver_objective_breakdown: MpcObjectiveBreakdown
     total_solver_runtime_seconds: float

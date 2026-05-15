@@ -83,6 +83,7 @@ const statusNode = document.getElementById("backtest-status");
 const summaryCaptionNode = document.getElementById("backtest-summary-caption");
 const summaryBody = document.getElementById("backtest-summary-body");
 const objectiveBody = document.getElementById("backtest-objective-body");
+const solverObjectiveBody = document.getElementById("backtest-solver-objective-body");
 const temperatureSummaryNode = document.getElementById("backtest-temp-summary");
 const switchSummaryNode = document.getElementById("backtest-switch-summary");
 const costSummaryNode = document.getElementById("backtest-cost-summary");
@@ -184,21 +185,8 @@ function renderSummary(payload) {
       <td>${metricDelta(row[3])}</td>
     </tr>
   `).join("");
-  const objectiveRows = [
-    ["Comfort low", payload.mpc_objective_breakdown.comfort_low],
-    ["Comfort high", payload.mpc_objective_breakdown.comfort_high],
-    ["Comfort total", payload.mpc_objective_breakdown.comfort_total],
-    ["Tracking under target", payload.mpc_objective_breakdown.tracking_under_target],
-    ["Tracking over target", payload.mpc_objective_breakdown.tracking_over_target],
-    ["Target tracking total", payload.mpc_objective_breakdown.temperature_tracking],
-    ["Energy cost", payload.mpc_objective_breakdown.energy_cost],
-    ["PV self-consumption reward", payload.mpc_objective_breakdown.pv_self_consumption_reward],
-    ["Unnecessary heating", payload.mpc_objective_breakdown.unnecessary_heating],
-    ["Terminal cost", payload.mpc_objective_breakdown.terminal_cost],
-    ["Start penalty", payload.mpc_objective_breakdown.start_penalty],
-    ["Runtime", payload.mpc_objective_breakdown.runtime],
-    ["Total", payload.mpc_objective_breakdown.total],
-  ];
+  const objectiveRows = objectiveBreakdownRows(payload.mpc_objective_breakdown);
+  const solverObjectiveRows = objectiveBreakdownRows(payload.solver_objective_breakdown);
   if (objectiveBody) {
     objectiveBody.innerHTML = objectiveRows.map((row) => `
       <tr>
@@ -207,7 +195,33 @@ function renderSummary(payload) {
       </tr>
     `).join("");
   }
+  if (solverObjectiveBody) {
+    solverObjectiveBody.innerHTML = solverObjectiveRows.map((row) => `
+      <tr>
+        <td>${row[0]}</td>
+        <td>${formatNumber(row[1], 3)}</td>
+      </tr>
+    `).join("");
+  }
   summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen`;
+}
+
+function objectiveBreakdownRows(breakdown) {
+  return [
+    ["Comfort low", breakdown.comfort_low],
+    ["Comfort high", breakdown.comfort_high],
+    ["Comfort total", breakdown.comfort_total],
+    ["Tracking under target", breakdown.tracking_under_target],
+    ["Tracking over target", breakdown.tracking_over_target],
+    ["Target tracking total", breakdown.temperature_tracking],
+    ["Energy cost", breakdown.energy_cost],
+    ["PV self-consumption reward", breakdown.pv_self_consumption_reward],
+    ["Unnecessary heating", breakdown.unnecessary_heating],
+    ["Terminal cost", breakdown.terminal_cost],
+    ["Start penalty", breakdown.start_penalty],
+    ["Runtime", breakdown.runtime],
+    ["Total", breakdown.total],
+  ];
 }
 
 

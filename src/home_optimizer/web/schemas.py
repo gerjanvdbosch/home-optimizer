@@ -385,6 +385,7 @@ class MpcBacktestResponse(BaseModel):
     horizon_steps: int
     step_count: int
     mpc_objective_breakdown: MpcObjectiveBreakdownResponse
+    solver_objective_breakdown: MpcObjectiveBreakdownResponse
     mpc_summary: MpcBacktestSummaryResponse
     historical_summary: MpcBacktestSummaryResponse
     delta: MpcBacktestDeltaResponse
