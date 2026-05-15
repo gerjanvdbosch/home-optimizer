@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
-from home_optimizer.domain import FORECAST_TEMPERATURE, GTI_LIVING_ROOM_WINDOWS_ADJUSTED, GTI_PV
+from home_optimizer.domain import (
+    FORECAST_TEMPERATURE,
+    GTI_LIVING_ROOM_WINDOWS,
+    GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+    GTI_PV,
+)
 from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import ElectricityPricingConfig
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
@@ -41,6 +46,14 @@ class BacktestForecastReplayHorizon:
     missing_forecast_count: int
 
 
+@dataclass(frozen=True)
+class BacktestForecastCoverage:
+    coverage_ratio: float
+    missing_forecast_count: int
+    latest_created_at_utc: datetime | None
+    missing_details: list[str]
+
+
 class BacktestForecastReplayProvider:
     def __init__(
         self,
@@ -69,26 +82,38 @@ class BacktestForecastReplayProvider:
         interval_minutes: int,
     ) -> BacktestForecastReplayHorizon:
         resolved_issue_time = ensure_utc(issue_time_utc)
+        history_rows = [
+            row for row in self.all_rows if row.timestamp_utc < resolved_issue_time
+        ]
         forecast_entries = self.preparation.load_forecast_entries(
             start_time_utc=resolved_issue_time,
             interval_minutes=interval_minutes,
             horizon_steps=horizon_steps,
             created_at_end_time=resolved_issue_time + timedelta(microseconds=1),
         )
-        coverage_ratio, missing_count, forecast_issue_time_utc = self._forecast_coverage(
+        forecast_entries = self._with_derived_adjusted_solar_forecast(
+            forecast_entries,
+            issue_time_utc=resolved_issue_time,
+            horizon_steps=horizon_steps,
+            interval_minutes=interval_minutes,
+            history_rows=history_rows,
+        )
+        coverage = self._forecast_coverage(
             forecast_entries,
             issue_time_utc=resolved_issue_time,
             horizon_steps=horizon_steps,
             interval_minutes=interval_minutes,
         )
-        if missing_count > 0 or forecast_issue_time_utc is None:
+        if coverage.missing_forecast_count > 0 or coverage.latest_created_at_utc is None:
             raise ValueError(
-                "missing_forecast: archived forecast coverage is incomplete for forecast_replay"
+                "missing_forecast: archived forecast coverage is incomplete for "
+                f"forecast_replay at issue_time={resolved_issue_time.isoformat()} "
+                f"coverage_ratio={coverage.coverage_ratio:.3f} "
+                f"latest_created_at_utc="
+                f"{coverage.latest_created_at_utc.isoformat() if coverage.latest_created_at_utc is not None else 'none'} "
+                f"missing={'; '.join(coverage.missing_details[:12])}"
             )
 
-        history_rows = [
-            row for row in self.all_rows if row.timestamp_utc < resolved_issue_time
-        ]
         base_load_forecast_kw = self.preparation.resolve_base_load_power_kw(
             history_rows or self.all_rows[:1]
         )
@@ -138,15 +163,15 @@ class BacktestForecastReplayProvider:
             )
         )
         forecast_age_minutes = max(
-            (resolved_issue_time - forecast_issue_time_utc).total_seconds() / 60.0,
+            (resolved_issue_time - coverage.latest_created_at_utc).total_seconds() / 60.0,
             0.0,
         )
         return BacktestForecastReplayHorizon(
             horizon=horizon,
-            forecast_issue_time_utc=forecast_issue_time_utc,
+            forecast_issue_time_utc=coverage.latest_created_at_utc,
             forecast_age_minutes=forecast_age_minutes,
-            forecast_coverage_ratio=coverage_ratio,
-            missing_forecast_count=missing_count,
+            forecast_coverage_ratio=coverage.coverage_ratio,
+            missing_forecast_count=coverage.missing_forecast_count,
         )
 
     @staticmethod
@@ -156,34 +181,116 @@ class BacktestForecastReplayProvider:
         issue_time_utc: datetime,
         horizon_steps: int,
         interval_minutes: int,
-    ) -> tuple[float, int, datetime | None]:
-        required_names = (
-            FORECAST_TEMPERATURE,
-            GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
-            GTI_PV,
-        )
-        expected_keys = {
-            (
-                name,
-                issue_time_utc + timedelta(minutes=interval_minutes * step),
-            )
-            for name in required_names
-            for step in range(horizon_steps)
-        }
+    ) -> BacktestForecastCoverage:
         selected_keys = {
             (entry.name, ensure_utc(entry.forecast_time_utc))
             for entry in forecast_entries
-            if entry.name in required_names
         }
-        expected_count = len(expected_keys)
-        actual_count = len(expected_keys & selected_keys)
+        expected_timestamps = [
+            issue_time_utc + timedelta(minutes=interval_minutes * step)
+            for step in range(horizon_steps)
+        ]
+        missing_details: list[str] = []
+        actual_count = 0
+        expected_count = horizon_steps * 3
+        for forecast_time_utc in expected_timestamps:
+            if (FORECAST_TEMPERATURE, forecast_time_utc) in selected_keys:
+                actual_count += 1
+            else:
+                missing_details.append(
+                    f"{FORECAST_TEMPERATURE}@{forecast_time_utc.isoformat()}"
+                )
+            if (GTI_PV, forecast_time_utc) in selected_keys:
+                actual_count += 1
+            else:
+                missing_details.append(f"{GTI_PV}@{forecast_time_utc.isoformat()}")
+            if (
+                (GTI_LIVING_ROOM_WINDOWS_ADJUSTED, forecast_time_utc) in selected_keys
+                or (GTI_LIVING_ROOM_WINDOWS, forecast_time_utc) in selected_keys
+            ):
+                actual_count += 1
+            else:
+                missing_details.append(
+                    f"{GTI_LIVING_ROOM_WINDOWS}@{forecast_time_utc.isoformat()}"
+                )
         missing_count = expected_count - actual_count
         latest_created = max(
-            (ensure_utc(entry.created_at_utc) for entry in forecast_entries if entry.name in required_names),
+            (
+                ensure_utc(entry.created_at_utc)
+                for entry in forecast_entries
+                if entry.name
+                in {
+                    FORECAST_TEMPERATURE,
+                    GTI_PV,
+                    GTI_LIVING_ROOM_WINDOWS,
+                    GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+                }
+            ),
             default=None,
         )
         coverage_ratio = (actual_count / expected_count) if expected_count > 0 else 1.0
-        return coverage_ratio, missing_count, latest_created
+        return BacktestForecastCoverage(
+            coverage_ratio=coverage_ratio,
+            missing_forecast_count=missing_count,
+            latest_created_at_utc=latest_created,
+            missing_details=missing_details,
+        )
+
+    def _with_derived_adjusted_solar_forecast(
+        self,
+        forecast_entries: list[ForecastEntry],
+        *,
+        issue_time_utc: datetime,
+        horizon_steps: int,
+        interval_minutes: int,
+        history_rows: list[MpcDatasetRow],
+    ) -> list[ForecastEntry]:
+        expected_forecast_times = {
+            issue_time_utc + timedelta(minutes=interval_minutes * step)
+            for step in range(horizon_steps)
+        }
+        existing_adjusted_keys = {
+            (entry.name, ensure_utc(entry.forecast_time_utc))
+            for entry in forecast_entries
+            if entry.name == GTI_LIVING_ROOM_WINDOWS_ADJUSTED
+            and ensure_utc(entry.forecast_time_utc) in expected_forecast_times
+        }
+        if len(existing_adjusted_keys) >= len(expected_forecast_times):
+            return forecast_entries
+
+        shutter_open_fraction = self._latest_shutter_open_fraction(history_rows)
+        derived_entries: list[ForecastEntry] = []
+        for entry in forecast_entries:
+            if entry.name != GTI_LIVING_ROOM_WINDOWS:
+                continue
+            forecast_time_utc = ensure_utc(entry.forecast_time_utc)
+            key = (GTI_LIVING_ROOM_WINDOWS_ADJUSTED, forecast_time_utc)
+            if key in existing_adjusted_keys:
+                continue
+            derived_entries.append(
+                ForecastEntry(
+                    created_at_utc=entry.created_at_utc,
+                    forecast_time_utc=entry.forecast_time_utc,
+                    name=GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+                    value=float(entry.value) * shutter_open_fraction,
+                    unit=entry.unit,
+                    source=entry.source,
+                )
+            )
+        if not derived_entries:
+            return forecast_entries
+        return [*forecast_entries, *derived_entries]
+
+    @staticmethod
+    def _latest_shutter_open_fraction(history_rows: list[MpcDatasetRow]) -> float:
+        latest_position_pct: float | None = None
+        for row in history_rows:
+            if row.shutter_position_pct is None:
+                continue
+            latest_position_pct = float(row.shutter_position_pct)
+        if latest_position_pct is None:
+            return 1.0
+        return min(max(latest_position_pct / 100.0, 0.0), 1.0)
 
 
 class SpaceHeatingMpcBacktestService:
