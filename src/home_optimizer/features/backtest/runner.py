@@ -14,6 +14,7 @@ from home_optimizer.features.mpc.models import (
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
+    MpcObjectiveBreakdown,
     MpcObjectiveWeights,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
@@ -58,6 +59,7 @@ class SpaceHeatingMpcBacktestRunner:
         infeasible_count = 0
         total_solver_runtime_seconds = 0.0
         slack_usage_count = 0
+        cumulative_objective_breakdown = MpcObjectiveBreakdown()
         historical_hp_on_by_timestamp = historical_hp_on_by_timestamp or {}
         historical_energy_cost_by_timestamp = historical_energy_cost_by_timestamp or {}
 
@@ -78,6 +80,10 @@ class SpaceHeatingMpcBacktestRunner:
                 control_model=control_model,
                 initial_state=current_state,
                 horizon=horizon,
+            )
+            cumulative_objective_breakdown = self._add_objective_breakdowns(
+                cumulative_objective_breakdown,
+                plan.objective_breakdown,
             )
 
             if not plan.feasible or not plan.steps:
@@ -175,7 +181,23 @@ class SpaceHeatingMpcBacktestRunner:
                 interval_minutes=interval_minutes,
                 mode="historical",
             ),
+            mpc_objective_breakdown=cumulative_objective_breakdown,
             total_solver_runtime_seconds=total_solver_runtime_seconds,
+        )
+
+    @staticmethod
+    def _add_objective_breakdowns(
+        left: MpcObjectiveBreakdown,
+        right: MpcObjectiveBreakdown,
+    ) -> MpcObjectiveBreakdown:
+        return MpcObjectiveBreakdown(
+            comfort_low=left.comfort_low + right.comfort_low,
+            comfort_high=left.comfort_high + right.comfort_high,
+            temperature_tracking=left.temperature_tracking + right.temperature_tracking,
+            terminal=left.terminal + right.terminal,
+            start=left.start + right.start,
+            runtime=left.runtime + right.runtime,
+            energy=left.energy + right.energy,
         )
 
     @staticmethod

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from home_optimizer.domain.models import DomainModel
+from home_optimizer.features.mpc.models import MpcObjectiveBreakdown
 
 
 class MpcBacktestStepResult(DomainModel):
@@ -47,4 +48,5 @@ class MpcBacktestResult(DomainModel):
     step_results: list[MpcBacktestStepResult]
     mpc_summary: MpcBacktestSummary
     historical_summary: MpcBacktestSummary
+    mpc_objective_breakdown: MpcObjectiveBreakdown
     total_solver_runtime_seconds: float

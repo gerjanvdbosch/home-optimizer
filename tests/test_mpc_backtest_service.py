@@ -19,6 +19,7 @@ from home_optimizer.features.modeling import (
     StoredModelVersion,
 )
 from home_optimizer.features.mpc import MpcInitialState
+from home_optimizer.features.mpc import MpcObjectiveBreakdown
 
 
 class _UnusedSamplesReader:
@@ -61,6 +62,7 @@ class _StubRunner:
                 runtime_minutes=0,
                 estimated_energy_cost_eur=0.0,
             ),
+            mpc_objective_breakdown=MpcObjectiveBreakdown(),
             total_solver_runtime_seconds=0.0,
         )
 

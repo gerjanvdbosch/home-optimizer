@@ -8,6 +8,7 @@ from home_optimizer.features.mpc import (
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
+    MpcObjectiveBreakdown,
     MpcPlan,
     MpcPlanStep,
     Rc2StateMpcInitialState,
@@ -22,6 +23,15 @@ class _StaticPlanController:
             status="ok",
             termination_condition="optimal",
             feasible=True,
+            objective_breakdown=MpcObjectiveBreakdown(
+                comfort_low=1.0,
+                comfort_high=2.0,
+                temperature_tracking=3.0,
+                terminal=4.0,
+                start=5.0,
+                runtime=6.0,
+                energy=7.0,
+            ),
             steps=[
                 MpcPlanStep(
                     timestamp_utc=step.timestamp_utc,
@@ -88,6 +98,8 @@ def test_backtest_runner_keeps_simulated_state_instead_of_resetting_to_historica
 
     assert [step.simulated_next_room_temp_c for step in result.step_results] == [10.0, 5.0]
     assert [step.historical_next_room_temp_c for step in result.step_results] == [50.0, 60.0]
+    assert result.mpc_objective_breakdown.total == 56.0
+    assert result.mpc_objective_breakdown.temperature_tracking == 6.0
 
 
 def test_backtest_runner_advances_2state_mass_state_across_steps() -> None:

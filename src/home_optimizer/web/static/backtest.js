@@ -82,6 +82,7 @@ const runButton = document.getElementById("backtest-run-button");
 const statusNode = document.getElementById("backtest-status");
 const summaryCaptionNode = document.getElementById("backtest-summary-caption");
 const summaryBody = document.getElementById("backtest-summary-body");
+const objectiveBody = document.getElementById("backtest-objective-body");
 const temperatureSummaryNode = document.getElementById("backtest-temp-summary");
 const switchSummaryNode = document.getElementById("backtest-switch-summary");
 const costSummaryNode = document.getElementById("backtest-cost-summary");
@@ -183,6 +184,25 @@ function renderSummary(payload) {
       <td>${metricDelta(row[3])}</td>
     </tr>
   `).join("");
+  const objectiveRows = [
+    ["Comfort low", payload.mpc_objective_breakdown.comfort_low],
+    ["Comfort high", payload.mpc_objective_breakdown.comfort_high],
+    ["Comfort total", payload.mpc_objective_breakdown.comfort_total],
+    ["Target tracking", payload.mpc_objective_breakdown.temperature_tracking],
+    ["Terminal", payload.mpc_objective_breakdown.terminal],
+    ["Start", payload.mpc_objective_breakdown.start],
+    ["Runtime", payload.mpc_objective_breakdown.runtime],
+    ["Energy", payload.mpc_objective_breakdown.energy],
+    ["Total", payload.mpc_objective_breakdown.total],
+  ];
+  if (objectiveBody) {
+    objectiveBody.innerHTML = objectiveRows.map((row) => `
+      <tr>
+        <td>${row[0]}</td>
+        <td>${formatNumber(row[1], 3)}</td>
+      </tr>
+    `).join("");
+  }
   summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen`;
 }
 
