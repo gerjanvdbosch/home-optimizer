@@ -65,10 +65,12 @@ def rollout_without_heating(
 
     predicted_temperatures = [initial_state.room_temp_c]
     current_temp_c = initial_state.room_temp_c
+    current_q_heat_eff_kw = initial_state.q_heat_eff_kw
     current_mass_temp_c = (
         initial_state.mass_temp_c if isinstance(initial_state, Rc2StateMpcInitialState) else None
     )
     for step in horizon[:-1]:
+        current_q_heat_eff_kw = control_model.actuator_alpha * current_q_heat_eff_kw
         if isinstance(control_model, Rc2StateThermalControlModel):
             if current_mass_temp_c is None:
                 raise ValueError("Rc2StateThermalControlModel requires Rc2StateMpcInitialState")
@@ -78,7 +80,7 @@ def rollout_without_heating(
                 outdoor_temp_c=step.outdoor_temp_c,
                 solar_gain_kw=step.solar_gain_kw,
                 solar_gain_mass_kw=float(step.solar_gain_mass_kw),
-                heating_effect_kw=0.0,
+                heating_effect_kw=current_q_heat_eff_kw,
                 occupied=step.occupied,
                 hour_sin=step.hour_sin,
                 hour_cos=step.hour_cos,
@@ -88,7 +90,7 @@ def rollout_without_heating(
                 room_temp_c=current_temp_c,
                 outdoor_temp_c=step.outdoor_temp_c,
                 solar_gain_kw=step.solar_gain_kw,
-                heating_effect_kw=0.0,
+                heating_effect_kw=current_q_heat_eff_kw,
                 occupied=step.occupied,
             )
         predicted_temperatures.append(current_temp_c)

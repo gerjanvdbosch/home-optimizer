@@ -107,12 +107,17 @@ class SpaceHeatingMpcBacktestRunner:
 
             next_step = timeline[index + 1]
             current_step = timeline[index]
-            heating_effect_kw = current_step.effective_heating_kw_forecast * float(int(applied_hp_on))
+            q_heat_eff_kw = self._apply_heat_actuator(
+                control_model=control_model,
+                previous_q_heat_eff_kw=current_state.q_heat_eff_kw,
+                commanded_hp_on=applied_hp_on,
+                current_step=current_step,
+            )
             predicted_next_temp, next_state = self._predict_next_state(
                 control_model=control_model,
                 current_state=current_state,
                 current_step=current_step,
-                heating_effect_kw=heating_effect_kw,
+                heating_effect_kw=q_heat_eff_kw,
             )
             total_solver_runtime_seconds += solve_time_seconds or 0.0
 
@@ -128,6 +133,7 @@ class SpaceHeatingMpcBacktestRunner:
                     historical_hp_on=historical_hp_on,
                     start=start,
                     stop=stop,
+                    q_heat_eff_kw=q_heat_eff_kw,
                     predicted_next_room_temp_c=predicted_next_temp,
                     simulated_next_room_temp_c=predicted_next_temp,
                     historical_next_room_temp_c=next_step.realized_room_temp_c,
@@ -155,7 +161,7 @@ class SpaceHeatingMpcBacktestRunner:
             )
 
             current_state = self._advance_state(
-                next_state=next_state,
+                next_state=next_state.model_copy(update={"q_heat_eff_kw": q_heat_eff_kw}),
                 hp_on=applied_hp_on,
             )
 
@@ -260,6 +266,23 @@ class SpaceHeatingMpcBacktestRunner:
                 "on_steps": 0,
                 "off_steps": off_steps,
             }
+        )
+
+    @staticmethod
+    def _apply_heat_actuator(
+        *,
+        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        previous_q_heat_eff_kw: float,
+        commanded_hp_on: bool,
+        current_step: MpcHorizonStep,
+    ) -> float:
+        return float(
+            (control_model.actuator_alpha * previous_q_heat_eff_kw)
+            + (
+                (1.0 - control_model.actuator_alpha)
+                * current_step.effective_heating_kw_forecast
+                * float(int(commanded_hp_on))
+            )
         )
 
     @staticmethod

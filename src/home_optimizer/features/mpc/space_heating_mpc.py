@@ -74,7 +74,8 @@ class SpaceHeatingMpcSolver:
         steps: list[MpcPlanStep] = []
         for index, horizon_step in enumerate(problem.horizon):
             hp_on = bool(round(pyo.value(model.hp_on[index])))
-            effective_heating_kw = float(horizon_step.effective_heating_kw_forecast * hp_on)
+            q_heat_eff_kw = float(pyo.value(model.q_heat_eff[index]))
+            effective_heating_kw = q_heat_eff_kw
             site_energy_cost = float(
                 (
                     (horizon_step.import_price_eur_kwh * pyo.value(model.grid_import[index]))
@@ -92,6 +93,7 @@ class SpaceHeatingMpcSolver:
                     start=bool(round(pyo.value(model.start[index]))),
                     stop=bool(round(pyo.value(model.stop[index]))),
                     predicted_room_temp_c=float(pyo.value(model.room_temp[index])),
+                    q_heat_eff_kw=q_heat_eff_kw,
                     temp_min_c=horizon_step.temp_min_c,
                     temp_max_c=horizon_step.temp_max_c,
                     slack_low_c=float(pyo.value(model.slack_low[index])),
@@ -165,6 +167,7 @@ class SpaceHeatingMpcSolver:
         model.grid_import = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.grid_export = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.room_temp = pyo.Var(model.T, domain=pyo.Reals)
+        model.q_heat_eff = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.track_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
@@ -172,6 +175,7 @@ class SpaceHeatingMpcSolver:
 
         initial_hp_on = 1 if problem.initial_state.hp_on else 0
         model.initial_room_temp = pyo.Param(initialize=problem.initial_state.room_temp_c)
+        model.initial_q_heat_eff = pyo.Param(initialize=problem.initial_state.q_heat_eff_kw)
         model.initial_hp_on = pyo.Param(initialize=initial_hp_on)
         model.room_temp[0].fix(problem.initial_state.room_temp_c)
 
@@ -181,17 +185,27 @@ class SpaceHeatingMpcSolver:
                 (problem.control_model.a * model_ref.room_temp[t])
                 + (problem.control_model.b_out * step.outdoor_temp_c)
                 + (problem.control_model.b_solar * step.solar_gain_kw)
-                + (
-                    problem.control_model.b_heat
-                    * step.effective_heating_kw_forecast
-                    * model_ref.hp_on[t]
-                )
+                + (problem.control_model.b_heat * model_ref.q_heat_eff[t])
                 + (problem.control_model.b_occ * step.occupied)
                 + problem.control_model.c
             )
 
         if horizon_size >= 2:
             model.dynamics = pyo.Constraint(model.T_transition, rule=dynamics_rule)
+
+        model.heat_actuator = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.q_heat_eff[t]
+            == (
+                problem.control_model.actuator_alpha
+                * (model_ref.initial_q_heat_eff if t == 0 else model_ref.q_heat_eff[t - 1])
+            )
+            + (
+                (1.0 - problem.control_model.actuator_alpha)
+                * problem.horizon[t].effective_heating_kw_forecast
+                * model_ref.hp_on[t]
+            ),
+        )
 
         def comfort_low_rule(model_ref: Any, t: int) -> Any:
             return (
@@ -340,6 +354,7 @@ class SpaceHeatingMpcSolver:
         model.grid_export = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.room_temp = pyo.Var(model.T, domain=pyo.Reals)
         model.mass_temp = pyo.Var(model.T, domain=pyo.Reals)
+        model.q_heat_eff = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.track_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
@@ -348,6 +363,7 @@ class SpaceHeatingMpcSolver:
         initial_hp_on = 1 if problem.initial_state.hp_on else 0
         model.initial_room_temp = pyo.Param(initialize=problem.initial_state.room_temp_c)
         model.initial_mass_temp = pyo.Param(initialize=problem.initial_state.mass_temp_c)
+        model.initial_q_heat_eff = pyo.Param(initialize=problem.initial_state.q_heat_eff_kw)
         model.initial_hp_on = pyo.Param(initialize=initial_hp_on)
         model.room_temp[0].fix(problem.initial_state.room_temp_c)
         model.mass_temp[0].fix(problem.initial_state.mass_temp_c)
@@ -358,11 +374,7 @@ class SpaceHeatingMpcSolver:
                 (problem.control_model.a11 * model_ref.room_temp[t])
                 + (problem.control_model.a12 * model_ref.mass_temp[t])
                 + (problem.control_model.b_out_room * step.outdoor_temp_c)
-                + (
-                    problem.control_model.b_heat_room
-                    * step.effective_heating_kw_forecast
-                    * model_ref.hp_on[t]
-                )
+                + (problem.control_model.b_heat_room * model_ref.q_heat_eff[t])
                 + (problem.control_model.b_solar_direct_room * step.solar_gain_kw)
                 + (
                     problem.control_model.b_solar_filtered_room
@@ -380,11 +392,7 @@ class SpaceHeatingMpcSolver:
                 (problem.control_model.a21 * model_ref.room_temp[t])
                 + (problem.control_model.a22 * model_ref.mass_temp[t])
                 + (problem.control_model.b_out_mass * step.outdoor_temp_c)
-                + (
-                    problem.control_model.b_heat_mass
-                    * step.effective_heating_kw_forecast
-                    * model_ref.hp_on[t]
-                )
+                + (problem.control_model.b_heat_mass * model_ref.q_heat_eff[t])
                 + (problem.control_model.b_solar_direct_mass * step.solar_gain_kw)
                 + (
                     problem.control_model.b_solar_filtered_mass
@@ -399,6 +407,20 @@ class SpaceHeatingMpcSolver:
         if horizon_size >= 2:
             model.room_dynamics = pyo.Constraint(model.T_transition, rule=room_dynamics_rule)
             model.mass_dynamics = pyo.Constraint(model.T_transition, rule=mass_dynamics_rule)
+
+        model.heat_actuator = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.q_heat_eff[t]
+            == (
+                problem.control_model.actuator_alpha
+                * (model_ref.initial_q_heat_eff if t == 0 else model_ref.q_heat_eff[t - 1])
+            )
+            + (
+                (1.0 - problem.control_model.actuator_alpha)
+                * problem.horizon[t].effective_heating_kw_forecast
+                * model_ref.hp_on[t]
+            ),
+        )
 
         def comfort_low_rule(model_ref: Any, t: int) -> Any:
             return (

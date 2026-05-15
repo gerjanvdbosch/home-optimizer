@@ -95,6 +95,7 @@ class SpaceHeatingMpcPreparationService:
             contiguous_steps += 1
         base_state = MpcInitialState(
             room_temp_c=float(latest.room_temperature_c),
+            q_heat_eff_kw=max(float(latest.space_heating_output_estimate_kw or 0.0), 0.0),
             hp_on=latest_hp_on,
             on_steps=contiguous_steps if latest_hp_on else 0,
             off_steps=contiguous_steps if not latest_hp_on else 0,
@@ -105,6 +106,7 @@ class SpaceHeatingMpcPreparationService:
         return Rc2StateMpcInitialState(
             room_temp_c=base_state.room_temp_c,
             mass_temp_c=base_state.room_temp_c + params.initial_mass_offset_c,
+            q_heat_eff_kw=base_state.q_heat_eff_kw,
             hp_on=base_state.hp_on,
             on_steps=base_state.on_steps,
             off_steps=base_state.off_steps,

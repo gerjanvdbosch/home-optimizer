@@ -77,6 +77,7 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
                 start=step.start,
                 stop=step.stop,
                 predicted_room_temp_c=step.predicted_room_temp_c,
+                q_heat_eff_kw=step.q_heat_eff_kw,
                 temp_min_c=step.temp_min_c,
                 temp_max_c=step.temp_max_c,
                 slack_low_c=step.slack_low_c,

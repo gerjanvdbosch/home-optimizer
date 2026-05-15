@@ -914,6 +914,7 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
     assert len(payload["steps"]) == 4
     assert payload["steps"][0]["timestamp_utc"] == "2026-04-25T12:00:00Z"
     assert payload["steps"][0]["hp_on"] is True
+    assert payload["steps"][0]["q_heat_eff_kw"] == 0.0
     assert payload["steps"][0]["temp_min_c"] == 19.0
     assert payload["steps"][0]["temp_max_c"] == 21.0
     assert payload["steps"][0]["effective_heating_kw"] == 2.5
@@ -985,6 +986,7 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert payload["delta"]["estimated_energy_cost_eur"] == pytest.approx(-0.03, abs=1e-9)
     assert payload["delta"]["runtime_minutes"] == 0
     assert payload["steps"][0]["mpc_hp_on"] is True
+    assert payload["steps"][0]["q_heat_eff_kw"] == 0.0
     assert payload["steps"][0]["historical_hp_on"] is False
     assert payload["steps"][1]["feasible"] is False
 

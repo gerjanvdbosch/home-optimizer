@@ -12,6 +12,7 @@ class MpcBacktestStepResult(DomainModel):
     historical_hp_on: bool
     start: bool
     stop: bool
+    q_heat_eff_kw: float = 0.0
     predicted_next_room_temp_c: float
     simulated_next_room_temp_c: float
     historical_next_room_temp_c: float | None = None

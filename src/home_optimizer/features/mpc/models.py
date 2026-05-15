@@ -16,6 +16,7 @@ class LinearThermalControlModel(DomainModel):
     b_solar: float
     b_heat: float
     b_occ: float
+    actuator_alpha: float = Field(default=0.0, ge=0.0, lt=1.0)
     c: float = 0.0
     notes: str = Field(
         default="Control-oriented linear 1-state room temperature model for space-heating MPC."
@@ -59,6 +60,7 @@ class Rc2StateThermalControlModel(DomainModel):
     b_hour_cos_room: float = 0.0
     b_hour_sin_mass: float = 0.0
     b_hour_cos_mass: float = 0.0
+    actuator_alpha: float = Field(default=0.0, ge=0.0, lt=1.0)
     c_room: float = 0.0
     c_mass: float = 0.0
     notes: str = Field(
@@ -149,6 +151,7 @@ class MpcHorizonStep(DomainModel):
 
 class MpcInitialState(DomainModel):
     room_temp_c: float
+    q_heat_eff_kw: float = Field(default=0.0, ge=0.0)
     hp_on: bool = False
     on_steps: int = Field(default=0, ge=0)
     off_steps: int = Field(default=0, ge=0)
@@ -214,6 +217,7 @@ class MpcPlanStep(DomainModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    q_heat_eff_kw: float = 0.0
     temp_min_c: float
     temp_max_c: float
     slack_low_c: float = 0.0

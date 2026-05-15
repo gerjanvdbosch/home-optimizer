@@ -38,6 +38,7 @@ def _arx_to_control_model(
         b_solar=_sum_matching(weights_by_feature, "solar_gain_lag_") / solar_scale,
         b_heat=_sum_matching(weights_by_feature, "thermal_output_lag_"),
         b_occ=_sum_matching(weights_by_feature, "occupied_flag_lag_"),
+        actuator_alpha=0.0,
         c=float(model.intercept),
         notes=(
             "Approximate 1-state control model derived from ARX coefficients by aggregating "
@@ -72,6 +73,7 @@ def _rc_to_2state_control_model(
         b_hour_cos_room=float(b_discrete[0, 6]),
         b_hour_sin_mass=float(b_discrete[1, 5]),
         b_hour_cos_mass=float(b_discrete[1, 6]),
+        actuator_alpha=float(model.config.alpha_heat),
         c_room=0.0,
         c_mass=0.0,
         notes=(

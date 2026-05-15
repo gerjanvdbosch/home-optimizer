@@ -51,6 +51,7 @@ def test_to_control_model_from_arx_aggregates_matching_coefficients() -> None:
     assert control_model.b_heat == pytest.approx(0.4)
     assert control_model.b_solar == pytest.approx(0.04)
     assert control_model.b_occ == pytest.approx(0.03)
+    assert control_model.actuator_alpha == pytest.approx(0.0)
     assert control_model.c == pytest.approx(1.25)
 
 
@@ -86,6 +87,7 @@ def test_to_control_model_from_room_rc_defaults_to_exact_2state_conversion() -> 
     assert control_model.b_hour_cos_room == pytest.approx(float(b_discrete[0, 6]))
     assert control_model.b_hour_sin_mass == pytest.approx(float(b_discrete[1, 5]))
     assert control_model.b_hour_cos_mass == pytest.approx(float(b_discrete[1, 6]))
+    assert control_model.actuator_alpha == pytest.approx(room_rc_model.config.alpha_heat)
 
 
 def test_room_rc_control_model_keeps_heating_active_under_comfort_pressure() -> None:

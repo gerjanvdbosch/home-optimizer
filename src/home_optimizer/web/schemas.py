@@ -282,6 +282,7 @@ class MpcPlanStepResponse(BaseModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    q_heat_eff_kw: float
     temp_min_c: float
     temp_max_c: float
     slack_low_c: float
@@ -355,6 +356,7 @@ class MpcBacktestStepResponse(BaseModel):
     historical_hp_on: bool
     start: bool
     stop: bool
+    q_heat_eff_kw: float
     predicted_next_room_temp_c: float
     simulated_next_room_temp_c: float
     historical_next_room_temp_c: float | None = None
