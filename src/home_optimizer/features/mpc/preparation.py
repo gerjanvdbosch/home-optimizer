@@ -12,6 +12,7 @@ from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import (
     RoomRcModel,
+    RoomRcTrainer,
     StoredModelVersion,
     TrainedLinearRoomModel,
 )
@@ -28,11 +29,13 @@ class SpaceHeatingMpcPreparationService:
         active_room_model_reader: ActiveRoomModelReaderPort,
         target_schedule: list[TemperatureTargetWindow],
         electricity_pricing: ElectricityPricingConfig | None = None,
+        rc_trainer: RoomRcTrainer | None = None,
     ) -> None:
         self.samples_reader = samples_reader
         self.active_room_model_reader = active_room_model_reader
         self.target_schedule = list(target_schedule)
         self.electricity_pricing = electricity_pricing or _DynamicPricingLike()
+        self.rc_trainer = rc_trainer or RoomRcTrainer()
 
     def resolve_room_model_version(self, model_id: str | None) -> StoredModelVersion | None:
         if model_id is not None:
@@ -103,22 +106,45 @@ class SpaceHeatingMpcPreparationService:
         if not isinstance(source_model, RoomRcModel):
             return base_state
         params = RoomRC2StateParams.from_dict(source_model.params)
+        filtered_mass_temp_c = self._estimate_filtered_mass_temp_c(
+            rows,
+            source_model=source_model,
+        )
         return Rc2StateMpcInitialState(
             room_temp_c=base_state.room_temp_c,
-            mass_temp_c=base_state.room_temp_c + params.initial_mass_offset_c,
+            mass_temp_c=filtered_mass_temp_c,
             q_heat_eff_kw=base_state.q_heat_eff_kw,
             hp_on=base_state.hp_on,
             on_steps=base_state.on_steps,
             off_steps=base_state.off_steps,
         )
 
-    @staticmethod
     def history_rows_for_initial_state(
+        self,
         source_model: TrainedLinearRoomModel | RoomRcModel,
         *,
         minimum_history_rows: int,
     ) -> int:
+        if isinstance(source_model, RoomRcModel):
+            return max(
+                minimum_history_rows,
+                self.rc_trainer.max_history_rows(source_model.config),
+            )
         return minimum_history_rows
+
+    def _estimate_filtered_mass_temp_c(
+        self,
+        rows: list[MpcDatasetRow],
+        *,
+        source_model: RoomRcModel,
+    ) -> float:
+        try:
+            _, mass_temp_c = self.rc_trainer.estimate_current_state(source_model, rows)
+            return float(mass_temp_c)
+        except (ValueError, IndexError, KeyError):
+            params = RoomRC2StateParams.from_dict(source_model.params)
+            latest_room_temp_c = float(rows[-1].room_temperature_c or 0.0)
+            return latest_room_temp_c + params.initial_mass_offset_c
 
     def resolve_effective_heating_kw(
         self,

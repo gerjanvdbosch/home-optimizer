@@ -22,15 +22,61 @@ class _UnusedModelReader:
         return None
 
 
-def _service() -> SpaceHeatingMpcPreparationService:
+class _UnusedRcTrainer:
+    def estimate_current_state(self, model: RoomRcModel, rows: list[MpcDatasetRow]) -> tuple[float, float]:
+        raise ValueError("not configured for this test")
+
+    def max_history_rows(self, config: RoomRcConfig) -> int:
+        return 36
+
+
+def _service(
+    *,
+    rc_trainer: _UnusedRcTrainer | None = None,
+) -> SpaceHeatingMpcPreparationService:
     return SpaceHeatingMpcPreparationService(
         samples_reader=_UnusedSamplesReader(),
         active_room_model_reader=_UnusedModelReader(),
         target_schedule=[],
+        rc_trainer=rc_trainer or _UnusedRcTrainer(),
     )
 
 
-def test_initial_state_from_rows_uses_model_mass_offset_for_2r2c() -> None:
+class _FilteredStateRcTrainer(_UnusedRcTrainer):
+    def estimate_current_state(self, model: RoomRcModel, rows: list[MpcDatasetRow]) -> tuple[float, float]:
+        return 19.3, 22.1
+
+
+def test_initial_state_from_rows_uses_filtered_mass_state_for_2r2c() -> None:
+    latest_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    model = RoomRcModel(
+        trained_from_utc=latest_time,
+        trained_to_utc=latest_time,
+        interval_minutes=10,
+        config=RoomRcConfig(),
+        params={"initial_mass_offset_c": 5.0},
+        sample_count=10,
+    )
+    rows = [
+        MpcDatasetRow(
+            timestamp_utc=latest_time,
+            room_temperature_c=19.5,
+            mode_space=0,
+            mode_off=1,
+            space_heating_output_estimate_kw=0.0,
+        )
+    ]
+
+    initial_state = _service(
+        rc_trainer=_FilteredStateRcTrainer()
+    ).initial_state_from_rows(rows, source_model=model)
+
+    assert isinstance(initial_state, Rc2StateMpcInitialState)
+    assert initial_state.room_temp_c == 19.5
+    assert initial_state.mass_temp_c == 22.1
+
+
+def test_initial_state_from_rows_falls_back_to_model_mass_offset_when_filter_fails() -> None:
     latest_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     model = RoomRcModel(
         trained_from_utc=latest_time,
@@ -53,7 +99,6 @@ def test_initial_state_from_rows_uses_model_mass_offset_for_2r2c() -> None:
     initial_state = _service().initial_state_from_rows(rows, source_model=model)
 
     assert isinstance(initial_state, Rc2StateMpcInitialState)
-    assert initial_state.room_temp_c == 19.5
     assert initial_state.mass_temp_c == 24.5
 
 
@@ -72,7 +117,7 @@ def test_history_rows_for_initial_state_keeps_requested_context() -> None:
         minimum_history_rows=3,
     )
 
-    assert history_rows == 3
+    assert history_rows == 36
 
 
 def test_resolve_effective_heating_kw_returns_zero_when_heating_is_explicitly_off() -> None:
