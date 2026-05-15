@@ -26,11 +26,12 @@ class _StaticPlanController:
             objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=1.0,
                 comfort_high=2.0,
-                temperature_tracking=3.0,
+                tracking_under_target=1.0,
+                tracking_over_target=2.0,
                 terminal=4.0,
                 start=5.0,
                 runtime=6.0,
-                energy=7.0,
+                energy_cost=7.0,
             ),
             steps=[
                 MpcPlanStep(

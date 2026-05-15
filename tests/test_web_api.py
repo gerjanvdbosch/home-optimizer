@@ -223,11 +223,12 @@ class FakeSpaceHeatingMpcPlanningService:
             objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=0.0,
                 comfort_high=0.0,
-                temperature_tracking=2.0,
+                tracking_under_target=1.5,
+                tracking_over_target=0.5,
                 terminal=0.0,
                 start=250.0,
                 runtime=0.4,
-                energy=3.0,
+                energy_cost=3.0,
             ),
             steps=[
                 MpcPlanStep(
@@ -334,11 +335,12 @@ class FakeSpaceHeatingMpcBacktestService:
             mpc_objective_breakdown=MpcObjectiveBreakdown(
                 comfort_low=12.0,
                 comfort_high=1.0,
-                temperature_tracking=3.5,
+                tracking_under_target=3.0,
+                tracking_over_target=0.5,
                 terminal=0.0,
                 start=250.0,
                 runtime=0.4,
-                energy=3.0,
+                energy_cost=3.0,
             ),
             total_solver_runtime_seconds=0.15,
         )
@@ -900,10 +902,14 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
     assert payload["objective_value"] == 123.4
     assert payload["objective_breakdown"]["comfort_total"] == 0.0
     assert payload["objective_breakdown"]["temperature_tracking"] == 2.0
-    assert payload["objective_breakdown"]["terminal"] == 0.0
-    assert payload["objective_breakdown"]["start"] == 250.0
+    assert payload["objective_breakdown"]["tracking_under_target"] == 1.5
+    assert payload["objective_breakdown"]["tracking_over_target"] == 0.5
+    assert payload["objective_breakdown"]["terminal_cost"] == 0.0
+    assert payload["objective_breakdown"]["start_penalty"] == 250.0
     assert payload["objective_breakdown"]["runtime"] == 0.4
-    assert payload["objective_breakdown"]["energy"] == 3.0
+    assert payload["objective_breakdown"]["energy_cost"] == 3.0
+    assert payload["objective_breakdown"]["pv_self_consumption_reward"] == 0.0
+    assert payload["objective_breakdown"]["unnecessary_heating"] == 0.0
     assert payload["objective_breakdown"]["total"] == 255.4
     assert (
         payload["heating_explanation"]
@@ -980,6 +986,8 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert payload["step_count"] == 2
     assert payload["mpc_objective_breakdown"]["comfort_total"] == 13.0
     assert payload["mpc_objective_breakdown"]["temperature_tracking"] == 3.5
+    assert payload["mpc_objective_breakdown"]["tracking_under_target"] == 3.0
+    assert payload["mpc_objective_breakdown"]["tracking_over_target"] == 0.5
     assert payload["mpc_objective_breakdown"]["total"] == pytest.approx(269.9)
     assert payload["mpc_summary"]["infeasible_count"] == 1
     assert payload["historical_summary"]["estimated_energy_cost_eur"] == 0.2

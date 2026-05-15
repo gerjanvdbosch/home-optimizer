@@ -282,6 +282,7 @@ class MpcPlanStepResponse(BaseModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    useful_preheat_target_c: float
     q_heat_eff_kw: float
     temp_min_c: float
     temp_max_c: float
@@ -296,11 +297,15 @@ class MpcObjectiveBreakdownResponse(BaseModel):
     comfort_low: float
     comfort_high: float
     comfort_total: float
+    tracking_under_target: float
+    tracking_over_target: float
     temperature_tracking: float
-    terminal: float
-    start: float
+    energy_cost: float
+    pv_self_consumption_reward: float
+    unnecessary_heating: float
+    terminal_cost: float
+    start_penalty: float
     runtime: float
-    energy: float
     total: float
 
 

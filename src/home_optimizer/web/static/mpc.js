@@ -214,11 +214,11 @@ function updateSummary(payload) {
   );
   setSummaryValue(
     summaryNodes.objectiveTerminal,
-    formatNumber(payload.objective_breakdown?.terminal, 3),
+    formatNumber(payload.objective_breakdown?.terminal_cost, 3),
   );
   setSummaryValue(
     summaryNodes.objectiveStart,
-    formatNumber(payload.objective_breakdown?.start, 3),
+    formatNumber(payload.objective_breakdown?.start_penalty, 3),
   );
   setSummaryValue(
     summaryNodes.objectiveRuntime,
@@ -226,7 +226,7 @@ function updateSummary(payload) {
   );
   setSummaryValue(
     summaryNodes.objectiveEnergy,
-    formatNumber(payload.objective_breakdown?.energy, 3),
+    formatNumber(payload.objective_breakdown?.energy_cost, 3),
   );
   setSummaryValue(summaryNodes.solveTime, `${formatNumber(payload.solve_time_seconds, 3)} s`);
   setSummaryValue(summaryNodes.starts, String(payload.summary.start_count));

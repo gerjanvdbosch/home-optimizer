@@ -199,11 +199,22 @@ class SpaceHeatingMpcBacktestRunner:
         return MpcObjectiveBreakdown(
             comfort_low=left.comfort_low + right.comfort_low,
             comfort_high=left.comfort_high + right.comfort_high,
-            temperature_tracking=left.temperature_tracking + right.temperature_tracking,
+            tracking_under_target=(
+                left.tracking_under_target + right.tracking_under_target
+            ),
+            tracking_over_target=(
+                left.tracking_over_target + right.tracking_over_target
+            ),
+            unnecessary_heating=(
+                left.unnecessary_heating + right.unnecessary_heating
+            ),
             terminal=left.terminal + right.terminal,
             start=left.start + right.start,
             runtime=left.runtime + right.runtime,
-            energy=left.energy + right.energy,
+            energy_cost=left.energy_cost + right.energy_cost,
+            pv_self_consumption_reward=(
+                left.pv_self_consumption_reward + right.pv_self_consumption_reward
+            ),
         )
 
     @staticmethod

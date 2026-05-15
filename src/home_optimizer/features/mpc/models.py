@@ -177,10 +177,14 @@ class MpcConstraints(DomainModel):
 class MpcObjectiveWeights(DomainModel):
     comfort_low: float = Field(default=10_000.0, ge=0.0)
     comfort_high: float = Field(default=10_000.0, ge=0.0)
-    temperature_tracking: float = Field(default=5.0, ge=0.0)
-    start: float = Field(default=250.0, ge=0.0)
+    tracking_under_target: float = Field(default=25.0, ge=0.0)
+    tracking_over_target: float = Field(default=0.5, ge=0.0)
+    unnecessary_heating: float = Field(default=4.0, ge=0.0)
+    terminal: float = Field(default=8.0, ge=0.0)
+    start: float = Field(default=50.0, ge=0.0)
     energy: float = Field(default=1.0, ge=0.0)
-    runtime: float = Field(default=0.1, ge=0.0)
+    pv_self_consumption: float = Field(default=0.5, ge=0.0)
+    runtime: float = Field(default=0.05, ge=0.0)
 
 
 class MpcProblem(DomainModel):
@@ -217,6 +221,7 @@ class MpcPlanStep(DomainModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    useful_preheat_target_c: float = 0.0
     q_heat_eff_kw: float = 0.0
     temp_min_c: float
     temp_max_c: float
@@ -230,26 +235,40 @@ class MpcPlanStep(DomainModel):
 class MpcObjectiveBreakdown(DomainModel):
     comfort_low: float = 0.0
     comfort_high: float = 0.0
-    temperature_tracking: float = 0.0
+    tracking_under_target: float = 0.0
+    tracking_over_target: float = 0.0
+    unnecessary_heating: float = 0.0
     terminal: float = 0.0
     start: float = 0.0
     runtime: float = 0.0
-    energy: float = 0.0
+    energy_cost: float = 0.0
+    pv_self_consumption_reward: float = 0.0
 
     @property
     def comfort_total(self) -> float:
         return self.comfort_low + self.comfort_high
 
     @property
+    def temperature_tracking(self) -> float:
+        return self.tracking_under_target + self.tracking_over_target
+
+    @property
+    def energy(self) -> float:
+        return self.energy_cost
+
+    @property
     def total(self) -> float:
         return (
             self.comfort_low
             + self.comfort_high
-            + self.temperature_tracking
+            + self.tracking_under_target
+            + self.tracking_over_target
+            + self.unnecessary_heating
             + self.terminal
             + self.start
             + self.runtime
-            + self.energy
+            + self.energy_cost
+            - self.pv_self_consumption_reward
         )
 
 

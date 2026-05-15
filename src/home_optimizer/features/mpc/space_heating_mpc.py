@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from home_optimizer.features.mpc.explain import rollout_without_heating
 from home_optimizer.features.mpc.models import (
+    LinearThermalControlModel,
     MpcHorizonStep,
     MpcObjectiveBreakdown,
     MpcPlan,
@@ -11,6 +14,14 @@ from home_optimizer.features.mpc.models import (
     MpcProblem,
     Rc2StateThermalControlModel,
 )
+
+
+@dataclass(slots=True)
+class _ObjectiveContext:
+    useful_preheat_targets_c: list[float]
+    pv_self_consumable_kw: list[float]
+    unnecessary_heating_big_m_c: list[float]
+    terminal_target_c: float
 
 
 def _load_pyomo() -> Any:
@@ -29,7 +40,7 @@ class SpaceHeatingMpcSolver:
         self,
         *,
         solver_name: str | None = None,
-        solver_candidates: tuple[str, ...] = ("appsi_highs", "highs"),
+        solver_candidates: tuple[str, ...] = ("highs", "appsi_highs"),
     ) -> None:
         self.solver_name = solver_name
         self.solver_candidates = solver_candidates
@@ -64,11 +75,14 @@ class SpaceHeatingMpcSolver:
         objective_breakdown = MpcObjectiveBreakdown(
             comfort_low=float(pyo.value(model.comfort_low_term)),
             comfort_high=float(pyo.value(model.comfort_high_term)),
-            temperature_tracking=float(pyo.value(model.temperature_tracking_term)),
-            terminal=0.0,
+            tracking_under_target=float(pyo.value(model.tracking_under_target_term)),
+            tracking_over_target=float(pyo.value(model.tracking_over_target_term)),
+            unnecessary_heating=float(pyo.value(model.unnecessary_heating_term)),
+            terminal=float(pyo.value(model.terminal_term)),
             start=float(pyo.value(model.start_term)),
             runtime=float(pyo.value(model.runtime_term)),
-            energy=float(pyo.value(model.energy_term - model.energy_baseline_term)),
+            energy_cost=float(pyo.value(model.energy_term - model.energy_baseline_term)),
+            pv_self_consumption_reward=float(pyo.value(model.pv_self_consumption_reward_term)),
         )
         objective_value = float(pyo.value(model.objective))
         steps: list[MpcPlanStep] = []
@@ -93,6 +107,7 @@ class SpaceHeatingMpcSolver:
                     start=bool(round(pyo.value(model.start[index]))),
                     stop=bool(round(pyo.value(model.stop[index]))),
                     predicted_room_temp_c=float(pyo.value(model.room_temp[index])),
+                    useful_preheat_target_c=float(pyo.value(model.useful_preheat_target[index])),
                     q_heat_eff_kw=q_heat_eff_kw,
                     temp_min_c=horizon_step.temp_min_c,
                     temp_max_c=horizon_step.temp_max_c,
@@ -158,6 +173,7 @@ class SpaceHeatingMpcSolver:
     def _build_linear_model(self, problem: MpcProblem, pyo: Any) -> Any:
         model = pyo.ConcreteModel(name="space_heating_mpc")
         horizon_size = len(problem.horizon)
+        objective_context = self._build_objective_context(problem)
         model.T = pyo.RangeSet(0, horizon_size - 1)
         model.T_transition = pyo.RangeSet(0, max(0, horizon_size - 2))
 
@@ -170,8 +186,32 @@ class SpaceHeatingMpcSolver:
         model.q_heat_eff = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
-        model.track_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
-        model.track_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_under = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_over = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.unnecessary_heat_excess = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.terminal_under = pyo.Var(domain=pyo.NonNegativeReals)
+        model.useful_preheat_target = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.useful_preheat_targets_c[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.unnecessary_heating_big_m = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.unnecessary_heating_big_m_c[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.pv_self_consumable_kw = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.pv_self_consumable_kw[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.terminal_target = pyo.Param(initialize=objective_context.terminal_target_c)
 
         initial_hp_on = 1 if problem.initial_state.hp_on else 0
         model.initial_room_temp = pyo.Param(initialize=problem.initial_state.room_temp_c)
@@ -221,11 +261,23 @@ class SpaceHeatingMpcSolver:
 
         model.comfort_low = pyo.Constraint(model.T, rule=comfort_low_rule)
         model.comfort_high = pyo.Constraint(model.T, rule=comfort_high_rule)
-        model.temperature_tracking = pyo.Constraint(
+        model.tracking_under = pyo.Constraint(
             model.T,
-            rule=lambda model_ref, t: (
-                model_ref.room_temp[t] - float(problem.horizon[t].target_temp_c)
-                == model_ref.track_high[t] - model_ref.track_low[t]
+            rule=lambda model_ref, t: model_ref.track_under[t]
+            >= (model_ref.useful_preheat_target[t] - model_ref.room_temp[t]),
+        )
+        model.tracking_over = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.track_over[t]
+            >= (model_ref.room_temp[t] - model_ref.useful_preheat_target[t]),
+        )
+        model.unnecessary_heating = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.unnecessary_heat_excess[t]
+            >= (
+                model_ref.room_temp[t]
+                - model_ref.useful_preheat_target[t]
+                - (model_ref.unnecessary_heating_big_m[t] * (1 - model_ref.hp_on[t]))
             ),
         )
 
@@ -288,6 +340,11 @@ class SpaceHeatingMpcSolver:
             model.hp_on[t].fix(0)
             model.start[t].fix(0)
 
+        model.terminal_tracking = pyo.Constraint(
+            expr=model.terminal_under
+            >= (model.terminal_target - model.room_temp[horizon_size - 1])
+        )
+
         comfort_low_term = sum(
             problem.objective_weights.comfort_low * model.slack_low[t] for t in range(horizon_size)
         )
@@ -298,9 +355,19 @@ class SpaceHeatingMpcSolver:
         start_term = sum(
             problem.objective_weights.start * model.start[t] for t in range(horizon_size)
         )
-        temperature_tracking_term = sum(
-            problem.objective_weights.temperature_tracking
-            * (model.track_low[t] + model.track_high[t])
+        tracking_under_target_term = sum(
+            problem.objective_weights.tracking_under_target
+            * model.track_under[t]
+            for t in range(horizon_size)
+        )
+        tracking_over_target_term = sum(
+            problem.objective_weights.tracking_over_target
+            * model.track_over[t]
+            for t in range(horizon_size)
+        )
+        unnecessary_heating_term = sum(
+            problem.objective_weights.unnecessary_heating
+            * model.unnecessary_heat_excess[t]
             for t in range(horizon_size)
         )
         energy_term = sum(
@@ -318,23 +385,39 @@ class SpaceHeatingMpcSolver:
             * _baseline_site_energy_cost(problem.horizon[t])
             for t in range(horizon_size)
         )
+        pv_self_consumption_reward_term = sum(
+            problem.objective_weights.pv_self_consumption
+            * problem.dt_hours
+            * model.pv_self_consumable_kw[t]
+            * model.hp_on[t]
+            for t in range(horizon_size)
+        )
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
+        terminal_term = problem.objective_weights.terminal * model.terminal_under
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
         model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
-        model.temperature_tracking_term = pyo.Expression(expr=temperature_tracking_term)
+        model.tracking_under_target_term = pyo.Expression(expr=tracking_under_target_term)
+        model.tracking_over_target_term = pyo.Expression(expr=tracking_over_target_term)
+        model.unnecessary_heating_term = pyo.Expression(expr=unnecessary_heating_term)
+        model.terminal_term = pyo.Expression(expr=terminal_term)
         model.start_term = pyo.Expression(expr=start_term)
         model.energy_term = pyo.Expression(expr=energy_term)
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
+        model.pv_self_consumption_reward_term = pyo.Expression(expr=pv_self_consumption_reward_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
                 model.comfort_low_term
                 + model.comfort_high_term
-                + model.temperature_tracking_term
+                + model.tracking_under_target_term
+                + model.tracking_over_target_term
+                + model.unnecessary_heating_term
+                + model.terminal_term
                 + model.start_term
                 + (model.energy_term - model.energy_baseline_term)
+                - model.pv_self_consumption_reward_term
                 + model.runtime_term
             ),
             sense=pyo.minimize,
@@ -344,6 +427,7 @@ class SpaceHeatingMpcSolver:
     def _build_2state_model(self, problem: MpcProblem, pyo: Any) -> Any:
         model = pyo.ConcreteModel(name="space_heating_mpc_2state")
         horizon_size = len(problem.horizon)
+        objective_context = self._build_objective_context(problem)
         model.T = pyo.RangeSet(0, horizon_size - 1)
         model.T_transition = pyo.RangeSet(0, max(0, horizon_size - 2))
 
@@ -357,8 +441,32 @@ class SpaceHeatingMpcSolver:
         model.q_heat_eff = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
-        model.track_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
-        model.track_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_under = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_over = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.unnecessary_heat_excess = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.terminal_under = pyo.Var(domain=pyo.NonNegativeReals)
+        model.useful_preheat_target = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.useful_preheat_targets_c[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.unnecessary_heating_big_m = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.unnecessary_heating_big_m_c[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.pv_self_consumable_kw = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.pv_self_consumable_kw[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.terminal_target = pyo.Param(initialize=objective_context.terminal_target_c)
 
         initial_hp_on = 1 if problem.initial_state.hp_on else 0
         model.initial_room_temp = pyo.Param(initialize=problem.initial_state.room_temp_c)
@@ -436,11 +544,23 @@ class SpaceHeatingMpcSolver:
 
         model.comfort_low = pyo.Constraint(model.T, rule=comfort_low_rule)
         model.comfort_high = pyo.Constraint(model.T, rule=comfort_high_rule)
-        model.temperature_tracking = pyo.Constraint(
+        model.tracking_under = pyo.Constraint(
             model.T,
-            rule=lambda model_ref, t: (
-                model_ref.room_temp[t] - float(problem.horizon[t].target_temp_c)
-                == model_ref.track_high[t] - model_ref.track_low[t]
+            rule=lambda model_ref, t: model_ref.track_under[t]
+            >= (model_ref.useful_preheat_target[t] - model_ref.room_temp[t]),
+        )
+        model.tracking_over = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.track_over[t]
+            >= (model_ref.room_temp[t] - model_ref.useful_preheat_target[t]),
+        )
+        model.unnecessary_heating = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.unnecessary_heat_excess[t]
+            >= (
+                model_ref.room_temp[t]
+                - model_ref.useful_preheat_target[t]
+                - (model_ref.unnecessary_heating_big_m[t] * (1 - model_ref.hp_on[t]))
             ),
         )
 
@@ -503,6 +623,11 @@ class SpaceHeatingMpcSolver:
             model.hp_on[t].fix(0)
             model.start[t].fix(0)
 
+        model.terminal_tracking = pyo.Constraint(
+            expr=model.terminal_under
+            >= (model.terminal_target - model.room_temp[horizon_size - 1])
+        )
+
         comfort_low_term = sum(
             problem.objective_weights.comfort_low * model.slack_low[t] for t in range(horizon_size)
         )
@@ -513,9 +638,19 @@ class SpaceHeatingMpcSolver:
         start_term = sum(
             problem.objective_weights.start * model.start[t] for t in range(horizon_size)
         )
-        temperature_tracking_term = sum(
-            problem.objective_weights.temperature_tracking
-            * (model.track_low[t] + model.track_high[t])
+        tracking_under_target_term = sum(
+            problem.objective_weights.tracking_under_target
+            * model.track_under[t]
+            for t in range(horizon_size)
+        )
+        tracking_over_target_term = sum(
+            problem.objective_weights.tracking_over_target
+            * model.track_over[t]
+            for t in range(horizon_size)
+        )
+        unnecessary_heating_term = sum(
+            problem.objective_weights.unnecessary_heating
+            * model.unnecessary_heat_excess[t]
             for t in range(horizon_size)
         )
         energy_term = sum(
@@ -533,28 +668,143 @@ class SpaceHeatingMpcSolver:
             * _baseline_site_energy_cost(problem.horizon[t])
             for t in range(horizon_size)
         )
+        pv_self_consumption_reward_term = sum(
+            problem.objective_weights.pv_self_consumption
+            * problem.dt_hours
+            * model.pv_self_consumable_kw[t]
+            * model.hp_on[t]
+            for t in range(horizon_size)
+        )
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
+        terminal_term = problem.objective_weights.terminal * model.terminal_under
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
         model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
-        model.temperature_tracking_term = pyo.Expression(expr=temperature_tracking_term)
+        model.tracking_under_target_term = pyo.Expression(expr=tracking_under_target_term)
+        model.tracking_over_target_term = pyo.Expression(expr=tracking_over_target_term)
+        model.unnecessary_heating_term = pyo.Expression(expr=unnecessary_heating_term)
+        model.terminal_term = pyo.Expression(expr=terminal_term)
         model.start_term = pyo.Expression(expr=start_term)
         model.energy_term = pyo.Expression(expr=energy_term)
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
+        model.pv_self_consumption_reward_term = pyo.Expression(expr=pv_self_consumption_reward_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
                 model.comfort_low_term
                 + model.comfort_high_term
-                + model.temperature_tracking_term
+                + model.tracking_under_target_term
+                + model.tracking_over_target_term
+                + model.unnecessary_heating_term
+                + model.terminal_term
                 + model.start_term
                 + (model.energy_term - model.energy_baseline_term)
+                - model.pv_self_consumption_reward_term
                 + model.runtime_term
             ),
             sense=pyo.minimize,
         )
         return model
+
+    def _build_objective_context(self, problem: MpcProblem) -> _ObjectiveContext:
+        base_targets_c = [float(step.target_temp_c) for step in problem.horizon]
+        pv_surplus_available_kw = [
+            max(
+                0.0,
+                float(step.pv_available_power_forecast_kw) - float(step.base_load_power_forecast_kw),
+            )
+            for step in problem.horizon
+        ]
+        pv_normalizer_kw = max(
+            max(pv_surplus_available_kw, default=0.0),
+            max(
+                (
+                    max(
+                        float(step.hp_electric_power_forecast_kw),
+                        float(step.effective_heating_kw_forecast),
+                    )
+                    for step in problem.horizon
+                ),
+                default=0.0,
+            ),
+            1e-9,
+        )
+        pv_factors = [
+            min(pv_surplus_kw / pv_normalizer_kw, 1.0)
+            for pv_surplus_kw in pv_surplus_available_kw
+        ]
+        no_heat_rollout = rollout_without_heating(
+            control_model=problem.control_model,
+            initial_state=problem.initial_state,
+            horizon=problem.horizon,
+        )
+        max_import_price = max(
+            (float(step.import_price_eur_kwh) for step in problem.horizon),
+            default=0.0,
+        )
+        useful_preheat_targets_c: list[float] = []
+        future_need_factors: list[float] = []
+        for index, step in enumerate(problem.horizon):
+            base_target_c = base_targets_c[index]
+            comfort_headroom_c = max(0.0, float(step.temp_max_c) - base_target_c)
+            if comfort_headroom_c <= 0.0:
+                future_need_factors.append(0.0)
+                useful_preheat_targets_c.append(base_target_c)
+                continue
+            future_need_signal_c = 0.0
+            for future_index in range(index, len(problem.horizon)):
+                future_price_factor = 1.0
+                if max_import_price > 0.0:
+                    future_price_factor += float(
+                        problem.horizon[future_index].import_price_eur_kwh / max_import_price
+                    )
+                future_deficit_c = max(
+                    0.0,
+                    base_targets_c[future_index] - no_heat_rollout[future_index],
+                )
+                future_need_signal_c = max(
+                    future_need_signal_c,
+                    future_deficit_c * future_price_factor,
+                )
+            future_need_factor = min(future_need_signal_c / comfort_headroom_c, 1.0)
+            future_need_factors.append(future_need_factor)
+            preheat_headroom_c = comfort_headroom_c * pv_factors[index] * future_need_factor
+            useful_preheat_targets_c.append(
+                min(
+                    float(step.temp_max_c),
+                    max(base_target_c, base_target_c + preheat_headroom_c),
+                )
+            )
+
+        pv_self_consumable_kw = [
+            min(
+                float(step.hp_electric_power_forecast_kw),
+                pv_surplus_available_kw[index],
+            )
+            for index, step in enumerate(problem.horizon)
+        ]
+        unnecessary_heating_big_m_c = [
+            max(
+                float(problem.horizon[index].temp_max_c) - useful_preheat_targets_c[index],
+                max(
+                    (
+                        no_heat_rollout[future_index] - useful_preheat_targets_c[index]
+                        for future_index in range(index, len(problem.horizon))
+                    ),
+                    default=0.0,
+                ),
+                float(problem.horizon[index].temp_max_c - problem.horizon[index].temp_min_c),
+                0.0,
+            )
+            for index in range(len(problem.horizon))
+        ]
+        return _ObjectiveContext(
+            useful_preheat_targets_c=useful_preheat_targets_c,
+            pv_self_consumable_kw=pv_self_consumable_kw,
+            unnecessary_heating_big_m_c=unnecessary_heating_big_m_c,
+            terminal_target_c=useful_preheat_targets_c[-1],
+        )
 
 
 def _baseline_site_energy_cost(horizon_step: MpcHorizonStep) -> float:
