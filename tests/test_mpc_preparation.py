@@ -72,7 +72,7 @@ def test_initial_state_from_rows_uses_filtered_mass_state_for_2r2c() -> None:
     ).initial_state_from_rows(rows, source_model=model)
 
     assert isinstance(initial_state, Rc2StateMpcInitialState)
-    assert initial_state.room_temp_c == 19.5
+    assert initial_state.room_temp_c == 19.3
     assert initial_state.mass_temp_c == 22.1
 
 
@@ -99,6 +99,7 @@ def test_initial_state_from_rows_falls_back_to_model_mass_offset_when_filter_fai
     initial_state = _service().initial_state_from_rows(rows, source_model=model)
 
     assert isinstance(initial_state, Rc2StateMpcInitialState)
+    assert initial_state.room_temp_c == 19.5
     assert initial_state.mass_temp_c == 24.5
 
 

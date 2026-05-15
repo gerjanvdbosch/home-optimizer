@@ -105,13 +105,12 @@ class SpaceHeatingMpcPreparationService:
         )
         if not isinstance(source_model, RoomRcModel):
             return base_state
-        params = RoomRC2StateParams.from_dict(source_model.params)
-        filtered_mass_temp_c = self._estimate_filtered_mass_temp_c(
+        filtered_room_temp_c, filtered_mass_temp_c = self._estimate_filtered_rc_state(
             rows,
             source_model=source_model,
         )
         return Rc2StateMpcInitialState(
-            room_temp_c=base_state.room_temp_c,
+            room_temp_c=filtered_room_temp_c,
             mass_temp_c=filtered_mass_temp_c,
             q_heat_eff_kw=base_state.q_heat_eff_kw,
             hp_on=base_state.hp_on,
@@ -132,19 +131,19 @@ class SpaceHeatingMpcPreparationService:
             )
         return minimum_history_rows
 
-    def _estimate_filtered_mass_temp_c(
+    def _estimate_filtered_rc_state(
         self,
         rows: list[MpcDatasetRow],
         *,
         source_model: RoomRcModel,
-    ) -> float:
+    ) -> tuple[float, float]:
         try:
-            _, mass_temp_c = self.rc_trainer.estimate_current_state(source_model, rows)
-            return float(mass_temp_c)
+            room_temp_c, mass_temp_c = self.rc_trainer.estimate_current_state(source_model, rows)
+            return float(room_temp_c), float(mass_temp_c)
         except (ValueError, IndexError, KeyError):
             params = RoomRC2StateParams.from_dict(source_model.params)
             latest_room_temp_c = float(rows[-1].room_temperature_c or 0.0)
-            return latest_room_temp_c + params.initial_mass_offset_c
+            return latest_room_temp_c, latest_room_temp_c + params.initial_mass_offset_c
 
     def resolve_effective_heating_kw(
         self,
