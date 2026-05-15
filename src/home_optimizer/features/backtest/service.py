@@ -222,6 +222,11 @@ class SpaceHeatingMpcBacktestService:
                     occupied=float(row.occupied_flag),
                     hour_sin=hour_sin,
                     hour_cos=hour_cos,
+                    target_temp_c=(
+                        float(row.room_target_temperature_c)
+                        if row.room_target_temperature_c is not None
+                        else None
+                    ),
                     temp_min_c=float(room_target_min),
                     temp_max_c=float(room_target_max),
                     price_eur_kwh=float(row.price_import_eur_kwh or 0.0),

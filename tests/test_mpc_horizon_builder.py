@@ -75,6 +75,7 @@ def test_mpc_horizon_builder_uses_latest_forecast_targets_and_prices() -> None:
     assert horizon[0].solar_gain_kw == 2.0
     assert horizon[0].solar_gain_mass_kw == 2.0
     assert horizon[0].price_eur_kwh == 0.30
+    assert horizon[0].target_temp_c == 20.0
     assert horizon[0].temp_min_c == 19.5
     assert horizon[0].temp_max_c == 21.0
     assert horizon[1].price_eur_kwh == 0.30

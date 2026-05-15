@@ -117,6 +117,7 @@ class MpcHorizonStep(DomainModel):
     occupied: float = Field(default=0.0, ge=0.0, le=1.0)
     hour_sin: float = 0.0
     hour_cos: float = 0.0
+    target_temp_c: float | None = None
     temp_min_c: float
     temp_max_c: float
     price_eur_kwh: float = 0.0
@@ -141,6 +142,8 @@ class MpcHorizonStep(DomainModel):
             object.__setattr__(self, "import_price_eur_kwh", self.price_eur_kwh)
         if self.solar_gain_mass_kw is None:
             object.__setattr__(self, "solar_gain_mass_kw", self.solar_gain_kw)
+        if self.target_temp_c is None:
+            object.__setattr__(self, "target_temp_c", (self.temp_min_c + self.temp_max_c) / 2.0)
         return self
 
 
@@ -171,6 +174,7 @@ class MpcConstraints(DomainModel):
 class MpcObjectiveWeights(DomainModel):
     comfort_low: float = Field(default=10_000.0, ge=0.0)
     comfort_high: float = Field(default=10_000.0, ge=0.0)
+    temperature_tracking: float = Field(default=5.0, ge=0.0)
     start: float = Field(default=250.0, ge=0.0)
     energy: float = Field(default=1.0, ge=0.0)
     runtime: float = Field(default=0.1, ge=0.0)
@@ -302,4 +306,3 @@ class MpcHorizonBuildRequest(DomainModel):
         ):
             raise ValueError("fallback_temp_min_c cannot be greater than fallback_temp_max_c")
         return self
-

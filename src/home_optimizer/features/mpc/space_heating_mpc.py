@@ -64,7 +64,7 @@ class SpaceHeatingMpcSolver:
         objective_breakdown = MpcObjectiveBreakdown(
             comfort_low=float(pyo.value(model.comfort_low_term)),
             comfort_high=float(pyo.value(model.comfort_high_term)),
-            temperature_tracking=0.0,
+            temperature_tracking=float(pyo.value(model.temperature_tracking_term)),
             terminal=0.0,
             start=float(pyo.value(model.start_term)),
             runtime=float(pyo.value(model.runtime_term)),
@@ -167,6 +167,8 @@ class SpaceHeatingMpcSolver:
         model.room_temp = pyo.Var(model.T, domain=pyo.Reals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
 
         initial_hp_on = 1 if problem.initial_state.hp_on else 0
         model.initial_room_temp = pyo.Param(initialize=problem.initial_state.room_temp_c)
@@ -205,6 +207,13 @@ class SpaceHeatingMpcSolver:
 
         model.comfort_low = pyo.Constraint(model.T, rule=comfort_low_rule)
         model.comfort_high = pyo.Constraint(model.T, rule=comfort_high_rule)
+        model.temperature_tracking = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: (
+                model_ref.room_temp[t] - float(problem.horizon[t].target_temp_c)
+                == model_ref.track_high[t] - model_ref.track_low[t]
+            ),
+        )
 
         def transition_rule(model_ref: Any, t: int) -> Any:
             previous_hp_on = model_ref.initial_hp_on if t == 0 else model_ref.hp_on[t - 1]
@@ -275,6 +284,11 @@ class SpaceHeatingMpcSolver:
         start_term = sum(
             problem.objective_weights.start * model.start[t] for t in range(horizon_size)
         )
+        temperature_tracking_term = sum(
+            problem.objective_weights.temperature_tracking
+            * (model.track_low[t] + model.track_high[t])
+            for t in range(horizon_size)
+        )
         energy_term = sum(
             problem.objective_weights.energy
             * problem.dt_hours
@@ -295,6 +309,7 @@ class SpaceHeatingMpcSolver:
         )
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
         model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
+        model.temperature_tracking_term = pyo.Expression(expr=temperature_tracking_term)
         model.start_term = pyo.Expression(expr=start_term)
         model.energy_term = pyo.Expression(expr=energy_term)
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
@@ -303,6 +318,7 @@ class SpaceHeatingMpcSolver:
             expr=(
                 model.comfort_low_term
                 + model.comfort_high_term
+                + model.temperature_tracking_term
                 + model.start_term
                 + (model.energy_term - model.energy_baseline_term)
                 + model.runtime_term
@@ -326,6 +342,8 @@ class SpaceHeatingMpcSolver:
         model.mass_temp = pyo.Var(model.T, domain=pyo.Reals)
         model.slack_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.slack_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_low = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.track_high = pyo.Var(model.T, domain=pyo.NonNegativeReals)
 
         initial_hp_on = 1 if problem.initial_state.hp_on else 0
         model.initial_room_temp = pyo.Param(initialize=problem.initial_state.room_temp_c)
@@ -396,6 +414,13 @@ class SpaceHeatingMpcSolver:
 
         model.comfort_low = pyo.Constraint(model.T, rule=comfort_low_rule)
         model.comfort_high = pyo.Constraint(model.T, rule=comfort_high_rule)
+        model.temperature_tracking = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: (
+                model_ref.room_temp[t] - float(problem.horizon[t].target_temp_c)
+                == model_ref.track_high[t] - model_ref.track_low[t]
+            ),
+        )
 
         def transition_rule(model_ref: Any, t: int) -> Any:
             previous_hp_on = model_ref.initial_hp_on if t == 0 else model_ref.hp_on[t - 1]
@@ -466,6 +491,11 @@ class SpaceHeatingMpcSolver:
         start_term = sum(
             problem.objective_weights.start * model.start[t] for t in range(horizon_size)
         )
+        temperature_tracking_term = sum(
+            problem.objective_weights.temperature_tracking
+            * (model.track_low[t] + model.track_high[t])
+            for t in range(horizon_size)
+        )
         energy_term = sum(
             problem.objective_weights.energy
             * problem.dt_hours
@@ -486,6 +516,7 @@ class SpaceHeatingMpcSolver:
         )
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
         model.comfort_high_term = pyo.Expression(expr=comfort_high_term)
+        model.temperature_tracking_term = pyo.Expression(expr=temperature_tracking_term)
         model.start_term = pyo.Expression(expr=start_term)
         model.energy_term = pyo.Expression(expr=energy_term)
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
@@ -494,6 +525,7 @@ class SpaceHeatingMpcSolver:
             expr=(
                 model.comfort_low_term
                 + model.comfort_high_term
+                + model.temperature_tracking_term
                 + model.start_term
                 + (model.energy_term - model.energy_baseline_term)
                 + model.runtime_term

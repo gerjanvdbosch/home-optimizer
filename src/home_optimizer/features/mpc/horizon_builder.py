@@ -20,7 +20,7 @@ class MpcHorizonBuilder:
         start_time_utc = ensure_utc(request.start_time_utc)
         interval = timedelta(minutes=request.interval_minutes)
         end_time_utc = start_time_utc + (interval * request.horizon_steps)
-        _, min_series, max_series = build_daily_target_band_series(
+        target_series, min_series, max_series = build_daily_target_band_series(
             request.target_schedule,
             start_time=start_time_utc,
             end_time=end_time_utc,
@@ -31,6 +31,9 @@ class MpcHorizonBuilder:
         )
         min_by_timestamp = {
             parse_datetime(point.timestamp): point.value for point in min_series.points
+        }
+        target_by_timestamp = {
+            parse_datetime(point.timestamp): point.value for point in target_series.points
         }
         max_by_timestamp = {
             parse_datetime(point.timestamp): point.value for point in max_series.points
@@ -95,6 +98,12 @@ class MpcHorizonBuilder:
                     occupied=request.default_occupied,
                     hour_sin=hour_sin,
                     hour_cos=hour_cos,
+                    target_temp_c=float(
+                        target_by_timestamp.get(
+                            timestamp_utc,
+                            (float(temp_min_c) + float(temp_max_c)) / 2.0,
+                        )
+                    ),
                     temp_min_c=float(temp_min_c),
                     temp_max_c=float(temp_max_c),
                     price_eur_kwh=float(price_by_timestamp.get(timestamp_utc, 0.0)),
