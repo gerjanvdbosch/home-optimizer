@@ -59,6 +59,40 @@
         </div>
       </section>
 
+      <section class="charts" aria-label="Backtest visualisatie">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Temperatuur en comfortband</h2>
+            <span id="backtest-temp-summary">-</span>
+          </div>
+          <div class="chart-wrap chart-wrap-tall" id="backtest-temperature-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Warmtepomp vergelijking</h2>
+            <span id="backtest-switch-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="backtest-switch-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Kost en prijs</h2>
+            <span id="backtest-cost-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="backtest-cost-chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <h2>Comfort en slack</h2>
+            <span id="backtest-comfort-summary">-</span>
+          </div>
+          <div class="chart-wrap" id="backtest-comfort-chart"></div>
+        </article>
+      </section>
+
       <section class="panel import-panel">
         <div>
           <h2>Samenvatting</h2>
@@ -100,42 +134,6 @@
           </table>
         </div>
       </section>
-
-      <section class="charts" aria-label="Backtest visualisatie">
-        <article class="panel chart-panel">
-          <div class="panel-heading">
-            <h2>Temperatuur en comfortband</h2>
-            <span id="backtest-temp-summary">-</span>
-          </div>
-          <div class="chart-wrap chart-wrap-tall" id="backtest-temperature-chart"></div>
-        </article>
-
-        <article class="panel chart-panel">
-          <div class="panel-heading">
-            <h2>Warmtepomp vergelijking</h2>
-            <span id="backtest-switch-summary">-</span>
-          </div>
-          <div class="chart-wrap" id="backtest-switch-chart"></div>
-        </article>
-
-        <article class="panel chart-panel">
-          <div class="panel-heading">
-            <h2>Kost en prijs</h2>
-            <span id="backtest-cost-summary">-</span>
-          </div>
-          <div class="chart-wrap" id="backtest-cost-chart"></div>
-        </article>
-
-        <article class="panel chart-panel">
-          <div class="panel-heading">
-            <h2>Comfort en slack</h2>
-            <span id="backtest-comfort-summary">-</span>
-          </div>
-          <div class="chart-wrap" id="backtest-comfort-chart"></div>
-        </article>
-      </section>
-
-
     </main>
 
     <script src="plotly.js"></script>

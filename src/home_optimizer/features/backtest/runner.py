@@ -291,8 +291,16 @@ class SpaceHeatingMpcBacktestRunner:
             pv_surplus_kw,
         )
         return MpcObjectiveBreakdown(
-            comfort_low=objective_weights.comfort_low * slack_low_c,
-            comfort_high=objective_weights.comfort_high * slack_high_c,
+            comfort_low=(
+                objective_weights.comfort_low
+                * (interval_minutes / 60.0)
+                * slack_low_c
+            ),
+            comfort_high=(
+                objective_weights.comfort_high
+                * (interval_minutes / 60.0)
+                * slack_high_c
+            ),
             tracking_under_target=objective_weights.tracking_under_target * tracking_under_c,
             tracking_over_target=objective_weights.tracking_over_target * tracking_over_c,
             unnecessary_heating=(

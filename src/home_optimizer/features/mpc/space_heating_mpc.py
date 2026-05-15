@@ -346,10 +346,15 @@ class SpaceHeatingMpcSolver:
         )
 
         comfort_low_term = sum(
-            problem.objective_weights.comfort_low * model.slack_low[t] for t in range(horizon_size)
+            problem.objective_weights.comfort_low
+            * problem.dt_hours
+            * model.slack_low[t]
+            for t in range(horizon_size)
         )
         comfort_high_term = sum(
-            problem.objective_weights.comfort_high * model.slack_high[t]
+            problem.objective_weights.comfort_high
+            * problem.dt_hours
+            * model.slack_high[t]
             for t in range(horizon_size)
         )
         start_term = sum(
@@ -629,10 +634,15 @@ class SpaceHeatingMpcSolver:
         )
 
         comfort_low_term = sum(
-            problem.objective_weights.comfort_low * model.slack_low[t] for t in range(horizon_size)
+            problem.objective_weights.comfort_low
+            * problem.dt_hours
+            * model.slack_low[t]
+            for t in range(horizon_size)
         )
         comfort_high_term = sum(
-            problem.objective_weights.comfort_high * model.slack_high[t]
+            problem.objective_weights.comfort_high
+            * problem.dt_hours
+            * model.slack_high[t]
             for t in range(horizon_size)
         )
         start_term = sum(
