@@ -5,6 +5,11 @@ from datetime import datetime, time, timezone
 import pytest
 
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
+from home_optimizer.features.backtest.models import (
+    MpcBacktestResult,
+    MpcBacktestSummary,
+)
+from home_optimizer.features.backtest.service import SpaceHeatingMpcBacktestService
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling import (
     RoomRcConfig,
@@ -13,12 +18,7 @@ from home_optimizer.features.modeling import (
     RoomArxModel,
     StoredModelVersion,
 )
-from home_optimizer.features.mpc import (
-    MpcBacktestResult,
-    MpcBacktestSummary,
-    MpcInitialState,
-    SpaceHeatingMpcBacktestService,
-)
+from home_optimizer.features.mpc import MpcInitialState
 
 
 class _UnusedSamplesReader:

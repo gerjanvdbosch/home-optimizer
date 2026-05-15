@@ -6,9 +6,10 @@ from typing import Protocol
 import pandas as pd
 
 from home_optimizer.domain import NumericSeries, TextSeries
+from home_optimizer.features.backtest.models import MpcBacktestResult
 from home_optimizer.features.history.schemas import HistoryImportRequest, HistoryImportResult
 from home_optimizer.features.modeling import StoredModelVersion
-from home_optimizer.features.mpc import MpcBacktestResult, MpcPlan
+from home_optimizer.features.mpc import MpcPlan
 
 
 class ClosableGateway(Protocol):

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
+from home_optimizer.features.backtest.models import MpcBacktestResult
+from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunner
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
-from home_optimizer.features.mpc.backtest import SpaceHeatingMpcBacktestRunner
 from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.exogenous_features import (
     continue_exp_filter,
@@ -16,7 +18,6 @@ from home_optimizer.features.mpc.exogenous_features import (
 )
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
-    MpcBacktestResult,
     MpcConstraints,
     MpcHorizonStep,
     MpcObjectiveWeights,
@@ -31,7 +32,7 @@ class SpaceHeatingMpcBacktestService:
         *,
         samples_reader: DatasetSampleFrameReader,
         active_room_model_reader: ActiveRoomModelReaderPort,
-        target_schedule: list[object],
+        target_schedule: list[TemperatureTargetWindow],
         default_interval_minutes: int = 10,
         runner: SpaceHeatingMpcBacktestRunner | None = None,
     ) -> None:
@@ -261,14 +262,11 @@ class SpaceHeatingMpcBacktestService:
         interval_minutes: int,
     ) -> float:
         net_power_kw = float(row.net_power_kw or 0.0)
-        import_power_kw = max(net_power_kw, 0.0)
-        export_power_kw = max(-net_power_kw, 0.0)
         import_price = float(row.price_import_eur_kwh or 0.0)
         export_price = float(row.price_export_eur_kwh or 0.0)
+        grid_import_kw = max(net_power_kw, 0.0)
+        grid_export_kw = max(-net_power_kw, 0.0)
         return float(
-            (
-                (import_price * import_power_kw)
-                - (export_price * export_power_kw)
-            )
+            ((import_price * grid_import_kw) - (export_price * grid_export_kw))
             * (interval_minutes / 60.0)
         )

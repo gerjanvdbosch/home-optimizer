@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
-from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
+from home_optimizer.features.backtest.models import (
     MpcBacktestResult,
     MpcBacktestStepResult,
     MpcBacktestSummary,
+)
+from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
+from home_optimizer.features.mpc.models import (
+    LinearThermalControlModel,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonStep,

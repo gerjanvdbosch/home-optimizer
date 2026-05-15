@@ -16,10 +16,8 @@ from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
 from home_optimizer.features.history.weather_import_service import WeatherImportService
-from home_optimizer.features.mpc import (
-    SpaceHeatingMpcBacktestService,
-    SpaceHeatingMpcPlanningService,
-)
+from home_optimizer.features.backtest.service import SpaceHeatingMpcBacktestService
+from home_optimizer.features.mpc import SpaceHeatingMpcPlanningService
 from home_optimizer.features.pricing import (
     ElectricityPriceService,
     electricity_price_refresh_interval_seconds,

@@ -20,6 +20,11 @@ from home_optimizer.domain import (
 )
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features import HistoryImportResult
+from home_optimizer.features.backtest.models import (
+    MpcBacktestResult,
+    MpcBacktestStepResult,
+    MpcBacktestSummary,
+)
 from home_optimizer.features.modeling import (
     HorizonMetric,
     ROOM_ARX_MODEL_KIND,
@@ -34,11 +39,6 @@ from home_optimizer.features.modeling import (
     ValidationFoldResult,
 )
 from home_optimizer.features.mpc import MpcObjectiveBreakdown, MpcPlan, MpcPlanStep
-from home_optimizer.features.mpc import (
-    MpcBacktestResult,
-    MpcBacktestStepResult,
-    MpcBacktestSummary,
-)
 from home_optimizer.web import create_app
 from home_optimizer.web.services import dashboard_charts as dashboard_charts_module
 

@@ -1,5 +1,3 @@
-from .backtest import SpaceHeatingMpcBacktestRunner
-from .backtest_service import SpaceHeatingMpcBacktestService
 from .control_model import to_control_model
 from .controller_service import SpaceHeatingMpcControllerService
 from .explain import explain_heating_plan
@@ -11,9 +9,6 @@ from .horizon_builder import (
 from .models import (
     ControlModelConversionOptions,
     LinearThermalControlModel,
-    MpcBacktestResult,
-    MpcBacktestStepResult,
-    MpcBacktestSummary,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonBuildRequest,
@@ -35,9 +30,6 @@ __all__ = [
     "DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME",
     "DEFAULT_SOLAR_GAIN_FORECAST_NAME",
     "LinearThermalControlModel",
-    "MpcBacktestResult",
-    "MpcBacktestStepResult",
-    "MpcBacktestSummary",
     "MpcConstraints",
     "MpcControllerRequest",
     "MpcHorizonBuildRequest",
@@ -51,8 +43,6 @@ __all__ = [
     "MpcProblem",
     "Rc2StateMpcInitialState",
     "Rc2StateThermalControlModel",
-    "SpaceHeatingMpcBacktestRunner",
-    "SpaceHeatingMpcBacktestService",
     "SpaceHeatingMpcControllerService",
     "SpaceHeatingMpcPlanningService",
     "SpaceHeatingMpcSolver",

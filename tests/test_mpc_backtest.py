@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunner
 from home_optimizer.features.mpc import (
     LinearThermalControlModel,
     MpcControllerRequest,
@@ -11,7 +12,6 @@ from home_optimizer.features.mpc import (
     MpcPlanStep,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
-    SpaceHeatingMpcBacktestRunner,
 )
 
 

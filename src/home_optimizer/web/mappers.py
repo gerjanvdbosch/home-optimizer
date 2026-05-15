@@ -9,6 +9,7 @@ from home_optimizer.domain import (
     NumericSeries,
     TextSeries,
 )
+from home_optimizer.features.backtest.models import MpcBacktestResult, MpcBacktestSummary
 from home_optimizer.features.identification import (
     IdentificationDataset,
     IdentificationDatasetSummary,
@@ -19,7 +20,6 @@ from home_optimizer.features.modeling import (
     StoredModelVersion,
     StoredModelVersionSummary,
 )
-from home_optimizer.features.mpc import MpcBacktestResult, MpcBacktestSummary
 from home_optimizer.web.schemas import (
     BaselineKpiSummaryResponse,
     ChartPointResponse,
