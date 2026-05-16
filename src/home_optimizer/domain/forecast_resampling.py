@@ -4,6 +4,7 @@ from bisect import bisect_left
 from datetime import datetime, timedelta
 
 from .forecast import ForecastEntry
+from .names import DISCRETE_FORECAST_SIGNALS
 from .time import ensure_utc
 
 
@@ -88,7 +89,7 @@ def resample_forecast_entries(
                 cursor += interval
                 continue
 
-            if left_entry.unit is None or right_entry.unit is None:
+            if name in DISCRETE_FORECAST_SIGNALS:
                 resampled_value = float(left_entry.value)
             else:
                 progress = (cursor - left_time).total_seconds() / span_seconds
