@@ -54,6 +54,22 @@ class _StaticPlanController:
         )
 
 
+class _ReplayProvider:
+    def __init__(self, horizon: list[MpcHorizonStep]) -> None:
+        self.horizon = horizon
+
+    def get_forecast_horizon(self, *args, **kwargs):
+        class _ReplayHorizon:
+            def __init__(self, horizon: list[MpcHorizonStep]) -> None:
+                self.horizon = horizon
+                self.forecast_issue_time_utc = horizon[0].timestamp_utc
+                self.forecast_age_minutes = 0.0
+                self.forecast_coverage_ratio = 1.0
+                self.missing_forecast_count = 0
+
+        return _ReplayHorizon(self.horizon)
+
+
 def _step(
     hour: int,
     *,
@@ -146,6 +162,79 @@ def test_backtest_runner_advances_2state_mass_state_across_steps() -> None:
     )
 
     assert [step.simulated_next_room_temp_c for step in result.step_results] == [30.0, 31.0]
+
+
+def test_backtest_runner_uses_realized_exogenous_for_plant_in_forecast_replay() -> None:
+    runner = SpaceHeatingMpcBacktestRunner(controller=_StaticPlanController())
+    realized_timeline = [
+        MpcHorizonStep(
+            timestamp_utc=datetime(2026, 5, 14, 12, 0, tzinfo=timezone.utc),
+            outdoor_temp_c=0.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=0.0,
+            hp_electric_power_forecast_kw=1.0,
+            pv_available_power_forecast_kw=0.0,
+            pv_available_power_realized_kw=0.0,
+            base_load_power_forecast_kw=0.0,
+            base_load_power_realized_kw=0.0,
+            occupied=0.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.0,
+            realized_room_temp_c=20.0,
+        ),
+        MpcHorizonStep(
+            timestamp_utc=datetime(2026, 5, 14, 12, 10, tzinfo=timezone.utc),
+            outdoor_temp_c=0.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=0.0,
+            hp_electric_power_forecast_kw=1.0,
+            pv_available_power_forecast_kw=0.0,
+            pv_available_power_realized_kw=0.0,
+            base_load_power_forecast_kw=0.0,
+            base_load_power_realized_kw=0.0,
+            occupied=0.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.0,
+            realized_room_temp_c=20.0,
+        ),
+    ]
+    replay_horizon = [
+        realized_timeline[0].model_copy(
+            update={
+                "solar_gain_kw": 100.0,
+                "solar_gain_mass_kw": 100.0,
+                "solar_irradiance_forecast_w_m2": 1000.0,
+                "pv_available_power_forecast_kw": 10.0,
+            }
+        )
+    ]
+
+    result = runner.run(
+        model_id="room-model-v1",
+        model_type="room_arx",
+        control_model=LinearThermalControlModel(
+            a=1.0,
+            b_out=0.0,
+            b_solar=1.0,
+            b_heat=0.0,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        timeline=realized_timeline,
+        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
+        interval_minutes=10,
+        horizon_steps=1,
+        exogenous_mode="forecast_replay",
+        forecast_replay_provider=_ReplayProvider(replay_horizon),
+    )
+
+    assert result.step_results[0].pv_forecast_kw == pytest.approx(10.0)
+    assert result.step_results[0].pv_realized_kw == pytest.approx(0.0)
+    assert result.step_results[0].simulated_next_room_temp_c == pytest.approx(20.0)
 
 
 def test_backtest_runner_computes_pv_surplus_capture_and_safe_zero_ratio() -> None:

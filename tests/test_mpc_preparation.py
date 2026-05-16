@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.modeling import RoomRcConfig, RoomRcModel
 from home_optimizer.features.mpc import Rc2StateMpcInitialState
@@ -160,3 +161,55 @@ def test_resolve_effective_heating_kw_still_fails_when_heating_state_is_unknown(
             rows,
             fallback_kw=None,
         )
+
+
+def test_infer_pv_power_input_scale_uses_overlap_median_instead_of_latest_anchor() -> None:
+    service = _service()
+    rows = [
+        MpcDatasetRow(
+            timestamp_utc=datetime(2026, 1, 1, 11, 40, tzinfo=timezone.utc),
+            pv_output_power_kw=1.0,
+        ),
+        MpcDatasetRow(
+            timestamp_utc=datetime(2026, 1, 1, 11, 50, tzinfo=timezone.utc),
+            pv_output_power_kw=2.0,
+        ),
+        MpcDatasetRow(
+            timestamp_utc=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            pv_output_power_kw=9.0,
+        ),
+    ]
+    forecast_entries = [
+        ForecastEntry(
+            created_at_utc=datetime(2026, 1, 1, 11, 0, tzinfo=timezone.utc),
+            forecast_time_utc=datetime(2026, 1, 1, 11, 40, tzinfo=timezone.utc),
+            name="gti_pv",
+            value=100.0,
+            unit="W/m2",
+            source="forecast",
+        ),
+        ForecastEntry(
+            created_at_utc=datetime(2026, 1, 1, 11, 0, tzinfo=timezone.utc),
+            forecast_time_utc=datetime(2026, 1, 1, 11, 50, tzinfo=timezone.utc),
+            name="gti_pv",
+            value=200.0,
+            unit="W/m2",
+            source="forecast",
+        ),
+        ForecastEntry(
+            created_at_utc=datetime(2026, 1, 1, 11, 0, tzinfo=timezone.utc),
+            forecast_time_utc=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            name="gti_pv",
+            value=100.0,
+            unit="W/m2",
+            source="forecast",
+        ),
+    ]
+
+    scale = service.infer_pv_power_input_scale(
+        rows,
+        forecast_entries=forecast_entries,
+        start_time_utc=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert scale == pytest.approx(0.01)

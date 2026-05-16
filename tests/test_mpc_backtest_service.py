@@ -386,7 +386,8 @@ def test_backtest_service_perfect_foresight_sets_forecast_and_realized_exogenous
 
 def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypatch) -> None:
     start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
-    end_time = datetime(2026, 1, 1, 12, 10, tzinfo=timezone.utc)
+    middle_time = datetime(2026, 1, 1, 12, 10, tzinfo=timezone.utc)
+    end_time = datetime(2026, 1, 1, 12, 20, tzinfo=timezone.utc)
     captured_horizons = []
 
     class _ForecastSamplesReader(_UnusedSamplesReader):
@@ -419,7 +420,7 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
                     },
                     {
                         "created_at_utc": start_time - timedelta(minutes=30),
-                        "forecast_time_utc": end_time,
+                        "forecast_time_utc": middle_time,
                         "name": "temperature",
                         "source": "forecast",
                         "unit": "C",
@@ -427,7 +428,7 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
                     },
                     {
                         "created_at_utc": start_time - timedelta(minutes=30),
-                        "forecast_time_utc": end_time,
+                        "forecast_time_utc": middle_time,
                         "name": "gti_living_room_windows_adjusted",
                         "source": "forecast",
                         "unit": "W/m2",
@@ -435,11 +436,35 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
                     },
                     {
                         "created_at_utc": start_time - timedelta(minutes=30),
-                        "forecast_time_utc": end_time,
+                        "forecast_time_utc": middle_time,
                         "name": "gti_pv",
                         "source": "forecast",
                         "unit": "W/m2",
                         "value": 200.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": end_time,
+                        "name": "temperature",
+                        "source": "forecast",
+                        "unit": "C",
+                        "value": 5.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": end_time,
+                        "name": "gti_living_room_windows_adjusted",
+                        "source": "forecast",
+                        "unit": "W/m2",
+                        "value": 150.0,
+                    },
+                    {
+                        "created_at_utc": start_time - timedelta(minutes=30),
+                        "forecast_time_utc": end_time,
+                        "name": "gti_pv",
+                        "source": "forecast",
+                        "unit": "W/m2",
+                        "value": 100.0,
                     },
                 ]
             )
@@ -534,7 +559,7 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
             price_import_eur_kwh=0.25,
         ),
         MpcDatasetRow(
-            timestamp_utc=end_time,
+            timestamp_utc=middle_time,
             room_temperature_c=20.1,
             outdoor_temperature_c=11.0,
             room_target_min_temperature_c=19.0,
@@ -543,6 +568,20 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
             solar_gain_proxy_w_m2=120.0,
             pv_output_power_kw=1.1,
             net_power_kw=0.9,
+            hp_electric_power_kw=0.5,
+            occupied_flag=0,
+            price_import_eur_kwh=0.25,
+        ),
+        MpcDatasetRow(
+            timestamp_utc=end_time,
+            room_temperature_c=20.2,
+            outdoor_temperature_c=12.0,
+            room_target_min_temperature_c=19.0,
+            room_target_max_temperature_c=21.0,
+            solar_irradiance_w_m2=140.0,
+            solar_gain_proxy_w_m2=140.0,
+            pv_output_power_kw=1.2,
+            net_power_kw=1.0,
             hp_electric_power_kw=0.5,
             occupied_flag=0,
             price_import_eur_kwh=0.25,
@@ -581,12 +620,16 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
     assert result.exogenous_mode == "forecast_replay"
     assert result.forecast_coverage_ratio == pytest.approx(1.0)
     assert result.missing_forecast_count == 0
-    assert len(captured_horizons) == 1
+    assert len(captured_horizons) == 2
     assert captured_horizons[0][0].outdoor_temp_c == 3.0
     assert captured_horizons[0][1].pv_available_power_forecast_kw == pytest.approx(0.5)
     assert captured_horizons[0][1].pv_available_power_forecast_kw != captured_horizons[0][1].pv_available_power_realized_kw
     assert captured_horizons[0][0].solar_irradiance_forecast_w_m2 == 500.0
     assert captured_horizons[0][0].solar_irradiance_realized_w_m2 == 100.0
+    assert result.step_results[0].pv_forecast_kw == pytest.approx(1.0)
+    assert result.step_results[0].pv_realized_kw == pytest.approx(1.0)
+    assert result.step_results[1].pv_forecast_kw != pytest.approx(result.step_results[1].pv_realized_kw)
+    assert result.step_results[1].pv_realized_kw == pytest.approx(1.1)
 
 
 def test_backtest_service_forecast_replay_derives_adjusted_solar_from_raw_window_forecast(

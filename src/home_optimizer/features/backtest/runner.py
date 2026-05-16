@@ -95,6 +95,8 @@ class SpaceHeatingMpcBacktestRunner:
                     realized_horizon=realized_horizon,
                     replay_horizon=replay_horizon.horizon,
                 )
+            current_forecast_step = horizon[0]
+            current_realized_step = timeline[index]
 
             request = MpcControllerRequest(
                 interval_minutes=interval_minutes,
@@ -134,35 +136,34 @@ class SpaceHeatingMpcBacktestRunner:
                     slack_usage_count += 1
 
             next_step = timeline[index + 1]
-            current_step = timeline[index]
             q_heat_eff_kw = self._apply_heat_actuator(
                 control_model=control_model,
                 previous_q_heat_eff_kw=current_state.q_heat_eff_kw,
                 commanded_hp_on=applied_hp_on,
-                current_step=current_step,
+                current_step=current_realized_step,
             )
             predicted_next_temp, next_state = self._predict_next_state(
                 control_model=control_model,
                 current_state=current_state,
-                current_step=current_step,
+                current_step=current_realized_step,
                 heating_effect_kw=q_heat_eff_kw,
             )
             total_solver_runtime_seconds += solve_time_seconds or 0.0
 
             historical_hp_on = historical_hp_on_by_timestamp.get(
-                current_step.timestamp_utc,
-                current_step.effective_heating_kw_forecast > 0.0,
+                current_realized_step.timestamp_utc,
+                current_realized_step.effective_heating_kw_forecast > 0.0,
             )
             historical_q_heat_eff_kw = self._apply_heat_actuator(
                 control_model=control_model,
                 previous_q_heat_eff_kw=historical_q_heat_eff_kw,
                 commanded_hp_on=historical_hp_on,
-                current_step=current_step,
+                current_step=current_realized_step,
             )
 
             step_results.append(
                 MpcBacktestStepResult(
-                    timestamp_utc=current_step.timestamp_utc,
+                    timestamp_utc=current_realized_step.timestamp_utc,
                     forecast_issue_time_utc=forecast_issue_time_utc,
                     forecast_age_minutes=forecast_age_minutes,
                     mpc_hp_on=applied_hp_on,
@@ -177,27 +178,30 @@ class SpaceHeatingMpcBacktestRunner:
                     useful_preheat_target_c=(
                         first_step.useful_preheat_target_c
                         if plan.feasible and plan.steps
-                        else float(current_step.target_temp_c or current_step.temp_min_c)
+                        else float(
+                            current_forecast_step.target_temp_c
+                            or current_forecast_step.temp_min_c
+                        )
                     ),
                     q_heat_eff_kw=q_heat_eff_kw,
                     historical_q_heat_eff_kw=historical_q_heat_eff_kw,
-                    hp_electric_power_kw=current_step.hp_electric_power_forecast_kw,
-                    pv_forecast_kw=current_step.pv_available_power_forecast_kw,
-                    pv_realized_kw=float(current_step.pv_available_power_realized_kw or 0.0),
-                    solar_irradiance_forecast_wm2=current_step.solar_irradiance_forecast_w_m2,
-                    solar_irradiance_realized_wm2=current_step.solar_irradiance_realized_w_m2,
-                    solar_gain_forecast_kw=current_step.solar_gain_kw,
-                    solar_gain_realized_kw=float(current_step.solar_gain_realized_kw or 0.0),
-                    base_load_forecast_kw=current_step.base_load_power_forecast_kw,
-                    base_load_realized_kw=float(current_step.base_load_power_realized_kw or 0.0),
+                    hp_electric_power_kw=current_forecast_step.hp_electric_power_forecast_kw,
+                    pv_forecast_kw=current_forecast_step.pv_available_power_forecast_kw,
+                    pv_realized_kw=float(current_realized_step.pv_available_power_realized_kw or 0.0),
+                    solar_irradiance_forecast_wm2=current_forecast_step.solar_irradiance_forecast_w_m2,
+                    solar_irradiance_realized_wm2=current_realized_step.solar_irradiance_realized_w_m2,
+                    solar_gain_forecast_kw=current_forecast_step.solar_gain_kw,
+                    solar_gain_realized_kw=float(current_realized_step.solar_gain_realized_kw or 0.0),
+                    base_load_forecast_kw=current_forecast_step.base_load_power_forecast_kw,
+                    base_load_realized_kw=float(current_realized_step.base_load_power_realized_kw or 0.0),
                     pv_surplus_forecast_kw=max(
-                        current_step.pv_available_power_forecast_kw
-                        - current_step.base_load_power_forecast_kw,
+                        current_forecast_step.pv_available_power_forecast_kw
+                        - current_forecast_step.base_load_power_forecast_kw,
                         0.0,
                     ),
                     pv_surplus_realized_kw=max(
-                        float(current_step.pv_available_power_realized_kw or 0.0)
-                        - float(current_step.base_load_power_realized_kw or 0.0),
+                        float(current_realized_step.pv_available_power_realized_kw or 0.0)
+                        - float(current_realized_step.base_load_power_realized_kw or 0.0),
                         0.0,
                     ),
                     predicted_next_room_temp_c=predicted_next_temp,
@@ -207,18 +211,18 @@ class SpaceHeatingMpcBacktestRunner:
                     temp_max_c=next_step.temp_max_c,
                     slack_low_c=slack_low_c,
                     slack_high_c=slack_high_c,
-                    price_eur_kwh=current_step.import_price_eur_kwh,
+                    price_eur_kwh=current_forecast_step.import_price_eur_kwh,
                     estimated_mpc_energy_cost_eur=self._site_energy_cost(
-                        current_step=current_step,
+                        current_step=current_realized_step,
                         hp_on=applied_hp_on,
                         interval_minutes=interval_minutes,
                     ),
                     estimated_historical_energy_cost_eur=self._site_energy_cost(
-                        current_step=current_step,
+                        current_step=current_realized_step,
                         hp_on=historical_hp_on,
                         interval_minutes=interval_minutes,
                         override_cost=historical_energy_cost_by_timestamp.get(
-                            current_step.timestamp_utc
+                            current_realized_step.timestamp_utc
                         ),
                     ),
                     solve_time_seconds=solve_time_seconds,
@@ -228,7 +232,7 @@ class SpaceHeatingMpcBacktestRunner:
             executed_path_objective_breakdown = self._add_objective_breakdowns(
                 executed_path_objective_breakdown,
                 self._executed_step_objective_breakdown(
-                    current_step=current_step,
+                    current_step=current_forecast_step,
                     planned_room_temp_c=(
                         first_step.predicted_room_temp_c
                         if plan.feasible and plan.steps
@@ -237,7 +241,10 @@ class SpaceHeatingMpcBacktestRunner:
                     useful_preheat_target_c=(
                         first_step.useful_preheat_target_c
                         if plan.feasible and plan.steps
-                        else float(current_step.target_temp_c or current_step.temp_min_c)
+                        else float(
+                            current_forecast_step.target_temp_c
+                            or current_forecast_step.temp_min_c
+                        )
                     ),
                     hp_on=applied_hp_on,
                     q_heat_eff_kw=q_heat_eff_kw,

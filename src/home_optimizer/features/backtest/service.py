@@ -85,10 +85,25 @@ class BacktestForecastReplayProvider:
         history_rows = [
             row for row in self.all_rows if row.timestamp_utc < resolved_issue_time
         ]
+        forecast_start_time_utc = (
+            history_rows[0].timestamp_utc
+            if history_rows
+            else resolved_issue_time
+        )
+        forecast_end_steps = max(
+            int(
+                (
+                    (resolved_issue_time - forecast_start_time_utc).total_seconds()
+                    / 60.0
+                )
+                / interval_minutes
+            ),
+            0,
+        ) + horizon_steps
         forecast_entries = self.preparation.load_forecast_entries(
-            start_time_utc=resolved_issue_time,
+            start_time_utc=forecast_start_time_utc,
             interval_minutes=interval_minutes,
-            horizon_steps=horizon_steps,
+            horizon_steps=forecast_end_steps,
             created_at_end_time=resolved_issue_time + timedelta(microseconds=1),
         )
         forecast_entries = self._with_derived_adjusted_solar_forecast(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from statistics import median
 
 from home_optimizer.domain import GTI_PV
 from home_optimizer.domain.forecast import ForecastEntry
@@ -287,6 +288,17 @@ class SpaceHeatingMpcPreparationService:
                     created_at_utc,
                     float(entry.value),
                 )
+
+        overlap_ratios = [
+            float(row.pv_output_power_kw) / latest_created_by_forecast_time[row.timestamp_utc][1]
+            for row in rows
+            if row.pv_output_power_kw is not None
+            and float(row.pv_output_power_kw) > 0.0
+            and row.timestamp_utc in latest_created_by_forecast_time
+            and latest_created_by_forecast_time[row.timestamp_utc][1] > 0.0
+        ]
+        if overlap_ratios:
+            return float(median(overlap_ratios))
 
         start_forecast_value = latest_created_by_forecast_time.get(start_time_utc)
         if start_forecast_value is None or start_forecast_value[1] <= 0.0:
