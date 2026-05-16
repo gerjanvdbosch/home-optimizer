@@ -1470,13 +1470,13 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
             "start": "2026-04-25T12:00:00+00:00",
             "end": "2026-04-25T18:00:00+00:00",
             "code": 0,
-            "label": "helder",
+            "label": "Helder",
         },
         {
             "start": "2026-04-25T18:00:00+00:00",
             "end": expected_day_end.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds"),
             "code": 61,
-            "label": "lichte regen",
+            "label": "Lichte regen",
         },
     ]
     local_timezone = dashboard_charts_module.current_timezone()

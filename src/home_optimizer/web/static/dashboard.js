@@ -34,6 +34,10 @@ function chartTimestamp(timestamp) {
   return localTimestamp.toISOString().slice(0, 19);
 }
 
+function formatTimeLabel(timestamp) {
+  return chartTimestamp(timestamp).slice(11, 16);
+}
+
 function plotLayout(options, hasPoints) {
   const annotations = hasPoints
     ? []
@@ -148,12 +152,12 @@ function renderWeatherStrip(element, segments, options) {
         customdata: segments.map((segment) => [
           segment.label,
           segment.code,
-          chartTimestamp(segment.start),
-          chartTimestamp(segment.end),
+          formatTimeLabel(segment.start),
+          formatTimeLabel(segment.end),
         ]),
         type: "bar",
         hovertemplate:
-          "%{customdata[2]} – %{customdata[3]}<br>%{customdata[0]} (code %{customdata[1]})<extra>Weer</extra>",
+          "%{customdata[2]} – %{customdata[3]}<br>%{customdata[0]}<extra>Weer</extra>",
       }]
     : [];
   const layout = plotLayout(options, hasSegments);
@@ -762,7 +766,7 @@ function heatpumpStatusLegendTraces(statusIntervalsByName) {
 }
 
 function modeAtTimestamp(modePoints, timestamp) {
-  let currentMode = "onbekend";
+  let currentMode = "Onbekend";
   const timestampMs = Date.parse(timestamp);
   for (const point of modePoints) {
     if (Date.parse(point.timestamp) > timestampMs) {
@@ -774,7 +778,7 @@ function modeAtTimestamp(modePoints, timestamp) {
 }
 
 function displayMode(mode) {
-  return mode === "onbekend" ? "Onbekend" : mode.toUpperCase();
+  return mode === "Onbekend" ? "Onbekend" : mode.toUpperCase();
 }
 
 function modeIntervals(modePoints) {

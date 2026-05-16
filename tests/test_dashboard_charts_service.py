@@ -254,13 +254,13 @@ def test_dashboard_charts_service_builds_weather_segments_from_forecast_codes() 
             "start": "2026-04-25T12:00:00+00:00",
             "end": "2026-04-25T12:30:00+00:00",
             "code": 0,
-            "label": "helder",
+            "label": "Helder",
         },
         {
             "start": "2026-04-25T12:30:00+00:00",
             "end": normalize_utc_timestamp(day_end),
             "code": 61,
-            "label": "lichte regen",
+            "label": "Lichte regen",
         },
     ]
 
