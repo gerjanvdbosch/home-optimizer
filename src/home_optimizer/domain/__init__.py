@@ -36,6 +36,7 @@ from .names import (
     FORECAST_HUMIDITY,
     FORECAST_PRECIPITATION,
     FORECAST_TEMPERATURE,
+    FORECAST_WEATHER_CODE,
     FORECAST_WIND,
     GTI_LIVING_ROOM_WINDOWS,
     GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
@@ -96,6 +97,7 @@ from .series_transforms import (
 from .target_schedule import TemperatureTargetWindow
 from .time import ensure_utc, normalize_utc_timestamp
 from .timeseries import MinuteSample
+from .weather_codes import WMO_WEATHER_CODE_LABELS_NL, weather_code_label
 
 __all__ = [
     "BASELOAD",
@@ -128,6 +130,7 @@ __all__ = [
     "FORECAST_HUMIDITY",
     "FORECAST_PRECIPITATION",
     "FORECAST_TEMPERATURE",
+    "FORECAST_WEATHER_CODE",
     "FORECAST_WIND",
     "ELECTRICITY_PRICE",
     "FixedPricing",
@@ -201,4 +204,6 @@ __all__ = [
     "upsample_series_forward_fill",
     "utc_now",
     "window_values_between",
+    "WMO_WEATHER_CODE_LABELS_NL",
+    "weather_code_label",
 ]

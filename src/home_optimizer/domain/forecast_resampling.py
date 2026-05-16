@@ -88,10 +88,13 @@ def resample_forecast_entries(
                 cursor += interval
                 continue
 
-            progress = (cursor - left_time).total_seconds() / span_seconds
-            interpolated_value = float(left_entry.value) + (
-                (float(right_entry.value) - float(left_entry.value)) * progress
-            )
+            if left_entry.unit is None or right_entry.unit is None:
+                resampled_value = float(left_entry.value)
+            else:
+                progress = (cursor - left_time).total_seconds() / span_seconds
+                resampled_value = float(left_entry.value) + (
+                    (float(right_entry.value) - float(left_entry.value)) * progress
+                )
             resampled_entries.append(
                 ForecastEntry(
                     created_at_utc=max(
@@ -100,7 +103,7 @@ def resample_forecast_entries(
                     ),
                     forecast_time_utc=cursor,
                     name=name,
-                    value=interpolated_value,
+                    value=resampled_value,
                     unit=left_entry.unit or right_entry.unit,
                     source=right_entry.source,
                 )
