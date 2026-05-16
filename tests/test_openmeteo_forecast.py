@@ -24,6 +24,7 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
                 "relative_humidity_2m": [65, 66],
                 "wind_speed_10m": [4.1, 4.0],
                 "dew_point_2m": [6.0, 5.8],
+                "precipitation": [0.2, 0.0],
                 "direct_radiation": [300, 280],
                 "diffuse_radiation": [120, 110],
             }
@@ -73,13 +74,13 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
 
     written = service.refresh_forecast(datetime(2026, 4, 25, 11, 45, tzinfo=timezone.utc))
 
-    assert written == 16
+    assert written == 18
     assert len(seen_queries) == 3
     assert "latitude=52.09" in seen_queries[0]
     assert "longitude=5.12" in seen_queries[0]
     assert (
         "minutely_15=temperature_2m%2Crelative_humidity_2m%2Cwind_speed_10m"
-        "%2Cdew_point_2m%2Cdirect_radiation%2Cdiffuse_radiation"
+        "%2Cdew_point_2m%2Cprecipitation%2Cdirect_radiation%2Cdiffuse_radiation"
         in seen_queries[0]
     )
     assert "azimuth=-32.0" in seen_queries[1]
@@ -98,6 +99,7 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
         "gti_living_room_windows",
         "gti_pv",
         "humidity",
+        "precipitation",
         "temperature",
         "wind",
         "dew_point",
@@ -106,6 +108,7 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
         "gti_living_room_windows",
         "gti_pv",
         "humidity",
+        "precipitation",
         "temperature",
         "wind",
     ]
@@ -113,6 +116,9 @@ def test_openmeteo_forecast_service_stores_requested_series(tmp_path) -> None:
     assert rows[0].forecast_time_utc == "2026-04-25T12:00:00+00:00"
     assert rows[0].unit == "°C"
     assert rows[0].source == "openmeteo"
+    precipitation_rows = [row for row in rows if row.name == "precipitation"]
+    assert [row.value for row in precipitation_rows] == [0.2, 0.0]
+    assert all(row.unit == "mm" for row in precipitation_rows)
 
 
 def test_openmeteo_forecast_service_skips_when_database_forecast_is_fresh(tmp_path) -> None:
@@ -124,6 +130,7 @@ def test_openmeteo_forecast_service_skips_when_database_forecast_is_fresh(tmp_pa
                 "relative_humidity_2m": [65],
                 "wind_speed_10m": [4.1],
                 "dew_point_2m": [6.0],
+                "precipitation": [0.2],
                 "direct_radiation": [300],
                 "diffuse_radiation": [120],
             }
@@ -166,10 +173,10 @@ def test_openmeteo_forecast_service_skips_when_database_forecast_is_fresh(tmp_pa
     with database.session() as session:
         rows = session.execute(select(ForecastValue)).scalars().all()
 
-    assert first_written == 6
+    assert first_written == 7
     assert second_written == 0
     assert len(seen_queries) == 1
-    assert len(rows) == 6
+    assert len(rows) == 7
 
 
 def test_openmeteo_forecast_service_skips_without_home_coordinates(tmp_path) -> None:
@@ -205,6 +212,7 @@ def test_weather_import_service_imports_only_missing_historical_rows(tmp_path) -
                 "relative_humidity_2m": [65, 66],
                 "wind_speed_10m": [4.1, 4.0],
                 "dew_point_2m": [6.0, 5.8],
+                "precipitation": [0.2, 0.0],
                 "direct_radiation": [300, 280],
                 "diffuse_radiation": [120, 110],
             }
@@ -251,7 +259,7 @@ def test_weather_import_service_imports_only_missing_historical_rows(tmp_path) -
         datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc)
     )
 
-    assert written == 11
+    assert written == 13
     assert len(seen_queries) == 1
     assert f"past_days={settings.history_import_max_days_back}" in seen_queries[0]
     assert "forecast_minutely_15=192" not in seen_queries[0]
@@ -279,6 +287,7 @@ def test_weather_import_service_filters_on_quarter_hour_window(tmp_path) -> None
                 "relative_humidity_2m": [60, 60, 70, 70],
                 "wind_speed_10m": [3.0, 3.0, 4.0, 4.0],
                 "dew_point_2m": [4.0, 4.0, 7.0, 7.0],
+                "precipitation": [0.0, 0.1, 0.2, 0.3],
                 "direct_radiation": [0, 0, 300, 320],
                 "diffuse_radiation": [0, 0, 100, 110],
             }
@@ -310,7 +319,7 @@ def test_weather_import_service_filters_on_quarter_hour_window(tmp_path) -> None
         datetime(2026, 4, 30, 10, 7, 23, tzinfo=timezone.utc)
     )
 
-    assert written == 18
+    assert written == 21
 
     with database.session() as session:
         rows = session.execute(
