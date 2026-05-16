@@ -118,6 +118,10 @@ body {
   height: 420px;
 }
 
+.chart-wrap-slim {
+  height: 96px;
+}
+
 button {
   border: none;
   border-radius: 4px;

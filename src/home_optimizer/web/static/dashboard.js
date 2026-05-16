@@ -129,6 +129,48 @@ function renderPlot(element, seriesList, options) {
   });
 }
 
+function renderWeatherStrip(element, segments, options) {
+  const hasSegments = Array.isArray(segments) && segments.length > 0;
+  const traces = hasSegments
+    ? [{
+        x: segments.map((segment) => chartTimestamp(weatherSegmentMidpoint(segment))),
+        y: segments.map(() => 1),
+        width: segments.map((segment) => weatherSegmentWidth(segment)),
+        text: segments.map((segment) => weatherSegmentText(segment)),
+        textposition: "inside",
+        insidetextanchor: "middle",
+        textfont: { size: 11, color: "#263238" },
+        cliponaxis: false,
+        marker: {
+          color: segments.map((segment) => weatherCodeColor(segment.code)),
+          line: { color: "#ffffff", width: 1 },
+        },
+        customdata: segments.map((segment) => [
+          segment.label,
+          segment.code,
+          chartTimestamp(segment.start),
+          chartTimestamp(segment.end),
+        ]),
+        type: "bar",
+        hovertemplate:
+          "%{customdata[2]} – %{customdata[3]}<br>%{customdata[0]} (code %{customdata[1]})<extra>Weer</extra>",
+      }]
+    : [];
+  const layout = plotLayout(options, hasSegments);
+  layout.margin = { t: 10, r: 12, b: 32, l: 12 };
+  layout.showlegend = false;
+  layout.yaxis = {
+    visible: false,
+    fixedrange: true,
+    range: [0, 1.4],
+  };
+
+  Plotly.react(element, traces, layout, {
+    displayModeBar: false,
+    responsive: true,
+  });
+}
+
 const button = document.getElementById("import-button");
 const weatherImportButton = document.getElementById("weather-import-button");
 const status = document.getElementById("status");
@@ -143,6 +185,7 @@ const heatpumpSummary = document.getElementById("heatpump-summary");
 const priceSummary = document.getElementById("price-summary");
 const forecastSummary = document.getElementById("forecast-summary");
 const precipitationSummary = document.getElementById("precipitation-summary");
+const weatherStripSummary = document.getElementById("weather-strip-summary");
 const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
 const outdoorChart = document.getElementById("outdoor-chart");
@@ -151,6 +194,7 @@ const heatpumpChart = document.getElementById("heatpump-chart");
 const priceChart = document.getElementById("price-chart");
 const forecastChart = document.getElementById("forecast-chart");
 const precipitationChart = document.getElementById("precipitation-chart");
+const weatherStripChart = document.getElementById("weather-strip-chart");
 const shutterChart = document.getElementById("shutter-chart");
 const compressorSummary = document.getElementById("compressor-summary");
 const compressorChart = document.getElementById("compressor-chart");
@@ -164,6 +208,7 @@ const chartElements = [
   priceChart,
   forecastChart,
   precipitationChart,
+  weatherStripChart,
   shutterChart,
   compressorChart,
   supplyChart,
@@ -230,6 +275,7 @@ function handleChartLoadError(error) {
     priceSummary,
     forecastSummary,
     precipitationSummary,
+    weatherStripSummary,
     shutterSummary,
     compressorSummary,
   ]
@@ -340,7 +386,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !precipitationChart || !shutterChart || !compressorChart) {
+  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !precipitationChart || !weatherStripChart || !shutterChart || !compressorChart) {
     return;
   }
 
@@ -479,6 +525,11 @@ async function loadCharts() {
     xRange: [startIso, endIso],
   });
 
+  renderWeatherStrip(weatherStripChart, payload.forecast_weather_segments, {
+    emptyText: "Geen weerverwachting voor deze dag",
+    xRange: [startIso, endIso],
+  });
+
   renderPlot(thermalChart, [payload.thermal_output, payload.cop], {
     colors: ["#ff7043", "#4caf50"],
     emptyText: "Geen thermische output voor deze dag",
@@ -561,6 +612,9 @@ async function loadCharts() {
   );
   if (precipitationSummary) {
     precipitationSummary.textContent = summarizeSeries(payload.forecast_precipitation, 2);
+  }
+  if (weatherStripSummary) {
+    weatherStripSummary.textContent = summarizeWeatherSegments(payload.forecast_weather_segments);
   }
 }
 
@@ -810,6 +864,54 @@ function summarizeNamedLatest(series, label) {
   }
   const unit = series.unit || "";
   return `${label}: ${latest.value.toFixed(1)} ${unit}`.trim();
+}
+
+function summarizeWeatherSegments(segments) {
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return "-";
+  }
+
+  const uniqueLabels = [];
+  for (const segment of segments) {
+    if (!uniqueLabels.includes(segment.label)) {
+      uniqueLabels.push(segment.label);
+    }
+  }
+
+  if (uniqueLabels.length <= 3) {
+    return uniqueLabels.join(" · ");
+  }
+
+  return `${uniqueLabels.slice(0, 3).join(" · ")} · …`;
+}
+
+function weatherSegmentMidpoint(segment) {
+  return new Date((Date.parse(segment.start) + Date.parse(segment.end)) / 2).toISOString();
+}
+
+function weatherSegmentWidth(segment) {
+  return Date.parse(segment.end) - Date.parse(segment.start);
+}
+
+function weatherSegmentDurationMinutes(segment) {
+  return weatherSegmentWidth(segment) / (60 * 1000);
+}
+
+function weatherSegmentText(segment) {
+  return weatherSegmentDurationMinutes(segment) >= 45 ? segment.label : "";
+}
+
+function weatherCodeColor(code) {
+  if (code === 0) return "#ffe082";
+  if (code === 1) return "#fff9c4";
+  if (code === 2) return "#cfd8dc";
+  if (code === 3) return "#b0bec5";
+  if ([45, 48].includes(code)) return "#e0e0e0";
+  if ([51, 53, 55, 56, 57].includes(code)) return "#b3e5fc";
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "#90caf9";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "#e1f5fe";
+  if ([95, 96, 99].includes(code)) return "#d1c4e9";
+  return "#eeeeee";
 }
 
 function activeStatusLabels(statusSeriesList, timestamp) {

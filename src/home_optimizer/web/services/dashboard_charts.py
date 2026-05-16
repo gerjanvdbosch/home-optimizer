@@ -16,6 +16,7 @@ from home_optimizer.domain import (
     DHW_TOP_TEMPERATURE,
     FORECAST_PRECIPITATION,
     FORECAST_TEMPERATURE,
+    FORECAST_WEATHER_CODE,
     GTI_LIVING_ROOM_WINDOWS,
     GTI_PV,
     HP_DELTA_T,
@@ -41,13 +42,14 @@ from home_optimizer.domain import (
     adjusted_gti_with_shutter,
     build_daily_target_band_series,
     latest_value_at,
+    weather_code_label,
 )
 from home_optimizer.domain.pricing import (
     DEFAULT_DYNAMIC_PRICE_SOURCE,
     DEFAULT_FIXED_PRICE_SOURCE,
     resolve_daily_price_series,
 )
-from home_optimizer.domain.time import current_local_timezone
+from home_optimizer.domain.time import current_local_timezone, normalize_utc_timestamp
 from home_optimizer.web.mappers import series_response, text_series_response
 from home_optimizer.web.ports import DashboardDataReader
 from home_optimizer.web.schemas import DashboardChartsResponse
@@ -63,6 +65,55 @@ def empty_series(name: str, unit: str | None = None) -> NumericSeries:
 
 def empty_text_series(name: str) -> TextSeries:
     return TextSeries(name=name, points=[])
+
+
+def build_weather_segments(
+    series: NumericSeries | None,
+    *,
+    end_time: datetime,
+) -> list[dict[str, str | int]]:
+    if series is None or not series.points:
+        return []
+
+    relevant_points = [
+        point
+        for point in series.points
+        if point.timestamp < normalize_utc_timestamp(end_time)
+    ]
+    if not relevant_points:
+        return []
+
+    segments: list[dict[str, str | int]] = []
+    current_start = relevant_points[0].timestamp
+    current_code = int(relevant_points[0].value)
+
+    for point in relevant_points[1:]:
+        point_code = int(point.value)
+        if point_code == current_code:
+            continue
+        segments.append(
+            {
+                "start": current_start,
+                "end": point.timestamp,
+                "code": current_code,
+                "label": weather_code_label(current_code),
+            }
+        )
+        current_start = point.timestamp
+        current_code = point_code
+
+    end_timestamp = normalize_utc_timestamp(end_time)
+    if current_start < end_timestamp:
+        segments.append(
+            {
+                "start": current_start,
+                "end": end_timestamp,
+                "code": current_code,
+                "label": weather_code_label(current_code),
+            }
+        )
+
+    return segments
 
 
 def build_delta_series(
@@ -217,6 +268,7 @@ class DashboardChartsService:
             names=[
                 FORECAST_TEMPERATURE,
                 FORECAST_PRECIPITATION,
+                FORECAST_WEATHER_CODE,
                 GTI_PV,
                 GTI_LIVING_ROOM_WINDOWS,
             ],
@@ -300,6 +352,10 @@ class DashboardChartsService:
             end_time=end_time,
             fetched_series=electricity_price_series if electricity_price_series.points else None,
         )
+        forecast_weather_segments = build_weather_segments(
+            forecast_series_by_name.get(FORECAST_WEATHER_CODE),
+            end_time=end_time,
+        )
 
         return DashboardChartsResponse.model_validate(
             {
@@ -360,6 +416,7 @@ class DashboardChartsService:
                         empty_series(FORECAST_PRECIPITATION),
                     )
                 ),
+                "forecast_weather_segments": forecast_weather_segments,
                 "forecast_gti": [
                     series_response(forecast_series_by_name.get(GTI_PV, empty_series(GTI_PV))),
                     series_response(

@@ -550,6 +550,14 @@ class FakeTimeSeriesReadRepository:
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.4)],
             ),
             NumericSeries(
+                name="weather_code",
+                unit="code",
+                points=[
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0),
+                    NumericPoint(timestamp="2026-04-25T18:00:00+00:00", value=61.0),
+                ],
+            ),
+            NumericSeries(
                 name="gti_pv",
                 unit="W/m2",
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=500.0)],
@@ -1457,6 +1465,20 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         "unit": "mm",
         "points": [{"timestamp": "2026-04-25T12:00:00+00:00", "value": 0.4}],
     }
+    assert payload["forecast_weather_segments"] == [
+        {
+            "start": "2026-04-25T12:00:00+00:00",
+            "end": "2026-04-25T18:00:00+00:00",
+            "code": 0,
+            "label": "helder",
+        },
+        {
+            "start": "2026-04-25T18:00:00+00:00",
+            "end": expected_day_end.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds"),
+            "code": 61,
+            "label": "lichte regen",
+        },
+    ]
     local_timezone = dashboard_charts_module.current_timezone()
     start_time = datetime.combine(chart_date, time.min, tzinfo=local_timezone)
     end_time = start_time + timedelta(days=1)
@@ -1488,7 +1510,7 @@ def test_dashboard_charts_endpoint_returns_day_series() -> None:
         ("text", ["hp_mode"], start_time.isoformat(), end_time.isoformat()),
         (
             "forecast",
-            ["temperature", "precipitation", "gti_pv", "gti_living_room_windows"],
+            ["temperature", "precipitation", "weather_code", "gti_pv", "gti_living_room_windows"],
             start_time.isoformat(),
             forecast_end_time.isoformat(),
         ),

@@ -55,6 +55,13 @@ class ChartTextSeriesResponse(BaseModel):
     points: list[ChartTextPointResponse]
 
 
+class WeatherSegmentResponse(BaseModel):
+    start: str
+    end: str
+    code: int
+    label: str
+
+
 class DashboardChartsResponse(BaseModel):
     date: str
     electricity_price: ChartSeriesResponse
@@ -74,6 +81,7 @@ class DashboardChartsResponse(BaseModel):
     heatpump_statuses: list[ChartSeriesResponse]
     forecast_temperature: ChartSeriesResponse
     forecast_precipitation: ChartSeriesResponse
+    forecast_weather_segments: list[WeatherSegmentResponse]
     forecast_gti: list[ChartSeriesResponse]
     pv_output_power: ChartSeriesResponse
     baseload: ChartSeriesResponse

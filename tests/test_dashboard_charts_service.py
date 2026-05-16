@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from home_optimizer.app import AppSettings
 from home_optimizer.domain import (
+    FORECAST_WEATHER_CODE,
     NumericPoint,
     NumericSeries,
     OUTDOOR_TEMPERATURE,
@@ -225,6 +226,43 @@ def test_dashboard_charts_service_includes_forecast_precipitation_chart() -> Non
     assert len(response.forecast_precipitation.points) == 1
     assert response.forecast_precipitation.points[0].timestamp == "2026-04-25T12:00:00+00:00"
     assert response.forecast_precipitation.points[0].value == 0.35
+
+
+def test_dashboard_charts_service_builds_weather_segments_from_forecast_codes() -> None:
+    reader = FakeDashboardDataReader(
+        forecast_series=[
+            NumericSeries(
+                name=FORECAST_WEATHER_CODE,
+                unit="code",
+                points=[
+                    NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.0),
+                    NumericPoint(timestamp="2026-04-25T12:15:00+00:00", value=0.0),
+                    NumericPoint(timestamp="2026-04-25T12:30:00+00:00", value=61.0),
+                ],
+            )
+        ]
+    )
+    service = DashboardChartsService(reader, build_settings())
+
+    response = service.get_day_charts(date(2026, 4, 25))
+    local_timezone = current_timezone()
+    day_end = datetime.combine(date(2026, 4, 25), time.min, tzinfo=local_timezone) + timedelta(days=1)
+
+    assert any(FORECAST_WEATHER_CODE in names for names in reader.read_forecast_series_calls)
+    assert [segment.model_dump() for segment in response.forecast_weather_segments] == [
+        {
+            "start": "2026-04-25T12:00:00+00:00",
+            "end": "2026-04-25T12:30:00+00:00",
+            "code": 0,
+            "label": "helder",
+        },
+        {
+            "start": "2026-04-25T12:30:00+00:00",
+            "end": normalize_utc_timestamp(day_end),
+            "code": 61,
+            "label": "lichte regen",
+        },
+    ]
 
 
 def test_dashboard_charts_service_clamps_cop_to_ten() -> None:
