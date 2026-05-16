@@ -874,8 +874,10 @@ class SpaceHeatingMpcSolver:
         future_need_factors: list[float] = []
         for index, step in enumerate(problem.horizon):
             base_target_c = base_targets_c[index]
+            comfort_floor_c = float(step.temp_min_c)
+            base_tracking_band_c = max(0.0, base_target_c - comfort_floor_c)
             comfort_headroom_c = max(0.0, float(step.temp_max_c) - base_target_c)
-            if comfort_headroom_c <= 0.0:
+            if comfort_headroom_c <= 0.0 and base_tracking_band_c <= 0.0:
                 future_need_factors.append(0.0)
                 useful_preheat_targets_c.append(base_target_c)
                 continue
@@ -899,17 +901,25 @@ class SpaceHeatingMpcSolver:
                     max(future_target_deficit_c, future_comfort_min_deficit_c)
                     * future_price_factor,
                 )
-            future_need_factor = min(future_need_signal_c / comfort_headroom_c, 1.0)
+            future_need_normalizer_c = max(comfort_headroom_c, base_tracking_band_c, 1e-9)
+            future_need_factor = min(future_need_signal_c / future_need_normalizer_c, 1.0)
             future_need_factors.append(future_need_factor)
+            opportunity_factor = pv_factors[index] * math.sqrt(max(future_need_factor, 0.0))
+            economic_tracking_target_c = (
+                comfort_floor_c
+                + (base_tracking_band_c * opportunity_factor)
+            )
             preheat_headroom_c = (
                 comfort_headroom_c
-                * pv_factors[index]
-                * math.sqrt(max(future_need_factor, 0.0))
+                * opportunity_factor
             )
             useful_preheat_targets_c.append(
                 min(
                     float(step.temp_max_c),
-                    max(base_target_c, base_target_c + preheat_headroom_c),
+                    max(
+                        comfort_floor_c,
+                        economic_tracking_target_c + preheat_headroom_c,
+                    ),
                 )
             )
 

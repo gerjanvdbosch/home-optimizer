@@ -63,7 +63,7 @@ def test_site_cost_prefers_pv_surplus_window_for_heating() -> None:
     assert plan.steps[1].estimated_energy_cost_eur < (0.30 * 2.0 * 0.25)
 
 
-def test_target_tracking_prefers_heating_toward_target_within_wide_comfort_band() -> None:
+def test_target_tracking_does_not_chase_midpoint_without_pv_opportunity() -> None:
     start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     horizon = [
         MpcHorizonStep(
@@ -113,11 +113,12 @@ def test_target_tracking_prefers_heating_toward_target_within_wide_comfort_band(
     )
 
     assert plan.feasible is True
-    assert plan.steps[0].hp_on is True
-    assert plan.objective_breakdown.temperature_tracking > 0.0
+    assert plan.steps[0].hp_on is False
+    assert plan.steps[0].useful_preheat_target_c == pytest.approx(19.0)
+    assert plan.objective_breakdown.temperature_tracking == pytest.approx(0.0)
 
 
-def test_useful_preheat_target_stays_within_base_target_and_comfort_max() -> None:
+def test_useful_preheat_target_stays_within_comfort_band() -> None:
     start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     horizon = [
         MpcHorizonStep(
@@ -153,7 +154,7 @@ def test_useful_preheat_target_stays_within_base_target_and_comfort_max() -> Non
 
     assert plan.feasible is True
     for step in plan.steps:
-        assert step.useful_preheat_target_c >= 20.0
+        assert step.useful_preheat_target_c >= 19.0
         assert step.useful_preheat_target_c <= 21.0
 
 
@@ -232,6 +233,45 @@ def test_mpc_avoids_unnecessary_heating_near_comfort_max() -> None:
     )
 
     assert plan.feasible is True
+    assert plan.steps[0].hp_on is False
+
+
+def test_mpc_does_not_chase_midpoint_target_without_pv_surplus() -> None:
+    start_time = datetime(2026, 1, 1, 19, 30, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=15 * step),
+            outdoor_temp_c=12.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=0.0,
+            base_load_power_forecast_kw=0.5,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(4)
+    ]
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(interval_minutes=15, horizon=horizon),
+        control_model=LinearThermalControlModel(
+            a=0.99,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.35,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.6, hp_on=False, off_steps=1),
+    )
+
+    assert plan.feasible is True
+    assert plan.steps[0].useful_preheat_target_c == pytest.approx(19.0)
     assert plan.steps[0].hp_on is False
 
 
