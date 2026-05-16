@@ -25,6 +25,7 @@ class FakeDashboardDataReader:
         self,
         *,
         series: list[NumericSeries] | None = None,
+        forecast_series: list[NumericSeries] | None = None,
         electricity_price_series: NumericSeries | None = None,
     ) -> None:
         self._series = series or [
@@ -39,12 +40,14 @@ class FakeDashboardDataReader:
                 points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=32.5)],
             ),
         ]
+        self._forecast_series = forecast_series or []
         self._electricity_price_series = electricity_price_series or NumericSeries(
             name="electricity_price",
             unit="EUR/kWh",
             points=[],
         )
         self.read_series_calls: list[list[str]] = []
+        self.read_forecast_series_calls: list[list[str]] = []
 
     def read_series(self, names, start_time, end_time) -> list[NumericSeries]:
         self.read_series_calls.append(list(names))
@@ -57,7 +60,8 @@ class FakeDashboardDataReader:
         return []
 
     def read_forecast_series(self, names, start_time, end_time) -> list[NumericSeries]:
-        return []
+        self.read_forecast_series_calls.append(list(names))
+        return self._forecast_series
 
     def read_electricity_price_series(
         self,
@@ -199,6 +203,28 @@ def test_dashboard_charts_service_includes_outdoor_temperature_chart() -> None:
     assert len(response.outdoor_temperature.points) == 1
     assert response.outdoor_temperature.points[0].timestamp == "2026-04-25T12:00:00+00:00"
     assert response.outdoor_temperature.points[0].value == 11.4
+
+
+def test_dashboard_charts_service_includes_forecast_precipitation_chart() -> None:
+    reader = FakeDashboardDataReader(
+        forecast_series=[
+            NumericSeries(
+                name="precipitation",
+                unit="mm",
+                points=[NumericPoint(timestamp="2026-04-25T12:00:00+00:00", value=0.35)],
+            )
+        ]
+    )
+    service = DashboardChartsService(reader, build_settings())
+
+    response = service.get_day_charts(date(2026, 4, 25))
+
+    assert any("precipitation" in names for names in reader.read_forecast_series_calls)
+    assert response.forecast_precipitation.name == "precipitation"
+    assert response.forecast_precipitation.unit == "mm"
+    assert len(response.forecast_precipitation.points) == 1
+    assert response.forecast_precipitation.points[0].timestamp == "2026-04-25T12:00:00+00:00"
+    assert response.forecast_precipitation.points[0].value == 0.35
 
 
 def test_dashboard_charts_service_clamps_cop_to_ten() -> None:

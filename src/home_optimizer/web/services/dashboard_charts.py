@@ -14,6 +14,7 @@ from home_optimizer.domain import (
     DHW_TARGET_MIN_TEMPERATURE,
     DHW_TARGET_TEMPERATURE,
     DHW_TOP_TEMPERATURE,
+    FORECAST_PRECIPITATION,
     FORECAST_TEMPERATURE,
     GTI_LIVING_ROOM_WINDOWS,
     GTI_PV,
@@ -213,7 +214,12 @@ class DashboardChartsService:
             end_time=end_time,
         )
         forecast_series = self.reader.read_forecast_series(
-            names=[FORECAST_TEMPERATURE, GTI_PV, GTI_LIVING_ROOM_WINDOWS],
+            names=[
+                FORECAST_TEMPERATURE,
+                FORECAST_PRECIPITATION,
+                GTI_PV,
+                GTI_LIVING_ROOM_WINDOWS,
+            ],
             start_time=start_time,
             end_time=end_time + timedelta(minutes=15),
         )
@@ -346,6 +352,12 @@ class DashboardChartsService:
                     forecast_series_by_name.get(
                         FORECAST_TEMPERATURE,
                         empty_series(FORECAST_TEMPERATURE),
+                    )
+                ),
+                "forecast_precipitation": series_response(
+                    forecast_series_by_name.get(
+                        FORECAST_PRECIPITATION,
+                        empty_series(FORECAST_PRECIPITATION),
                     )
                 ),
                 "forecast_gti": [

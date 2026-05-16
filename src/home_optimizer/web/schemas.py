@@ -73,6 +73,7 @@ class DashboardChartsResponse(BaseModel):
     heatpump_mode: ChartTextSeriesResponse
     heatpump_statuses: list[ChartSeriesResponse]
     forecast_temperature: ChartSeriesResponse
+    forecast_precipitation: ChartSeriesResponse
     forecast_gti: list[ChartSeriesResponse]
     pv_output_power: ChartSeriesResponse
     baseload: ChartSeriesResponse

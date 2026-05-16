@@ -142,6 +142,7 @@ const dhwSummary = document.getElementById("dhw-summary");
 const heatpumpSummary = document.getElementById("heatpump-summary");
 const priceSummary = document.getElementById("price-summary");
 const forecastSummary = document.getElementById("forecast-summary");
+const precipitationSummary = document.getElementById("precipitation-summary");
 const shutterSummary = document.getElementById("shutter-summary");
 const roomChart = document.getElementById("room-chart");
 const outdoorChart = document.getElementById("outdoor-chart");
@@ -149,6 +150,7 @@ const dhwChart = document.getElementById("dhw-chart");
 const heatpumpChart = document.getElementById("heatpump-chart");
 const priceChart = document.getElementById("price-chart");
 const forecastChart = document.getElementById("forecast-chart");
+const precipitationChart = document.getElementById("precipitation-chart");
 const shutterChart = document.getElementById("shutter-chart");
 const compressorSummary = document.getElementById("compressor-summary");
 const compressorChart = document.getElementById("compressor-chart");
@@ -161,6 +163,7 @@ const chartElements = [
   heatpumpChart,
   priceChart,
   forecastChart,
+  precipitationChart,
   shutterChart,
   compressorChart,
   supplyChart,
@@ -192,6 +195,7 @@ const forecastSeriesStyles = {
   gti_living_room_windows: { label: "GTI ramen", color: "#6d4c41" },
   gti_living_room_windows_adjusted: { label: "Instraling", color: "#6d4c41", dash: "dot" },
   temperature: { label: "Buitentemperatuur", color: "#1e88e5" },
+  precipitation: { label: "Neerslag", color: "#1565c0" },
 };
 
 let selectedDate = new Date();
@@ -225,6 +229,7 @@ function handleChartLoadError(error) {
     heatpumpSummary,
     priceSummary,
     forecastSummary,
+    precipitationSummary,
     shutterSummary,
     compressorSummary,
   ]
@@ -335,7 +340,7 @@ async function pollImportJob(jobId) {
 }
 
 async function loadCharts() {
-  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !shutterChart || !compressorChart) {
+  if (!roomChart || !outdoorChart || !dhwChart || !heatpumpChart || !priceChart || !forecastChart || !precipitationChart || !shutterChart || !compressorChart) {
     return;
   }
 
@@ -462,6 +467,18 @@ async function loadCharts() {
     },
   );
 
+  renderPlot(precipitationChart, [payload.forecast_precipitation], {
+    colors: [forecastSeriesStyles.precipitation.color],
+    emptyText: "Geen neerslagverwachting voor deze dag",
+    yTitle: payload.forecast_precipitation.unit || "",
+    traceOptions: [{
+      label: forecastSeriesStyles.precipitation.label,
+      precision: 2,
+      shape: "hv",
+    }],
+    xRange: [startIso, endIso],
+  });
+
   renderPlot(thermalChart, [payload.thermal_output, payload.cop], {
     colors: ["#ff7043", "#4caf50"],
     emptyText: "Geen thermische output voor deze dag",
@@ -542,6 +559,9 @@ async function loadCharts() {
     payload.forecast_temperature,
     payload.forecast_gti,
   );
+  if (precipitationSummary) {
+    precipitationSummary.textContent = summarizeSeries(payload.forecast_precipitation, 2);
+  }
 }
 
 function renderHeatpumpPowerPlot(element, powerSeries, modeSeries, statusSeriesList, options = {}) {
