@@ -976,6 +976,7 @@ def test_space_heating_mpc_plan_endpoint_returns_plan() -> None:
     assert payload["objective_breakdown"]["runtime"] == 0.4
     assert payload["objective_breakdown"]["energy_cost"] == 3.0
     assert payload["objective_breakdown"]["pv_self_consumption_reward"] == 0.0
+    assert payload["objective_breakdown"]["captured_pv_kwh"] == 0.0
     assert payload["objective_breakdown"]["unnecessary_heating"] == 0.0
     assert payload["objective_breakdown"]["total"] == 255.4
     assert (
@@ -1061,9 +1062,11 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert payload["mpc_objective_breakdown"]["temperature_tracking"] == 0.5
     assert payload["mpc_objective_breakdown"]["tracking_under_target"] == 0.3
     assert payload["mpc_objective_breakdown"]["tracking_over_target"] == 0.2
+    assert payload["mpc_objective_breakdown"]["captured_pv_kwh"] == 0.0
     assert payload["mpc_objective_breakdown"]["total"] == pytest.approx(51.55)
     assert payload["solver_objective_breakdown"]["comfort_total"] == 13.0
     assert payload["solver_objective_breakdown"]["temperature_tracking"] == 3.5
+    assert payload["solver_objective_breakdown"]["captured_pv_kwh"] == 0.0
     assert payload["solver_objective_breakdown"]["total"] == pytest.approx(269.9)
     assert payload["mpc_summary"]["infeasible_count"] == 1
     assert payload["historical_summary"]["estimated_energy_cost_eur"] == 0.2

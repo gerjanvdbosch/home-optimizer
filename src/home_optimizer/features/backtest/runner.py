@@ -363,6 +363,7 @@ class SpaceHeatingMpcBacktestRunner:
             pv_self_consumption_reward=(
                 left.pv_self_consumption_reward + right.pv_self_consumption_reward
             ),
+            captured_pv_kwh=left.captured_pv_kwh + right.captured_pv_kwh,
         )
 
     @staticmethod
@@ -392,21 +393,23 @@ class SpaceHeatingMpcBacktestRunner:
             current_step.hp_electric_power_forecast_kw * float(int(hp_on)),
             pv_surplus_kw,
         )
+        dt_hours = interval_minutes / 60.0
+        captured_pv_kwh = pv_self_consumable_kw * dt_hours
         return MpcObjectiveBreakdown(
             comfort_low=(
                 objective_weights.comfort_low
-                * (interval_minutes / 60.0)
+                * dt_hours
                 * slack_low_c
             ),
             active_comfort_high=(
                 float(objective_weights.active_comfort_high or 0.0)
-                * (interval_minutes / 60.0)
+                * dt_hours
                 * slack_high_c
                 * float(int(active_heating))
             ),
             passive_comfort_high=(
                 objective_weights.passive_comfort_high
-                * (interval_minutes / 60.0)
+                * dt_hours
                 * slack_high_c
                 * float(int(not active_heating))
             ),
@@ -415,7 +418,7 @@ class SpaceHeatingMpcBacktestRunner:
             unnecessary_heating=(
                 objective_weights.unnecessary_heating
                 * tracking_over_c
-                * float(int(hp_on))
+                * float(int(active_heating))
             ),
             terminal=0.0,
             start=objective_weights.start * float(int(start)),
@@ -428,9 +431,9 @@ class SpaceHeatingMpcBacktestRunner:
             ),
             pv_self_consumption_reward=(
                 objective_weights.pv_self_consumption
-                * (interval_minutes / 60.0)
-                * pv_self_consumable_kw
+                * captured_pv_kwh
             ),
+            captured_pv_kwh=captured_pv_kwh,
         )
 
     @staticmethod

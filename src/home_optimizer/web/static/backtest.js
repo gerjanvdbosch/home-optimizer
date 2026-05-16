@@ -235,6 +235,7 @@ function objectiveBreakdownRows(breakdown) {
     ["Target tracking total", breakdown.temperature_tracking],
     ["Energy cost", breakdown.energy_cost],
     ["PV self-consumption reward", breakdown.pv_self_consumption_reward],
+    ["Captured PV (kWh)", breakdown.captured_pv_kwh],
     ["Unnecessary heating cost", breakdown.unnecessary_heating],
     ["Terminal cost", breakdown.terminal_cost],
     ["Start penalty", breakdown.start_penalty],

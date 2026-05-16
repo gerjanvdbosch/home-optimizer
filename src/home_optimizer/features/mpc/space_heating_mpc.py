@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from time import perf_counter
 from typing import Any
 
@@ -86,6 +87,7 @@ class SpaceHeatingMpcSolver:
             runtime=float(pyo.value(model.runtime_term)),
             energy_cost=float(pyo.value(model.energy_term - model.energy_baseline_term)),
             pv_self_consumption_reward=float(pyo.value(model.pv_self_consumption_reward_term)),
+            captured_pv_kwh=float(pyo.value(model.captured_pv_kwh_term)),
         )
         objective_value = float(pyo.value(model.objective))
         steps: list[MpcPlanStep] = []
@@ -318,7 +320,10 @@ class SpaceHeatingMpcSolver:
             >= (
                 model_ref.room_temp[t]
                 - model_ref.useful_preheat_target[t]
-                - (model_ref.unnecessary_heating_big_m[t] * (1 - model_ref.hp_on[t]))
+                - (
+                    model_ref.unnecessary_heating_big_m[t]
+                    * (1 - model_ref.active_heating_state[t])
+                )
             ),
         )
 
@@ -444,6 +449,10 @@ class SpaceHeatingMpcSolver:
             * model.hp_on[t]
             for t in range(horizon_size)
         )
+        captured_pv_kwh_term = sum(
+            problem.dt_hours * model.pv_self_consumable_kw[t] * model.hp_on[t]
+            for t in range(horizon_size)
+        )
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
@@ -462,6 +471,7 @@ class SpaceHeatingMpcSolver:
         model.energy_term = pyo.Expression(expr=energy_term)
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
         model.pv_self_consumption_reward_term = pyo.Expression(expr=pv_self_consumption_reward_term)
+        model.captured_pv_kwh_term = pyo.Expression(expr=captured_pv_kwh_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
@@ -654,7 +664,10 @@ class SpaceHeatingMpcSolver:
             >= (
                 model_ref.room_temp[t]
                 - model_ref.useful_preheat_target[t]
-                - (model_ref.unnecessary_heating_big_m[t] * (1 - model_ref.hp_on[t]))
+                - (
+                    model_ref.unnecessary_heating_big_m[t]
+                    * (1 - model_ref.active_heating_state[t])
+                )
             ),
         )
 
@@ -780,6 +793,10 @@ class SpaceHeatingMpcSolver:
             * model.hp_on[t]
             for t in range(horizon_size)
         )
+        captured_pv_kwh_term = sum(
+            problem.dt_hours * model.pv_self_consumable_kw[t] * model.hp_on[t]
+            for t in range(horizon_size)
+        )
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
@@ -798,6 +815,7 @@ class SpaceHeatingMpcSolver:
         model.energy_term = pyo.Expression(expr=energy_term)
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
         model.pv_self_consumption_reward_term = pyo.Expression(expr=pv_self_consumption_reward_term)
+        model.captured_pv_kwh_term = pyo.Expression(expr=captured_pv_kwh_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
@@ -868,17 +886,26 @@ class SpaceHeatingMpcSolver:
                     future_price_factor += float(
                         problem.horizon[future_index].import_price_eur_kwh / max_import_price
                     )
-                future_deficit_c = max(
+                future_target_deficit_c = max(
                     0.0,
                     base_targets_c[future_index] - no_heat_rollout[future_index],
                 )
+                future_comfort_min_deficit_c = max(
+                    0.0,
+                    float(problem.horizon[future_index].temp_min_c) - no_heat_rollout[future_index],
+                )
                 future_need_signal_c = max(
                     future_need_signal_c,
-                    future_deficit_c * future_price_factor,
+                    max(future_target_deficit_c, future_comfort_min_deficit_c)
+                    * future_price_factor,
                 )
             future_need_factor = min(future_need_signal_c / comfort_headroom_c, 1.0)
             future_need_factors.append(future_need_factor)
-            preheat_headroom_c = comfort_headroom_c * pv_factors[index] * future_need_factor
+            preheat_headroom_c = (
+                comfort_headroom_c
+                * pv_factors[index]
+                * math.sqrt(max(future_need_factor, 0.0))
+            )
             useful_preheat_targets_c.append(
                 min(
                     float(step.temp_max_c),

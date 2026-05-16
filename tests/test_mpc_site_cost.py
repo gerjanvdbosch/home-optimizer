@@ -194,6 +194,7 @@ def test_mpc_preheats_with_pv_surplus_and_future_heat_need() -> None:
     assert plan.feasible is True
     assert plan.steps[0].useful_preheat_target_c > 20.0
     assert plan.steps[0].hp_on is True
+    assert plan.objective_breakdown.captured_pv_kwh > 0.0
 
 
 def test_mpc_avoids_unnecessary_heating_near_comfort_max() -> None:

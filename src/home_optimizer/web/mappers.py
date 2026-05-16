@@ -261,6 +261,7 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
         pv_self_consumption_reward=(
             result.mpc_objective_breakdown.pv_self_consumption_reward
         ),
+        captured_pv_kwh=result.mpc_objective_breakdown.captured_pv_kwh,
         unnecessary_heating=result.mpc_objective_breakdown.unnecessary_heating,
         terminal_cost=result.mpc_objective_breakdown.terminal,
         start_penalty=result.mpc_objective_breakdown.start,
@@ -280,6 +281,7 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
         pv_self_consumption_reward=(
             result.solver_objective_breakdown.pv_self_consumption_reward
         ),
+        captured_pv_kwh=result.solver_objective_breakdown.captured_pv_kwh,
         unnecessary_heating=result.solver_objective_breakdown.unnecessary_heating,
         terminal_cost=result.solver_objective_breakdown.terminal,
         start_penalty=result.solver_objective_breakdown.start,

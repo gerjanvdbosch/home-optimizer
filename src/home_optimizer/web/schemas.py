@@ -313,6 +313,7 @@ class MpcObjectiveBreakdownResponse(BaseModel):
     temperature_tracking: float
     energy_cost: float
     pv_self_consumption_reward: float
+    captured_pv_kwh: float
     unnecessary_heating: float
     terminal_cost: float
     start_penalty: float

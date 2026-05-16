@@ -203,9 +203,9 @@ class MpcObjectiveWeights(DomainModel):
     unnecessary_heating: float = Field(default=4.0, ge=0.0)
     q_heat_eff_active_threshold_kw: float = Field(default=0.1, ge=0.0)
     terminal: float = Field(default=8.0, ge=0.0)
-    start: float = Field(default=50.0, ge=0.0)
+    start: float = Field(default=10.0, ge=0.0)
     energy: float = Field(default=1.0, ge=0.0)
-    pv_self_consumption: float = Field(default=0.5, ge=0.0)
+    pv_self_consumption: float = Field(default=12.0, ge=0.0)
     runtime: float = Field(default=0.05, ge=0.0)
 
     @model_validator(mode="after")
@@ -272,6 +272,7 @@ class MpcObjectiveBreakdown(DomainModel):
     runtime: float = 0.0
     energy_cost: float = 0.0
     pv_self_consumption_reward: float = 0.0
+    captured_pv_kwh: float = 0.0
 
     @property
     def comfort_high(self) -> float:

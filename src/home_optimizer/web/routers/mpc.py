@@ -69,6 +69,7 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
             temperature_tracking=plan.objective_breakdown.temperature_tracking,
             energy_cost=plan.objective_breakdown.energy_cost,
             pv_self_consumption_reward=plan.objective_breakdown.pv_self_consumption_reward,
+            captured_pv_kwh=plan.objective_breakdown.captured_pv_kwh,
             unnecessary_heating=plan.objective_breakdown.unnecessary_heating,
             terminal_cost=plan.objective_breakdown.terminal,
             start_penalty=plan.objective_breakdown.start,
