@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from statistics import median
 
-from home_optimizer.domain import GTI_PV
+from home_optimizer.domain import (
+    FORECAST_TEMPERATURE,
+    GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+    GTI_PV,
+)
 from home_optimizer.domain.forecast import ForecastEntry
-from home_optimizer.domain.pricing import ElectricityPricingConfig
-from home_optimizer.domain.pricing import PriceInterval
+from home_optimizer.domain.pricing import ElectricityPricingConfig, PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset import MpcDatasetService
@@ -19,7 +22,14 @@ from home_optimizer.features.modeling import (
     TrainedLinearRoomModel,
 )
 from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams
-from home_optimizer.features.mpc.models import MpcInitialState, Rc2StateMpcInitialState
+from home_optimizer.features.mpc.exogenous_features import trailing_exp_filter
+from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
+from home_optimizer.features.mpc.models import (
+    MpcHorizonBuildRequest,
+    MpcHorizonStep,
+    MpcInitialState,
+    Rc2StateMpcInitialState,
+)
 from home_optimizer.features.mpc.ports import ActiveRoomModelReaderPort
 
 
@@ -38,6 +48,7 @@ class SpaceHeatingMpcPreparationService:
         self.target_schedule = list(target_schedule)
         self.electricity_pricing = electricity_pricing or _DynamicPricingLike()
         self.rc_trainer = rc_trainer or RoomRcTrainer()
+        self.horizon_builder = MpcHorizonBuilder()
 
     def resolve_room_model_version(self, model_id: str | None) -> StoredModelVersion | None:
         if model_id is not None:
@@ -134,6 +145,163 @@ class SpaceHeatingMpcPreparationService:
                 )
             )
         return intervals
+
+    def build_forecast_horizon(
+        self,
+        *,
+        start_time_utc: datetime,
+        interval_minutes: int,
+        horizon_steps: int,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        operating_rows: list[MpcDatasetRow],
+        effective_heating_kw: float,
+        hp_electric_power_kw: float,
+        export_price_eur_kwh: float,
+        base_load_power_kw: float | None = None,
+        forecast_entries: list[ForecastEntry] | None = None,
+        price_intervals: list[PriceInterval] | None = None,
+        pv_power_input_scale: float | None = None,
+        created_at_end_time: datetime | None = None,
+    ) -> list[MpcHorizonStep]:
+        resolved_start_time = ensure_utc(start_time_utc)
+        resolved_forecast_entries = (
+            forecast_entries
+            if forecast_entries is not None
+            else self.load_forecast_entries(
+                start_time_utc=resolved_start_time,
+                interval_minutes=interval_minutes,
+                horizon_steps=horizon_steps,
+                created_at_end_time=created_at_end_time,
+            )
+        )
+        resolved_price_intervals = (
+            price_intervals
+            if price_intervals is not None
+            else self.load_price_intervals(
+                start_time_utc=resolved_start_time,
+                interval_minutes=interval_minutes,
+                horizon_steps=horizon_steps,
+            )
+        )
+        resolved_base_load_power_kw = (
+            float(base_load_power_kw)
+            if base_load_power_kw is not None
+            else self.resolve_base_load_power_kw(operating_rows)
+        )
+        resolved_pv_power_input_scale = (
+            float(pv_power_input_scale)
+            if pv_power_input_scale is not None
+            else self.infer_pv_power_input_scale(
+                operating_rows,
+                forecast_entries=resolved_forecast_entries,
+                start_time_utc=resolved_start_time,
+            )
+        )
+        return self.horizon_builder.build(
+            MpcHorizonBuildRequest(
+                start_time_utc=resolved_start_time,
+                horizon_steps=horizon_steps,
+                interval_minutes=interval_minutes,
+                target_schedule=self.target_schedule,
+                forecast_entries=resolved_forecast_entries,
+                price_intervals=resolved_price_intervals,
+                default_effective_heating_kw=effective_heating_kw,
+                default_hp_electric_power_kw=hp_electric_power_kw,
+                default_base_load_power_kw=resolved_base_load_power_kw,
+                default_export_price_eur_kwh=export_price_eur_kwh,
+                pv_power_input_scale=resolved_pv_power_input_scale,
+                solar_gain_filter_alpha=self._solar_gain_filter_alpha(source_model),
+                initial_filtered_solar_gain_kw=self._initial_filtered_solar_gain_kw(
+                    operating_rows,
+                    source_model=source_model,
+                    start_time_utc=resolved_start_time,
+                ),
+                local_timezone=self._local_timezone(source_model),
+            )
+        )
+
+    def build_historical_horizon(
+        self,
+        rows: list[MpcDatasetRow],
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        effective_heating_kw: float,
+        hp_electric_power_kw: float,
+        export_price_eur_kwh: float,
+        history_rows: list[MpcDatasetRow] | None = None,
+    ) -> list[MpcHorizonStep]:
+        if not rows:
+            return []
+        resolved_rows = list(rows)
+        resolved_history_rows = list(history_rows or [])
+        operating_rows = [*resolved_history_rows, *resolved_rows]
+        forecast_entries = self._forecast_entries_from_rows(
+            resolved_rows,
+            source_model=source_model,
+        )
+        price_intervals = self._price_intervals_from_rows(resolved_rows)
+        horizon = self.horizon_builder.build(
+            MpcHorizonBuildRequest(
+                start_time_utc=resolved_rows[0].timestamp_utc,
+                horizon_steps=len(resolved_rows),
+                interval_minutes=self._interval_minutes_from_rows(resolved_rows),
+                target_schedule=self.target_schedule,
+                forecast_entries=forecast_entries,
+                price_intervals=price_intervals,
+                default_effective_heating_kw=effective_heating_kw,
+                default_hp_electric_power_kw=hp_electric_power_kw,
+                default_base_load_power_kw=0.0,
+                default_export_price_eur_kwh=export_price_eur_kwh,
+                pv_power_input_scale=1.0,
+                solar_gain_input_scale=self._solar_gain_input_scale(source_model),
+                solar_gain_filter_alpha=self._solar_gain_filter_alpha(source_model),
+                initial_filtered_solar_gain_kw=self._initial_filtered_solar_gain_kw(
+                    operating_rows,
+                    source_model=source_model,
+                    start_time_utc=resolved_rows[0].timestamp_utc,
+                ),
+                local_timezone=self._local_timezone(source_model),
+                occupied_by_timestamp={
+                    row.timestamp_utc: float(row.occupied_flag) for row in resolved_rows
+                },
+                hp_electric_power_by_timestamp={
+                    row.timestamp_utc: float(row.hp_electric_power_kw or hp_electric_power_kw)
+                    for row in resolved_rows
+                },
+                base_load_power_by_timestamp={
+                    row.timestamp_utc: self._row_base_load_power_kw(row) for row in resolved_rows
+                },
+                export_price_by_timestamp={
+                    row.timestamp_utc: float(row.price_export_eur_kwh or export_price_eur_kwh)
+                    for row in resolved_rows
+                },
+                realized_room_temp_by_timestamp={
+                    row.timestamp_utc: float(row.room_temperature_c)
+                    for row in resolved_rows
+                    if row.room_temperature_c is not None
+                },
+                realized_pv_power_by_timestamp={
+                    row.timestamp_utc: float(row.pv_output_power_kw or 0.0)
+                    for row in resolved_rows
+                },
+                realized_base_load_power_by_timestamp={
+                    row.timestamp_utc: self._row_base_load_power_kw(row) for row in resolved_rows
+                },
+                realized_solar_irradiance_by_timestamp={
+                    row.timestamp_utc: float(row.solar_irradiance_w_m2 or 0.0)
+                    for row in resolved_rows
+                },
+                solar_irradiance_by_timestamp={
+                    row.timestamp_utc: float(row.solar_irradiance_w_m2 or 0.0)
+                    for row in resolved_rows
+                },
+                realized_solar_gain_by_timestamp={
+                    row.timestamp_utc: self.row_solar_gain_kw(row, source_model=source_model)
+                    for row in resolved_rows
+                },
+            )
+        )
+        return horizon
 
     def initial_state_from_rows(
         self,
@@ -271,6 +439,8 @@ class SpaceHeatingMpcPreparationService:
         forecast_entries: list[ForecastEntry],
         start_time_utc: datetime,
     ) -> float:
+        if not rows:
+            return 0.0
         latest_row = rows[-1]
         latest_pv_output_kw = float(latest_row.pv_output_power_kw or 0.0)
         if latest_pv_output_kw <= 0.0:
@@ -305,6 +475,31 @@ class SpaceHeatingMpcPreparationService:
             return 0.0
         return latest_pv_output_kw / start_forecast_value[1]
 
+    def row_solar_gain_proxy_w_m2(self, row: MpcDatasetRow) -> float:
+        if row.solar_gain_proxy_w_m2 is not None:
+            return float(row.solar_gain_proxy_w_m2)
+        irradiance_w_m2 = float(row.solar_irradiance_w_m2 or 0.0)
+        shutter_fraction = 1.0
+        if row.shutter_position_pct is not None:
+            shutter_fraction = min(max(float(row.shutter_position_pct) / 100.0, 0.0), 1.0)
+        return float(irradiance_w_m2 * shutter_fraction)
+
+    def row_solar_gain_kw(
+        self,
+        row: MpcDatasetRow,
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+    ) -> float:
+        solar_gain_proxy_w_m2 = self.row_solar_gain_proxy_w_m2(row)
+        if isinstance(source_model, RoomRcModel):
+            return float(
+                solar_gain_proxy_w_m2
+                * source_model.config.glass_area_m2
+                * source_model.config.g_glass
+                / 1000.0
+            )
+        return float(solar_gain_proxy_w_m2)
+
     @staticmethod
     def row_hp_on(row: MpcDatasetRow) -> bool:
         heating_output_kw = float(row.space_heating_output_estimate_kw or 0.0)
@@ -321,6 +516,114 @@ class SpaceHeatingMpcPreparationService:
         return row.space_heating_output_estimate_kw is not None and float(
             row.space_heating_output_estimate_kw
         ) <= 0.0
+
+    @staticmethod
+    def _interval_minutes_from_rows(rows: list[MpcDatasetRow]) -> int:
+        if len(rows) < 2:
+            raise ValueError("At least two dataset rows are required to infer interval_minutes")
+        delta_minutes = (
+            ensure_utc(rows[1].timestamp_utc) - ensure_utc(rows[0].timestamp_utc)
+        ).total_seconds() / 60.0
+        if delta_minutes <= 0:
+            raise ValueError("Dataset rows must be sorted ascending with unique timestamps")
+        return int(delta_minutes)
+
+    @staticmethod
+    def _row_base_load_power_kw(row: MpcDatasetRow) -> float:
+        return float(row.net_power_kw or 0.0) + float(row.pv_output_power_kw or 0.0) - float(
+            row.hp_electric_power_kw or 0.0
+        )
+
+    def _forecast_entries_from_rows(
+        self,
+        rows: list[MpcDatasetRow],
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+    ) -> list[ForecastEntry]:
+        entries: list[ForecastEntry] = []
+        for row in rows:
+            timestamp_utc = ensure_utc(row.timestamp_utc)
+            entries.extend(
+                [
+                    ForecastEntry(
+                        created_at_utc=timestamp_utc,
+                        forecast_time_utc=timestamp_utc,
+                        name=FORECAST_TEMPERATURE,
+                        value=float(row.outdoor_temperature_c or 0.0),
+                        unit="C",
+                        source="historical_dataset",
+                    ),
+                    ForecastEntry(
+                        created_at_utc=timestamp_utc,
+                        forecast_time_utc=timestamp_utc,
+                        name=GTI_LIVING_ROOM_WINDOWS_ADJUSTED,
+                        value=self.row_solar_gain_proxy_w_m2(row),
+                        unit="W/m2",
+                        source="historical_dataset",
+                    ),
+                    ForecastEntry(
+                        created_at_utc=timestamp_utc,
+                        forecast_time_utc=timestamp_utc,
+                        name=GTI_PV,
+                        value=float(row.pv_output_power_kw or 0.0),
+                        unit="kW",
+                        source="historical_dataset",
+                    ),
+                ]
+            )
+        return entries
+
+    @staticmethod
+    def _price_intervals_from_rows(rows: list[MpcDatasetRow]) -> list[PriceInterval]:
+        interval_minutes = SpaceHeatingMpcPreparationService._interval_minutes_from_rows(rows)
+        return [
+            PriceInterval(
+                start_time_utc=row.timestamp_utc,
+                end_time_utc=row.timestamp_utc + timedelta(minutes=interval_minutes),
+                source="historical_dataset",
+                name="electricity_price",
+                unit="EUR/kWh",
+                value=float(row.price_import_eur_kwh or 0.0),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _solar_gain_input_scale(source_model: TrainedLinearRoomModel | RoomRcModel) -> float:
+        if isinstance(source_model, RoomRcModel):
+            return float(source_model.config.glass_area_m2 * source_model.config.g_glass / 1000.0)
+        return 1.0
+
+    @staticmethod
+    def _solar_gain_filter_alpha(source_model: TrainedLinearRoomModel | RoomRcModel) -> float:
+        if isinstance(source_model, RoomRcModel):
+            return float(source_model.config.alpha_solar)
+        return 0.0
+
+    @staticmethod
+    def _local_timezone(source_model: TrainedLinearRoomModel | RoomRcModel) -> str | None:
+        if isinstance(source_model, RoomRcModel):
+            return source_model.config.local_timezone
+        return None
+
+    def _initial_filtered_solar_gain_kw(
+        self,
+        rows: list[MpcDatasetRow],
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        start_time_utc: datetime,
+    ) -> float:
+        if not isinstance(source_model, RoomRcModel):
+            return 0.0
+        solar_gain_history_kw = [
+            self.row_solar_gain_kw(row, source_model=source_model)
+            for row in rows
+            if row.timestamp_utc < start_time_utc
+        ]
+        return trailing_exp_filter(
+            solar_gain_history_kw,
+            alpha=source_model.config.alpha_solar,
+        )
 
 
 class _MpcDatasetSettings:

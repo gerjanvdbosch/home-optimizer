@@ -90,15 +90,60 @@ class MpcHorizonBuilder:
                     solar_gain_kw=solar_direct_values[step_index],
                     solar_gain_mass_kw=solar_filtered_values[step_index],
                     solar_irradiance_forecast_w_m2=float(
-                        solar_by_timestamp.get(timestamp_utc, 0.0)
+                        request.solar_irradiance_by_timestamp.get(
+                            timestamp_utc,
+                            solar_by_timestamp.get(timestamp_utc, 0.0),
+                        )
+                    ),
+                    solar_irradiance_realized_w_m2=float(
+                        request.realized_solar_irradiance_by_timestamp.get(
+                            timestamp_utc,
+                            solar_by_timestamp.get(timestamp_utc, 0.0),
+                        )
+                    ),
+                    solar_gain_realized_kw=float(
+                        request.realized_solar_gain_by_timestamp.get(
+                            timestamp_utc,
+                            solar_direct_values[step_index],
+                        )
                     ),
                     effective_heating_kw_forecast=request.default_effective_heating_kw,
-                    hp_electric_power_forecast_kw=request.default_hp_electric_power_kw,
+                    hp_electric_power_forecast_kw=float(
+                        request.hp_electric_power_by_timestamp.get(
+                            timestamp_utc,
+                            request.default_hp_electric_power_kw,
+                        )
+                    ),
                     pv_available_power_forecast_kw=float(
                         pv_by_timestamp.get(timestamp_utc, 0.0) * request.pv_power_input_scale
                     ),
-                    base_load_power_forecast_kw=request.default_base_load_power_kw,
-                    occupied=request.default_occupied,
+                    pv_available_power_realized_kw=float(
+                        request.realized_pv_power_by_timestamp.get(
+                            timestamp_utc,
+                            pv_by_timestamp.get(timestamp_utc, 0.0) * request.pv_power_input_scale,
+                        )
+                    ),
+                    base_load_power_forecast_kw=float(
+                        request.base_load_power_by_timestamp.get(
+                            timestamp_utc,
+                            request.default_base_load_power_kw,
+                        )
+                    ),
+                    base_load_power_realized_kw=float(
+                        request.realized_base_load_power_by_timestamp.get(
+                            timestamp_utc,
+                            request.base_load_power_by_timestamp.get(
+                                timestamp_utc,
+                                request.default_base_load_power_kw,
+                            ),
+                        )
+                    ),
+                    occupied=float(
+                        request.occupied_by_timestamp.get(
+                            timestamp_utc,
+                            request.default_occupied,
+                        )
+                    ),
                     hour_sin=hour_sin,
                     hour_cos=hour_cos,
                     target_temp_c=float(
@@ -111,7 +156,13 @@ class MpcHorizonBuilder:
                     temp_max_c=float(temp_max_c),
                     price_eur_kwh=float(price_by_timestamp.get(timestamp_utc, 0.0)),
                     import_price_eur_kwh=float(price_by_timestamp.get(timestamp_utc, 0.0)),
-                    export_price_eur_kwh=request.default_export_price_eur_kwh,
+                    export_price_eur_kwh=float(
+                        request.export_price_by_timestamp.get(
+                            timestamp_utc,
+                            request.default_export_price_eur_kwh,
+                        )
+                    ),
+                    realized_room_temp_c=request.realized_room_temp_by_timestamp.get(timestamp_utc),
                 )
             )
         return horizon

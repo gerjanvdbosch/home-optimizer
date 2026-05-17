@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+
 from pydantic import Field, model_validator
 
 from home_optimizer.domain.forecast import ForecastEntry
@@ -603,6 +604,16 @@ class MpcHorizonBuildRequest(DomainModel):
     local_timezone: str | None = None
     fallback_temp_min_c: float | None = None
     fallback_temp_max_c: float | None = None
+    occupied_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    hp_electric_power_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    base_load_power_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    export_price_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    realized_room_temp_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    realized_pv_power_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    realized_base_load_power_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    solar_irradiance_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    realized_solar_irradiance_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
+    realized_solar_gain_by_timestamp: dict[datetime, float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_fallback_bounds(self) -> "MpcHorizonBuildRequest":

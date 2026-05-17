@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from home_optimizer.domain import (
     FORECAST_TEMPERATURE,
@@ -18,19 +18,11 @@ from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunne
 from home_optimizer.features.dataset.models import MpcDatasetRow
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
-from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.control_model import to_control_model
-from home_optimizer.features.mpc.exogenous_features import (
-    continue_exp_filter,
-    local_hour_sin_cos,
-    solar_gain_proxy_to_kw,
-    trailing_exp_filter,
-)
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
-    MpcControlMode,
     MpcConstraints,
-    MpcHorizonBuildRequest,
+    MpcControlMode,
     MpcHorizonStep,
     MpcObjectiveWeights,
 )
@@ -60,7 +52,6 @@ class BacktestForecastReplayProvider:
         self,
         *,
         preparation: SpaceHeatingMpcPreparationService,
-        target_schedule: list[TemperatureTargetWindow],
         source_model: TrainedLinearRoomModel | RoomRcModel,
         all_rows: list[MpcDatasetRow],
         effective_heating_kw: float,
@@ -68,13 +59,11 @@ class BacktestForecastReplayProvider:
         export_price_eur_kwh: float,
     ) -> None:
         self.preparation = preparation
-        self.target_schedule = list(target_schedule)
         self.source_model = source_model
         self.all_rows = list(all_rows)
         self.effective_heating_kw = effective_heating_kw
         self.hp_electric_power_kw = hp_electric_power_kw
         self.export_price_eur_kwh = export_price_eur_kwh
-        self.horizon_builder = MpcHorizonBuilder()
 
     def get_forecast_horizon(
         self,
@@ -121,62 +110,35 @@ class BacktestForecastReplayProvider:
             interval_minutes=interval_minutes,
         )
         if coverage.missing_forecast_count > 0 or coverage.latest_created_at_utc is None:
+            latest_created_at = (
+                coverage.latest_created_at_utc.isoformat()
+                if coverage.latest_created_at_utc is not None
+                else "none"
+            )
             raise ValueError(
                 "missing_forecast: archived forecast coverage is incomplete for "
                 f"forecast_replay at issue_time={resolved_issue_time.isoformat()} "
                 f"coverage_ratio={coverage.coverage_ratio:.3f} "
-                f"latest_created_at_utc="
-                f"{coverage.latest_created_at_utc.isoformat() if coverage.latest_created_at_utc is not None else 'none'} "
+                f"latest_created_at_utc={latest_created_at} "
                 f"missing={'; '.join(coverage.missing_details[:12])}"
             )
 
-        base_load_forecast_kw = self.preparation.resolve_base_load_power_kw(
-            history_rows or self.all_rows[:1]
-        )
-        pv_power_input_scale = self.preparation.infer_pv_power_input_scale(
-            history_rows or self.all_rows[:1],
-            forecast_entries=forecast_entries,
+        horizon = self.preparation.build_forecast_horizon(
             start_time_utc=resolved_issue_time,
-        )
-        initial_filtered_solar_gain_kw = 0.0
-        solar_gain_filter_alpha = 0.0
-        local_timezone: str | None = None
-        if isinstance(self.source_model, RoomRcModel):
-            solar_gain_history_kw = [
-                SpaceHeatingMpcBacktestService._solar_gain_input(
-                    row,
-                    source_model=self.source_model,
-                )
-                for row in history_rows
-            ]
-            solar_gain_filter_alpha = self.source_model.config.alpha_solar
-            initial_filtered_solar_gain_kw = trailing_exp_filter(
-                solar_gain_history_kw,
-                alpha=solar_gain_filter_alpha,
-            )
-            local_timezone = self.source_model.config.local_timezone
-
-        horizon = self.horizon_builder.build(
-            MpcHorizonBuildRequest(
+            interval_minutes=interval_minutes,
+            horizon_steps=horizon_steps,
+            source_model=self.source_model,
+            operating_rows=history_rows or self.all_rows[:1],
+            effective_heating_kw=self.effective_heating_kw,
+            hp_electric_power_kw=self.hp_electric_power_kw,
+            export_price_eur_kwh=self.export_price_eur_kwh,
+            forecast_entries=forecast_entries,
+            price_intervals=self.preparation.load_price_intervals(
                 start_time_utc=resolved_issue_time,
-                horizon_steps=horizon_steps,
                 interval_minutes=interval_minutes,
-                target_schedule=self.target_schedule,
-                forecast_entries=forecast_entries,
-                price_intervals=self.preparation.load_price_intervals(
-                    start_time_utc=resolved_issue_time,
-                    interval_minutes=interval_minutes,
-                    horizon_steps=horizon_steps,
-                ),
-                default_effective_heating_kw=self.effective_heating_kw,
-                default_hp_electric_power_kw=self.hp_electric_power_kw,
-                default_base_load_power_kw=base_load_forecast_kw,
-                default_export_price_eur_kwh=self.export_price_eur_kwh,
-                pv_power_input_scale=pv_power_input_scale,
-                solar_gain_filter_alpha=solar_gain_filter_alpha,
-                initial_filtered_solar_gain_kw=initial_filtered_solar_gain_kw,
-                local_timezone=local_timezone,
-            )
+                horizon_steps=horizon_steps,
+            ),
+            created_at_end_time=resolved_issue_time + timedelta(microseconds=1),
         )
         forecast_age_minutes = max(
             (resolved_issue_time - coverage.latest_created_at_utc).total_seconds() / 60.0,
@@ -399,7 +361,9 @@ class SpaceHeatingMpcBacktestService:
             if resolved_start_time <= row.timestamp_utc <= resolved_end_time
         ]
         if len(backtest_rows) < 2:
-            raise ValueError("Backtest requires at least two historical rows in the selected window")
+            raise ValueError(
+                "Backtest requires at least two historical rows in the selected window"
+            )
         inference_rows = [*initial_rows, *backtest_rows]
         effective_heating_kw = self.preparation.resolve_effective_heating_kw(
             inference_rows,
@@ -410,9 +374,9 @@ class SpaceHeatingMpcBacktestService:
             fallback_kw=effective_heating_kw,
         )
         export_price_eur_kwh = self.preparation.resolve_export_price_eur_kwh(inference_rows)
-        timeline = self._build_timeline(
+        timeline = self.preparation.build_historical_horizon(
             backtest_rows,
-            initial_rows=initial_rows,
+            history_rows=initial_rows,
             source_model=source_model,
             effective_heating_kw=effective_heating_kw,
             hp_electric_power_kw=hp_electric_power_kw,
@@ -433,7 +397,6 @@ class SpaceHeatingMpcBacktestService:
         if exogenous_mode == "forecast_replay":
             forecast_replay_provider = BacktestForecastReplayProvider(
                 preparation=self.preparation,
-                target_schedule=self.target_schedule,
                 source_model=source_model,
                 all_rows=inference_rows,
                 effective_heating_kw=effective_heating_kw,
@@ -460,116 +423,6 @@ class SpaceHeatingMpcBacktestService:
             control_mode=control_mode,
             forecast_replay_provider=forecast_replay_provider,
         )
-
-    def _build_timeline(
-        self,
-        backtest_rows: list[MpcDatasetRow],
-        *,
-        initial_rows: list[MpcDatasetRow],
-        source_model: TrainedLinearRoomModel | RoomRcModel,
-        effective_heating_kw: float,
-        hp_electric_power_kw: float,
-        export_price_eur_kwh: float,
-    ) -> list[MpcHorizonStep]:
-        solar_direct_values = [
-            self._solar_gain_input(
-                row,
-                source_model=source_model,
-            )
-            for row in backtest_rows
-        ]
-        solar_filtered_values: list[float] = list(solar_direct_values)
-        local_timezone: str | None = None
-        if isinstance(source_model, RoomRcModel):
-            solar_history_kw = [
-                self._solar_gain_input(row, source_model=source_model)
-                for row in initial_rows
-                if row.timestamp_utc < backtest_rows[0].timestamp_utc
-            ]
-            solar_filtered_values = continue_exp_filter(
-                solar_direct_values,
-                alpha=source_model.config.alpha_solar,
-                initial_filtered_value=trailing_exp_filter(
-                    solar_history_kw,
-                    alpha=source_model.config.alpha_solar,
-                ),
-            )
-            local_timezone = source_model.config.local_timezone
-
-        timeline: list[MpcHorizonStep] = []
-        for index, row in enumerate(backtest_rows):
-            room_target_min = row.room_target_min_temperature_c
-            room_target_max = row.room_target_max_temperature_c
-            if room_target_min is None or room_target_max is None:
-                raise ValueError(
-                    f"Missing room target bounds for backtest row at {row.timestamp_utc.isoformat()}"
-                )
-            net_power_kw = float(row.net_power_kw or 0.0)
-            pv_output_kw = float(row.pv_output_power_kw or 0.0)
-            hp_power_kw = float(row.hp_electric_power_kw or 0.0)
-            base_load_power_kw = net_power_kw + pv_output_kw - hp_power_kw
-            hour_sin, hour_cos = local_hour_sin_cos(
-                row.timestamp_utc,
-                local_timezone=local_timezone,
-            )
-            timeline.append(
-                MpcHorizonStep(
-                    timestamp_utc=row.timestamp_utc,
-                    outdoor_temp_c=float(row.outdoor_temperature_c or 0.0),
-                    solar_gain_kw=solar_direct_values[index],
-                    solar_gain_mass_kw=solar_filtered_values[index],
-                    solar_irradiance_forecast_w_m2=float(row.solar_irradiance_w_m2 or 0.0),
-                    solar_irradiance_realized_w_m2=float(row.solar_irradiance_w_m2 or 0.0),
-                    solar_gain_realized_kw=solar_direct_values[index],
-                    effective_heating_kw_forecast=effective_heating_kw,
-                    hp_electric_power_forecast_kw=hp_electric_power_kw,
-                    pv_available_power_forecast_kw=pv_output_kw,
-                    pv_available_power_realized_kw=pv_output_kw,
-                    base_load_power_forecast_kw=base_load_power_kw,
-                    base_load_power_realized_kw=base_load_power_kw,
-                    occupied=float(row.occupied_flag),
-                    hour_sin=hour_sin,
-                    hour_cos=hour_cos,
-                    target_temp_c=(
-                        float(row.room_target_temperature_c)
-                        if row.room_target_temperature_c is not None
-                        else None
-                    ),
-                    temp_min_c=float(room_target_min),
-                    temp_max_c=float(room_target_max),
-                    price_eur_kwh=float(row.price_import_eur_kwh or 0.0),
-                    import_price_eur_kwh=float(row.price_import_eur_kwh or 0.0),
-                    export_price_eur_kwh=float(row.price_export_eur_kwh or export_price_eur_kwh),
-                    realized_room_temp_c=(
-                        float(row.room_temperature_c)
-                        if row.room_temperature_c is not None
-                        else None
-                    ),
-                )
-            )
-        return timeline
-
-    @staticmethod
-    def _solar_gain_input(
-        row: MpcDatasetRow,
-        *,
-        source_model: TrainedLinearRoomModel | RoomRcModel,
-    ) -> float:
-        solar_gain_proxy_w_m2 = row.solar_gain_proxy_w_m2
-        if solar_gain_proxy_w_m2 is None:
-            irradiance_w_m2 = float(row.solar_irradiance_w_m2 or 0.0)
-            shutter_fraction = 1.0
-            if row.shutter_position_pct is not None:
-                shutter_fraction = min(max(float(row.shutter_position_pct) / 100.0, 0.0), 1.0)
-            solar_gain_proxy_w_m2 = irradiance_w_m2 * shutter_fraction
-        solar_gain_proxy_w_m2 = float(solar_gain_proxy_w_m2 or 0.0)
-        if isinstance(source_model, RoomRcModel):
-            return solar_gain_proxy_to_kw(
-                solar_gain_proxy_w_m2,
-                glass_area_m2=source_model.config.glass_area_m2,
-                g_glass=source_model.config.g_glass,
-            )
-        return solar_gain_proxy_w_m2
 
     @staticmethod
     def _historical_energy_cost(

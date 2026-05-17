@@ -3,11 +3,9 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta, timezone
 
 from home_optimizer.domain.forecast import ForecastEntry
-from home_optimizer.domain.pricing import FixedPricing
-from home_optimizer.domain.pricing import PriceInterval
+from home_optimizer.domain.pricing import FixedPricing, PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
-from home_optimizer.features.dataset.models import MpcDataset
-from home_optimizer.features.dataset.models import MpcDatasetRow
+from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import StoredModelVersion
 from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams, RoomRcConfig, RoomRcModel
 from home_optimizer.features.modeling.room_arx import RoomArxConfig, RoomArxModel
@@ -51,7 +49,11 @@ def test_mpc_preparation_uses_configured_fixed_pricing_for_dataset_build(monkeyp
     class _CapturingDatasetService:
         def __init__(self, samples_reader, settings) -> None:
             captured["pricing_mode"] = settings.electricity_pricing.mode
-            captured["feed_in_tariff"] = getattr(settings.electricity_pricing, "feed_in_tariff", None)
+            captured["feed_in_tariff"] = getattr(
+                settings.electricity_pricing,
+                "feed_in_tariff",
+                None,
+            )
 
         def build_dataset(self, *, start_time, end_time, interval_minutes) -> MpcDataset:
             return MpcDataset(
@@ -241,21 +243,47 @@ def test_space_heating_mpc_planning_service_uses_default_interval_setting(monkey
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(service, "_load_initial_rows", lambda **kwargs: [])
-    monkeypatch.setattr(service, "_initial_state_from_rows", lambda *args, **kwargs: MpcInitialState(room_temp_c=19.0))
+    monkeypatch.setattr(
+        service,
+        "_initial_state_from_rows",
+        lambda *args, **kwargs: MpcInitialState(room_temp_c=19.0),
+    )
     monkeypatch.setattr(service, "_resolve_effective_heating_kw", lambda *args, **kwargs: 2.0)
     monkeypatch.setattr(service, "_resolve_hp_electric_power_kw", lambda *args, **kwargs: 2.0)
     monkeypatch.setattr(service, "_resolve_export_price_eur_kwh", lambda *args, **kwargs: 0.0)
     monkeypatch.setattr(service, "_resolve_base_load_power_kw", lambda *args, **kwargs: 0.0)
-    monkeypatch.setattr(service, "_load_forecast_entries", lambda **kwargs: captured.update({"forecast_interval": kwargs["interval_minutes"]}) or [])
+    monkeypatch.setattr(
+        service,
+        "_load_forecast_entries",
+        lambda **kwargs: captured.update(
+            {"forecast_interval": kwargs["interval_minutes"]}
+        )
+        or [],
+    )
     monkeypatch.setattr(service, "_load_price_intervals", lambda **kwargs: [])
-    monkeypatch.setattr(service, "_infer_pv_power_input_scale", lambda *args, **kwargs: 0.0)
-    monkeypatch.setattr(service.controller, "build_horizon", lambda request: captured.update({"request_interval": request.interval_minutes}) or [])
-    monkeypatch.setattr(service.controller, "plan_from_source_model", lambda request, **kwargs: captured.update({"controller_interval": request.interval_minutes}) or MpcPlan(status="ok", termination_condition="optimal", feasible=True, steps=[]))
+    monkeypatch.setattr(
+        service.preparation,
+        "build_forecast_horizon",
+        lambda **kwargs: captured.update({"horizon_interval": kwargs["interval_minutes"]}) or [],
+    )
+    monkeypatch.setattr(
+        service.controller,
+        "plan_from_source_model",
+        lambda request, **kwargs: captured.update(
+            {"controller_interval": request.interval_minutes}
+        )
+        or MpcPlan(
+            status="ok",
+            termination_condition="optimal",
+            feasible=True,
+            steps=[],
+        ),
+    )
 
     service.plan(start_time_utc=start_time, horizon_steps=2, default_effective_heating_kw=2.0)
 
     assert captured["forecast_interval"] == 10
-    assert captured["request_interval"] == 10
+    assert captured["horizon_interval"] == 10
     assert captured["controller_interval"] == 10
 
 

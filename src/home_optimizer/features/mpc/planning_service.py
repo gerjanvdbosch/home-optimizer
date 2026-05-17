@@ -1,25 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from home_optimizer.domain.forecast import ForecastEntry
 from home_optimizer.domain.pricing import ElectricityPricingConfig
-from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset.ports import DatasetSampleFrameReader
 from home_optimizer.features.modeling import RoomRcModel, StoredModelVersion, TrainedLinearRoomModel
 from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
-from home_optimizer.features.mpc.exogenous_features import (
-    solar_gain_proxy_to_kw,
-    trailing_exp_filter,
-)
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
-    MpcControlMode,
     MpcConstraints,
     MpcControllerRequest,
-    MpcHorizonBuildRequest,
+    MpcControlMode,
     MpcInitialState,
     MpcObjectiveWeights,
     MpcPlan,
@@ -116,48 +109,22 @@ class SpaceHeatingMpcPlanningService:
             interval_minutes=resolved_interval_minutes,
             horizon_steps=horizon_steps,
         )
-        pv_power_input_scale = self._infer_pv_power_input_scale(
-            initial_rows,
-            forecast_entries=forecast_entries,
+        horizon = self.preparation.build_forecast_horizon(
             start_time_utc=resolved_start_time,
-        )
-        initial_filtered_solar_gain_kw = 0.0
-        solar_gain_filter_alpha = 0.0
-        local_timezone: str | None = None
-        if isinstance(source_model, RoomRcModel):
-            solar_gain_history_kw = [
-                self._row_solar_gain_kw(row, source_model=source_model)
-                for row in initial_rows
-                if row.timestamp_utc < resolved_start_time
-            ]
-            solar_gain_filter_alpha = source_model.config.alpha_solar
-            initial_filtered_solar_gain_kw = trailing_exp_filter(
-                solar_gain_history_kw,
-                alpha=solar_gain_filter_alpha,
-            )
-            local_timezone = source_model.config.local_timezone
-
-        horizon = self.controller.build_horizon(
-            MpcHorizonBuildRequest(
+            interval_minutes=resolved_interval_minutes,
+            horizon_steps=horizon_steps,
+            source_model=source_model,
+            operating_rows=initial_rows,
+            effective_heating_kw=effective_heating_kw,
+            hp_electric_power_kw=hp_electric_power_kw,
+            export_price_eur_kwh=export_price_eur_kwh,
+            base_load_power_kw=base_load_power_kw,
+            forecast_entries=forecast_entries,
+            price_intervals=self._load_price_intervals(
                 start_time_utc=resolved_start_time,
-                horizon_steps=horizon_steps,
                 interval_minutes=resolved_interval_minutes,
-                target_schedule=self.target_schedule,
-                forecast_entries=forecast_entries,
-                price_intervals=self._load_price_intervals(
-                    start_time_utc=resolved_start_time,
-                    interval_minutes=resolved_interval_minutes,
-                    horizon_steps=horizon_steps,
-                ),
-                default_effective_heating_kw=effective_heating_kw,
-                default_hp_electric_power_kw=hp_electric_power_kw,
-                default_base_load_power_kw=base_load_power_kw,
-                default_export_price_eur_kwh=export_price_eur_kwh,
-                pv_power_input_scale=pv_power_input_scale,
-                solar_gain_filter_alpha=solar_gain_filter_alpha,
-                initial_filtered_solar_gain_kw=initial_filtered_solar_gain_kw,
-                local_timezone=local_timezone,
-            )
+                horizon_steps=horizon_steps,
+            ),
         )
 
         return self.controller.plan_from_source_model(
@@ -221,26 +188,13 @@ class SpaceHeatingMpcPlanningService:
     def _resolve_base_load_power_kw(self, rows) -> float:
         return self.preparation.resolve_base_load_power_kw(rows)
 
-    def _infer_pv_power_input_scale(
-        self,
-        rows,
-        *,
-        forecast_entries: list[ForecastEntry],
-        start_time_utc: datetime,
-    ) -> float:
-        return self.preparation.infer_pv_power_input_scale(
-            rows,
-            forecast_entries=forecast_entries,
-            start_time_utc=start_time_utc,
-        )
-
     def _load_forecast_entries(
         self,
         *,
         start_time_utc: datetime,
         interval_minutes: int,
         horizon_steps: int,
-    ) -> list[ForecastEntry]:
+    ):
         return self.preparation.load_forecast_entries(
             start_time_utc=start_time_utc,
             interval_minutes=interval_minutes,
@@ -253,30 +207,9 @@ class SpaceHeatingMpcPlanningService:
         start_time_utc: datetime,
         interval_minutes: int,
         horizon_steps: int,
-    ) -> list[PriceInterval]:
+    ):
         return self.preparation.load_price_intervals(
             start_time_utc=start_time_utc,
             interval_minutes=interval_minutes,
             horizon_steps=horizon_steps,
-        )
-
-    @staticmethod
-    def _row_solar_gain_kw(
-        row,
-        *,
-        source_model: RoomRcModel,
-    ) -> float:
-        solar_gain_proxy_w_m2 = row.solar_gain_proxy_w_m2
-        if solar_gain_proxy_w_m2 is None:
-            irradiance_w_m2 = float(row.solar_irradiance_w_m2 or 0.0)
-            shutter_fraction = 1.0
-            if row.shutter_position_pct is not None:
-                shutter_fraction = min(max(float(row.shutter_position_pct) / 100.0, 0.0), 1.0)
-            solar_gain_proxy_w_m2 = irradiance_w_m2 * shutter_fraction
-        return float(
-            solar_gain_proxy_to_kw(
-                float(solar_gain_proxy_w_m2 or 0.0),
-                glass_area_m2=source_model.config.glass_area_m2,
-                g_glass=source_model.config.g_glass,
-            )
         )
