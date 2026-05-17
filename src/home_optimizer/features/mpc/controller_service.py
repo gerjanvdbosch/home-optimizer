@@ -23,6 +23,7 @@ from home_optimizer.features.mpc.models import (
     ThermalFlexibilityState,
 )
 from home_optimizer.features.mpc.preheat_scheduler import SpaceHeatingPreheatScheduler
+from home_optimizer.features.mpc.sequencer import HeatPumpSequencer
 from home_optimizer.features.mpc.space_heating_mpc import SpaceHeatingMpcSolver
 
 
@@ -43,6 +44,7 @@ class SpaceHeatingMpcControllerService:
         horizon_builder: MpcHorizonBuilder | None = None,
         preheat_scheduler: SpaceHeatingPreheatScheduler | None = None,
         flexibility_assessor: SpaceHeatingFlexibilityAssessor | None = None,
+        sequencer: HeatPumpSequencer | None = None,
     ) -> None:
         self.solver = solver or SpaceHeatingMpcSolver()
         self.control_model_provider = control_model_provider
@@ -51,6 +53,7 @@ class SpaceHeatingMpcControllerService:
         self.horizon_builder = horizon_builder or MpcHorizonBuilder()
         self.preheat_scheduler = preheat_scheduler or SpaceHeatingPreheatScheduler()
         self.flexibility_assessor = flexibility_assessor or SpaceHeatingFlexibilityAssessor()
+        self.sequencer = sequencer or HeatPumpSequencer()
 
     def plan(
         self,
@@ -67,6 +70,10 @@ class SpaceHeatingMpcControllerService:
         resolved_flexibility: ThermalFlexibilityState | None = None
         resolved_preheat_schedule: PreheatSchedule | None = None
         execution_targets: list[ExecutionTargetStep] | None = None
+        resolved_sequencer_state = self.sequencer.load_state(
+            request.sequencer_key,
+            request.sequencer_state,
+        )
         resolved_flexibility = self.flexibility_assessor.assess(
             interval_minutes=request.interval_minutes,
             control_model=resolved_control_model,
@@ -82,9 +89,12 @@ class SpaceHeatingMpcControllerService:
             initial_state=resolved_initial_state,
             horizon=resolved_horizon,
         )
-        execution_targets = self.flexibility_assessor.build_execution_targets(
+        execution_targets, projected_sequencer_state = self.sequencer.build_execution_targets(
+            horizon=resolved_horizon,
             flexibility_state=resolved_flexibility,
             schedule=resolved_preheat_schedule,
+            constraints=request.constraints,
+            sequencer_state=resolved_sequencer_state,
         )
         resolved_horizon = self._apply_execution_targets(
             horizon=resolved_horizon,
@@ -102,6 +112,7 @@ class SpaceHeatingMpcControllerService:
             thermal_flexibility=resolved_flexibility,
             preheat_schedule=resolved_preheat_schedule,
             execution_targets=execution_targets,
+            sequencer_state=resolved_sequencer_state,
             constraints=request.constraints,
             objective_weights=request.objective_weights,
             max_solver_seconds=request.max_solver_seconds,
@@ -113,6 +124,7 @@ class SpaceHeatingMpcControllerService:
                 "preheat_plan": resolved_preheat_plan,
                 "thermal_flexibility": resolved_flexibility,
                 "preheat_schedule": resolved_preheat_schedule,
+                "sequencer_state": projected_sequencer_state,
                 "heating_explanation": explain_heating_plan(
                     plan=plan,
                     control_model=resolved_control_model,
@@ -214,25 +226,74 @@ class SpaceHeatingMpcControllerService:
             block.block_id: block for block in (preheat_schedule.blocks if preheat_schedule else [])
         }
         updated_horizon: list[MpcHorizonStep] = []
-        for step, target_step in zip(horizon, execution_targets, strict=False):
-            block = (
-                blocks_by_id.get(target_step.active_preheat_block_id)
-                if target_step.active_preheat_block_id is not None
+        for index, (step, target_step) in enumerate(zip(horizon, execution_targets, strict=False)):
+            scheduled_block_id = (
+                preheat_schedule.step_to_block_id[index]
+                if preheat_schedule is not None and index < len(preheat_schedule.step_to_block_id)
+                else None
+            )
+            scheduled_block = (
+                blocks_by_id.get(scheduled_block_id)
+                if scheduled_block_id is not None
                 else None
             )
             updated_horizon.append(
                 step.model_copy(
                     update={
                         "economic_target_c": target_step.economic_target_c,
-                        "preheat_active": target_step.active_preheat_block_id is not None,
-                        "preheat_block_id": target_step.active_preheat_block_id,
-                        "preheat_opportunity_score": 1.0 if target_step.active_preheat_block_id is not None else 0.0,
+                        "preheat_active": scheduled_block_id is not None,
+                        "preheat_block_id": scheduled_block_id,
+                        "preheat_opportunity_score": (
+                            float(step.preheat_opportunity_score)
+                            if scheduled_block_id is not None
+                            else 0.0
+                        ),
                         "max_preheat_target_c": target_step.max_preheat_target_c,
                         "preheat_budget_share_kwh": target_step.block_budget_share_kwh,
-                        "preheat_block_budget_kwh": block.planned_charge_kwh if block is not None else 0.0,
+                        "preheat_block_budget_kwh": (
+                            scheduled_block.planned_charge_kwh if scheduled_block is not None else 0.0
+                        ),
                         "preheat_block_cumulative_target_kwh": target_step.block_cumulative_budget_target_kwh,
-                        "preheat_block_max_starts": block.max_starts if block is not None else 0,
+                        "preheat_block_max_starts": (
+                            scheduled_block.max_starts if scheduled_block is not None else 0
+                        ),
+                        "sequencer_mode": target_step.sequencer_mode,
+                        "active_run_id": target_step.active_run_id,
+                        "hp_must_be_on": target_step.hp_must_be_on,
+                        "hp_must_be_off": target_step.hp_must_be_off,
+                        "hp_start_allowed": target_step.hp_start_allowed,
+                        "start_reason_hint": target_step.start_reason_hint,
+                        "stop_reason_hint": target_step.stop_reason_hint,
+                        "committed_on_until_utc": target_step.committed_on_until_utc,
+                        "locked_off_until_utc": target_step.locked_off_until_utc,
+                        "starts_used_in_block": target_step.starts_used_in_block,
+                        "run_budget_used_kwh": target_step.run_budget_used_kwh,
+                        "starts_blocked_by_lockout": target_step.starts_blocked_by_lockout,
+                        "starts_blocked_by_max_starts": target_step.starts_blocked_by_max_starts,
+                        "starts_blocked_by_existing_commitment": target_step.starts_blocked_by_existing_commitment,
                     }
                 )
             )
         return updated_horizon
+
+    def advance_sequencer_state(
+        self,
+        *,
+        request_key: str | None,
+        state,
+        executed_step: MpcHorizonStep,
+        executed_target: ExecutionTargetStep,
+        executed_hp_on: bool,
+        interval_minutes: int,
+        preheat_charge_kwh: float,
+    ):
+        next_state = self.sequencer.advance_state(
+            state=state,
+            executed_step=executed_step,
+            executed_target=executed_target,
+            executed_hp_on=executed_hp_on,
+            interval_minutes=interval_minutes,
+            preheat_charge_kwh=preheat_charge_kwh,
+        )
+        self.sequencer.save_state(request_key, next_state)
+        return next_state

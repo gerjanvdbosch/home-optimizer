@@ -123,6 +123,22 @@ class SpaceHeatingMpcSolver:
                     preheat_block_id=horizon_step.preheat_block_id,
                     preheat_block_budget_kwh=float(horizon_step.preheat_block_budget_kwh),
                     q_heat_eff_kw=q_heat_eff_kw,
+                    sequencer_mode=horizon_step.sequencer_mode,
+                    active_run_id=horizon_step.active_run_id,
+                    hp_must_be_on=bool(horizon_step.hp_must_be_on),
+                    hp_must_be_off=bool(horizon_step.hp_must_be_off),
+                    hp_start_allowed=bool(horizon_step.hp_start_allowed),
+                    start_reason=horizon_step.start_reason_hint,
+                    stop_reason=horizon_step.stop_reason_hint,
+                    committed_on_until_utc=horizon_step.committed_on_until_utc,
+                    locked_off_until_utc=horizon_step.locked_off_until_utc,
+                    starts_used_in_block=int(horizon_step.starts_used_in_block),
+                    run_budget_used_kwh=float(horizon_step.run_budget_used_kwh),
+                    starts_blocked_by_lockout=bool(horizon_step.starts_blocked_by_lockout),
+                    starts_blocked_by_max_starts=bool(horizon_step.starts_blocked_by_max_starts),
+                    starts_blocked_by_existing_commitment=bool(
+                        horizon_step.starts_blocked_by_existing_commitment
+                    ),
                     temp_min_c=horizon_step.temp_min_c,
                     temp_max_c=horizon_step.temp_max_c,
                     slack_low_c=float(pyo.value(model.slack_low[index])),
@@ -353,6 +369,7 @@ class SpaceHeatingMpcSolver:
             model.T,
             rule=lambda model_ref, t: model_ref.start[t] + model_ref.stop[t] <= 1,
         )
+        self._apply_execution_constraints(model=model, problem=problem, pyo=pyo)
         model.grid_balance = pyo.Constraint(
             model.T,
             rule=lambda model_ref, t: (
@@ -727,6 +744,7 @@ class SpaceHeatingMpcSolver:
             model.T,
             rule=lambda model_ref, t: model_ref.start[t] + model_ref.stop[t] <= 1,
         )
+        self._apply_execution_constraints(model=model, problem=problem, pyo=pyo)
         model.grid_balance = pyo.Constraint(
             model.T,
             rule=lambda model_ref, t: (
@@ -1078,6 +1096,39 @@ class SpaceHeatingMpcSolver:
                 - sum(model_ref.preheat_charge[index] for index in range(t + 1))
             ),
         )
+
+    @staticmethod
+    def _apply_execution_constraints(
+        *,
+        model: Any,
+        problem: MpcProblem,
+        pyo: Any,
+    ) -> None:
+        forced_on = [index for index, step in enumerate(problem.horizon) if step.hp_must_be_on]
+        forced_off = [index for index, step in enumerate(problem.horizon) if step.hp_must_be_off]
+        blocked_start = [
+            index
+            for index, step in enumerate(problem.horizon)
+            if (not step.hp_start_allowed) and not step.hp_must_be_on
+        ]
+        overlap = set(forced_on).intersection(forced_off)
+        if overlap:
+            raise ValueError(f"conflicting sequencer constraints for steps: {sorted(overlap)}")
+        if forced_on:
+            model.sequencer_force_on = pyo.Constraint(
+                forced_on,
+                rule=lambda model_ref, t: model_ref.hp_on[t] == 1,
+            )
+        if forced_off:
+            model.sequencer_force_off = pyo.Constraint(
+                forced_off,
+                rule=lambda model_ref, t: model_ref.hp_on[t] == 0,
+            )
+        if blocked_start:
+            model.sequencer_block_start = pyo.Constraint(
+                blocked_start,
+                rule=lambda model_ref, t: model_ref.start[t] == 0,
+            )
 
     @staticmethod
     def _preheat_budget_shortfall_expression(

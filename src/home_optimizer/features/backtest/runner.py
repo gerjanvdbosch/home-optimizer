@@ -11,6 +11,8 @@ from home_optimizer.features.backtest.models import (
 )
 from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
 from home_optimizer.features.mpc.models import (
+    ExecutionTargetStep,
+    HeatPumpSequencerState,
     LinearThermalControlModel,
     MpcControlMode,
     MpcConstraints,
@@ -72,6 +74,7 @@ class SpaceHeatingMpcBacktestRunner:
         historical_energy_cost_by_timestamp = historical_energy_cost_by_timestamp or {}
         missing_forecast_count = 0
         forecast_coverage_ratio = 1.0
+        current_sequencer_state = HeatPumpSequencerState()
 
         for index in range(len(timeline) - 1):
             realized_horizon = timeline[index : index + horizon_steps]
@@ -104,6 +107,7 @@ class SpaceHeatingMpcBacktestRunner:
                 interval_minutes=interval_minutes,
                 horizon=horizon,
                 control_mode=control_mode,
+                sequencer_state=current_sequencer_state,
                 constraints=resolved_constraints,
                 objective_weights=resolved_weights,
                 max_solver_seconds=max_solver_seconds,
@@ -127,6 +131,7 @@ class SpaceHeatingMpcBacktestRunner:
                 solve_time_seconds = plan.solve_time_seconds
                 slack_low_c = 0.0
                 slack_high_c = 0.0
+                first_step = None
             else:
                 first_step = plan.steps[0]
                 applied_hp_on = first_step.hp_on
@@ -288,6 +293,97 @@ class SpaceHeatingMpcBacktestRunner:
                 next_state=next_state.model_copy(update={"q_heat_eff_kw": q_heat_eff_kw}),
                 hp_on=applied_hp_on,
             )
+            executed_target = ExecutionTargetStep(
+                timestamp_utc=current_forecast_step.timestamp_utc,
+                economic_target_c=float(
+                    first_step.economic_target_c
+                    if first_step is not None
+                    else current_forecast_step.economic_target_c or current_forecast_step.temp_min_c
+                ),
+                preheat_target_c=float(
+                    first_step.useful_preheat_target_c
+                    if first_step is not None
+                    else current_forecast_step.max_preheat_target_c or current_forecast_step.temp_min_c
+                ),
+                active_preheat_block_id=(
+                    first_step.preheat_block_id
+                    if first_step is not None
+                    else current_forecast_step.preheat_block_id
+                ),
+                remaining_block_budget_kwh=0.0,
+                block_budget_share_kwh=(
+                    first_step.preheat_budget_share_kwh
+                    if first_step is not None
+                    else float(current_forecast_step.preheat_budget_share_kwh)
+                ),
+                block_cumulative_budget_target_kwh=float(
+                    current_forecast_step.preheat_block_cumulative_target_kwh
+                ),
+                storage_target_kwh=float(current_forecast_step.preheat_block_budget_kwh),
+                max_preheat_target_c=float(
+                    current_forecast_step.max_preheat_target_c or current_forecast_step.temp_max_c
+                ),
+                start_allowed_for_preheat=bool(
+                    first_step.hp_start_allowed if first_step is not None else current_forecast_step.hp_start_allowed
+                ),
+                start_reason_hint=(
+                    first_step.start_reason if first_step is not None else current_forecast_step.start_reason_hint
+                ),
+                sequencer_mode=(
+                    first_step.sequencer_mode if first_step is not None else current_forecast_step.sequencer_mode
+                ),
+                active_run_id=(
+                    first_step.active_run_id if first_step is not None else current_forecast_step.active_run_id
+                ),
+                hp_must_be_on=bool(
+                    first_step.hp_must_be_on if first_step is not None else current_forecast_step.hp_must_be_on
+                ),
+                hp_must_be_off=bool(
+                    first_step.hp_must_be_off if first_step is not None else current_forecast_step.hp_must_be_off
+                ),
+                hp_start_allowed=bool(
+                    first_step.hp_start_allowed if first_step is not None else current_forecast_step.hp_start_allowed
+                ),
+                stop_reason_hint=(
+                    first_step.stop_reason if first_step is not None else current_forecast_step.stop_reason_hint
+                ),
+                committed_on_until_utc=(
+                    first_step.committed_on_until_utc
+                    if first_step is not None
+                    else current_forecast_step.committed_on_until_utc
+                ),
+                locked_off_until_utc=(
+                    first_step.locked_off_until_utc
+                    if first_step is not None
+                    else current_forecast_step.locked_off_until_utc
+                ),
+                starts_used_in_block=(
+                    first_step.starts_used_in_block if first_step is not None else current_forecast_step.starts_used_in_block
+                ),
+                run_budget_used_kwh=(
+                    first_step.run_budget_used_kwh if first_step is not None else current_forecast_step.run_budget_used_kwh
+                ),
+                starts_blocked_by_lockout=bool(
+                    first_step.starts_blocked_by_lockout if first_step is not None else current_forecast_step.starts_blocked_by_lockout
+                ),
+                starts_blocked_by_max_starts=bool(
+                    first_step.starts_blocked_by_max_starts if first_step is not None else current_forecast_step.starts_blocked_by_max_starts
+                ),
+                starts_blocked_by_existing_commitment=bool(
+                    first_step.starts_blocked_by_existing_commitment if first_step is not None else current_forecast_step.starts_blocked_by_existing_commitment
+                ),
+                stop_conditions=[],
+            )
+            if hasattr(self.controller, "advance_sequencer_state"):
+                current_sequencer_state = self.controller.advance_sequencer_state(
+                    request_key=None,
+                    state=current_sequencer_state,
+                    executed_step=current_forecast_step,
+                    executed_target=executed_target,
+                    executed_hp_on=applied_hp_on,
+                    interval_minutes=interval_minutes,
+                    preheat_charge_kwh=first_step.preheat_charge_kwh if first_step is not None else 0.0,
+                )
 
         if step_results:
             last_step = step_results[-1]

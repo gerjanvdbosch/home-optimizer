@@ -10,6 +10,8 @@ from .horizon_builder import (
 from .models import (
     ControlModelConversionOptions,
     ExecutionTargetStep,
+    HeatPumpSequencerSnapshot,
+    HeatPumpSequencerState,
     LinearThermalControlModel,
     MpcControlMode,
     MpcConstraints,
@@ -33,14 +35,19 @@ from .models import (
 )
 from .planning_service import SpaceHeatingMpcPlanningService
 from .preheat_scheduler import SpaceHeatingPreheatScheduler
+from .sequencer import HeatPumpSequencer, InMemoryHeatPumpSequencerStateStore
 from .space_heating_mpc import SpaceHeatingMpcSolver
 
 __all__ = [
     "ControlModelConversionOptions",
     "ExecutionTargetStep",
+    "HeatPumpSequencerSnapshot",
+    "HeatPumpSequencerState",
     "DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME",
     "DEFAULT_SOLAR_GAIN_FORECAST_NAME",
     "LinearThermalControlModel",
+    "HeatPumpSequencer",
+    "InMemoryHeatPumpSequencerStateStore",
     "MpcControlMode",
     "MpcConstraints",
     "MpcControllerRequest",

@@ -141,6 +141,20 @@ class MpcHorizonStep(DomainModel):
     preheat_block_budget_kwh: float = Field(default=0.0, ge=0.0)
     preheat_block_cumulative_target_kwh: float = Field(default=0.0, ge=0.0)
     preheat_block_max_starts: int = Field(default=0, ge=0)
+    sequencer_mode: str = "IDLE"
+    active_run_id: str | None = None
+    hp_must_be_on: bool = False
+    hp_must_be_off: bool = False
+    hp_start_allowed: bool = True
+    start_reason_hint: str | None = None
+    stop_reason_hint: str | None = None
+    committed_on_until_utc: datetime | None = None
+    locked_off_until_utc: datetime | None = None
+    starts_used_in_block: int = Field(default=0, ge=0)
+    run_budget_used_kwh: float = Field(default=0.0, ge=0.0)
+    starts_blocked_by_lockout: bool = False
+    starts_blocked_by_max_starts: bool = False
+    starts_blocked_by_existing_commitment: bool = False
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> "MpcHorizonStep":
@@ -326,9 +340,67 @@ class ExecutionTargetStep(DomainModel):
     max_preheat_target_c: float
     start_allowed_for_preheat: bool = False
     start_reason_hint: str | None = None
+    sequencer_mode: str = "IDLE"
+    active_run_id: str | None = None
+    hp_must_be_on: bool = False
+    hp_must_be_off: bool = False
+    hp_start_allowed: bool = True
+    stop_reason_hint: str | None = None
+    committed_on_until_utc: datetime | None = None
+    locked_off_until_utc: datetime | None = None
+    starts_used_in_block: int = Field(default=0, ge=0)
+    run_budget_used_kwh: float = Field(default=0.0, ge=0.0)
+    starts_blocked_by_lockout: bool = False
+    starts_blocked_by_max_starts: bool = False
+    starts_blocked_by_existing_commitment: bool = False
+    stop_conditions: list[str] = Field(default_factory=list)
 
 
 MpcControlMode = Literal["hierarchical_preheat"]
+
+HeatPumpSequencerMode = Literal[
+    "IDLE",
+    "PREHEAT_RUNNING",
+    "COMFORT_RUNNING",
+    "LOCKED_OUT",
+    "SAFETY_STOP",
+]
+
+
+class HeatPumpSequencerState(DomainModel):
+    mode: HeatPumpSequencerMode = "IDLE"
+    active_run_id: str | None = None
+    active_block_id: int | None = None
+    run_started_at_utc: datetime | None = None
+    committed_on_until_utc: datetime | None = None
+    locked_off_until_utc: datetime | None = None
+    starts_used_by_block: dict[int, int] = Field(default_factory=dict)
+    used_budget_by_block_kwh: dict[int, float] = Field(default_factory=dict)
+    previous_hp_on: bool = False
+    on_steps: int = Field(default=0, ge=0)
+    off_steps: int = Field(default=0, ge=0)
+    last_start_reason: str | None = None
+    last_stop_reason: str | None = None
+
+
+class HeatPumpSequencerSnapshot(DomainModel):
+    mode: HeatPumpSequencerMode
+    active_run_id: str | None = None
+    active_block_id: int | None = None
+    hp_must_be_on: bool = False
+    hp_must_be_off: bool = False
+    hp_start_allowed: bool = True
+    start_reason: str | None = None
+    stop_reason: str | None = None
+    committed_on_until_utc: datetime | None = None
+    locked_off_until_utc: datetime | None = None
+    starts_used_in_block: int = Field(default=0, ge=0)
+    run_budget_used_kwh: float = Field(default=0.0, ge=0.0)
+    starts_blocked_by_lockout: bool = False
+    starts_blocked_by_max_starts: bool = False
+    starts_blocked_by_existing_commitment: bool = False
+    run_target_budget_kwh: float = Field(default=0.0, ge=0.0)
+    stop_conditions: list[str] = Field(default_factory=list)
 
 
 class MpcObjectiveWeights(DomainModel):
@@ -364,6 +436,7 @@ class MpcProblem(DomainModel):
     thermal_flexibility: ThermalFlexibilityState | None = None
     preheat_schedule: PreheatSchedule | None = None
     execution_targets: list[ExecutionTargetStep] | None = None
+    sequencer_state: HeatPumpSequencerState | None = None
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
     max_solver_seconds: float | None = Field(default=None, gt=0.0)
@@ -403,6 +476,20 @@ class MpcPlanStep(DomainModel):
     preheat_block_budget_kwh: float = 0.0
     mass_temp_c: float | None = None
     q_heat_eff_kw: float = 0.0
+    sequencer_mode: str = "IDLE"
+    active_run_id: str | None = None
+    hp_must_be_on: bool = False
+    hp_must_be_off: bool = False
+    hp_start_allowed: bool = True
+    start_reason: str | None = None
+    stop_reason: str | None = None
+    committed_on_until_utc: datetime | None = None
+    locked_off_until_utc: datetime | None = None
+    starts_used_in_block: int = 0
+    run_budget_used_kwh: float = 0.0
+    starts_blocked_by_lockout: bool = False
+    starts_blocked_by_max_starts: bool = False
+    starts_blocked_by_existing_commitment: bool = False
     temp_min_c: float
     temp_max_c: float
     slack_low_c: float = 0.0
@@ -471,6 +558,7 @@ class MpcPlan(DomainModel):
     preheat_plan: PreheatPlan | None = None
     thermal_flexibility: ThermalFlexibilityState | None = None
     preheat_schedule: PreheatSchedule | None = None
+    sequencer_state: HeatPumpSequencerState | None = None
     objective_breakdown: MpcObjectiveBreakdown = Field(
         default_factory=MpcObjectiveBreakdown
     )
@@ -482,6 +570,8 @@ class MpcControllerRequest(DomainModel):
     horizon: list[MpcHorizonStep]
     control_mode: MpcControlMode = "hierarchical_preheat"
     preheat_plan: PreheatPlan | None = None
+    sequencer_state: HeatPumpSequencerState | None = None
+    sequencer_key: str | None = None
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
     max_solver_seconds: float | None = Field(default=None, gt=0.0)
