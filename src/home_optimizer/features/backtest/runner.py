@@ -201,6 +201,11 @@ class SpaceHeatingMpcBacktestRunner:
                         if plan.feasible and plan.steps
                         else float(current_forecast_step.preheat_budget_share_kwh)
                     ),
+                    preheat_charge_kwh=(
+                        first_step.preheat_charge_kwh
+                        if plan.feasible and plan.steps
+                        else 0.0
+                    ),
                     preheat_opportunity_score=(
                         first_step.preheat_opportunity_score
                         if plan.feasible and plan.steps
@@ -710,7 +715,7 @@ class SpaceHeatingMpcBacktestRunner:
                 preheat_block_ids.add(step.preheat_block_id)
             preheat_budget_electric_kwh += step.preheat_budget_share_kwh
             if step.preheat_active:
-                used_preheat_budget_kwh += hp_energy_kwh
+                used_preheat_budget_kwh += step.preheat_charge_kwh
             mpc_hp_energy_during_realized_pv_surplus_kwh += min(
                 step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
                 step.pv_surplus_realized_kw,

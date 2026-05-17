@@ -297,6 +297,7 @@ class MpcPlanStepResponse(BaseModel):
     preheat_block_id: int | None = None
     preheat_opportunity_score: float
     preheat_budget_share_kwh: float
+    preheat_charge_kwh: float
     preheat_block_budget_kwh: float
     q_heat_eff_kw: float
     temp_min_c: float
@@ -410,6 +411,7 @@ class MpcBacktestStepResponse(BaseModel):
     preheat_active: bool
     preheat_block_id: int | None = None
     preheat_budget_share_kwh: float
+    preheat_charge_kwh: float
     preheat_opportunity_score: float
     q_heat_eff_kw: float
     historical_q_heat_eff_kw: float

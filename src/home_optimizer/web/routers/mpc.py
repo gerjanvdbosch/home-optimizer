@@ -97,6 +97,7 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
                 preheat_block_id=step.preheat_block_id,
                 preheat_opportunity_score=step.preheat_opportunity_score,
                 preheat_budget_share_kwh=step.preheat_budget_share_kwh,
+                preheat_charge_kwh=step.preheat_charge_kwh,
                 preheat_block_budget_kwh=step.preheat_block_budget_kwh,
                 q_heat_eff_kw=step.q_heat_eff_kw,
                 temp_min_c=step.temp_min_c,

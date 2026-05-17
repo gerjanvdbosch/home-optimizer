@@ -477,16 +477,12 @@ class SpaceHeatingMpcSolver:
         )
         pv_self_consumption_reward_term = sum(
             problem.objective_weights.pv_self_consumption
-            * problem.dt_hours
-            * model.pv_self_consumable_kw[t]
+            * model.preheat_charge[t]
             * model.pv_opportunity_score[t]
-            * model.hp_on[t]
             for t in range(horizon_size)
         )
         captured_pv_kwh_term = sum(
-            problem.dt_hours
-            * model.pv_self_consumable_kw[t]
-            * model.hp_on[t]
+            model.preheat_charge[t]
             for t in range(horizon_size)
         )
         runtime_term = sum(
@@ -855,16 +851,12 @@ class SpaceHeatingMpcSolver:
         )
         pv_self_consumption_reward_term = sum(
             problem.objective_weights.pv_self_consumption
-            * problem.dt_hours
-            * model.pv_self_consumable_kw[t]
+            * model.preheat_charge[t]
             * model.pv_opportunity_score[t]
-            * model.hp_on[t]
             for t in range(horizon_size)
         )
         captured_pv_kwh_term = sum(
-            problem.dt_hours
-            * model.pv_self_consumable_kw[t]
-            * model.hp_on[t]
+            model.preheat_charge[t]
             for t in range(horizon_size)
         )
         runtime_term = sum(

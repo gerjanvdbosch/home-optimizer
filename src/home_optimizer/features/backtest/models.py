@@ -41,6 +41,7 @@ class MpcBacktestStepResult(DomainModel):
     preheat_active: bool = False
     preheat_block_id: int | None = None
     preheat_budget_share_kwh: float = 0.0
+    preheat_charge_kwh: float = 0.0
     preheat_opportunity_score: float = 0.0
     q_heat_eff_kw: float = 0.0
     historical_q_heat_eff_kw: float = 0.0
