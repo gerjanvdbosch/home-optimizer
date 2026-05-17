@@ -340,7 +340,7 @@ class MpcPlanSummaryResponse(BaseModel):
 
 
 class MpcPlanResponse(BaseModel):
-    control_mode: str = "legacy_objective"
+    control_mode: str = "hierarchical_preheat"
     status: str
     termination_condition: str
     feasible: bool

@@ -173,7 +173,7 @@ def test_mpc_preheats_with_pv_surplus_and_future_heat_need() -> None:
             solar_gain_kw=0.0,
             effective_heating_kw_forecast=2.0,
             hp_electric_power_forecast_kw=2.0,
-            pv_available_power_forecast_kw=3.0 if step == 0 else 0.0,
+            pv_available_power_forecast_kw=3.0 if step in {0, 1} else 0.0,
             base_load_power_forecast_kw=0.5,
             occupied=0.0,
             target_temp_c=20.0,
@@ -202,6 +202,8 @@ def test_mpc_preheats_with_pv_surplus_and_future_heat_need() -> None:
     assert plan.steps[0].useful_preheat_target_c > 19.0
     assert plan.steps[0].hp_on is True
     assert plan.objective_breakdown.captured_pv_kwh > 0.0
+    assert plan.preheat_schedule is not None
+    assert plan.preheat_schedule.blocks
 
 
 def test_single_pv_spike_does_not_trigger_short_run_with_sustained_opportunity() -> None:
@@ -331,9 +333,9 @@ def test_scheduler_clusters_contiguous_preheat_steps_into_single_block() -> None
         initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
     )
 
-    assert plan.preheat_plan is not None
-    assert len(plan.preheat_plan.blocks) == 1
-    assert plan.preheat_plan.blocks[0].max_starts == 1
+    assert plan.preheat_schedule is not None
+    assert len(plan.preheat_schedule.blocks) == 1
+    assert plan.preheat_schedule.blocks[0].max_starts == 1
     active_block_ids = {
         step.preheat_block_id for step in plan.steps if step.preheat_active
     }
@@ -475,7 +477,7 @@ def test_mpc_does_not_chase_midpoint_target_without_pv_surplus() -> None:
     assert plan.feasible is True
     assert plan.steps[0].useful_preheat_target_c > 19.0
     assert plan.steps[0].useful_preheat_target_c < 20.0
-    assert plan.steps[0].hp_on is False
+    assert plan.steps[0].preheat_block_id is None
 
 
 def test_passive_solar_gain_does_not_create_unnecessary_heating_penalty() -> None:

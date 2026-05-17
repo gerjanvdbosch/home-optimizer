@@ -212,7 +212,7 @@ class FakeSpaceHeatingMpcPlanningService:
         horizon_steps: int = 36,
         default_effective_heating_kw: float | None = None,
         max_solver_seconds: float | None = None,
-        control_mode: str = "legacy_objective",
+        control_mode: str = "hierarchical_preheat",
     ) -> MpcPlan:
         resolved_interval_minutes = interval_minutes or 12
         return MpcPlan(
@@ -267,7 +267,7 @@ class FakeSpaceHeatingMpcBacktestService:
         horizon_steps: int = 36,
         max_solver_seconds: float | None = None,
         exogenous_mode: str = "perfect_foresight",
-        control_mode: str = "legacy_objective",
+        control_mode: str = "hierarchical_preheat",
     ) -> MpcBacktestResult:
         return MpcBacktestResult(
             control_mode=control_mode,
@@ -1059,7 +1059,7 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["exogenous_mode"] == "perfect_foresight"
-    assert payload["control_mode"] == "legacy_objective"
+    assert payload["control_mode"] == "hierarchical_preheat"
     assert payload["model_id"] == "room-model-active"
     assert payload["interval_minutes"] == 12
     assert payload["horizon_steps"] == 4

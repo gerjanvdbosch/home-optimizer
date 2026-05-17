@@ -57,12 +57,21 @@ class SpaceHeatingFlexibilityAssessor:
             sum(pv_surplus_forecast_kw[index : index + window_steps]) * dt_hours
             for index in range(len(horizon))
         ]
+        expected_discharge_need_kwh = self._expected_discharge_need_profile_kwh(
+            horizon=horizon,
+            no_heat_rollout=no_heat_rollout,
+            max_import_price=max_import_price,
+            control_model=control_model,
+            dt_hours=dt_hours,
+        )
 
         steps: list[ThermalFlexibilityStep] = []
         total_storage = 0.0
         total_discharge_need = 0.0
         for index, step in enumerate(horizon):
-            no_heat_room_temp_c, no_heat_mass_temp_c = no_heat_rollout[index]
+            room_temp_c, mass_temp_c, q_heat_eff_kw = no_heat_rollout[index]
+            no_heat_room_temp_c = room_temp_c
+            no_heat_mass_temp_c = mass_temp_c
             comfort_headroom_c = max(0.0, float(step.temp_max_c) - no_heat_room_temp_c)
             room_band_c = max(float(step.temp_max_c) - float(step.temp_min_c), 1e-9)
             future_need_c = max(
@@ -98,14 +107,30 @@ class SpaceHeatingFlexibilityAssessor:
                 * max(float(step.hp_electric_power_forecast_kw), 1e-9)
                 * dt_hours,
             )
-            expected_discharge_need_kwh = max(
-                0.0,
-                (max(economic_target_c - no_heat_room_temp_c, 0.0) / heat_gain_c)
-                * max(float(step.hp_electric_power_forecast_kw), 1e-9)
-                * dt_hours,
+            room_mass_delta_c = (
+                no_heat_room_temp_c - no_heat_mass_temp_c
+                if no_heat_mass_temp_c is not None
+                else 0.0
             )
+            mass_reference_temp_c = (
+                no_heat_mass_temp_c if no_heat_mass_temp_c is not None else no_heat_room_temp_c
+            )
+            mass_deficit_to_economic_target_c = max(
+                economic_target_c - mass_reference_temp_c,
+                0.0,
+            )
+            mass_deficit_to_preheat_target_c = max(
+                float(step.temp_max_c) - mass_reference_temp_c,
+                0.0,
+            )
+            band_c = max(float(step.temp_max_c) - float(step.temp_min_c), 1e-9)
+            normalized_storage_soc = min(
+                max((mass_reference_temp_c - float(step.temp_min_c)) / band_c, 0.0),
+                1.0,
+            )
+            estimated_storage_soc_kwh = available_storage_kwh * normalized_storage_soc
             total_storage += available_storage_kwh
-            total_discharge_need += expected_discharge_need_kwh
+            total_discharge_need += expected_discharge_need_kwh[index]
             steps.append(
                 ThermalFlexibilityStep(
                     index=index,
@@ -113,11 +138,19 @@ class SpaceHeatingFlexibilityAssessor:
                     temp_min_c=step.temp_min_c,
                     temp_max_c=step.temp_max_c,
                     economic_target_c=economic_target_c,
+                    room_temp_c=no_heat_room_temp_c,
+                    mass_temp_c=no_heat_mass_temp_c,
+                    q_heat_eff_kw=q_heat_eff_kw,
                     no_heat_room_temp_c=no_heat_room_temp_c,
                     no_heat_mass_temp_c=no_heat_mass_temp_c,
+                    room_mass_delta_c=room_mass_delta_c,
+                    mass_deficit_to_economic_target_c=mass_deficit_to_economic_target_c,
+                    mass_deficit_to_preheat_target_c=mass_deficit_to_preheat_target_c,
+                    normalized_storage_soc=normalized_storage_soc,
+                    estimated_storage_soc_kwh=estimated_storage_soc_kwh,
                     comfort_headroom_c=comfort_headroom_c,
                     available_storage_kwh=available_storage_kwh,
-                    expected_discharge_need_kwh=expected_discharge_need_kwh,
+                    expected_discharge_need_kwh=expected_discharge_need_kwh[index],
                     pv_surplus_forecast_kw=pv_surplus_forecast_kw[index],
                     pv_surplus_window_kwh=pv_surplus_window_kwh[index],
                 )
@@ -132,6 +165,50 @@ class SpaceHeatingFlexibilityAssessor:
                 "step_count": len(steps),
             },
         )
+
+    def _expected_discharge_need_profile_kwh(
+        self,
+        *,
+        horizon: Sequence[MpcHorizonStep],
+        no_heat_rollout: Sequence[tuple[float, float | None, float]],
+        max_import_price: float,
+        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        dt_hours: float,
+    ) -> list[float]:
+        if not horizon:
+            return []
+
+        future_need_profile: list[float] = [0.0 for _ in horizon]
+        for index, step in enumerate(horizon):
+            economic_target_c = self._economic_target_c(
+                step=step,
+                future_need_score=0.0,
+                max_import_price=max_import_price,
+            )
+            heat_gain_c = max(
+                self._one_step_room_heat_gain_c(
+                    control_model=control_model,
+                    step=step,
+                ),
+                0.05,
+            )
+            hp_power_kw = max(float(step.hp_electric_power_forecast_kw), 1e-9)
+            running_need_kwh = 0.0
+            for future_index in range(index, len(horizon)):
+                future_room_temp_c = no_heat_rollout[future_index][0]
+                future_target_c = self._economic_target_c(
+                    step=horizon[future_index],
+                    future_need_score=0.0,
+                    max_import_price=max_import_price,
+                )
+                deficit_c = max(future_target_c - future_room_temp_c, 0.0)
+                if deficit_c <= 0.0:
+                    continue
+                step_need_kwh = (deficit_c / heat_gain_c) * hp_power_kw * dt_hours
+                lookahead_decay = 1.0 / (1.0 + 0.15 * (future_index - index))
+                running_need_kwh += step_need_kwh * lookahead_decay
+            future_need_profile[index] = max(running_need_kwh, 0.0)
+        return future_need_profile
 
     def build_execution_targets(
         self,
@@ -175,7 +252,12 @@ class SpaceHeatingFlexibilityAssessor:
                 preheat_target_c = max(step.economic_target_c, block.max_preheat_target_c)
                 remaining_budget_kwh = max(block.planned_charge_kwh, 0.0)
                 start_allowed_for_preheat = remaining_budget_kwh > 0.0
-                start_reason_hint = "preheat_block_active"
+                start_reason_hint = (
+                    "post_solar_hold_needed"
+                    if block.post_solar_no_heat_drops_below_economic_target
+                    or block.post_solar_no_heat_drops_below_temp_min
+                    else "post_solar_hold_ok"
+                )
                 block_budget_share_kwh = max(
                     cumulative_targets_by_block[block.block_id].get(step.index, 0.0)
                     - cumulative_targets_by_block[block.block_id].get(step.index - 1, 0.0),
@@ -196,6 +278,7 @@ class SpaceHeatingFlexibilityAssessor:
                     remaining_block_budget_kwh=remaining_budget_kwh,
                     block_budget_share_kwh=block_budget_share_kwh,
                     block_cumulative_budget_target_kwh=block_cumulative_budget_target_kwh,
+                    storage_target_kwh=block.planned_charge_kwh if block is not None else 0.0,
                     max_preheat_target_c=max_preheat_target_c,
                     start_allowed_for_preheat=start_allowed_for_preheat,
                     start_reason_hint=start_reason_hint,
@@ -247,18 +330,18 @@ class SpaceHeatingFlexibilityAssessor:
         control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: Sequence[MpcHorizonStep],
-    ) -> list[tuple[float, float | None]]:
+    ) -> list[tuple[float, float | None, float]]:
         if not horizon:
             return []
 
-        states: list[tuple[float, float | None]] = []
+        states: list[tuple[float, float | None, float]] = []
         current_room_temp_c = initial_state.room_temp_c
         current_mass_temp_c = (
             initial_state.mass_temp_c if isinstance(initial_state, Rc2StateMpcInitialState) else None
         )
         current_q_heat_eff_kw = initial_state.q_heat_eff_kw
         for step in horizon:
-            states.append((current_room_temp_c, current_mass_temp_c))
+            states.append((current_room_temp_c, current_mass_temp_c, current_q_heat_eff_kw))
             current_q_heat_eff_kw = control_model.actuator_alpha * current_q_heat_eff_kw
             if isinstance(control_model, Rc2StateThermalControlModel):
                 if current_mass_temp_c is None:

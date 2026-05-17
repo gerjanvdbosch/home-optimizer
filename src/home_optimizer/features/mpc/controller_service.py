@@ -67,40 +67,30 @@ class SpaceHeatingMpcControllerService:
         resolved_flexibility: ThermalFlexibilityState | None = None
         resolved_preheat_schedule: PreheatSchedule | None = None
         execution_targets: list[ExecutionTargetStep] | None = None
-        if request.control_mode == "hierarchical_preheat":
-            resolved_flexibility = self.flexibility_assessor.assess(
-                interval_minutes=request.interval_minutes,
-                control_model=resolved_control_model,
-                initial_state=resolved_initial_state,
-                horizon=resolved_horizon,
-                constraints=request.constraints,
-            )
-            resolved_preheat_schedule = self.preheat_scheduler.build_schedule(
-                flexibility_state=resolved_flexibility,
-                constraints=request.constraints,
-                interval_minutes=request.interval_minutes,
-            )
-            execution_targets = self.flexibility_assessor.build_execution_targets(
-                flexibility_state=resolved_flexibility,
-                schedule=resolved_preheat_schedule,
-            )
-            resolved_horizon = self._apply_execution_targets(
-                horizon=resolved_horizon,
-                execution_targets=execution_targets,
-                preheat_schedule=resolved_preheat_schedule,
-            )
-        else:
-            resolved_preheat_plan = request.preheat_plan or self.preheat_scheduler.build(
-                interval_minutes=request.interval_minutes,
-                control_model=resolved_control_model,
-                initial_state=resolved_initial_state,
-                horizon=resolved_horizon,
-                constraints=request.constraints,
-            )
-            resolved_horizon = self._apply_preheat_plan(
-                horizon=resolved_horizon,
-                preheat_plan=resolved_preheat_plan,
-            )
+        resolved_flexibility = self.flexibility_assessor.assess(
+            interval_minutes=request.interval_minutes,
+            control_model=resolved_control_model,
+            initial_state=resolved_initial_state,
+            horizon=resolved_horizon,
+            constraints=request.constraints,
+        )
+        resolved_preheat_schedule = self.preheat_scheduler.build_schedule(
+            flexibility_state=resolved_flexibility,
+            constraints=request.constraints,
+            interval_minutes=request.interval_minutes,
+            control_model=resolved_control_model,
+            initial_state=resolved_initial_state,
+            horizon=resolved_horizon,
+        )
+        execution_targets = self.flexibility_assessor.build_execution_targets(
+            flexibility_state=resolved_flexibility,
+            schedule=resolved_preheat_schedule,
+        )
+        resolved_horizon = self._apply_execution_targets(
+            horizon=resolved_horizon,
+            execution_targets=execution_targets,
+            preheat_schedule=resolved_preheat_schedule,
+        )
 
         problem = MpcProblem(
             interval_minutes=request.interval_minutes,

@@ -121,6 +121,117 @@ def test_hierarchical_scheduler_builds_single_block_for_sustained_surplus() -> N
     assert schedule.blocks[0].planned_charge_kwh > 0.0
 
 
+def test_hierarchical_scheduler_merges_short_gap_inside_surplus_window() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    flexibility = ThermalFlexibilityState(
+        steps=[
+            ThermalFlexibilityStep(
+                index=step,
+                timestamp_utc=start_time + timedelta(minutes=10 * step),
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                economic_target_c=19.8,
+                no_heat_room_temp_c=19.4,
+                no_heat_mass_temp_c=19.6,
+                comfort_headroom_c=1.2,
+                available_storage_kwh=2.5,
+                expected_discharge_need_kwh=1.8,
+                pv_surplus_forecast_kw=2.0 if step in {1, 2, 4, 5} else 0.0,
+                pv_surplus_window_kwh=1.2 if step in {1, 2, 4, 5} else 0.0,
+            )
+            for step in range(8)
+        ]
+    )
+
+    schedule = SpaceHeatingPreheatScheduler().build_schedule(
+        flexibility_state=flexibility,
+        constraints=MpcConstraints(),
+        interval_minutes=10,
+    )
+
+    assert len(schedule.blocks) == 1
+    assert schedule.blocks[0].start_index == 1
+    assert schedule.blocks[0].end_index == 5
+
+
+def test_hierarchical_scheduler_skips_long_low_energy_block() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    flexibility = ThermalFlexibilityState(
+        steps=[
+            ThermalFlexibilityStep(
+                index=step,
+                timestamp_utc=start_time + timedelta(minutes=10 * step),
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                economic_target_c=19.8,
+                no_heat_room_temp_c=19.4,
+                no_heat_mass_temp_c=19.6,
+                comfort_headroom_c=1.2,
+                available_storage_kwh=0.02,
+                expected_discharge_need_kwh=0.02,
+                pv_surplus_forecast_kw=0.25 if 1 <= step <= 5 else 0.0,
+                pv_surplus_window_kwh=0.2 if 1 <= step <= 5 else 0.0,
+            )
+            for step in range(8)
+        ]
+    )
+
+    schedule = SpaceHeatingPreheatScheduler().build_schedule(
+        flexibility_state=flexibility,
+        constraints=MpcConstraints(),
+        interval_minutes=10,
+    )
+
+    assert schedule.blocks == []
+
+
+def test_hierarchical_scheduler_selects_best_block_under_required_charge_budget() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    flexibility = ThermalFlexibilityState(
+        steps=[
+            ThermalFlexibilityStep(
+                index=step,
+                timestamp_utc=start_time + timedelta(minutes=10 * step),
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                economic_target_c=19.8,
+                no_heat_room_temp_c=19.4,
+                no_heat_mass_temp_c=19.6,
+                comfort_headroom_c=0.6 if step < 4 else 1.6,
+                available_storage_kwh=0.4 if step < 4 else 1.4,
+                expected_discharge_need_kwh=0.4 if step < 4 else 1.0,
+                pv_surplus_forecast_kw=(
+                    1.0
+                    if step in {1, 2}
+                    else 2.0
+                    if step in {10, 11, 12, 13}
+                    else 0.0
+                ),
+                pv_surplus_window_kwh=(
+                    0.3
+                    if step in {1, 2}
+                    else 1.6
+                    if step in {10, 11, 12, 13}
+                    else 0.0
+                ),
+            )
+            for step in range(14)
+        ],
+        total_available_storage_kwh=1.4,
+        total_expected_discharge_need_kwh=1.0,
+    )
+
+    schedule = SpaceHeatingPreheatScheduler().build_schedule(
+        flexibility_state=flexibility,
+        constraints=MpcConstraints(),
+        interval_minutes=10,
+    )
+
+    assert len(schedule.blocks) == 1
+    assert schedule.blocks[0].start_index == 10
+    assert schedule.blocks[0].end_index == 13
+
+
 def test_hierarchical_mode_limits_to_single_start_within_block() -> None:
     start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     horizon = [

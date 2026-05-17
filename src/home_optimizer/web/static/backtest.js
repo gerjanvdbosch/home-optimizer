@@ -282,6 +282,7 @@ function renderCharts(payload) {
   let capturedRealizedRunning = 0;
   let capturedForecastRunning = 0;
   const dtHours = (payload.interval_minutes || 0) / 60;
+  const preheatChargePower = payload.steps.map((step) => dtHours > 0 ? step.preheat_charge_kwh / dtHours : 0);
   for (const step of payload.steps) {
     mpcRunning += step.estimated_mpc_energy_cost_eur;
     historicalRunning += step.estimated_historical_energy_cost_eur;
@@ -357,6 +358,7 @@ function renderCharts(payload) {
       { x: timestamps, y: pvSurplusForecast, name: "PV surplus forecast", type: "scatter", mode: "lines", line: { color: "#fb8c00", width: 3 } },
       { x: timestamps, y: pvSurplusRealized, name: "PV surplus realized", type: "scatter", mode: "lines", line: { color: "#43a047", width: 2 } },
       { x: timestamps, y: mpcHpPower, name: "MPC HP power", type: "scatter", mode: "lines", yaxis: "y2", line: { color: "#03a9f4", shape: "hv" } },
+      { x: timestamps, y: preheatChargePower, name: "Preheat charge", type: "scatter", mode: "lines", yaxis: "y2", line: { color: "#8e24aa", width: 2, dash: "dot" } },
     ],
     chartLayout("Surplus (kW)", "HP power (kW)"),
     { responsive: true, displayModeBar: false },
@@ -403,7 +405,7 @@ async function loadBacktest() {
       end_time: new Date(endTimeInput.value).toISOString(),
       horizon_steps: String(Number(horizonStepsInput.value || 36)),
       exogenous_mode: exogenousModeSelect?.value || "perfect_foresight",
-      mpc_control_mode: controlModeSelect?.value || "legacy_objective",
+      mpc_control_mode: controlModeSelect?.value || "hierarchical_preheat",
     });
     if (modelSelect.value) {
       params.set("model_id", modelSelect.value);

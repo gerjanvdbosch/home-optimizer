@@ -26,7 +26,7 @@ ExogenousModeQuery = Annotated[
     Query(alias="exogenous_mode"),
 ]
 ControlModeQuery = Annotated[
-    Literal["legacy_objective", "hierarchical_preheat"],
+    Literal["hierarchical_preheat"],
     Query(alias="mpc_control_mode"),
 ]
 
@@ -51,7 +51,7 @@ def create_backtest_router(settings: AppSettings) -> APIRouter:
         horizon_steps: HorizonStepsQuery = 36,
         max_solver_seconds: MaxSolverSecondsQuery = None,
         exogenous_mode: ExogenousModeQuery = "perfect_foresight",
-        mpc_control_mode: ControlModeQuery = "legacy_objective",
+        mpc_control_mode: ControlModeQuery = "hierarchical_preheat",
     ) -> MpcBacktestResponse:
         if start_time is None:
             now = datetime.now(timezone.utc).replace(second=0, microsecond=0)

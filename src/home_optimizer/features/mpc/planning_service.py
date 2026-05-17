@@ -57,7 +57,7 @@ class SpaceHeatingMpcPlanningService:
         *,
         start_time_utc: datetime,
         model_id: str | None = None,
-        control_mode: MpcControlMode = "legacy_objective",
+        control_mode: MpcControlMode = "hierarchical_preheat",
         interval_minutes: int | None = None,
         horizon_steps: int = 36,
         constraints: MpcConstraints | None = None,

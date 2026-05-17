@@ -33,7 +33,7 @@ MaxSolverSecondsQuery = Annotated[
     Query(alias="max_solver_seconds", gt=0.0),
 ]
 ControlModeQuery = Annotated[
-    Literal["legacy_objective", "hierarchical_preheat"] | None,
+    Literal["hierarchical_preheat"] | None,
     Query(alias="mpc_control_mode"),
 ]
 
@@ -143,7 +143,7 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
                 horizon_steps=horizon_steps,
                 default_effective_heating_kw=default_effective_heating_kw,
                 max_solver_seconds=max_solver_seconds,
-                control_mode=mpc_control_mode or "legacy_objective",
+                control_mode=mpc_control_mode or "hierarchical_preheat",
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

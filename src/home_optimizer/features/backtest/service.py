@@ -343,7 +343,7 @@ class SpaceHeatingMpcBacktestService:
         conversion_options: ControlModelConversionOptions | None = None,
         default_effective_heating_kw: float | None = None,
         exogenous_mode: str = "perfect_foresight",
-        control_mode: MpcControlMode = "legacy_objective",
+        control_mode: MpcControlMode = "hierarchical_preheat",
     ) -> MpcBacktestResult:
         resolved_start_time = ensure_utc(start_time_utc)
         resolved_end_time = ensure_utc(end_time_utc)

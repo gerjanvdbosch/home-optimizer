@@ -225,6 +225,9 @@ class PreheatPlanStep(DomainModel):
 
 class PreheatBlock(DomainModel):
     block_id: int = Field(ge=0)
+    candidate_block_id: int | None = Field(default=None, ge=0)
+    selected: bool = True
+    skipped_reason: str | None = None
     start_index: int = Field(default=0, ge=0)
     end_index: int = Field(default=0, ge=0)
     start_time_utc: datetime
@@ -236,9 +239,17 @@ class PreheatBlock(DomainModel):
     min_run_steps: int = Field(default=0, ge=0)
     preferred_start_index: int | None = None
     max_preheat_target_c: float = 0.0
+    simulated_end_room_temp_c: float | None = None
+    simulated_end_mass_temp_c: float | None = None
+    post_solar_no_heat_min_temp_c: float | None = None
+    post_solar_no_heat_end_temp_c: float | None = None
+    post_solar_no_heat_drops_below_economic_target: bool = False
+    post_solar_no_heat_drops_below_temp_min: bool = False
     step_count: int = Field(default=0, ge=0)
+    planned_run_steps: int = Field(default=0, ge=0)
     used_charge_kwh: float = Field(default=0.0, ge=0.0)
     missed_charge_kwh: float = Field(default=0.0, ge=0.0)
+    remaining_need_kwh: float = Field(default=0.0, ge=0.0)
     starts_in_block: int = Field(default=0, ge=0)
     run_duration_minutes: float = Field(default=0.0, ge=0.0)
     limit_reason: str | None = None
@@ -268,13 +279,25 @@ class ThermalFlexibilityStep(DomainModel):
     temp_min_c: float
     temp_max_c: float
     economic_target_c: float
+    room_temp_c: float = 0.0
+    mass_temp_c: float | None = None
+    q_heat_eff_kw: float = Field(default=0.0, ge=0.0)
     no_heat_room_temp_c: float
     no_heat_mass_temp_c: float | None = None
+    room_mass_delta_c: float = 0.0
+    mass_deficit_to_economic_target_c: float = Field(default=0.0, ge=0.0)
+    mass_deficit_to_preheat_target_c: float = Field(default=0.0, ge=0.0)
+    normalized_storage_soc: float = Field(default=0.0, ge=0.0, le=1.0)
+    estimated_storage_soc_kwh: float | None = None
     comfort_headroom_c: float = Field(default=0.0, ge=0.0)
     available_storage_kwh: float = Field(default=0.0, ge=0.0)
     expected_discharge_need_kwh: float = Field(default=0.0, ge=0.0)
     pv_surplus_forecast_kw: float = Field(default=0.0, ge=0.0)
     pv_surplus_window_kwh: float = Field(default=0.0, ge=0.0)
+    post_solar_no_heat_min_temp_c: float | None = None
+    post_solar_no_heat_end_temp_c: float | None = None
+    post_solar_no_heat_drops_below_economic_target: bool = False
+    post_solar_no_heat_drops_below_temp_min: bool = False
 
 
 class ThermalFlexibilityState(DomainModel):
@@ -299,12 +322,13 @@ class ExecutionTargetStep(DomainModel):
     remaining_block_budget_kwh: float = Field(default=0.0, ge=0.0)
     block_budget_share_kwh: float = Field(default=0.0, ge=0.0)
     block_cumulative_budget_target_kwh: float = Field(default=0.0, ge=0.0)
+    storage_target_kwh: float = Field(default=0.0, ge=0.0)
     max_preheat_target_c: float
     start_allowed_for_preheat: bool = False
     start_reason_hint: str | None = None
 
 
-MpcControlMode = Literal["legacy_objective", "hierarchical_preheat"]
+MpcControlMode = Literal["hierarchical_preheat"]
 
 
 class MpcObjectiveWeights(DomainModel):
@@ -332,7 +356,7 @@ class MpcObjectiveWeights(DomainModel):
 
 class MpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
-    control_mode: MpcControlMode = "legacy_objective"
+    control_mode: MpcControlMode = "hierarchical_preheat"
     control_model: Rc2StateThermalControlModel | LinearThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
@@ -377,6 +401,7 @@ class MpcPlanStep(DomainModel):
     preheat_charge_kwh: float = 0.0
     preheat_block_id: int | None = None
     preheat_block_budget_kwh: float = 0.0
+    mass_temp_c: float | None = None
     q_heat_eff_kw: float = 0.0
     temp_min_c: float
     temp_max_c: float
@@ -436,7 +461,7 @@ class MpcObjectiveBreakdown(DomainModel):
 
 
 class MpcPlan(DomainModel):
-    control_mode: MpcControlMode = "legacy_objective"
+    control_mode: MpcControlMode = "hierarchical_preheat"
     status: str
     termination_condition: str
     feasible: bool
@@ -455,7 +480,7 @@ class MpcPlan(DomainModel):
 class MpcControllerRequest(DomainModel):
     interval_minutes: int = Field(gt=0)
     horizon: list[MpcHorizonStep]
-    control_mode: MpcControlMode = "legacy_objective"
+    control_mode: MpcControlMode = "hierarchical_preheat"
     preheat_plan: PreheatPlan | None = None
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)

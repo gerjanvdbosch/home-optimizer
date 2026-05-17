@@ -48,7 +48,7 @@ class SpaceHeatingMpcBacktestRunner:
         historical_hp_on_by_timestamp: dict[datetime, bool] | None = None,
         historical_energy_cost_by_timestamp: dict[datetime, float] | None = None,
         exogenous_mode: str = "perfect_foresight",
-        control_mode: MpcControlMode = "legacy_objective",
+        control_mode: MpcControlMode = "hierarchical_preheat",
         forecast_replay_provider: Any | None = None,
     ) -> MpcBacktestResult:
         if interval_minutes <= 0:
