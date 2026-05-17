@@ -79,6 +79,7 @@ const endTimeInput = document.getElementById("backtest-end-time");
 const modelSelect = document.getElementById("backtest-model-select");
 const horizonStepsInput = document.getElementById("backtest-horizon-steps");
 const exogenousModeSelect = document.getElementById("backtest-exogenous-mode");
+const controlModeSelect = document.getElementById("backtest-control-mode");
 const runButton = document.getElementById("backtest-run-button");
 const statusNode = document.getElementById("backtest-status");
 const summaryCaptionNode = document.getElementById("backtest-summary-caption");
@@ -121,6 +122,9 @@ function setControlsDisabled(disabled) {
   }
   if (exogenousModeSelect) {
     exogenousModeSelect.disabled = disabled;
+  }
+  if (controlModeSelect) {
+    controlModeSelect.disabled = disabled;
   }
   if (previousDayButton) {
     previousDayButton.disabled = disabled;
@@ -188,9 +192,16 @@ function renderSummary(payload) {
     ["Passive high deg-min", payload.mpc_summary.passive_comfort_high_degree_minutes, payload.historical_summary.passive_comfort_high_degree_minutes, payload.delta.passive_comfort_high_degree_minutes],
     ["PV surplus forecast (kWh)", payload.pv_diagnostics.forecast_pv_surplus_kwh, payload.pv_diagnostics.forecast_pv_surplus_kwh, 0],
     ["PV surplus realized (kWh)", payload.pv_diagnostics.realized_pv_surplus_kwh, payload.pv_diagnostics.realized_pv_surplus_kwh, 0],
+    ["Preheat budget (kWh)", payload.pv_diagnostics.preheat_budget_electric_kwh, 0, payload.pv_diagnostics.preheat_budget_electric_kwh],
+    ["Used preheat budget (kWh)", payload.pv_diagnostics.used_preheat_budget_kwh, 0, payload.pv_diagnostics.used_preheat_budget_kwh],
+    ["Missed surplus w/ headroom (kWh)", payload.pv_diagnostics.missed_surplus_with_headroom_kwh, 0, payload.pv_diagnostics.missed_surplus_with_headroom_kwh],
     ["MPC HP energy (kWh)", payload.pv_diagnostics.mpc_hp_energy_kwh, 0, payload.pv_diagnostics.mpc_hp_energy_kwh],
     ["Captured realized PV (kWh)", payload.pv_diagnostics.mpc_realized_pv_surplus_capture_kwh, 0, payload.pv_diagnostics.mpc_realized_pv_surplus_capture_kwh],
     ["Capture ratio realized", payload.pv_diagnostics.mpc_realized_pv_surplus_capture_ratio, 0, payload.pv_diagnostics.mpc_realized_pv_surplus_capture_ratio],
+    ["Preheat block count", payload.pv_diagnostics.preheat_block_count, 0, payload.pv_diagnostics.preheat_block_count],
+    ["Starts per preheat block", payload.pv_diagnostics.starts_per_preheat_block, 0, payload.pv_diagnostics.starts_per_preheat_block],
+    ["Average run duration (min)", payload.pv_diagnostics.average_run_duration_minutes, 0, payload.pv_diagnostics.average_run_duration_minutes],
+    ["Short run count", payload.pv_diagnostics.short_run_count, 0, payload.pv_diagnostics.short_run_count],
     ["Infeasible", payload.mpc_summary.infeasible_count, payload.historical_summary.infeasible_count, payload.delta.infeasible_count],
     ["Avg solve time (s)", payload.mpc_summary.average_solver_runtime_seconds, payload.historical_summary.average_solver_runtime_seconds, payload.delta.average_solver_runtime_seconds],
   ];
@@ -220,7 +231,7 @@ function renderSummary(payload) {
       </tr>
     `).join("");
   }
-  summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen | ${payload.exogenous_mode}`;
+  summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen | ${payload.control_mode} | ${payload.exogenous_mode}`;
 }
 
 function objectiveBreakdownRows(breakdown) {
@@ -236,6 +247,7 @@ function objectiveBreakdownRows(breakdown) {
     ["Energy cost", breakdown.energy_cost],
     ["PV self-consumption reward", breakdown.pv_self_consumption_reward],
     ["Captured PV (kWh)", breakdown.captured_pv_kwh],
+    ["Preheat budget shortfall", breakdown.preheat_budget_shortfall],
     ["Unnecessary heating cost", breakdown.unnecessary_heating],
     ["Terminal cost", breakdown.terminal_cost],
     ["Start penalty", breakdown.start_penalty],
@@ -391,6 +403,7 @@ async function loadBacktest() {
       end_time: new Date(endTimeInput.value).toISOString(),
       horizon_steps: String(Number(horizonStepsInput.value || 36)),
       exogenous_mode: exogenousModeSelect?.value || "perfect_foresight",
+      mpc_control_mode: controlModeSelect?.value || "legacy_objective",
     });
     if (modelSelect.value) {
       params.set("model_id", modelSelect.value);

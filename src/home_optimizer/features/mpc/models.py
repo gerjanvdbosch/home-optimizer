@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from pydantic import Field, model_validator
 
 from home_optimizer.domain.forecast import ForecastEntry
@@ -131,6 +132,15 @@ class MpcHorizonStep(DomainModel):
     import_price_eur_kwh: float = 0.0
     export_price_eur_kwh: float = 0.0
     realized_room_temp_c: float | None = None
+    economic_target_c: float | None = None
+    preheat_active: bool = False
+    preheat_opportunity_score: float = Field(default=0.0, ge=0.0)
+    max_preheat_target_c: float | None = None
+    preheat_budget_share_kwh: float = Field(default=0.0, ge=0.0)
+    preheat_block_id: int | None = None
+    preheat_block_budget_kwh: float = Field(default=0.0, ge=0.0)
+    preheat_block_cumulative_target_kwh: float = Field(default=0.0, ge=0.0)
+    preheat_block_max_starts: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> "MpcHorizonStep":
@@ -165,6 +175,10 @@ class MpcHorizonStep(DomainModel):
             )
         if self.target_temp_c is None:
             object.__setattr__(self, "target_temp_c", (self.temp_min_c + self.temp_max_c) / 2.0)
+        if self.economic_target_c is None:
+            object.__setattr__(self, "economic_target_c", float(self.target_temp_c))
+        if self.max_preheat_target_c is None:
+            object.__setattr__(self, "max_preheat_target_c", float(self.economic_target_c))
         return self
 
 
@@ -189,8 +203,108 @@ class Rc2StateMpcInitialState(MpcInitialState):
 
 
 class MpcConstraints(DomainModel):
-    min_on_steps: int = Field(default=1, ge=1)
-    min_off_steps: int = Field(default=1, ge=1)
+    min_on_steps: int = Field(default=0, ge=0)
+    min_off_steps: int = Field(default=0, ge=0)
+    pv_opportunity_window_steps: int = Field(default=0, ge=0)
+
+
+class PreheatPlanStep(DomainModel):
+    timestamp_utc: datetime
+    economic_target_c: float = 0.0
+    preheat_active: bool = False
+    preheat_opportunity_score: float = Field(default=0.0, ge=0.0)
+    max_preheat_target_c: float = 0.0
+    preheat_budget_share_kwh: float = Field(default=0.0, ge=0.0)
+    preheat_block_id: int | None = None
+    preheat_block_budget_kwh: float = Field(default=0.0, ge=0.0)
+    preheat_block_max_starts: int = Field(default=0, ge=0)
+    pv_surplus_window_kwh: float = Field(default=0.0, ge=0.0)
+    storage_headroom_electric_kwh: float = Field(default=0.0, ge=0.0)
+    reason: str | None = None
+
+
+class PreheatBlock(DomainModel):
+    block_id: int = Field(ge=0)
+    start_index: int = Field(default=0, ge=0)
+    end_index: int = Field(default=0, ge=0)
+    start_time_utc: datetime
+    end_time_utc: datetime
+    available_surplus_kwh: float = Field(default=0.0, ge=0.0)
+    available_storage_kwh: float = Field(default=0.0, ge=0.0)
+    planned_charge_kwh: float = Field(default=0.0, ge=0.0)
+    max_starts: int = Field(default=1, ge=0)
+    min_run_steps: int = Field(default=0, ge=0)
+    preferred_start_index: int | None = None
+    max_preheat_target_c: float = 0.0
+    step_count: int = Field(default=0, ge=0)
+    used_charge_kwh: float = Field(default=0.0, ge=0.0)
+    missed_charge_kwh: float = Field(default=0.0, ge=0.0)
+    starts_in_block: int = Field(default=0, ge=0)
+    run_duration_minutes: float = Field(default=0.0, ge=0.0)
+    limit_reason: str | None = None
+    reason: str | None = None
+
+
+class PreheatPlan(DomainModel):
+    steps: list[PreheatPlanStep] = Field(default_factory=list)
+    blocks: list[PreheatBlock] = Field(default_factory=list)
+    preheat_budget_electric_kwh: float = Field(default=0.0, ge=0.0)
+    preheat_window_start_utc: datetime | None = None
+    preheat_window_end_utc: datetime | None = None
+    reason: str | None = None
+
+    @property
+    def preheat_active_per_step(self) -> list[bool]:
+        return [step.preheat_active for step in self.steps]
+
+    @property
+    def max_preheat_target_c_per_step(self) -> list[float]:
+        return [step.max_preheat_target_c for step in self.steps]
+
+
+class ThermalFlexibilityStep(DomainModel):
+    index: int = Field(ge=0)
+    timestamp_utc: datetime
+    temp_min_c: float
+    temp_max_c: float
+    economic_target_c: float
+    no_heat_room_temp_c: float
+    no_heat_mass_temp_c: float | None = None
+    comfort_headroom_c: float = Field(default=0.0, ge=0.0)
+    available_storage_kwh: float = Field(default=0.0, ge=0.0)
+    expected_discharge_need_kwh: float = Field(default=0.0, ge=0.0)
+    pv_surplus_forecast_kw: float = Field(default=0.0, ge=0.0)
+    pv_surplus_window_kwh: float = Field(default=0.0, ge=0.0)
+
+
+class ThermalFlexibilityState(DomainModel):
+    steps: list[ThermalFlexibilityStep] = Field(default_factory=list)
+    total_available_storage_kwh: float = Field(default=0.0, ge=0.0)
+    total_expected_discharge_need_kwh: float = Field(default=0.0, ge=0.0)
+    diagnostics: dict[str, float | int | str] = Field(default_factory=dict)
+
+
+class PreheatSchedule(DomainModel):
+    blocks: list[PreheatBlock] = Field(default_factory=list)
+    step_to_block_id: list[int | None] = Field(default_factory=list)
+    total_planned_charge_kwh: float = Field(default=0.0, ge=0.0)
+    diagnostics: dict[str, float | int | str] = Field(default_factory=dict)
+
+
+class ExecutionTargetStep(DomainModel):
+    timestamp_utc: datetime
+    economic_target_c: float
+    preheat_target_c: float
+    active_preheat_block_id: int | None = None
+    remaining_block_budget_kwh: float = Field(default=0.0, ge=0.0)
+    block_budget_share_kwh: float = Field(default=0.0, ge=0.0)
+    block_cumulative_budget_target_kwh: float = Field(default=0.0, ge=0.0)
+    max_preheat_target_c: float
+    start_allowed_for_preheat: bool = False
+    start_reason_hint: str | None = None
+
+
+MpcControlMode = Literal["legacy_objective", "hierarchical_preheat"]
 
 
 class MpcObjectiveWeights(DomainModel):
@@ -206,6 +320,7 @@ class MpcObjectiveWeights(DomainModel):
     start: float = Field(default=10.0, ge=0.0)
     energy: float = Field(default=1.0, ge=0.0)
     pv_self_consumption: float = Field(default=12.0, ge=0.0)
+    preheat_budget_shortfall: float = Field(default=24.0, ge=0.0)
     runtime: float = Field(default=0.05, ge=0.0)
 
     @model_validator(mode="after")
@@ -217,9 +332,14 @@ class MpcObjectiveWeights(DomainModel):
 
 class MpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
+    control_mode: MpcControlMode = "legacy_objective"
     control_model: Rc2StateThermalControlModel | LinearThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
+    preheat_plan: PreheatPlan | None = None
+    thermal_flexibility: ThermalFlexibilityState | None = None
+    preheat_schedule: PreheatSchedule | None = None
+    execution_targets: list[ExecutionTargetStep] | None = None
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
     max_solver_seconds: float | None = Field(default=None, gt=0.0)
@@ -249,7 +369,14 @@ class MpcPlanStep(DomainModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    economic_target_c: float = 0.0
     useful_preheat_target_c: float = 0.0
+    preheat_active: bool = False
+    preheat_opportunity_score: float = 0.0
+    preheat_budget_share_kwh: float = 0.0
+    preheat_charge_kwh: float = 0.0
+    preheat_block_id: int | None = None
+    preheat_block_budget_kwh: float = 0.0
     q_heat_eff_kw: float = 0.0
     temp_min_c: float
     temp_max_c: float
@@ -273,6 +400,7 @@ class MpcObjectiveBreakdown(DomainModel):
     energy_cost: float = 0.0
     pv_self_consumption_reward: float = 0.0
     captured_pv_kwh: float = 0.0
+    preheat_budget_shortfall: float = 0.0
 
     @property
     def comfort_high(self) -> float:
@@ -302,17 +430,22 @@ class MpcObjectiveBreakdown(DomainModel):
             + self.start
             + self.runtime
             + self.energy_cost
+            + self.preheat_budget_shortfall
             - self.pv_self_consumption_reward
         )
 
 
 class MpcPlan(DomainModel):
+    control_mode: MpcControlMode = "legacy_objective"
     status: str
     termination_condition: str
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
     heating_explanation: str | None = None
+    preheat_plan: PreheatPlan | None = None
+    thermal_flexibility: ThermalFlexibilityState | None = None
+    preheat_schedule: PreheatSchedule | None = None
     objective_breakdown: MpcObjectiveBreakdown = Field(
         default_factory=MpcObjectiveBreakdown
     )
@@ -322,6 +455,8 @@ class MpcPlan(DomainModel):
 class MpcControllerRequest(DomainModel):
     interval_minutes: int = Field(gt=0)
     horizon: list[MpcHorizonStep]
+    control_mode: MpcControlMode = "legacy_objective"
+    preheat_plan: PreheatPlan | None = None
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
     max_solver_seconds: float | None = Field(default=None, gt=0.0)

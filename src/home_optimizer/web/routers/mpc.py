@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -31,6 +32,10 @@ MaxSolverSecondsQuery = Annotated[
     float | None,
     Query(alias="max_solver_seconds", gt=0.0),
 ]
+ControlModeQuery = Annotated[
+    Literal["legacy_objective", "hierarchical_preheat"] | None,
+    Query(alias="mpc_control_mode"),
+]
 
 
 def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
@@ -52,6 +57,7 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
         estimated_energy_cost_eur=sum(step.estimated_energy_cost_eur for step in plan.steps),
     )
     return MpcPlanResponse(
+        control_mode=plan.control_mode,
         status=plan.status,
         termination_condition=plan.termination_condition,
         feasible=plan.feasible,
@@ -70,6 +76,7 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
             energy_cost=plan.objective_breakdown.energy_cost,
             pv_self_consumption_reward=plan.objective_breakdown.pv_self_consumption_reward,
             captured_pv_kwh=plan.objective_breakdown.captured_pv_kwh,
+            preheat_budget_shortfall=plan.objective_breakdown.preheat_budget_shortfall,
             unnecessary_heating=plan.objective_breakdown.unnecessary_heating,
             terminal_cost=plan.objective_breakdown.terminal,
             start_penalty=plan.objective_breakdown.start,
@@ -84,7 +91,13 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
                 start=step.start,
                 stop=step.stop,
                 predicted_room_temp_c=step.predicted_room_temp_c,
+                economic_target_c=step.economic_target_c,
                 useful_preheat_target_c=step.useful_preheat_target_c,
+                preheat_active=step.preheat_active,
+                preheat_block_id=step.preheat_block_id,
+                preheat_opportunity_score=step.preheat_opportunity_score,
+                preheat_budget_share_kwh=step.preheat_budget_share_kwh,
+                preheat_block_budget_kwh=step.preheat_block_budget_kwh,
                 q_heat_eff_kw=step.q_heat_eff_kw,
                 temp_min_c=step.temp_min_c,
                 temp_max_c=step.temp_max_c,
@@ -119,6 +132,7 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
         interval_minutes: IntervalQuery = None,
         default_effective_heating_kw: HeatingKwQuery = None,
         max_solver_seconds: MaxSolverSecondsQuery = None,
+        mpc_control_mode: ControlModeQuery = None,
     ) -> MpcPlanResponse:
         try:
             plan = container.space_heating_mpc_planning_service.plan(
@@ -128,6 +142,7 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
                 horizon_steps=horizon_steps,
                 default_effective_heating_kw=default_effective_heating_kw,
                 max_solver_seconds=max_solver_seconds,
+                control_mode=mpc_control_mode or "legacy_objective",
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

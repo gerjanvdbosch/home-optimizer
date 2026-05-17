@@ -16,6 +16,7 @@ from home_optimizer.features.mpc.exogenous_features import (
 )
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
+    MpcControlMode,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonBuildRequest,
@@ -56,6 +57,7 @@ class SpaceHeatingMpcPlanningService:
         *,
         start_time_utc: datetime,
         model_id: str | None = None,
+        control_mode: MpcControlMode = "legacy_objective",
         interval_minutes: int | None = None,
         horizon_steps: int = 36,
         constraints: MpcConstraints | None = None,
@@ -162,6 +164,7 @@ class SpaceHeatingMpcPlanningService:
             MpcControllerRequest(
                 interval_minutes=resolved_interval_minutes,
                 horizon=horizon,
+                control_mode=control_mode,
                 constraints=resolved_constraints,
                 objective_weights=resolved_weights,
                 max_solver_seconds=max_solver_seconds,

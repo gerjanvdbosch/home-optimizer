@@ -291,7 +291,13 @@ class MpcPlanStepResponse(BaseModel):
     start: bool
     stop: bool
     predicted_room_temp_c: float
+    economic_target_c: float
     useful_preheat_target_c: float
+    preheat_active: bool
+    preheat_block_id: int | None = None
+    preheat_opportunity_score: float
+    preheat_budget_share_kwh: float
+    preheat_block_budget_kwh: float
     q_heat_eff_kw: float
     temp_min_c: float
     temp_max_c: float
@@ -314,6 +320,7 @@ class MpcObjectiveBreakdownResponse(BaseModel):
     energy_cost: float
     pv_self_consumption_reward: float
     captured_pv_kwh: float
+    preheat_budget_shortfall: float
     unnecessary_heating: float
     terminal_cost: float
     start_penalty: float
@@ -332,6 +339,7 @@ class MpcPlanSummaryResponse(BaseModel):
 
 
 class MpcPlanResponse(BaseModel):
+    control_mode: str = "legacy_objective"
     status: str
     termination_condition: str
     feasible: bool
@@ -366,6 +374,15 @@ class MpcBacktestPvDiagnosticsResponse(BaseModel):
     mpc_realized_pv_surplus_capture_kwh: float
     mpc_realized_pv_surplus_capture_ratio: float
     mpc_forecast_pv_surplus_capture_ratio: float
+    preheat_budget_electric_kwh: float
+    used_preheat_budget_kwh: float
+    missed_surplus_with_headroom_kwh: float
+    captured_realized_pv_kwh: float
+    capture_ratio_realized: float
+    average_run_duration_minutes: float
+    short_run_count: int
+    preheat_block_count: int
+    starts_per_preheat_block: float
 
 
 class MpcBacktestDeltaResponse(BaseModel):
@@ -390,6 +407,10 @@ class MpcBacktestStepResponse(BaseModel):
     historical_hp_on: bool
     start: bool
     stop: bool
+    preheat_active: bool
+    preheat_block_id: int | None = None
+    preheat_budget_share_kwh: float
+    preheat_opportunity_score: float
     q_heat_eff_kw: float
     historical_q_heat_eff_kw: float
     hp_electric_power_kw: float
@@ -419,6 +440,7 @@ class MpcBacktestStepResponse(BaseModel):
 
 class MpcBacktestResponse(BaseModel):
     exogenous_mode: str
+    control_mode: str
     missing_forecast_count: int
     forecast_coverage_ratio: float
     model_id: str

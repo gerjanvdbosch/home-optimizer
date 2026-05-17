@@ -262,6 +262,7 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
             result.mpc_objective_breakdown.pv_self_consumption_reward
         ),
         captured_pv_kwh=result.mpc_objective_breakdown.captured_pv_kwh,
+        preheat_budget_shortfall=result.mpc_objective_breakdown.preheat_budget_shortfall,
         unnecessary_heating=result.mpc_objective_breakdown.unnecessary_heating,
         terminal_cost=result.mpc_objective_breakdown.terminal,
         start_penalty=result.mpc_objective_breakdown.start,
@@ -282,6 +283,7 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
             result.solver_objective_breakdown.pv_self_consumption_reward
         ),
         captured_pv_kwh=result.solver_objective_breakdown.captured_pv_kwh,
+        preheat_budget_shortfall=result.solver_objective_breakdown.preheat_budget_shortfall,
         unnecessary_heating=result.solver_objective_breakdown.unnecessary_heating,
         terminal_cost=result.solver_objective_breakdown.terminal,
         start_penalty=result.solver_objective_breakdown.start,
@@ -290,6 +292,7 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
     )
     return MpcBacktestResponse(
         exogenous_mode=result.exogenous_mode,
+        control_mode=result.control_mode,
         missing_forecast_count=result.missing_forecast_count,
         forecast_coverage_ratio=result.forecast_coverage_ratio,
         model_id=result.model_id,

@@ -25,6 +25,10 @@ ExogenousModeQuery = Annotated[
     Literal["perfect_foresight", "forecast_replay"],
     Query(alias="exogenous_mode"),
 ]
+ControlModeQuery = Annotated[
+    Literal["legacy_objective", "hierarchical_preheat"],
+    Query(alias="mpc_control_mode"),
+]
 
 
 def create_backtest_router(settings: AppSettings) -> APIRouter:
@@ -47,6 +51,7 @@ def create_backtest_router(settings: AppSettings) -> APIRouter:
         horizon_steps: HorizonStepsQuery = 36,
         max_solver_seconds: MaxSolverSecondsQuery = None,
         exogenous_mode: ExogenousModeQuery = "perfect_foresight",
+        mpc_control_mode: ControlModeQuery = "legacy_objective",
     ) -> MpcBacktestResponse:
         if start_time is None:
             now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
@@ -61,6 +66,7 @@ def create_backtest_router(settings: AppSettings) -> APIRouter:
                 horizon_steps=horizon_steps,
                 max_solver_seconds=max_solver_seconds,
                 exogenous_mode=exogenous_mode,
+                control_mode=mpc_control_mode,
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

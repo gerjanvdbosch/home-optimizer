@@ -6,10 +6,13 @@ import pytest
 
 from home_optimizer.features.mpc import (
     LinearThermalControlModel,
+    MpcConstraints,
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
     MpcObjectiveWeights,
+    PreheatPlan,
+    PreheatPlanStep,
     SpaceHeatingMpcControllerService,
 )
 
@@ -63,7 +66,7 @@ def test_site_cost_prefers_pv_surplus_window_for_heating() -> None:
     assert plan.steps[1].estimated_energy_cost_eur < (0.30 * 2.0 * 0.25)
 
 
-def test_target_tracking_does_not_chase_midpoint_without_pv_opportunity() -> None:
+def test_target_tracking_uses_economic_target_without_pv_opportunity() -> None:
     start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     horizon = [
         MpcHorizonStep(
@@ -113,9 +116,12 @@ def test_target_tracking_does_not_chase_midpoint_without_pv_opportunity() -> Non
     )
 
     assert plan.feasible is True
-    assert plan.steps[0].hp_on is False
-    assert plan.steps[0].useful_preheat_target_c == pytest.approx(19.0)
-    assert plan.objective_breakdown.temperature_tracking == pytest.approx(0.0)
+    assert plan.steps[0].economic_target_c > 19.0
+    assert plan.steps[0].economic_target_c < 22.0
+    assert plan.steps[0].useful_preheat_target_c == pytest.approx(
+        plan.steps[0].economic_target_c
+    )
+    assert plan.objective_breakdown.temperature_tracking >= 0.0
 
 
 def test_useful_preheat_target_stays_within_comfort_band() -> None:
@@ -193,9 +199,205 @@ def test_mpc_preheats_with_pv_surplus_and_future_heat_need() -> None:
     )
 
     assert plan.feasible is True
-    assert plan.steps[0].useful_preheat_target_c > 20.0
+    assert plan.steps[0].useful_preheat_target_c > 19.0
     assert plan.steps[0].hp_on is True
     assert plan.objective_breakdown.captured_pv_kwh > 0.0
+
+
+def test_single_pv_spike_does_not_trigger_short_run_with_sustained_opportunity() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=8.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=2.5 if step == 0 else 0.0,
+            base_load_power_forecast_kw=0.4,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(6)
+    ]
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(
+            interval_minutes=10,
+            horizon=horizon,
+            constraints=MpcConstraints(min_on_steps=3, min_off_steps=3),
+        ),
+        control_model=LinearThermalControlModel(
+            a=0.98,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.35,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=20.7, hp_on=False, off_steps=6),
+    )
+
+    assert plan.feasible is True
+    assert plan.steps[0].hp_on is False
+    assert all(not plan.steps[index].hp_on for index in range(3))
+    assert plan.objective_breakdown.captured_pv_kwh == pytest.approx(0.0)
+
+
+def test_sustained_pv_surplus_triggers_run_and_respects_min_on_steps() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=7.0 if step >= 4 else 9.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=2.8 if step < 4 else 0.0,
+            base_load_power_forecast_kw=0.4,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(8)
+    ]
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(
+            interval_minutes=10,
+            horizon=horizon,
+            constraints=MpcConstraints(min_on_steps=3, min_off_steps=3),
+        ),
+        control_model=LinearThermalControlModel(
+            a=0.97,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.45,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
+    )
+
+    assert plan.feasible is True
+    start_indices = [index for index, step in enumerate(plan.steps) if step.start]
+    assert start_indices
+    first_start = start_indices[0]
+    assert all(
+        plan.steps[index].hp_on
+        for index in range(first_start, min(first_start + 3, len(plan.steps)))
+    )
+    assert max(step.predicted_room_temp_c - step.temp_max_c for step in plan.steps) <= 0.15
+
+
+def test_scheduler_clusters_contiguous_preheat_steps_into_single_block() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=7.0 if step >= 4 else 9.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=2.8 if 1 <= step <= 4 else 0.0,
+            base_load_power_forecast_kw=0.4,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(8)
+    ]
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(interval_minutes=10, horizon=horizon),
+        control_model=LinearThermalControlModel(
+            a=0.97,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.45,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
+    )
+
+    assert plan.preheat_plan is not None
+    assert len(plan.preheat_plan.blocks) == 1
+    assert plan.preheat_plan.blocks[0].max_starts == 1
+    active_block_ids = {
+        step.preheat_block_id for step in plan.steps if step.preheat_active
+    }
+    assert active_block_ids == {0}
+
+
+def test_preheat_block_start_limit_keeps_single_start_in_same_block() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=8.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=2.5,
+            base_load_power_forecast_kw=0.3,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.25,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(8)
+    ]
+    preheat_plan = PreheatPlan(
+        steps=[
+            PreheatPlanStep(
+                timestamp_utc=step.timestamp_utc,
+                preheat_active=True,
+                preheat_opportunity_score=1.0,
+                max_preheat_target_c=20.7,
+                preheat_budget_share_kwh=0.3,
+                preheat_block_id=0,
+                preheat_block_budget_kwh=2.4,
+                preheat_block_max_starts=1,
+                pv_surplus_window_kwh=2.4,
+                storage_headroom_electric_kwh=2.4,
+                reason="test_block",
+            )
+            for step in horizon
+        ],
+    )
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(
+            interval_minutes=10,
+            horizon=horizon,
+            preheat_plan=preheat_plan,
+        ),
+        control_model=LinearThermalControlModel(
+            a=0.95,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.4,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.0, hp_on=False, off_steps=6),
+    )
+
+    assert plan.feasible is True
+    assert sum(1 for step in plan.steps if step.start) <= 1
 
 
 def test_mpc_avoids_unnecessary_heating_near_comfort_max() -> None:
@@ -271,7 +473,8 @@ def test_mpc_does_not_chase_midpoint_target_without_pv_surplus() -> None:
     )
 
     assert plan.feasible is True
-    assert plan.steps[0].useful_preheat_target_c == pytest.approx(19.0)
+    assert plan.steps[0].useful_preheat_target_c > 19.0
+    assert plan.steps[0].useful_preheat_target_c < 20.0
     assert plan.steps[0].hp_on is False
 
 

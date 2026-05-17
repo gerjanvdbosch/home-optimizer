@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from home_optimizer.features.mpc import (
+    LinearThermalControlModel,
+    MpcConstraints,
+    MpcControllerRequest,
+    MpcHorizonStep,
+    MpcInitialState,
+    SpaceHeatingFlexibilityAssessor,
+    SpaceHeatingMpcControllerService,
+    SpaceHeatingPreheatScheduler,
+    ThermalFlexibilityState,
+    ThermalFlexibilityStep,
+)
+
+
+def test_flexibility_assessor_sets_economic_target_above_temp_min() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=15 * step),
+            outdoor_temp_c=7.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=0.0,
+            base_load_power_forecast_kw=0.2,
+            occupied=0.0,
+            target_temp_c=20.5,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.22,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(4)
+    ]
+
+    flexibility = SpaceHeatingFlexibilityAssessor().assess(
+        interval_minutes=15,
+        control_model=LinearThermalControlModel(
+            a=0.98,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.35,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.9, hp_on=False, off_steps=1),
+        horizon=horizon,
+        constraints=MpcConstraints(),
+    )
+
+    assert flexibility.steps
+    assert flexibility.steps[0].economic_target_c > horizon[0].temp_min_c
+    assert flexibility.steps[0].economic_target_c < horizon[0].target_temp_c
+
+
+def test_hierarchical_scheduler_ignores_single_spike() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    flexibility = ThermalFlexibilityState(
+        steps=[
+            ThermalFlexibilityStep(
+                index=step,
+                timestamp_utc=start_time + timedelta(minutes=10 * step),
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                economic_target_c=19.6,
+                no_heat_room_temp_c=19.7,
+                no_heat_mass_temp_c=19.8,
+                comfort_headroom_c=1.0,
+                available_storage_kwh=1.2,
+                expected_discharge_need_kwh=0.8,
+                pv_surplus_forecast_kw=2.0 if step == 2 else 0.0,
+                pv_surplus_window_kwh=0.33 if step == 2 else 0.0,
+            )
+            for step in range(6)
+        ]
+    )
+
+    schedule = SpaceHeatingPreheatScheduler().build_schedule(
+        flexibility_state=flexibility,
+        constraints=MpcConstraints(min_on_steps=0, min_off_steps=0),
+        interval_minutes=10,
+    )
+
+    assert schedule.blocks == []
+
+
+def test_hierarchical_scheduler_builds_single_block_for_sustained_surplus() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    flexibility = ThermalFlexibilityState(
+        steps=[
+            ThermalFlexibilityStep(
+                index=step,
+                timestamp_utc=start_time + timedelta(minutes=10 * step),
+                temp_min_c=19.0,
+                temp_max_c=21.0,
+                economic_target_c=19.6,
+                no_heat_room_temp_c=19.5,
+                no_heat_mass_temp_c=19.7,
+                comfort_headroom_c=1.0,
+                available_storage_kwh=2.0,
+                expected_discharge_need_kwh=1.6,
+                pv_surplus_forecast_kw=2.0 if 1 <= step <= 4 else 0.0,
+                pv_surplus_window_kwh=1.3 if 1 <= step <= 4 else 0.0,
+            )
+            for step in range(8)
+        ]
+    )
+
+    schedule = SpaceHeatingPreheatScheduler().build_schedule(
+        flexibility_state=flexibility,
+        constraints=MpcConstraints(),
+        interval_minutes=10,
+    )
+
+    assert len(schedule.blocks) == 1
+    assert schedule.blocks[0].max_starts == 1
+    assert schedule.blocks[0].planned_charge_kwh > 0.0
+
+
+def test_hierarchical_mode_limits_to_single_start_within_block() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=7.5,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=2.8 if 1 <= step <= 5 else 0.0,
+            base_load_power_forecast_kw=0.3,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.24,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(10)
+    ]
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(
+            interval_minutes=10,
+            horizon=horizon,
+            control_mode="hierarchical_preheat",
+        ),
+        control_model=LinearThermalControlModel(
+            a=0.97,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.45,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
+    )
+
+    assert plan.feasible is True
+    assert plan.control_mode == "hierarchical_preheat"
+    block_starts = [step for step in plan.steps if step.preheat_block_id is not None and step.start]
+    assert len(block_starts) <= 1
+    assert any(step.preheat_block_id is not None for step in plan.steps)
+
+
+def test_hierarchical_mode_allows_comfort_start_outside_preheat_block() -> None:
+    start_time = datetime(2026, 1, 1, 18, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=5.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=0.0,
+            base_load_power_forecast_kw=0.6,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.30,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(6)
+    ]
+
+    plan = SpaceHeatingMpcControllerService().plan(
+        MpcControllerRequest(
+            interval_minutes=10,
+            horizon=horizon,
+            control_mode="hierarchical_preheat",
+        ),
+        control_model=LinearThermalControlModel(
+            a=0.95,
+            b_out=0.0,
+            b_solar=0.0,
+            b_heat=0.45,
+            b_occ=0.0,
+            c=0.0,
+        ),
+        initial_state=MpcInitialState(room_temp_c=19.05, hp_on=False, off_steps=6),
+    )
+
+    assert plan.feasible is True
+    assert plan.steps[0].hp_on is True
+    assert plan.steps[0].preheat_block_id is None

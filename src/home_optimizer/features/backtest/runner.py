@@ -12,6 +12,7 @@ from home_optimizer.features.backtest.models import (
 from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcControllerService
 from home_optimizer.features.mpc.models import (
     LinearThermalControlModel,
+    MpcControlMode,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonStep,
@@ -47,6 +48,7 @@ class SpaceHeatingMpcBacktestRunner:
         historical_hp_on_by_timestamp: dict[datetime, bool] | None = None,
         historical_energy_cost_by_timestamp: dict[datetime, float] | None = None,
         exogenous_mode: str = "perfect_foresight",
+        control_mode: MpcControlMode = "legacy_objective",
         forecast_replay_provider: Any | None = None,
     ) -> MpcBacktestResult:
         if interval_minutes <= 0:
@@ -101,6 +103,7 @@ class SpaceHeatingMpcBacktestRunner:
             request = MpcControllerRequest(
                 interval_minutes=interval_minutes,
                 horizon=horizon,
+                control_mode=control_mode,
                 constraints=resolved_constraints,
                 objective_weights=resolved_weights,
                 max_solver_seconds=max_solver_seconds,
@@ -182,6 +185,26 @@ class SpaceHeatingMpcBacktestRunner:
                             current_forecast_step.target_temp_c
                             or current_forecast_step.temp_min_c
                         )
+                    ),
+                    preheat_active=(
+                        first_step.preheat_active
+                        if plan.feasible and plan.steps
+                        else bool(current_forecast_step.preheat_active)
+                    ),
+                    preheat_block_id=(
+                        first_step.preheat_block_id
+                        if plan.feasible and plan.steps
+                        else current_forecast_step.preheat_block_id
+                    ),
+                    preheat_budget_share_kwh=(
+                        first_step.preheat_budget_share_kwh
+                        if plan.feasible and plan.steps
+                        else float(current_forecast_step.preheat_budget_share_kwh)
+                    ),
+                    preheat_opportunity_score=(
+                        first_step.preheat_opportunity_score
+                        if plan.feasible and plan.steps
+                        else float(current_forecast_step.preheat_opportunity_score)
                     ),
                     q_heat_eff_kw=q_heat_eff_kw,
                     historical_q_heat_eff_kw=historical_q_heat_eff_kw,
@@ -276,10 +299,20 @@ class SpaceHeatingMpcBacktestRunner:
                     )
                 }
             )
+            executed_path_objective_breakdown = executed_path_objective_breakdown.model_copy(
+                update={
+                    "preheat_budget_shortfall": self._executed_preheat_budget_shortfall_cost(
+                        step_results=step_results,
+                        interval_minutes=interval_minutes,
+                        objective_weights=resolved_weights,
+                    )
+                }
+            )
 
         average_solver_runtime = total_solver_runtime_seconds / len(step_results) if step_results else 0.0
         return MpcBacktestResult(
             exogenous_mode=exogenous_mode,
+            control_mode=control_mode,
             missing_forecast_count=missing_forecast_count,
             forecast_coverage_ratio=forecast_coverage_ratio if step_results else 1.0,
             model_id=model_id,
@@ -364,6 +397,9 @@ class SpaceHeatingMpcBacktestRunner:
                 left.pv_self_consumption_reward + right.pv_self_consumption_reward
             ),
             captured_pv_kwh=left.captured_pv_kwh + right.captured_pv_kwh,
+            preheat_budget_shortfall=(
+                left.preheat_budget_shortfall + right.preheat_budget_shortfall
+            ),
         )
 
     @staticmethod
@@ -434,6 +470,7 @@ class SpaceHeatingMpcBacktestRunner:
                 * captured_pv_kwh
             ),
             captured_pv_kwh=captured_pv_kwh,
+            preheat_budget_shortfall=0.0,
         )
 
     @staticmethod
@@ -653,6 +690,14 @@ class SpaceHeatingMpcBacktestRunner:
         mpc_hp_energy_during_realized_pv_surplus_kwh = 0.0
         mpc_hp_energy_during_forecast_pv_surplus_kwh = 0.0
         mpc_realized_pv_surplus_capture_kwh = 0.0
+        preheat_budget_electric_kwh = 0.0
+        used_preheat_budget_kwh = 0.0
+        missed_surplus_with_headroom_kwh = 0.0
+        run_durations_minutes: list[int] = []
+        current_run_minutes = 0
+        preheat_block_ids: set[int] = set()
+        mpc_start_count = 0
+        previous_hp_on = False
 
         for step in step_results:
             realized_pv_surplus_kwh += step.pv_surplus_realized_kw * dt_hours
@@ -661,6 +706,11 @@ class SpaceHeatingMpcBacktestRunner:
                 step.hp_electric_power_kw * float(int(step.mpc_hp_on)) * dt_hours
             )
             mpc_hp_energy_kwh += hp_energy_kwh
+            if step.preheat_block_id is not None:
+                preheat_block_ids.add(step.preheat_block_id)
+            preheat_budget_electric_kwh += step.preheat_budget_share_kwh
+            if step.preheat_active:
+                used_preheat_budget_kwh += hp_energy_kwh
             mpc_hp_energy_during_realized_pv_surplus_kwh += min(
                 step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
                 step.pv_surplus_realized_kw,
@@ -673,6 +723,26 @@ class SpaceHeatingMpcBacktestRunner:
                 step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
                 step.pv_surplus_realized_kw,
             ) * dt_hours
+            if step.preheat_active:
+                missed_surplus_with_headroom_kwh += max(
+                    min(step.hp_electric_power_kw, step.pv_surplus_realized_kw) * dt_hours
+                    - min(
+                        step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                        step.pv_surplus_realized_kw,
+                    )
+                    * dt_hours,
+                    0.0,
+                )
+            if step.mpc_hp_on:
+                if not previous_hp_on:
+                    mpc_start_count += 1
+                current_run_minutes += interval_minutes
+            elif current_run_minutes > 0:
+                run_durations_minutes.append(current_run_minutes)
+                current_run_minutes = 0
+            previous_hp_on = step.mpc_hp_on
+        if current_run_minutes > 0:
+            run_durations_minutes.append(current_run_minutes)
 
         return MpcBacktestPvDiagnostics(
             realized_pv_surplus_kwh=realized_pv_surplus_kwh,
@@ -695,4 +765,56 @@ class SpaceHeatingMpcBacktestRunner:
                 if forecast_pv_surplus_kwh > 0.0
                 else 0.0
             ),
+            preheat_budget_electric_kwh=preheat_budget_electric_kwh,
+            used_preheat_budget_kwh=used_preheat_budget_kwh,
+            missed_surplus_with_headroom_kwh=missed_surplus_with_headroom_kwh,
+            captured_realized_pv_kwh=mpc_realized_pv_surplus_capture_kwh,
+            capture_ratio_realized=(
+                mpc_realized_pv_surplus_capture_kwh / realized_pv_surplus_kwh
+                if realized_pv_surplus_kwh > 0.0
+                else 0.0
+            ),
+            average_run_duration_minutes=(
+                sum(run_durations_minutes) / len(run_durations_minutes)
+                if run_durations_minutes
+                else 0.0
+            ),
+            short_run_count=sum(1 for duration in run_durations_minutes if duration < 30),
+            preheat_block_count=len(preheat_block_ids),
+            starts_per_preheat_block=(
+                mpc_start_count / len(preheat_block_ids)
+                if preheat_block_ids
+                else 0.0
+            ),
+        )
+
+    @staticmethod
+    def _executed_preheat_budget_shortfall_cost(
+        *,
+        step_results: list[MpcBacktestStepResult],
+        interval_minutes: int,
+        objective_weights: MpcObjectiveWeights,
+    ) -> float:
+        dt_hours = interval_minutes / 60.0
+        block_budget_kwh: dict[int, float] = {}
+        block_charge_kwh: dict[int, float] = {}
+        for step in step_results:
+            if step.preheat_block_id is None:
+                continue
+            block_budget_kwh[step.preheat_block_id] = (
+                block_budget_kwh.get(step.preheat_block_id, 0.0)
+                + step.preheat_budget_share_kwh
+            )
+            block_charge_kwh[step.preheat_block_id] = (
+                block_charge_kwh.get(step.preheat_block_id, 0.0)
+                + min(
+                    step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                    step.pv_surplus_forecast_kw,
+                )
+                * dt_hours
+            )
+        return sum(
+            objective_weights.preheat_budget_shortfall
+            * max(block_budget_kwh[block_id] - block_charge_kwh.get(block_id, 0.0), 0.0)
+            for block_id in block_budget_kwh
         )

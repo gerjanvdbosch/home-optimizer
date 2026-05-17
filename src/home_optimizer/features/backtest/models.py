@@ -17,6 +17,15 @@ class MpcBacktestPvDiagnostics(DomainModel):
     mpc_realized_pv_surplus_capture_kwh: float = 0.0
     mpc_realized_pv_surplus_capture_ratio: float = 0.0
     mpc_forecast_pv_surplus_capture_ratio: float = 0.0
+    preheat_budget_electric_kwh: float = 0.0
+    used_preheat_budget_kwh: float = 0.0
+    missed_surplus_with_headroom_kwh: float = 0.0
+    captured_realized_pv_kwh: float = 0.0
+    capture_ratio_realized: float = 0.0
+    average_run_duration_minutes: float = 0.0
+    short_run_count: int = 0
+    preheat_block_count: int = 0
+    starts_per_preheat_block: float = 0.0
 
 
 class MpcBacktestStepResult(DomainModel):
@@ -29,6 +38,10 @@ class MpcBacktestStepResult(DomainModel):
     stop: bool
     planned_room_temp_c: float = 0.0
     useful_preheat_target_c: float = 0.0
+    preheat_active: bool = False
+    preheat_block_id: int | None = None
+    preheat_budget_share_kwh: float = 0.0
+    preheat_opportunity_score: float = 0.0
     q_heat_eff_kw: float = 0.0
     historical_q_heat_eff_kw: float = 0.0
     hp_electric_power_kw: float = 0.0
@@ -72,6 +85,7 @@ class MpcBacktestSummary(DomainModel):
 
 class MpcBacktestResult(DomainModel):
     exogenous_mode: str = "perfect_foresight"
+    control_mode: str = "legacy_objective"
     missing_forecast_count: int = 0
     forecast_coverage_ratio: float = 1.0
     model_id: str

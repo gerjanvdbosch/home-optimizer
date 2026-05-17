@@ -21,6 +21,7 @@ from home_optimizer.features.mpc.models import (
 class _ObjectiveContext:
     useful_preheat_targets_c: list[float]
     pv_self_consumable_kw: list[float]
+    pv_opportunity_scores: list[float]
     comfort_high_big_m_c: list[float]
     unnecessary_heating_big_m_c: list[float]
     q_heat_eff_big_m_kw: float
@@ -88,6 +89,7 @@ class SpaceHeatingMpcSolver:
             energy_cost=float(pyo.value(model.energy_term - model.energy_baseline_term)),
             pv_self_consumption_reward=float(pyo.value(model.pv_self_consumption_reward_term)),
             captured_pv_kwh=float(pyo.value(model.captured_pv_kwh_term)),
+            preheat_budget_shortfall=float(pyo.value(model.preheat_budget_shortfall_term)),
         )
         objective_value = float(pyo.value(model.objective))
         steps: list[MpcPlanStep] = []
@@ -112,7 +114,14 @@ class SpaceHeatingMpcSolver:
                     start=bool(round(pyo.value(model.start[index]))),
                     stop=bool(round(pyo.value(model.stop[index]))),
                     predicted_room_temp_c=float(pyo.value(model.room_temp[index])),
+                    economic_target_c=float(horizon_step.economic_target_c or horizon_step.temp_min_c),
                     useful_preheat_target_c=float(pyo.value(model.useful_preheat_target[index])),
+                    preheat_active=bool(horizon_step.preheat_active),
+                    preheat_opportunity_score=float(horizon_step.preheat_opportunity_score),
+                    preheat_budget_share_kwh=float(horizon_step.preheat_budget_share_kwh),
+                    preheat_charge_kwh=float(pyo.value(model.preheat_charge[index])),
+                    preheat_block_id=horizon_step.preheat_block_id,
+                    preheat_block_budget_kwh=float(horizon_step.preheat_block_budget_kwh),
                     q_heat_eff_kw=q_heat_eff_kw,
                     temp_min_c=horizon_step.temp_min_c,
                     temp_max_c=horizon_step.temp_max_c,
@@ -197,6 +206,7 @@ class SpaceHeatingMpcSolver:
         model.track_under = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.track_over = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.unnecessary_heat_excess = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.preheat_charge = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.terminal_under = pyo.Var(domain=pyo.NonNegativeReals)
         model.useful_preheat_target = pyo.Param(
             model.T,
@@ -223,6 +233,13 @@ class SpaceHeatingMpcSolver:
             model.T,
             initialize={
                 index: objective_context.pv_self_consumable_kw[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.pv_opportunity_score = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.pv_opportunity_scores[index]
                 for index in range(horizon_size)
             },
         )
@@ -345,6 +362,11 @@ class SpaceHeatingMpcSolver:
                 - problem.horizon[t].pv_available_power_forecast_kw
             ),
         )
+        model.preheat_charge_limit = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.preheat_charge[t]
+            <= (problem.dt_hours * model_ref.pv_self_consumable_kw[t] * model_ref.hp_on[t]),
+        )
 
         if problem.constraints.min_on_steps > 1:
             model.min_on = pyo.Constraint(
@@ -365,6 +387,17 @@ class SpaceHeatingMpcSolver:
                 )
                 <= 1 - model_ref.hp_on[t],
             )
+
+        self._apply_preheat_block_start_limits(
+            model=model,
+            problem=problem,
+            pyo=pyo,
+        )
+        self._apply_preheat_block_budget_constraints(
+            model=model,
+            problem=problem,
+            pyo=pyo,
+        )
 
         remaining_on_steps = 0
         if problem.initial_state.hp_on:
@@ -446,17 +479,25 @@ class SpaceHeatingMpcSolver:
             problem.objective_weights.pv_self_consumption
             * problem.dt_hours
             * model.pv_self_consumable_kw[t]
+            * model.pv_opportunity_score[t]
             * model.hp_on[t]
             for t in range(horizon_size)
         )
         captured_pv_kwh_term = sum(
-            problem.dt_hours * model.pv_self_consumable_kw[t] * model.hp_on[t]
+            problem.dt_hours
+            * model.pv_self_consumable_kw[t]
+            * model.hp_on[t]
             for t in range(horizon_size)
         )
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
         terminal_term = problem.objective_weights.terminal * model.terminal_under
+        preheat_budget_shortfall_term = self._preheat_budget_shortfall_expression(
+            model=model,
+            problem=problem,
+            pyo=pyo,
+        )
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
         model.active_comfort_high_term = pyo.Expression(expr=active_comfort_high_term)
         model.passive_comfort_high_term = pyo.Expression(expr=passive_comfort_high_term)
@@ -472,6 +513,7 @@ class SpaceHeatingMpcSolver:
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
         model.pv_self_consumption_reward_term = pyo.Expression(expr=pv_self_consumption_reward_term)
         model.captured_pv_kwh_term = pyo.Expression(expr=captured_pv_kwh_term)
+        model.preheat_budget_shortfall_term = pyo.Expression(expr=preheat_budget_shortfall_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
@@ -483,6 +525,7 @@ class SpaceHeatingMpcSolver:
                 + model.terminal_term
                 + model.start_term
                 + (model.energy_term - model.energy_baseline_term)
+                + model.preheat_budget_shortfall_term
                 - model.pv_self_consumption_reward_term
                 + model.runtime_term
             ),
@@ -513,6 +556,7 @@ class SpaceHeatingMpcSolver:
         model.track_under = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.track_over = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.unnecessary_heat_excess = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+        model.preheat_charge = pyo.Var(model.T, domain=pyo.NonNegativeReals)
         model.terminal_under = pyo.Var(domain=pyo.NonNegativeReals)
         model.useful_preheat_target = pyo.Param(
             model.T,
@@ -539,6 +583,13 @@ class SpaceHeatingMpcSolver:
             model.T,
             initialize={
                 index: objective_context.pv_self_consumable_kw[index]
+                for index in range(horizon_size)
+            },
+        )
+        model.pv_opportunity_score = pyo.Param(
+            model.T,
+            initialize={
+                index: objective_context.pv_opportunity_scores[index]
                 for index in range(horizon_size)
             },
         )
@@ -689,6 +740,11 @@ class SpaceHeatingMpcSolver:
                 - problem.horizon[t].pv_available_power_forecast_kw
             ),
         )
+        model.preheat_charge_limit = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.preheat_charge[t]
+            <= (problem.dt_hours * model_ref.pv_self_consumable_kw[t] * model_ref.hp_on[t]),
+        )
 
         if problem.constraints.min_on_steps > 1:
             model.min_on = pyo.Constraint(
@@ -709,6 +765,17 @@ class SpaceHeatingMpcSolver:
                 )
                 <= 1 - model_ref.hp_on[t],
             )
+
+        self._apply_preheat_block_start_limits(
+            model=model,
+            problem=problem,
+            pyo=pyo,
+        )
+        self._apply_preheat_block_budget_constraints(
+            model=model,
+            problem=problem,
+            pyo=pyo,
+        )
 
         remaining_on_steps = 0
         if problem.initial_state.hp_on:
@@ -790,17 +857,25 @@ class SpaceHeatingMpcSolver:
             problem.objective_weights.pv_self_consumption
             * problem.dt_hours
             * model.pv_self_consumable_kw[t]
+            * model.pv_opportunity_score[t]
             * model.hp_on[t]
             for t in range(horizon_size)
         )
         captured_pv_kwh_term = sum(
-            problem.dt_hours * model.pv_self_consumable_kw[t] * model.hp_on[t]
+            problem.dt_hours
+            * model.pv_self_consumable_kw[t]
+            * model.hp_on[t]
             for t in range(horizon_size)
         )
         runtime_term = sum(
             problem.objective_weights.runtime * model.hp_on[t] for t in range(horizon_size)
         )
         terminal_term = problem.objective_weights.terminal * model.terminal_under
+        preheat_budget_shortfall_term = self._preheat_budget_shortfall_expression(
+            model=model,
+            problem=problem,
+            pyo=pyo,
+        )
         model.comfort_low_term = pyo.Expression(expr=comfort_low_term)
         model.active_comfort_high_term = pyo.Expression(expr=active_comfort_high_term)
         model.passive_comfort_high_term = pyo.Expression(expr=passive_comfort_high_term)
@@ -816,6 +891,7 @@ class SpaceHeatingMpcSolver:
         model.energy_baseline_term = pyo.Expression(expr=energy_baseline_term)
         model.pv_self_consumption_reward_term = pyo.Expression(expr=pv_self_consumption_reward_term)
         model.captured_pv_kwh_term = pyo.Expression(expr=captured_pv_kwh_term)
+        model.preheat_budget_shortfall_term = pyo.Expression(expr=preheat_budget_shortfall_term)
         model.runtime_term = pyo.Expression(expr=runtime_term)
         model.objective = pyo.Objective(
             expr=(
@@ -827,6 +903,7 @@ class SpaceHeatingMpcSolver:
                 + model.terminal_term
                 + model.start_term
                 + (model.energy_term - model.energy_baseline_term)
+                + model.preheat_budget_shortfall_term
                 - model.pv_self_consumption_reward_term
                 + model.runtime_term
             ),
@@ -835,7 +912,6 @@ class SpaceHeatingMpcSolver:
         return model
 
     def _build_objective_context(self, problem: MpcProblem) -> _ObjectiveContext:
-        base_targets_c = [float(step.target_temp_c) for step in problem.horizon]
         pv_surplus_available_kw = [
             max(
                 0.0,
@@ -843,83 +919,26 @@ class SpaceHeatingMpcSolver:
             )
             for step in problem.horizon
         ]
-        pv_normalizer_kw = max(
-            max(pv_surplus_available_kw, default=0.0),
-            max(
-                (
-                    max(
-                        float(step.hp_electric_power_forecast_kw),
-                        float(step.effective_heating_kw_forecast),
-                    )
-                    for step in problem.horizon
-                ),
-                default=0.0,
-            ),
-            1e-9,
-        )
-        pv_factors = [
-            min(pv_surplus_kw / pv_normalizer_kw, 1.0)
-            for pv_surplus_kw in pv_surplus_available_kw
+        pv_opportunity_scores = [
+            float(step.preheat_opportunity_score) if step.preheat_active else 0.0
+            for step in problem.horizon
         ]
         no_heat_rollout = rollout_without_heating(
             control_model=problem.control_model,
             initial_state=problem.initial_state,
             horizon=problem.horizon,
         )
-        max_import_price = max(
-            (float(step.import_price_eur_kwh) for step in problem.horizon),
-            default=0.0,
-        )
         useful_preheat_targets_c: list[float] = []
-        future_need_factors: list[float] = []
         for index, step in enumerate(problem.horizon):
-            base_target_c = base_targets_c[index]
             comfort_floor_c = float(step.temp_min_c)
-            base_tracking_band_c = max(0.0, base_target_c - comfort_floor_c)
-            comfort_headroom_c = max(0.0, float(step.temp_max_c) - base_target_c)
-            if comfort_headroom_c <= 0.0 and base_tracking_band_c <= 0.0:
-                future_need_factors.append(0.0)
-                useful_preheat_targets_c.append(base_target_c)
+            economic_target_c = float(step.economic_target_c or step.target_temp_c or step.temp_min_c)
+            if not step.preheat_active:
+                useful_preheat_targets_c.append(max(comfort_floor_c, economic_target_c))
                 continue
-            future_need_signal_c = 0.0
-            for future_index in range(index, len(problem.horizon)):
-                future_price_factor = 1.0
-                if max_import_price > 0.0:
-                    future_price_factor += float(
-                        problem.horizon[future_index].import_price_eur_kwh / max_import_price
-                    )
-                future_target_deficit_c = max(
-                    0.0,
-                    base_targets_c[future_index] - no_heat_rollout[future_index],
-                )
-                future_comfort_min_deficit_c = max(
-                    0.0,
-                    float(problem.horizon[future_index].temp_min_c) - no_heat_rollout[future_index],
-                )
-                future_need_signal_c = max(
-                    future_need_signal_c,
-                    max(future_target_deficit_c, future_comfort_min_deficit_c)
-                    * future_price_factor,
-                )
-            future_need_normalizer_c = max(comfort_headroom_c, base_tracking_band_c, 1e-9)
-            future_need_factor = min(future_need_signal_c / future_need_normalizer_c, 1.0)
-            future_need_factors.append(future_need_factor)
-            opportunity_factor = pv_factors[index] * math.sqrt(max(future_need_factor, 0.0))
-            economic_tracking_target_c = (
-                comfort_floor_c
-                + (base_tracking_band_c * opportunity_factor)
-            )
-            preheat_headroom_c = (
-                comfort_headroom_c
-                * opportunity_factor
-            )
             useful_preheat_targets_c.append(
                 min(
-                    float(step.temp_max_c),
-                    max(
-                        comfort_floor_c,
-                        economic_tracking_target_c + preheat_headroom_c,
-                    ),
+                    float(step.max_preheat_target_c or step.temp_max_c),
+                    max(comfort_floor_c, economic_target_c),
                 )
             )
 
@@ -927,7 +946,7 @@ class SpaceHeatingMpcSolver:
             min(
                 float(step.hp_electric_power_forecast_kw),
                 pv_surplus_available_kw[index],
-            )
+            ) * (1.0 if step.preheat_active else 0.0)
             for index, step in enumerate(problem.horizon)
         ]
         unnecessary_heating_big_m_c = [
@@ -969,11 +988,125 @@ class SpaceHeatingMpcSolver:
         return _ObjectiveContext(
             useful_preheat_targets_c=useful_preheat_targets_c,
             pv_self_consumable_kw=pv_self_consumable_kw,
+            pv_opportunity_scores=pv_opportunity_scores,
             comfort_high_big_m_c=comfort_high_big_m_c,
             unnecessary_heating_big_m_c=unnecessary_heating_big_m_c,
             q_heat_eff_big_m_kw=q_heat_eff_big_m_kw,
             terminal_target_c=useful_preheat_targets_c[-1],
         )
+
+    @staticmethod
+    def _preheat_block_step_indices(problem: MpcProblem) -> dict[int, list[int]]:
+        block_indices: dict[int, list[int]] = {}
+        for index, step in enumerate(problem.horizon):
+            if step.preheat_block_id is None or step.preheat_block_max_starts <= 0:
+                continue
+            block_indices.setdefault(step.preheat_block_id, []).append(index)
+        return block_indices
+
+    def _apply_preheat_block_start_limits(
+        self,
+        *,
+        model: Any,
+        problem: MpcProblem,
+        pyo: Any,
+    ) -> None:
+        block_indices = self._preheat_block_step_indices(problem)
+        if not block_indices:
+            return
+        model.PREHEAT_BLOCKS = pyo.Set(initialize=list(block_indices))
+        model.preheat_block_max_starts = pyo.Param(
+            model.PREHEAT_BLOCKS,
+            initialize={
+                block_id: problem.horizon[indices[0]].preheat_block_max_starts
+                for block_id, indices in block_indices.items()
+            },
+        )
+        model.preheat_block_start_limit = pyo.Constraint(
+            model.PREHEAT_BLOCKS,
+            rule=lambda model_ref, block_id: sum(
+                model_ref.start[index] for index in block_indices[block_id]
+            ) <= model_ref.preheat_block_max_starts[block_id],
+        )
+
+    def _apply_preheat_block_budget_constraints(
+        self,
+        *,
+        model: Any,
+        problem: MpcProblem,
+        pyo: Any,
+    ) -> None:
+        block_indices = self._preheat_block_step_indices(problem)
+        if not block_indices:
+            model.preheat_budget_shortfall = pyo.Var(domain=pyo.NonNegativeReals)
+            model.preheat_budget_shortfall.fix(0.0)
+            return
+        model.preheat_budget_shortfall = pyo.Var(
+            model.PREHEAT_BLOCKS,
+            domain=pyo.NonNegativeReals,
+        )
+        model.preheat_block_budget = pyo.Param(
+            model.PREHEAT_BLOCKS,
+            initialize={
+                block_id: problem.horizon[indices[0]].preheat_block_budget_kwh
+                for block_id, indices in block_indices.items()
+            },
+        )
+        model.preheat_block_step_target = pyo.Param(
+            model.T,
+            initialize={
+                index: float(problem.horizon[index].preheat_block_cumulative_target_kwh)
+                for index in range(len(problem.horizon))
+            },
+            default=0.0,
+        )
+        model.preheat_block_charge_limit = pyo.Constraint(
+            model.PREHEAT_BLOCKS,
+            rule=lambda model_ref, block_id: sum(
+                model_ref.preheat_charge[index] for index in block_indices[block_id]
+            ) <= model_ref.preheat_block_budget[block_id],
+        )
+        model.preheat_block_budget_shortfall = pyo.Constraint(
+            model.PREHEAT_BLOCKS,
+            rule=lambda model_ref, block_id: model_ref.preheat_budget_shortfall[block_id]
+            >= (
+                model_ref.preheat_block_budget[block_id]
+                - sum(model_ref.preheat_charge[index] for index in block_indices[block_id])
+            ),
+        )
+        model.preheat_budget_cumulative_shortfall = pyo.Var(
+            model.T,
+            domain=pyo.NonNegativeReals,
+        )
+        model.preheat_budget_cumulative_shortfall_limit = pyo.Constraint(
+            model.T,
+            rule=lambda model_ref, t: model_ref.preheat_budget_cumulative_shortfall[t]
+            >= (
+                model_ref.preheat_block_step_target[t]
+                - sum(model_ref.preheat_charge[index] for index in range(t + 1))
+            ),
+        )
+
+    @staticmethod
+    def _preheat_budget_shortfall_expression(
+        *,
+        model: Any,
+        problem: MpcProblem,
+        pyo: Any,
+    ) -> Any:
+        if not hasattr(model, "PREHEAT_BLOCKS"):
+            return 0.0
+        block_shortfall_term = sum(
+            problem.objective_weights.preheat_budget_shortfall
+            * model.preheat_budget_shortfall[block_id]
+            for block_id in model.PREHEAT_BLOCKS
+        )
+        cumulative_shortfall_term = 0.5 * problem.objective_weights.preheat_budget_shortfall * sum(
+            model.preheat_budget_cumulative_shortfall[t]
+            for t in model.T
+            if float(model.preheat_block_step_target[t]) > 0.0
+        )
+        return block_shortfall_term + cumulative_shortfall_term
 
 
 def _baseline_site_energy_cost(horizon_step: MpcHorizonStep) -> float:

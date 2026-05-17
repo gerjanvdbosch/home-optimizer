@@ -61,6 +61,13 @@
               <option value="forecast_replay">Forecast replay</option>
             </select>
           </label>
+          <label>
+            MPC control mode
+            <select id="backtest-control-mode">
+              <option value="legacy_objective">Legacy objective</option>
+              <option value="hierarchical_preheat">Hierarchical preheat</option>
+            </select>
+          </label>
           <button id="backtest-run-button" type="button">Run backtest</button>
           <div id="backtest-status" class="status" aria-live="polite"></div>
         </div>

@@ -1,6 +1,7 @@
 from .control_model import to_control_model
 from .controller_service import SpaceHeatingMpcControllerService
 from .explain import explain_heating_plan
+from .flexibility_assessor import SpaceHeatingFlexibilityAssessor
 from .horizon_builder import (
     DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME,
     DEFAULT_SOLAR_GAIN_FORECAST_NAME,
@@ -8,7 +9,9 @@ from .horizon_builder import (
 )
 from .models import (
     ControlModelConversionOptions,
+    ExecutionTargetStep,
     LinearThermalControlModel,
+    MpcControlMode,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonBuildRequest,
@@ -19,17 +22,26 @@ from .models import (
     MpcPlan,
     MpcPlanStep,
     MpcProblem,
+    PreheatPlan,
+    PreheatBlock,
+    PreheatSchedule,
+    PreheatPlanStep,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
+    ThermalFlexibilityState,
+    ThermalFlexibilityStep,
 )
 from .planning_service import SpaceHeatingMpcPlanningService
+from .preheat_scheduler import SpaceHeatingPreheatScheduler
 from .space_heating_mpc import SpaceHeatingMpcSolver
 
 __all__ = [
     "ControlModelConversionOptions",
+    "ExecutionTargetStep",
     "DEFAULT_OUTDOOR_TEMPERATURE_FORECAST_NAME",
     "DEFAULT_SOLAR_GAIN_FORECAST_NAME",
     "LinearThermalControlModel",
+    "MpcControlMode",
     "MpcConstraints",
     "MpcControllerRequest",
     "MpcHorizonBuildRequest",
@@ -41,11 +53,19 @@ __all__ = [
     "MpcPlan",
     "MpcPlanStep",
     "MpcProblem",
+    "PreheatBlock",
+    "PreheatPlan",
+    "PreheatSchedule",
+    "PreheatPlanStep",
     "Rc2StateMpcInitialState",
     "Rc2StateThermalControlModel",
     "SpaceHeatingMpcControllerService",
+    "SpaceHeatingFlexibilityAssessor",
     "SpaceHeatingMpcPlanningService",
+    "SpaceHeatingPreheatScheduler",
     "SpaceHeatingMpcSolver",
+    "ThermalFlexibilityState",
+    "ThermalFlexibilityStep",
     "explain_heating_plan",
     "to_control_model",
 ]
