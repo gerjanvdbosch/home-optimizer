@@ -97,6 +97,53 @@ def rollout_without_heating(
     return predicted_temperatures
 
 
+def rollout_with_full_heating(
+    *,
+    control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+    initial_state: MpcInitialState | Rc2StateMpcInitialState,
+    horizon: list[MpcHorizonStep],
+) -> list[float]:
+    if not horizon:
+        return []
+
+    predicted_temperatures = [initial_state.room_temp_c]
+    current_temp_c = initial_state.room_temp_c
+    current_q_heat_eff_kw = initial_state.q_heat_eff_kw
+    current_mass_temp_c = (
+        initial_state.mass_temp_c if isinstance(initial_state, Rc2StateMpcInitialState) else None
+    )
+    for step in horizon[:-1]:
+        current_q_heat_eff_kw = (
+            control_model.actuator_alpha * current_q_heat_eff_kw
+        ) + (
+            (1.0 - control_model.actuator_alpha) * step.effective_heating_kw_forecast
+        )
+        if isinstance(control_model, Rc2StateThermalControlModel):
+            if current_mass_temp_c is None:
+                raise ValueError("Rc2StateThermalControlModel requires Rc2StateMpcInitialState")
+            current_temp_c, current_mass_temp_c = control_model.predict_next_state(
+                room_temp_c=current_temp_c,
+                mass_temp_c=current_mass_temp_c,
+                outdoor_temp_c=step.outdoor_temp_c,
+                solar_gain_kw=step.solar_gain_kw,
+                solar_gain_mass_kw=float(step.solar_gain_mass_kw),
+                heating_effect_kw=current_q_heat_eff_kw,
+                occupied=step.occupied,
+                hour_sin=step.hour_sin,
+                hour_cos=step.hour_cos,
+            )
+        else:
+            current_temp_c = control_model.predict_next_temperature(
+                room_temp_c=current_temp_c,
+                outdoor_temp_c=step.outdoor_temp_c,
+                solar_gain_kw=step.solar_gain_kw,
+                heating_effect_kw=current_q_heat_eff_kw,
+                occupied=step.occupied,
+            )
+        predicted_temperatures.append(current_temp_c)
+    return predicted_temperatures
+
+
 def _format_local_time(timestamp_utc: datetime) -> str:
     local_timestamp = timestamp_utc.astimezone(current_local_timezone())
     return local_timestamp.strftime("%H:%M")

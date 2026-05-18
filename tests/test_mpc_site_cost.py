@@ -11,9 +11,11 @@ from home_optimizer.features.mpc import (
     MpcHorizonStep,
     MpcInitialState,
     MpcObjectiveWeights,
+    MpcProblem,
     PreheatPlan,
     PreheatPlanStep,
     SpaceHeatingMpcControllerService,
+    SpaceHeatingMpcSolver,
 )
 
 
@@ -118,6 +120,59 @@ def test_target_tracking_uses_economic_target_without_pv_opportunity() -> None:
     assert plan.feasible is True
     assert plan.steps[0].economic_target_c > 19.0
     assert plan.steps[0].economic_target_c < 22.0
+
+
+def test_forced_heating_stays_feasible_when_overheating_requires_large_slack() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=10.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=1.0,
+            hp_electric_power_forecast_kw=1.0,
+            pv_available_power_forecast_kw=0.0,
+            base_load_power_forecast_kw=0.0,
+            occupied=0.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.0,
+            export_price_eur_kwh=0.0,
+            hp_must_be_on=(step == 0),
+        )
+        for step in range(4)
+    ]
+
+    plan = SpaceHeatingMpcSolver().solve(
+        MpcProblem(
+            interval_minutes=10,
+            horizon=horizon,
+            objective_weights=MpcObjectiveWeights(
+                tracking_under_target=0.0,
+                tracking_over_target=0.0,
+                unnecessary_heating=0.0,
+                terminal=0.0,
+                start=0.0,
+                energy=0.0,
+                pv_self_consumption=0.0,
+                runtime=0.0,
+            ),
+            constraints=MpcConstraints(),
+            control_model=LinearThermalControlModel(
+                a=1.0,
+                b_out=0.0,
+                b_solar=0.0,
+                b_heat=10.0,
+                b_occ=0.0,
+                c=0.0,
+            ),
+            initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=1),
+        ),
+    )
+
+    assert plan.feasible is True
+    assert plan.steps[0].hp_on is True
+    assert plan.steps[1].slack_high_c > 5.0
     assert plan.steps[0].useful_preheat_target_c == pytest.approx(
         plan.steps[0].economic_target_c
     )
@@ -757,7 +812,12 @@ def test_lingering_q_heat_eff_counts_as_active_comfort_high() -> None:
             actuator_alpha=0.8,
             c=0.0,
         ),
-        initial_state=MpcInitialState(room_temp_c=20.6, q_heat_eff_kw=0.5, hp_on=False, off_steps=1),
+        initial_state=MpcInitialState(
+            room_temp_c=20.6,
+            q_heat_eff_kw=0.5,
+            hp_on=False,
+            off_steps=1,
+        ),
     )
 
     assert plan.feasible is True

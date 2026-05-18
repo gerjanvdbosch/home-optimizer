@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from time import perf_counter
 from typing import Any
 
-from home_optimizer.features.mpc.explain import rollout_without_heating
+from home_optimizer.features.mpc.explain import (
+    rollout_with_full_heating,
+    rollout_without_heating,
+)
 from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
     MpcHorizonStep,
     MpcObjectiveBreakdown,
     MpcPlan,
@@ -55,7 +56,19 @@ class SpaceHeatingMpcSolver:
         solver = self._build_solver(pyo, problem.max_solver_seconds)
 
         started_at = perf_counter()
-        results = solver.solve(model)
+        try:
+            results = solver.solve(model)
+        except Exception as exc:
+            if exc.__class__.__name__ == "NoFeasibleSolutionError":
+                return MpcPlan(
+                    status="error",
+                    termination_condition="infeasible",
+                    feasible=False,
+                    solve_time_seconds=perf_counter() - started_at,
+                    objective_breakdown=MpcObjectiveBreakdown(),
+                    steps=[],
+                )
+            raise
         solve_time_seconds = perf_counter() - started_at
 
         solver_status = str(results.solver.status)
@@ -114,7 +127,9 @@ class SpaceHeatingMpcSolver:
                     start=bool(round(pyo.value(model.start[index]))),
                     stop=bool(round(pyo.value(model.stop[index]))),
                     predicted_room_temp_c=float(pyo.value(model.room_temp[index])),
-                    economic_target_c=float(horizon_step.economic_target_c or horizon_step.temp_min_c),
+                    economic_target_c=float(
+                        horizon_step.economic_target_c or horizon_step.temp_min_c
+                    ),
                     useful_preheat_target_c=float(pyo.value(model.useful_preheat_target[index])),
                     preheat_active=bool(horizon_step.preheat_active),
                     preheat_opportunity_score=float(horizon_step.preheat_opportunity_score),
@@ -925,7 +940,8 @@ class SpaceHeatingMpcSolver:
         pv_surplus_available_kw = [
             max(
                 0.0,
-                float(step.pv_available_power_forecast_kw) - float(step.base_load_power_forecast_kw),
+                float(step.pv_available_power_forecast_kw)
+                - float(step.base_load_power_forecast_kw),
             )
             for step in problem.horizon
         ]
@@ -938,10 +954,17 @@ class SpaceHeatingMpcSolver:
             initial_state=problem.initial_state,
             horizon=problem.horizon,
         )
+        full_heat_rollout = rollout_with_full_heating(
+            control_model=problem.control_model,
+            initial_state=problem.initial_state,
+            horizon=problem.horizon,
+        )
         useful_preheat_targets_c: list[float] = []
-        for index, step in enumerate(problem.horizon):
+        for step in problem.horizon:
             comfort_floor_c = float(step.temp_min_c)
-            economic_target_c = float(step.economic_target_c or step.target_temp_c or step.temp_min_c)
+            economic_target_c = float(
+                step.economic_target_c or step.target_temp_c or step.temp_min_c
+            )
             if not step.preheat_active:
                 useful_preheat_targets_c.append(max(comfort_floor_c, economic_target_c))
                 continue
@@ -969,6 +992,13 @@ class SpaceHeatingMpcSolver:
                     ),
                     default=0.0,
                 ),
+                max(
+                    (
+                        full_heat_rollout[future_index] - useful_preheat_targets_c[index]
+                        for future_index in range(index, len(problem.horizon))
+                    ),
+                    default=0.0,
+                ),
                 float(problem.horizon[index].temp_max_c - problem.horizon[index].temp_min_c),
                 0.0,
             )
@@ -980,6 +1010,13 @@ class SpaceHeatingMpcSolver:
                 max(
                     (
                         no_heat_rollout[future_index] - float(problem.horizon[index].temp_max_c)
+                        for future_index in range(index, len(problem.horizon))
+                    ),
+                    default=0.0,
+                ),
+                max(
+                    (
+                        full_heat_rollout[future_index] - float(problem.horizon[index].temp_max_c)
                         for future_index in range(index, len(problem.horizon))
                     ),
                     default=0.0,
