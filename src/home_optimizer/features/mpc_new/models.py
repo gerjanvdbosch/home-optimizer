@@ -7,15 +7,16 @@ from pydantic import Field
 
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.features.mpc.models import (
-    ExecutionTargetStep,
-    HeatPumpSequencerState,
+    LinearThermalControlModel,
     MpcConstraints,
-    MpcControllerRequest,
     MpcControlMode,
     MpcHorizonStep,
+    MpcInitialState,
     MpcObjectiveBreakdown,
     MpcObjectiveWeights,
     MpcPlanStep,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     ThermalFlexibilityState,
 )
 
@@ -152,50 +153,18 @@ class IntentAwareMpcPlan(DomainModel):
     run_intent_plan: RunIntentPlan | None = None
     run_execution_state: RunExecutionState | None = None
     execution_targets: list[RunIntentExecutionTargetStep] = Field(default_factory=list)
-    legacy_execution_targets: list[ExecutionTargetStep] = Field(default_factory=list)
     diagnostics: dict[str, float | int | str] = Field(default_factory=dict)
 
 
-def to_legacy_sequencer_state(state: RunExecutionState | None) -> HeatPumpSequencerState | None:
-    if state is None:
-        return None
-    return HeatPumpSequencerState(
-        mode=(
-            "PREHEAT_RUNNING"
-            if state.mode == "PREHEAT_RUNNING"
-            else "COMFORT_RUNNING"
-            if state.mode == "COMFORT_FALLBACK_RUNNING"
-            else "LOCKED_OUT"
-            if state.mode == "LOCKED_OUT"
-            else "SAFETY_STOP"
-            if state.mode == "SAFETY_STOP"
-            else "IDLE"
-        ),
-        active_run_id=state.active_run_id,
-        active_block_id=state.active_source_block_id,
-        run_started_at_utc=state.run_started_at_utc,
-        committed_on_until_utc=state.committed_on_until_utc,
-        locked_off_until_utc=state.locked_off_until_utc,
-        previous_hp_on=state.previous_hp_on,
-        on_steps=state.on_steps,
-        off_steps=state.off_steps,
-        last_start_reason=state.start_reason,
-        last_stop_reason=state.stop_reason,
-    )
-
-
-def to_legacy_request(
-    request: IntentAwareMpcControllerRequest,
-    *,
-    horizon: list[MpcHorizonStep],
-) -> MpcControllerRequest:
-    return MpcControllerRequest(
-        interval_minutes=request.interval_minutes,
-        horizon=horizon,
-        control_mode=request.control_mode,
-        sequencer_key=request.sequencer_key,
-        sequencer_state=to_legacy_sequencer_state(request.run_execution_state),
-        constraints=request.constraints,
-        objective_weights=request.objective_weights,
-        max_solver_seconds=request.max_solver_seconds,
-    )
+class IntentAwareMpcProblem(DomainModel):
+    interval_minutes: int = Field(gt=0)
+    control_mode: MpcControlMode = "hierarchical_preheat"
+    control_model: Rc2StateThermalControlModel | LinearThermalControlModel
+    initial_state: Rc2StateMpcInitialState | MpcInitialState
+    horizon: list[MpcHorizonStep]
+    thermal_flexibility: ThermalFlexibilityState | None = None
+    run_intent_plan: RunIntentPlan | None = None
+    execution_targets: list[RunIntentExecutionTargetStep] = Field(default_factory=list)
+    constraints: MpcConstraints = Field(default_factory=MpcConstraints)
+    objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
+    max_solver_seconds: float | None = Field(default=None, gt=0.0)

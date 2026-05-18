@@ -15,12 +15,14 @@ from .models import (
 )
 from .planner import RunSelectionPlanner
 from .sequencer import IntentDrivenSequencer
+from .solver import IntentAwareMpcSolver
 
 __all__ = [
     "IntentAwareMpcControllerRequest",
     "IntentAwareMpcControllerService",
     "IntentAwareMpcPlan",
     "IntentDrivenSequencer",
+    "IntentAwareMpcSolver",
     "IntentExecutionMode",
     "IntentFallbackPolicy",
     "IntentReplacementPolicy",

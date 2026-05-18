@@ -5,31 +5,30 @@ from typing import Callable
 from home_optimizer.features.mpc.explain import explain_heating_plan
 from home_optimizer.features.mpc.flexibility_assessor import SpaceHeatingFlexibilityAssessor
 from home_optimizer.features.mpc.models import (
-    ExecutionTargetStep,
     LinearThermalControlModel,
     MpcHorizonStep,
     MpcInitialState,
-    MpcProblem,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
 )
-from home_optimizer.features.mpc.space_heating_mpc import SpaceHeatingMpcSolver
 from home_optimizer.features.mpc_new.models import (
     IntentAwareMpcControllerRequest,
     IntentAwareMpcPlan,
+    IntentAwareMpcProblem,
     RunExecutionState,
     RunIntentExecutionTargetStep,
     RunIntentPlan,
 )
 from home_optimizer.features.mpc_new.planner import RunSelectionPlanner
 from home_optimizer.features.mpc_new.sequencer import IntentDrivenSequencer
+from home_optimizer.features.mpc_new.solver import IntentAwareMpcSolver
 
 
 class IntentAwareMpcControllerService:
     def __init__(
         self,
         *,
-        solver: SpaceHeatingMpcSolver | None = None,
+        solver: IntentAwareMpcSolver | None = None,
         control_model_provider: Callable[
             [],
             LinearThermalControlModel | Rc2StateThermalControlModel,
@@ -43,7 +42,7 @@ class IntentAwareMpcControllerService:
         planner: RunSelectionPlanner | None = None,
         sequencer: IntentDrivenSequencer | None = None,
     ) -> None:
-        self.solver = solver or SpaceHeatingMpcSolver()
+        self.solver = solver or IntentAwareMpcSolver()
         self.control_model_provider = control_model_provider
         self.horizon_provider = horizon_provider
         self.initial_state_provider = initial_state_provider
@@ -88,25 +87,20 @@ class IntentAwareMpcControllerService:
             execution_state=request.run_execution_state,
             interval_minutes=request.interval_minutes,
         )
-        updated_horizon, legacy_targets = self._apply_intents_and_targets(
-            horizon=resolved_horizon,
-            execution_targets=execution_targets,
-            intent_plan=intent_plan,
-            flexibility=flexibility,
-        )
-        problem = MpcProblem(
+        problem = IntentAwareMpcProblem(
             interval_minutes=request.interval_minutes,
             control_mode=request.control_mode,
             control_model=resolved_control_model,
             initial_state=resolved_initial_state,
-            horizon=updated_horizon,
+            horizon=resolved_horizon,
             thermal_flexibility=flexibility,
-            execution_targets=legacy_targets,
-            sequencer_state=None,
+            run_intent_plan=intent_plan,
+            execution_targets=execution_targets,
             constraints=request.constraints,
             objective_weights=request.objective_weights,
             max_solver_seconds=request.max_solver_seconds,
         )
+        annotated_horizon = self.solver.annotate_horizon(problem)
         base_plan = self.solver.solve(problem)
         diagnostics = self._summarize_plan(
             plan_intents=intent_plan,
@@ -126,13 +120,12 @@ class IntentAwareMpcControllerService:
             run_intent_plan=intent_plan,
             run_execution_state=projected_state,
             execution_targets=execution_targets,
-            legacy_execution_targets=legacy_targets,
             diagnostics=diagnostics | {
                 "heating_explanation": explain_heating_plan(
                     plan=base_plan,
                     control_model=resolved_control_model,
                     initial_state=resolved_initial_state,
-                    horizon=updated_horizon,
+                    horizon=annotated_horizon,
                 )
             },
         )
@@ -182,115 +175,6 @@ class IntentAwareMpcControllerService:
         if self.horizon_provider is None:
             raise ValueError("horizon is required when no provider is configured")
         return self.horizon_provider()
-
-    @staticmethod
-    def _apply_intents_and_targets(
-        *,
-        horizon: list[MpcHorizonStep],
-        execution_targets: list[RunIntentExecutionTargetStep],
-        intent_plan: RunIntentPlan,
-        flexibility,
-    ) -> tuple[list[MpcHorizonStep], list[ExecutionTargetStep]]:
-        intents_by_id = {intent.intent_id: intent for intent in intent_plan.intents}
-        updated_horizon: list[MpcHorizonStep] = []
-        legacy_targets: list[ExecutionTargetStep] = []
-        for index, (step, target) in enumerate(zip(horizon, execution_targets, strict=False)):
-            intent = intents_by_id.get(target.active_intent_id or target.eligible_intent_id)
-            economic_target_c = (
-                flexibility.steps[index].economic_target_c
-                if index < len(flexibility.steps)
-                else float(step.economic_target_c or step.temp_min_c)
-            )
-            preheat_active = intent is not None
-            preheat_budget_share_kwh = 0.0
-            preheat_block_budget_kwh = 0.0
-            if intent is not None:
-                window_steps = max(
-                    1,
-                    sum(
-                        1
-                        for horizon_step in horizon
-                        if intent.start_window_start_utc
-                        <= horizon_step.timestamp_utc
-                        <= intent.start_window_end_utc
-                    ),
-                )
-                preheat_budget_share_kwh = intent.target_charge_kwh / window_steps
-                preheat_block_budget_kwh = intent.target_charge_kwh
-            updated_horizon.append(
-                step.model_copy(
-                    update={
-                        "economic_target_c": economic_target_c,
-                        "preheat_active": preheat_active,
-                        "preheat_opportunity_score": float(
-                            intent.score if intent is not None else 0.0
-                        ),
-                        "max_preheat_target_c": (
-                            intent.max_preheat_target_c
-                            if intent is not None
-                            else economic_target_c
-                        ),
-                        "preheat_budget_share_kwh": preheat_budget_share_kwh,
-                        "preheat_block_id": intent.source_block_id if intent is not None else None,
-                        "preheat_block_budget_kwh": preheat_block_budget_kwh,
-                        "preheat_block_cumulative_target_kwh": (
-                            preheat_budget_share_kwh
-                            * (index + 1 if preheat_active else 0)
-                        ),
-                        "preheat_block_max_starts": intent.max_starts if intent is not None else 0,
-                        "active_run_id": target.active_run_id,
-                        "hp_must_be_on": target.hp_must_be_on,
-                        "hp_must_be_off": target.hp_must_be_off,
-                        "hp_start_allowed": target.hp_start_allowed,
-                        "start_reason_hint": target.start_reason_hint,
-                        "stop_reason_hint": target.stop_reason_hint,
-                        "committed_on_until_utc": target.committed_on_until_utc,
-                        "locked_off_until_utc": target.locked_off_until_utc,
-                        "sequencer_mode": target.mode,
-                    }
-                )
-            )
-            legacy_targets.append(
-                ExecutionTargetStep(
-                    timestamp_utc=target.timestamp_utc,
-                    economic_target_c=economic_target_c,
-                    preheat_target_c=(
-                        intent.max_preheat_target_c
-                        if intent is not None
-                        else economic_target_c
-                    ),
-                    active_preheat_block_id=intent.source_block_id if intent is not None else None,
-                    remaining_block_budget_kwh=target.target_charge_remaining_kwh,
-                    block_budget_share_kwh=preheat_budget_share_kwh,
-                    block_cumulative_budget_target_kwh=(
-                        preheat_budget_share_kwh
-                        * (index + 1 if preheat_active else 0)
-                    ),
-                    storage_target_kwh=preheat_block_budget_kwh,
-                    max_preheat_target_c=(
-                        intent.max_preheat_target_c
-                        if intent is not None
-                        else economic_target_c
-                    ),
-                    start_allowed_for_preheat=target.hp_start_allowed and intent is not None,
-                    start_reason_hint=target.start_reason_hint,
-                    sequencer_mode=target.mode,
-                    active_run_id=target.active_run_id,
-                    hp_must_be_on=target.hp_must_be_on,
-                    hp_must_be_off=target.hp_must_be_off,
-                    hp_start_allowed=target.hp_start_allowed,
-                    stop_reason_hint=target.stop_reason_hint,
-                    committed_on_until_utc=target.committed_on_until_utc,
-                    locked_off_until_utc=target.locked_off_until_utc,
-                    starts_blocked_by_lockout=bool(
-                        target.locked_off_until_utc is not None
-                        and target.timestamp_utc < target.locked_off_until_utc
-                    ),
-                    starts_blocked_by_max_starts=False,
-                    starts_blocked_by_existing_commitment=target.active_intent_id is not None,
-                )
-            )
-        return updated_horizon, legacy_targets
 
     @staticmethod
     def _summarize_plan(
