@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 
 from home_optimizer.features.mpc.explain import rollout_without_heating
 from home_optimizer.features.mpc.models import (
@@ -25,6 +24,31 @@ class _PlanningState:
     mass_temp_c: float | None
     q_heat_eff_kw: float
     hp_on: bool
+
+
+@dataclass(slots=True)
+class _RunEvaluation:
+    run_start_index: int
+    run_end_index: int
+    planned_run_steps: int
+    used_charge_kwh: float
+    captured_pv_kwh: float
+    imported_energy_kwh: float
+    later_start_count: int
+    future_temp_min_violation_c: float
+    future_economic_violation_c: float
+    comfort_high_risk_c: float
+    storage_state_c: float
+    storage_state_gain_c: float
+    post_run_min_temp_c: float
+    post_run_end_temp_c: float
+    post_run_drops_below_economic: bool
+    post_run_drops_below_temp_min: bool
+    state_after_block: _PlanningState
+    state_after_policy: _PlanningState
+    policy_cursor_index: int
+    score: float
+    stop_reason: str
 
 
 class SpaceHeatingPreheatScheduler:
@@ -56,7 +80,6 @@ class SpaceHeatingPreheatScheduler:
             step.index
             for step in flexibility_state.steps
             if step.pv_surplus_window_kwh > 0.0
-            and step.available_storage_kwh > 0.0
             and step.expected_discharge_need_kwh > 0.0
         ]
         candidate_blocks = self._build_blocks_from_indices(
@@ -194,7 +217,7 @@ class SpaceHeatingPreheatScheduler:
         selected_blocks: list[PreheatBlock] = []
         remaining_need_kwh = required_preheat_charge_kwh
         cursor_index = 0
-        skipped_storage_sufficient_count = 0
+        skipped_block_count = 0
         sorted_candidates = sorted(candidate_blocks, key=lambda block: block.start_index)
         for candidate_index, candidate_block in enumerate(sorted_candidates):
             planning_state = self._simulate_span(
@@ -205,68 +228,47 @@ class SpaceHeatingPreheatScheduler:
                 end_index=candidate_block.start_index,
                 hp_on_indices=set(),
             )
-            no_heat_end_state = self._simulate_span(
-                control_model=control_model,
-                state=planning_state,
-                horizon=horizon,
-                start_index=candidate_block.start_index,
-                end_index=candidate_block.end_index + 1,
-                hp_on_indices=set(),
-            )
-            no_heat_hold = self._simulate_post_block_hold(
-                control_model=control_model,
-                state=no_heat_end_state,
-                horizon=horizon,
-                start_index=candidate_block.end_index + 1,
-                interval_minutes=interval_minutes,
-            )
             if remaining_need_kwh <= 0.0:
                 cursor_index = candidate_block.end_index + 1
-                planning_state = no_heat_end_state
-                continue
-            mass_temp_c = (
-                planning_state.mass_temp_c
-                if planning_state.mass_temp_c is not None
-                else planning_state.room_temp_c
-            )
-            step_at_block_end = flexibility_state.steps[candidate_block.end_index]
-            storage_sufficient = (
-                not no_heat_hold["drops_below_economic"]
-                and not no_heat_hold["drops_below_temp_min"]
-                and mass_temp_c >= step_at_block_end.economic_target_c
-                and step_at_block_end.normalized_storage_soc >= 0.6
-            )
-            if storage_sufficient:
-                skipped_storage_sufficient_count += 1
-                cursor_index = candidate_block.end_index + 1
-                planning_state = no_heat_end_state
+                planning_state = self._simulate_span(
+                    control_model=control_model,
+                    state=planning_state,
+                    horizon=horizon,
+                    start_index=candidate_block.start_index,
+                    end_index=candidate_block.end_index + 1,
+                    hp_on_indices=set(),
+                )
                 continue
 
-            planned_charge_kwh = min(
-                candidate_block.planned_charge_kwh,
-                remaining_need_kwh,
-                max(
-                    candidate_block.available_storage_kwh,
-                    0.0,
-                ),
-            )
-            if planned_charge_kwh <= 0.0:
-                cursor_index = candidate_block.end_index + 1
-                planning_state = no_heat_end_state
-                continue
-
-            run_summary = self._simulate_committed_run_in_block(
+            run_evaluation = self._select_best_run_in_block(
                 control_model=control_model,
                 state=planning_state,
                 horizon=horizon,
                 block=candidate_block,
                 interval_minutes=interval_minutes,
                 min_run_steps=min_run_steps,
-                planned_charge_kwh=planned_charge_kwh,
+                min_off_steps=min_off_steps,
+                planned_charge_limit_kwh=min(
+                    candidate_block.planned_charge_kwh,
+                    remaining_need_kwh,
+                    candidate_block.available_surplus_kwh,
+                ),
             )
-            used_charge_kwh = float(run_summary["used_charge_kwh"])
+            if run_evaluation is None or run_evaluation.used_charge_kwh <= 0.0:
+                skipped_block_count += 1
+                cursor_index = candidate_block.end_index + 1
+                planning_state = self._simulate_span(
+                    control_model=control_model,
+                    state=planning_state,
+                    horizon=horizon,
+                    start_index=candidate_block.start_index,
+                    end_index=candidate_block.end_index + 1,
+                    hp_on_indices=set(),
+                )
+                continue
+
             remaining_need_kwh = max(
-                remaining_need_kwh - used_charge_kwh,
+                remaining_need_kwh - run_evaluation.used_charge_kwh,
                 0.0,
             )
             selected_blocks.append(
@@ -275,38 +277,46 @@ class SpaceHeatingPreheatScheduler:
                         "block_id": len(selected_blocks),
                         "candidate_block_id": candidate_index,
                         "selected": True,
-                        "planned_charge_kwh": planned_charge_kwh,
-                        "planned_run_steps": int(run_summary["planned_run_steps"]),
-                        "preferred_start_index": int(run_summary["run_start_index"]),
-                        "used_charge_kwh": used_charge_kwh,
-                        "missed_charge_kwh": max(planned_charge_kwh - used_charge_kwh, 0.0),
+                        "planned_charge_kwh": run_evaluation.used_charge_kwh,
+                        "planned_run_steps": run_evaluation.planned_run_steps,
+                        "preferred_start_index": run_evaluation.run_start_index,
+                        "used_charge_kwh": run_evaluation.used_charge_kwh,
+                        "missed_charge_kwh": max(
+                            candidate_block.planned_charge_kwh - run_evaluation.used_charge_kwh,
+                            0.0,
+                        ),
                         "remaining_need_kwh": remaining_need_kwh,
-                        "simulated_end_room_temp_c": float(run_summary["end_room_temp_c"]),
-                        "simulated_end_mass_temp_c": run_summary["end_mass_temp_c"],
-                        "post_solar_no_heat_min_temp_c": float(run_summary["hold_min_temp_c"]),
-                        "post_solar_no_heat_end_temp_c": float(run_summary["hold_end_temp_c"]),
+                        "simulated_end_room_temp_c": run_evaluation.state_after_block.room_temp_c,
+                        "simulated_end_mass_temp_c": run_evaluation.state_after_block.mass_temp_c,
+                        "post_solar_no_heat_min_temp_c": run_evaluation.post_run_min_temp_c,
+                        "post_solar_no_heat_end_temp_c": run_evaluation.post_run_end_temp_c,
                         "post_solar_no_heat_drops_below_economic_target": bool(
-                            run_summary["hold_drops_below_economic"]
+                            run_evaluation.post_run_drops_below_economic
                         ),
                         "post_solar_no_heat_drops_below_temp_min": bool(
-                            run_summary["hold_drops_below_temp_min"]
+                            run_evaluation.post_run_drops_below_temp_min
                         ),
-                        "starts_in_block": 1 if used_charge_kwh > 0.0 else 0,
-                        "run_duration_minutes": float(run_summary["planned_run_steps"]) * interval_minutes,
-                        "limit_reason": str(run_summary["stop_reason"]),
+                        "starts_in_block": 1,
+                        "run_duration_minutes": (
+                            float(run_evaluation.planned_run_steps) * interval_minutes
+                        ),
+                        "limit_reason": run_evaluation.stop_reason,
                     }
                 )
             )
-            planning_state = run_summary["end_state"]
-            cursor_index = min(candidate_block.end_index + 1 + min_off_steps, len(horizon))
+            planning_state = run_evaluation.state_after_policy
+            cursor_index = run_evaluation.policy_cursor_index
 
         return selected_blocks, {
             "candidate_block_count": len(sorted_candidates),
             "selected_block_count": len(selected_blocks),
-            "skipped_storage_sufficient_count": skipped_storage_sufficient_count,
+            "skipped_storage_sufficient_count": 0,
+            "skipped_candidate_count": skipped_block_count,
             "starts_in_preheat_blocks": sum(block.starts_in_block for block in selected_blocks),
             "starts_outside_preheat_blocks": 0,
-            "late_comfort_starts_after_missed_preheat": 0,
+            "late_comfort_starts_after_missed_preheat": sum(
+                int(block.remaining_need_kwh > 0.0) for block in selected_blocks
+            ),
         }
 
     def build(
@@ -471,7 +481,10 @@ class SpaceHeatingPreheatScheduler:
         current_block_indices: list[int] = []
         block_id = 0
         for index in active_indices:
-            if current_block_indices and index > current_block_indices[-1] + 1 + gap_tolerance_steps:
+            if (
+                current_block_indices
+                and index > current_block_indices[-1] + 1 + gap_tolerance_steps
+            ):
                 block = SpaceHeatingPreheatScheduler._create_schedule_block(
                     block_id=block_id,
                     step_indices=current_block_indices,
@@ -534,7 +547,6 @@ class SpaceHeatingPreheatScheduler:
         )
         planned_charge_kwh = min(
             available_surplus_kwh,
-            available_storage_kwh,
             useful_discharge_need_kwh if useful_discharge_need_kwh > 0.0 else available_storage_kwh,
         )
         max_hp_power_kw = max(
@@ -547,20 +559,8 @@ class SpaceHeatingPreheatScheduler:
         minimum_useful_charge_kwh = max_hp_power_kw * useful_run_steps * dt_hours * 0.5
         if planned_charge_kwh < minimum_useful_charge_kwh:
             return None
-        preferred_start_index = max(
-            full_range_indices,
-            key=lambda index: flexibility_state.steps[index].pv_surplus_forecast_kw,
-        )
         max_preheat_target_c = max(
-            flexibility_state.steps[index].temp_min_c
-            + min(
-                flexibility_state.steps[index].comfort_headroom_c,
-                (
-                    flexibility_state.steps[index].available_storage_kwh
-                    / max(available_storage_kwh, 1e-9)
-                )
-                * flexibility_state.steps[index].comfort_headroom_c,
-            )
+            flexibility_state.steps[index].temp_max_c
             for index in full_range_indices
         )
         return PreheatBlock(
@@ -574,7 +574,6 @@ class SpaceHeatingPreheatScheduler:
             planned_charge_kwh=max(planned_charge_kwh, 0.0),
             max_starts=1,
             min_run_steps=useful_run_steps,
-            preferred_start_index=preferred_start_index,
             max_preheat_target_c=max_preheat_target_c,
             step_count=len(full_range_indices),
             reason="sustained_pv_surplus_with_storage",
@@ -719,44 +718,7 @@ class SpaceHeatingPreheatScheduler:
             )
         return current_state
 
-    def _simulate_post_block_hold(
-        self,
-        *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
-        state: _PlanningState,
-        horizon: list[MpcHorizonStep],
-        start_index: int,
-        interval_minutes: int,
-    ) -> dict[str, float | bool]:
-        hold_steps = max(1, round(120 / interval_minutes))
-        current_state = state
-        min_room_temp_c = current_state.room_temp_c
-        end_room_temp_c = current_state.room_temp_c
-        drops_below_economic = False
-        drops_below_temp_min = False
-        for index in range(start_index, min(start_index + hold_steps, len(horizon))):
-            step = horizon[index]
-            current_state = self._simulate_step(
-                control_model=control_model,
-                state=current_state,
-                step=step,
-                hp_on=False,
-                solar_scale=0.25,
-            )
-            min_room_temp_c = min(min_room_temp_c, current_state.room_temp_c)
-            end_room_temp_c = current_state.room_temp_c
-            if current_state.room_temp_c < float(step.economic_target_c or step.temp_min_c):
-                drops_below_economic = True
-            if current_state.room_temp_c < float(step.temp_min_c):
-                drops_below_temp_min = True
-        return {
-            "min_room_temp_c": min_room_temp_c,
-            "end_room_temp_c": end_room_temp_c,
-            "drops_below_economic": drops_below_economic,
-            "drops_below_temp_min": drops_below_temp_min,
-        }
-
-    def _simulate_committed_run_in_block(
+    def _select_best_run_in_block(
         self,
         *,
         control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
@@ -765,84 +727,321 @@ class SpaceHeatingPreheatScheduler:
         block: PreheatBlock,
         interval_minutes: int,
         min_run_steps: int,
-        planned_charge_kwh: float,
-    ) -> dict[str, object]:
-        dt_hours = interval_minutes / 60.0
-        run_start_index = block.preferred_start_index or block.start_index
-        run_start_index = min(max(run_start_index, block.start_index), block.end_index)
-        current_state = self._simulate_span(
+        min_off_steps: int,
+        planned_charge_limit_kwh: float,
+    ) -> _RunEvaluation | None:
+        if planned_charge_limit_kwh <= 0.0:
+            return None
+
+        no_run_state_after_block = self._simulate_span(
             control_model=control_model,
             state=state,
             horizon=horizon,
             start_index=block.start_index,
-            end_index=run_start_index,
+            end_index=block.end_index + 1,
             hp_on_indices=set(),
         )
+        baseline_future_summary = self._simulate_future_no_heat_summary(
+            control_model=control_model,
+            state=no_run_state_after_block,
+            horizon=horizon,
+            start_index=block.end_index + 1,
+        )
+        baseline_storage_reference_c = (
+            no_run_state_after_block.mass_temp_c
+            if no_run_state_after_block.mass_temp_c is not None
+            else no_run_state_after_block.room_temp_c
+        )
+        baseline_storage_state_c = max(
+            baseline_storage_reference_c
+            - float(
+                horizon[block.end_index].economic_target_c
+                or horizon[block.end_index].temp_min_c
+            ),
+            0.0,
+        )
+        best_evaluation: _RunEvaluation | None = None
+        latest_start_index = block.end_index - min_run_steps + 1
+        if latest_start_index < block.start_index:
+            return None
+
+        for run_start_index in range(block.start_index, latest_start_index + 1):
+            state_at_start = self._simulate_span(
+                control_model=control_model,
+                state=state,
+                horizon=horizon,
+                start_index=block.start_index,
+                end_index=run_start_index,
+                hp_on_indices=set(),
+            )
+            max_run_steps = block.end_index - run_start_index + 1
+            for planned_run_steps in range(min_run_steps, max_run_steps + 1):
+                evaluation = self._evaluate_run_candidate(
+                    control_model=control_model,
+                    state_at_start=state_at_start,
+                    horizon=horizon,
+                    block=block,
+                    run_start_index=run_start_index,
+                    planned_run_steps=planned_run_steps,
+                    interval_minutes=interval_minutes,
+                    min_run_steps=min_run_steps,
+                    min_off_steps=min_off_steps,
+                    planned_charge_limit_kwh=planned_charge_limit_kwh,
+                    baseline_future_summary=baseline_future_summary,
+                    baseline_storage_state_c=baseline_storage_state_c,
+                )
+                if evaluation is None:
+                    continue
+                if best_evaluation is None or evaluation.score > best_evaluation.score:
+                    best_evaluation = evaluation
+        return best_evaluation
+
+    def _evaluate_run_candidate(
+        self,
+        *,
+        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        state_at_start: _PlanningState,
+        horizon: list[MpcHorizonStep],
+        block: PreheatBlock,
+        run_start_index: int,
+        planned_run_steps: int,
+        interval_minutes: int,
+        min_run_steps: int,
+        min_off_steps: int,
+        planned_charge_limit_kwh: float,
+        baseline_future_summary: dict[str, float | bool | int],
+        baseline_storage_state_c: float,
+    ) -> _RunEvaluation | None:
+        dt_hours = interval_minutes / 60.0
+        run_end_index = min(run_start_index + planned_run_steps - 1, block.end_index)
+        current_state = state_at_start
         used_charge_kwh = 0.0
-        planned_run_steps = 0
+        captured_pv_kwh = 0.0
+        imported_energy_kwh = 0.0
+        comfort_high_risk_c = 0.0
         stop_reason = "block_ended"
-        step_index = run_start_index
-        while step_index <= block.end_index:
+        for step_index in range(run_start_index, run_end_index + 1):
             step = horizon[step_index]
+            hp_energy_kwh = float(step.hp_electric_power_forecast_kw) * dt_hours
+            pv_capture_kwh = min(
+                float(step.hp_electric_power_forecast_kw),
+                max(
+                    float(step.pv_available_power_forecast_kw)
+                    - float(step.base_load_power_forecast_kw),
+                    0.0,
+                ),
+            ) * dt_hours
             predicted_next_state = self._simulate_step(
                 control_model=control_model,
                 state=current_state,
                 step=step,
                 hp_on=True,
             )
-            used_charge_kwh += float(step.hp_electric_power_forecast_kw) * dt_hours
-            planned_run_steps += 1
+            used_charge_kwh += hp_energy_kwh
+            captured_pv_kwh += pv_capture_kwh
+            imported_energy_kwh += max(hp_energy_kwh - pv_capture_kwh, 0.0)
+            comfort_high_risk_c = max(
+                comfort_high_risk_c,
+                max(predicted_next_state.room_temp_c - float(step.temp_max_c), 0.0),
+            )
             current_state = predicted_next_state
             if current_state.room_temp_c >= min(float(step.temp_max_c), block.max_preheat_target_c):
                 stop_reason = "comfort_high_risk"
-                if planned_run_steps >= min_run_steps:
-                    break
-            if used_charge_kwh >= planned_charge_kwh and planned_run_steps >= min_run_steps:
+                break
+            if used_charge_kwh >= planned_charge_limit_kwh:
                 stop_reason = "budget_reached"
                 break
-            step_index += 1
+        actual_run_steps = max((run_end_index - run_start_index) + 1, 0)
+        if actual_run_steps < min_run_steps:
+            return None
 
-        hold_summary = self._simulate_post_block_hold(
+        state_after_block = self._simulate_span(
             control_model=control_model,
             state=current_state,
             horizon=horizon,
-            start_index=min(block.end_index + 1, len(horizon)),
-            interval_minutes=interval_minutes,
+            start_index=run_end_index + 1,
+            end_index=block.end_index + 1,
+            hp_on_indices=set(),
         )
-        future_need_kwh = 0.0
-        for future_index in range(min(block.end_index + 1, len(horizon)), len(horizon)):
-            future_step = horizon[future_index]
-            deficit_c = max(
-                float(future_step.economic_target_c or future_step.temp_min_c) - hold_summary["end_room_temp_c"],
-                0.0,
-            )
-            if deficit_c <= 0.0:
-                continue
-            heat_gain_c = max(
-                self._one_step_room_heat_gain_c(
-                    control_model=control_model,
-                    step=future_step,
-                ),
-                0.05,
-            )
-            future_need_kwh += (
-                deficit_c / heat_gain_c
-            ) * max(float(future_step.hp_electric_power_forecast_kw), 1e-9) * dt_hours
+        post_policy_index = min(block.end_index + 1 + min_off_steps, len(horizon))
+        state_after_policy = self._simulate_span(
+            control_model=control_model,
+            state=state_after_block,
+            horizon=horizon,
+            start_index=block.end_index + 1,
+            end_index=post_policy_index,
+            hp_on_indices=set(),
+        )
 
+        future_summary = self._simulate_future_no_heat_summary(
+            control_model=control_model,
+            state=state_after_block,
+            horizon=horizon,
+            start_index=block.end_index + 1,
+        )
+        storage_reference_c = (
+            state_after_block.mass_temp_c
+            if state_after_block.mass_temp_c is not None
+            else state_after_block.room_temp_c
+        )
+        storage_state_c = max(
+            storage_reference_c
+            - float(
+                horizon[block.end_index].economic_target_c
+                or horizon[block.end_index].temp_min_c
+            ),
+            0.0,
+        )
+        storage_state_gain_c = max(
+            storage_state_c - baseline_storage_state_c,
+            0.0,
+        )
+        score = self._score_run_evaluation(
+            captured_pv_kwh=captured_pv_kwh,
+            imported_energy_kwh=imported_energy_kwh,
+            storage_state_gain_c=storage_state_gain_c,
+            baseline_min_room_temp_c=float(baseline_future_summary["min_room_temp_c"]),
+            post_run_min_temp_c=float(future_summary["min_room_temp_c"]),
+            baseline_end_room_temp_c=float(baseline_future_summary["end_room_temp_c"]),
+            post_run_end_temp_c=float(future_summary["end_room_temp_c"]),
+            baseline_temp_min_violation_c=float(
+                baseline_future_summary["temp_min_violation_c"]
+            ),
+            future_temp_min_violation_c=future_summary["temp_min_violation_c"],
+            baseline_economic_violation_c=float(
+                baseline_future_summary["economic_violation_c"]
+            ),
+            future_economic_violation_c=future_summary["economic_violation_c"],
+            comfort_high_risk_c=comfort_high_risk_c,
+            baseline_later_start_count=int(baseline_future_summary["later_start_count"]),
+            later_start_count=int(future_summary["later_start_count"]),
+        )
+        if score <= 0.0:
+            return None
+        return _RunEvaluation(
+            run_start_index=run_start_index,
+            run_end_index=run_end_index,
+            planned_run_steps=actual_run_steps,
+            used_charge_kwh=used_charge_kwh,
+            captured_pv_kwh=captured_pv_kwh,
+            imported_energy_kwh=imported_energy_kwh,
+            later_start_count=int(future_summary["later_start_count"]),
+            future_temp_min_violation_c=float(future_summary["temp_min_violation_c"]),
+            future_economic_violation_c=float(future_summary["economic_violation_c"]),
+            comfort_high_risk_c=comfort_high_risk_c,
+            storage_state_c=storage_state_c,
+            storage_state_gain_c=storage_state_gain_c,
+            post_run_min_temp_c=float(future_summary["min_room_temp_c"]),
+            post_run_end_temp_c=float(future_summary["end_room_temp_c"]),
+            post_run_drops_below_economic=bool(future_summary["drops_below_economic"]),
+            post_run_drops_below_temp_min=bool(future_summary["drops_below_temp_min"]),
+            state_after_block=state_after_block,
+            state_after_policy=state_after_policy,
+            policy_cursor_index=post_policy_index,
+            score=score,
+            stop_reason=stop_reason,
+        )
+
+    def _simulate_future_no_heat_summary(
+        self,
+        *,
+        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        state: _PlanningState,
+        horizon: list[MpcHorizonStep],
+        start_index: int,
+    ) -> dict[str, float | bool | int]:
+        current_state = state
+        min_room_temp_c = current_state.room_temp_c
+        end_room_temp_c = current_state.room_temp_c
+        drops_below_economic = False
+        drops_below_temp_min = False
+        economic_violation_c = 0.0
+        temp_min_violation_c = 0.0
+        later_start_count = 0
+        in_deficit = False
+        for index in range(start_index, len(horizon)):
+            step = horizon[index]
+            current_state = self._simulate_step(
+                control_model=control_model,
+                state=current_state,
+                step=step,
+                hp_on=False,
+            )
+            min_room_temp_c = min(min_room_temp_c, current_state.room_temp_c)
+            end_room_temp_c = current_state.room_temp_c
+            economic_target_c = float(step.economic_target_c or step.temp_min_c)
+            economic_gap_c = max(economic_target_c - current_state.room_temp_c, 0.0)
+            temp_min_gap_c = max(float(step.temp_min_c) - current_state.room_temp_c, 0.0)
+            economic_violation_c += economic_gap_c
+            temp_min_violation_c += temp_min_gap_c
+            if economic_gap_c > 0.0:
+                drops_below_economic = True
+                if not in_deficit:
+                    later_start_count += 1
+                    in_deficit = True
+            else:
+                in_deficit = False
+            if temp_min_gap_c > 0.0:
+                drops_below_temp_min = True
         return {
-            "run_start_index": run_start_index,
-            "planned_run_steps": planned_run_steps,
-            "used_charge_kwh": used_charge_kwh,
-            "stop_reason": stop_reason,
-            "end_state": current_state,
-            "end_room_temp_c": current_state.room_temp_c,
-            "end_mass_temp_c": current_state.mass_temp_c,
-            "hold_min_temp_c": hold_summary["min_room_temp_c"],
-            "hold_end_temp_c": hold_summary["end_room_temp_c"],
-            "hold_drops_below_economic": hold_summary["drops_below_economic"],
-            "hold_drops_below_temp_min": hold_summary["drops_below_temp_min"],
-            "remaining_need_kwh": future_need_kwh,
+            "min_room_temp_c": min_room_temp_c,
+            "end_room_temp_c": end_room_temp_c,
+            "drops_below_economic": drops_below_economic,
+            "drops_below_temp_min": drops_below_temp_min,
+            "economic_violation_c": economic_violation_c,
+            "temp_min_violation_c": temp_min_violation_c,
+            "later_start_count": later_start_count,
         }
+
+    @staticmethod
+    def _score_run_evaluation(
+        *,
+        captured_pv_kwh: float,
+        imported_energy_kwh: float,
+        storage_state_gain_c: float,
+        baseline_min_room_temp_c: float,
+        post_run_min_temp_c: float,
+        baseline_end_room_temp_c: float,
+        post_run_end_temp_c: float,
+        baseline_temp_min_violation_c: float,
+        future_temp_min_violation_c: float,
+        baseline_economic_violation_c: float,
+        future_economic_violation_c: float,
+        comfort_high_risk_c: float,
+        baseline_later_start_count: int,
+        later_start_count: int,
+    ) -> float:
+        temp_min_violation_reduction_c = max(
+            baseline_temp_min_violation_c - future_temp_min_violation_c,
+            0.0,
+        )
+        economic_violation_reduction_c = max(
+            baseline_economic_violation_c - future_economic_violation_c,
+            0.0,
+        )
+        later_start_reduction = max(
+            baseline_later_start_count - later_start_count,
+            0,
+        )
+        min_room_temp_gain_c = max(
+            post_run_min_temp_c - baseline_min_room_temp_c,
+            0.0,
+        )
+        end_room_temp_gain_c = max(
+            post_run_end_temp_c - baseline_end_room_temp_c,
+            0.0,
+        )
+        return (
+            (12.0 * temp_min_violation_reduction_c)
+            + (3.0 * economic_violation_reduction_c)
+            + (2.0 * later_start_reduction)
+            + (6.0 * captured_pv_kwh)
+            + (2.5 * storage_state_gain_c)
+            + (2.0 * min_room_temp_gain_c)
+            + (1.0 * end_room_temp_gain_c)
+            - (10.0 * comfort_high_risk_c)
+            - (3.5 * imported_energy_kwh)
+        )
 
     @staticmethod
     def _simulate_step(
@@ -862,10 +1061,17 @@ class SpaceHeatingPreheatScheduler:
         if isinstance(control_model, Rc2StateThermalControlModel):
             next_room_temp_c, next_mass_temp_c = control_model.predict_next_state(
                 room_temp_c=state.room_temp_c,
-                mass_temp_c=state.mass_temp_c if state.mass_temp_c is not None else state.room_temp_c,
+                mass_temp_c=(
+                    state.mass_temp_c
+                    if state.mass_temp_c is not None
+                    else state.room_temp_c
+                ),
                 outdoor_temp_c=float(step.outdoor_temp_c),
                 solar_gain_kw=float(step.solar_gain_kw) * solar_scale,
-                solar_gain_mass_kw=float(step.solar_gain_mass_kw or step.solar_gain_kw) * solar_scale,
+                solar_gain_mass_kw=float(
+                    step.solar_gain_mass_kw or step.solar_gain_kw
+                )
+                * solar_scale,
                 heating_effect_kw=q_heat_eff_kw,
                 occupied=float(step.occupied),
                 hour_sin=float(step.hour_sin),

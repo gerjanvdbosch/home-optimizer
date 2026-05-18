@@ -8,12 +8,14 @@ from home_optimizer.features.mpc import (
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
+    PreheatBlock,
     SpaceHeatingFlexibilityAssessor,
     SpaceHeatingMpcControllerService,
     SpaceHeatingPreheatScheduler,
     ThermalFlexibilityState,
     ThermalFlexibilityStep,
 )
+from home_optimizer.features.mpc.preheat_scheduler import _PlanningState
 
 
 def test_flexibility_assessor_sets_economic_target_above_temp_min() -> None:
@@ -318,3 +320,67 @@ def test_hierarchical_mode_allows_comfort_start_outside_preheat_block() -> None:
     assert plan.feasible is True
     assert plan.steps[0].hp_on is True
     assert plan.steps[0].preheat_block_id is None
+
+
+def test_model_based_run_selection_does_not_anchor_to_peak_pv_step() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    horizon = [
+        MpcHorizonStep(
+            timestamp_utc=start_time + timedelta(minutes=10 * step),
+            outdoor_temp_c=4.0,
+            solar_gain_kw=0.0,
+            effective_heating_kw_forecast=2.0,
+            hp_electric_power_forecast_kw=2.0,
+            pv_available_power_forecast_kw=1.0 if step < 4 else 3.0 if step == 4 else 0.0,
+            base_load_power_forecast_kw=0.2,
+            occupied=0.0,
+            target_temp_c=20.0,
+            temp_min_c=19.0,
+            temp_max_c=21.0,
+            import_price_eur_kwh=0.30,
+            export_price_eur_kwh=0.05,
+        )
+        for step in range(10)
+    ]
+    scheduler = SpaceHeatingPreheatScheduler()
+    control_model = LinearThermalControlModel(
+        a=0.94,
+        b_out=0.0,
+        b_solar=0.0,
+        b_heat=0.55,
+        b_occ=0.0,
+        c=0.0,
+    )
+    block = PreheatBlock(
+        block_id=0,
+        start_index=0,
+        end_index=4,
+        start_time_utc=horizon[0].timestamp_utc,
+        end_time_utc=horizon[4].timestamp_utc,
+        available_surplus_kwh=1.4,
+        available_storage_kwh=2.0,
+        planned_charge_kwh=1.4,
+        max_starts=1,
+        min_run_steps=2,
+        max_preheat_target_c=21.0,
+        step_count=5,
+    )
+
+    evaluation = scheduler._select_best_run_in_block(
+        control_model=control_model,
+        state=_PlanningState(
+            room_temp_c=19.1,
+            mass_temp_c=None,
+            q_heat_eff_kw=0.0,
+            hp_on=False,
+        ),
+        horizon=horizon,
+        block=block,
+        interval_minutes=10,
+        min_run_steps=2,
+        min_off_steps=1,
+        planned_charge_limit_kwh=1.4,
+    )
+
+    assert evaluation is not None
+    assert evaluation.run_start_index < 4

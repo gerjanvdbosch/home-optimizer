@@ -969,10 +969,10 @@ class SpaceHeatingMpcSolver:
                 useful_preheat_targets_c.append(max(comfort_floor_c, economic_target_c))
                 continue
             useful_preheat_targets_c.append(
-                min(
-                    float(step.max_preheat_target_c or step.temp_max_c),
-                    max(comfort_floor_c, economic_target_c),
-                )
+                min(float(step.temp_max_c), max(
+                    comfort_floor_c,
+                    float(step.max_preheat_target_c or economic_target_c),
+                ))
             )
 
         pv_self_consumable_kw = [
