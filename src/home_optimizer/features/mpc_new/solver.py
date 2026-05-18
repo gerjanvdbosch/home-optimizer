@@ -21,7 +21,7 @@ class IntentAwareMpcSolver:
             control_model=problem.control_model,
             initial_state=problem.initial_state,
             horizon=annotated_horizon,
-            thermal_flexibility=problem.thermal_flexibility,
+            thermal_flexibility=None,
             constraints=problem.constraints,
             objective_weights=problem.objective_weights,
             max_solver_seconds=problem.max_solver_seconds,
@@ -40,9 +40,9 @@ class IntentAwareMpcSolver:
         ):
             intent = intents_by_id.get(target.active_intent_id or target.eligible_intent_id)
             economic_target_c = (
-                problem.thermal_flexibility.steps[index].economic_target_c
-                if problem.thermal_flexibility is not None
-                and index < len(problem.thermal_flexibility.steps)
+                problem.intent_planning_state.steps[index].economic_target_c
+                if problem.intent_planning_state is not None
+                and index < len(problem.intent_planning_state.steps)
                 else float(step.economic_target_c or step.temp_min_c)
             )
             preheat_active = intent is not None

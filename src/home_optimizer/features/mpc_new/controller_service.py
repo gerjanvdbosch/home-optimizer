@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Callable
 
 from home_optimizer.features.mpc.explain import explain_heating_plan
-from home_optimizer.features.mpc.flexibility_assessor import SpaceHeatingFlexibilityAssessor
 from home_optimizer.features.mpc.models import (
     LinearThermalControlModel,
     MpcHorizonStep,
@@ -11,6 +10,7 @@ from home_optimizer.features.mpc.models import (
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
 )
+from home_optimizer.features.mpc_new.assessor import IntentPlanningAssessor
 from home_optimizer.features.mpc_new.models import (
     IntentAwareMpcControllerRequest,
     IntentAwareMpcPlan,
@@ -38,7 +38,7 @@ class IntentAwareMpcControllerService:
             [],
             MpcInitialState | Rc2StateMpcInitialState,
         ] | None = None,
-        flexibility_assessor: SpaceHeatingFlexibilityAssessor | None = None,
+        planning_assessor: IntentPlanningAssessor | None = None,
         planner: RunSelectionPlanner | None = None,
         sequencer: IntentDrivenSequencer | None = None,
     ) -> None:
@@ -46,7 +46,7 @@ class IntentAwareMpcControllerService:
         self.control_model_provider = control_model_provider
         self.horizon_provider = horizon_provider
         self.initial_state_provider = initial_state_provider
-        self.flexibility_assessor = flexibility_assessor or SpaceHeatingFlexibilityAssessor()
+        self.planning_assessor = planning_assessor or IntentPlanningAssessor()
         self.planner = planner or RunSelectionPlanner()
         self.sequencer = sequencer or IntentDrivenSequencer()
 
@@ -61,7 +61,7 @@ class IntentAwareMpcControllerService:
         resolved_control_model = self._resolve_control_model(control_model)
         resolved_initial_state = self._resolve_initial_state(initial_state)
         resolved_horizon = self._resolve_horizon(horizon or request.horizon)
-        flexibility = self.flexibility_assessor.assess(
+        planning_state = self.planning_assessor.assess(
             interval_minutes=request.interval_minutes,
             control_model=resolved_control_model,
             initial_state=resolved_initial_state,
@@ -69,7 +69,7 @@ class IntentAwareMpcControllerService:
             constraints=request.constraints,
         )
         intent_plan = self.planner.build_plan(
-            flexibility_state=flexibility,
+            planning_state=planning_state,
             constraints=request.constraints,
             interval_minutes=request.interval_minutes,
             control_model=resolved_control_model,
@@ -81,7 +81,7 @@ class IntentAwareMpcControllerService:
         )
         execution_targets, projected_state = self.sequencer.build_execution_targets(
             horizon=resolved_horizon,
-            flexibility_state=flexibility,
+            planning_state=planning_state,
             intent_plan=intent_plan,
             constraints=request.constraints,
             execution_state=request.run_execution_state,
@@ -93,7 +93,7 @@ class IntentAwareMpcControllerService:
             control_model=resolved_control_model,
             initial_state=resolved_initial_state,
             horizon=resolved_horizon,
-            thermal_flexibility=flexibility,
+            intent_planning_state=planning_state,
             run_intent_plan=intent_plan,
             execution_targets=execution_targets,
             constraints=request.constraints,
@@ -116,7 +116,7 @@ class IntentAwareMpcControllerService:
             solve_time_seconds=base_plan.solve_time_seconds,
             objective_breakdown=base_plan.objective_breakdown,
             steps=base_plan.steps,
-            thermal_flexibility=flexibility,
+            intent_planning_state=planning_state,
             run_intent_plan=intent_plan,
             run_execution_state=projected_state,
             execution_targets=execution_targets,

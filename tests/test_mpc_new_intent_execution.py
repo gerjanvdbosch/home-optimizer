@@ -251,7 +251,7 @@ def test_comfort_fallback_outside_intent_only_at_low_comfort_risk() -> None:
         start_time=start_time,
         steps=6,
         pv_by_step={},
-        outdoor_by_step={0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0},
+        outdoor_by_step={0: 12.0, 1: 12.0, 2: 12.0, 3: 12.0, 4: 12.0, 5: 12.0},
     )
     controller = _controller()
     fallback_plan = controller.plan(
@@ -259,10 +259,16 @@ def test_comfort_fallback_outside_intent_only_at_low_comfort_risk() -> None:
         control_model=_model(),
         initial_state=MpcInitialState(room_temp_c=19.02, hp_on=False, off_steps=4),
     )
+    blocked_horizon = _build_horizon(
+        start_time=start_time,
+        steps=1,
+        pv_by_step={},
+        outdoor_by_step={0: 12.0},
+    )
     blocked_plan = controller.plan(
-        IntentAwareMpcControllerRequest(interval_minutes=10, horizon=no_pv_horizon),
+        IntentAwareMpcControllerRequest(interval_minutes=10, horizon=blocked_horizon),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=4),
+        initial_state=MpcInitialState(room_temp_c=21.2, hp_on=False, off_steps=4),
     )
 
     assert fallback_plan.run_intent_plan is not None
@@ -347,16 +353,17 @@ def test_sequencer_only_starts_for_intent_or_safety() -> None:
     start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     horizon = _build_horizon(
         start_time=start_time,
-        steps=4,
+        steps=1,
         pv_by_step={},
+        outdoor_by_step={0: 12.0},
     )
     sequencer = IntentDrivenSequencer()
     targets, _ = sequencer.build_execution_targets(
         horizon=horizon,
-        flexibility_state=_controller().flexibility_assessor.assess(
+        planning_state=_controller().planning_assessor.assess(
             interval_minutes=10,
             control_model=_model(),
-            initial_state=MpcInitialState(room_temp_c=20.8, hp_on=False, off_steps=4),
+            initial_state=MpcInitialState(room_temp_c=22.0, hp_on=False, off_steps=4),
             horizon=horizon,
             constraints=MpcConstraints(),
         ),

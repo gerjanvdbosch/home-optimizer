@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 from home_optimizer.features.mpc.models import (
     MpcConstraints,
     MpcHorizonStep,
-    ThermalFlexibilityState,
 )
 from home_optimizer.features.mpc_new.models import (
+    IntentPlanningState,
     PreheatRunIntent,
     RunExecutionState,
     RunIntentExecutionTargetStep,
@@ -40,7 +40,7 @@ class IntentDrivenSequencer:
         self,
         *,
         horizon: list[MpcHorizonStep],
-        flexibility_state: ThermalFlexibilityState,
+        planning_state: IntentPlanningState,
         intent_plan: RunIntentPlan,
         constraints: MpcConstraints,
         execution_state: RunExecutionState | None,
@@ -51,8 +51,8 @@ class IntentDrivenSequencer:
         targets: list[RunIntentExecutionTargetStep] = []
         for index, step in enumerate(horizon):
             flex_step = (
-                flexibility_state.steps[index]
-                if index < len(flexibility_state.steps)
+                planning_state.steps[index]
+                if index < len(planning_state.steps)
                 else None
             )
             eligible_intent = self._eligible_intent_for_step(

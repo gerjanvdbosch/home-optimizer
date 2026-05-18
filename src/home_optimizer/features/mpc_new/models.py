@@ -17,7 +17,6 @@ from home_optimizer.features.mpc.models import (
     MpcPlanStep,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
-    ThermalFlexibilityState,
 )
 
 RunType = Literal["preheat", "comfort_recovery"]
@@ -125,6 +124,34 @@ class RunIntentPlanningPolicy(DomainModel):
     minimum_time_before_replanning_active_intent_minutes: int = Field(default=30, ge=0)
 
 
+class IntentPlanningStep(DomainModel):
+    index: int = Field(ge=0)
+    timestamp_utc: datetime
+    temp_min_c: float
+    temp_max_c: float
+    economic_target_c: float
+    room_temp_c: float = 0.0
+    mass_temp_c: float | None = None
+    q_heat_eff_kw: float = Field(default=0.0, ge=0.0)
+    no_heat_room_temp_c: float = 0.0
+    no_heat_mass_temp_c: float | None = None
+    available_storage_kwh: float = Field(default=0.0, ge=0.0)
+    expected_discharge_need_kwh: float = Field(default=0.0, ge=0.0)
+    pv_surplus_forecast_kw: float = Field(default=0.0, ge=0.0)
+    pv_surplus_window_kwh: float = Field(default=0.0, ge=0.0)
+    post_solar_no_heat_min_temp_c: float | None = None
+    post_solar_no_heat_end_temp_c: float | None = None
+    post_solar_no_heat_drops_below_economic_target: bool = False
+    post_solar_no_heat_drops_below_temp_min: bool = False
+
+
+class IntentPlanningState(DomainModel):
+    steps: list[IntentPlanningStep] = Field(default_factory=list)
+    total_available_storage_kwh: float = Field(default=0.0, ge=0.0)
+    total_expected_discharge_need_kwh: float = Field(default=0.0, ge=0.0)
+    diagnostics: dict[str, float | int | str] = Field(default_factory=dict)
+
+
 class IntentAwareMpcControllerRequest(DomainModel):
     interval_minutes: int = Field(gt=0)
     horizon: list[MpcHorizonStep]
@@ -149,7 +176,7 @@ class IntentAwareMpcPlan(DomainModel):
         default_factory=MpcObjectiveBreakdown
     )
     steps: list[MpcPlanStep] = Field(default_factory=list)
-    thermal_flexibility: ThermalFlexibilityState | None = None
+    intent_planning_state: IntentPlanningState | None = None
     run_intent_plan: RunIntentPlan | None = None
     run_execution_state: RunExecutionState | None = None
     execution_targets: list[RunIntentExecutionTargetStep] = Field(default_factory=list)
@@ -162,7 +189,7 @@ class IntentAwareMpcProblem(DomainModel):
     control_model: Rc2StateThermalControlModel | LinearThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
-    thermal_flexibility: ThermalFlexibilityState | None = None
+    intent_planning_state: IntentPlanningState | None = None
     run_intent_plan: RunIntentPlan | None = None
     execution_targets: list[RunIntentExecutionTargetStep] = Field(default_factory=list)
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)

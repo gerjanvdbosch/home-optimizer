@@ -10,9 +10,9 @@ from home_optimizer.features.mpc.models import (
     PreheatBlock,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
-    ThermalFlexibilityState,
 )
 from home_optimizer.features.mpc_new.models import (
+    IntentPlanningState,
     PreheatRunIntent,
     RejectedIntentCandidate,
     RunExecutionState,
@@ -46,7 +46,7 @@ class RunSelectionPlanner:
     def build_plan(
         self,
         *,
-        flexibility_state: ThermalFlexibilityState,
+        planning_state: IntentPlanningState,
         constraints: MpcConstraints,
         interval_minutes: int,
         control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
@@ -57,7 +57,7 @@ class RunSelectionPlanner:
         execution_state: RunExecutionState | None = None,
     ) -> RunIntentPlan:
         resolved_policy = planning_policy or RunIntentPlanningPolicy()
-        if not flexibility_state.steps or not horizon:
+        if not planning_state.steps or not horizon:
             return RunIntentPlan(diagnostics={"reason": "empty_horizon"})
 
         min_run_steps = (
@@ -67,13 +67,13 @@ class RunSelectionPlanner:
         )
         active_indices = [
             step.index
-            for step in flexibility_state.steps
+            for step in planning_state.steps
             if step.pv_surplus_forecast_kw > 0.0
             and step.expected_discharge_need_kwh > 0.0
         ]
         candidate_blocks = self._build_candidate_blocks(
             active_indices=active_indices,
-            flexibility_state=flexibility_state,
+            planning_state=planning_state,
             interval_minutes=interval_minutes,
             min_run_steps=min_run_steps,
         )
@@ -157,7 +157,7 @@ class RunSelectionPlanner:
     def _build_candidate_blocks(
         *,
         active_indices: list[int],
-        flexibility_state: ThermalFlexibilityState,
+        planning_state: IntentPlanningState,
         interval_minutes: int,
         min_run_steps: int,
     ) -> list[PreheatBlock]:
@@ -172,7 +172,7 @@ class RunSelectionPlanner:
                 block = RunSelectionPlanner._create_block(
                     block_id=block_id,
                     step_indices=current_indices,
-                    flexibility_state=flexibility_state,
+                    planning_state=planning_state,
                     interval_minutes=interval_minutes,
                     min_run_steps=min_run_steps,
                 )
@@ -185,7 +185,7 @@ class RunSelectionPlanner:
             block = RunSelectionPlanner._create_block(
                 block_id=block_id,
                 step_indices=current_indices,
-                flexibility_state=flexibility_state,
+                planning_state=planning_state,
                 interval_minutes=interval_minutes,
                 min_run_steps=min_run_steps,
             )
@@ -198,28 +198,28 @@ class RunSelectionPlanner:
         *,
         block_id: int,
         step_indices: list[int],
-        flexibility_state: ThermalFlexibilityState,
+        planning_state: IntentPlanningState,
         interval_minutes: int,
         min_run_steps: int,
     ) -> PreheatBlock | None:
         full_indices = list(range(step_indices[0], step_indices[-1] + 1))
-        start_step = flexibility_state.steps[full_indices[0]]
-        end_step = flexibility_state.steps[full_indices[-1]]
+        start_step = planning_state.steps[full_indices[0]]
+        end_step = planning_state.steps[full_indices[-1]]
         dt_hours = interval_minutes / 60.0
         available_surplus_kwh = sum(
-            flexibility_state.steps[index].pv_surplus_forecast_kw * dt_hours
+            planning_state.steps[index].pv_surplus_forecast_kw * dt_hours
             for index in full_indices
         )
         available_storage_kwh = max(
             (
-                flexibility_state.steps[index].available_storage_kwh
+                planning_state.steps[index].available_storage_kwh
                 for index in full_indices
             ),
             default=0.0,
         )
         expected_discharge_need_kwh = max(
             (
-                flexibility_state.steps[index].expected_discharge_need_kwh
+                planning_state.steps[index].expected_discharge_need_kwh
                 for index in full_indices
             ),
             default=0.0,
@@ -234,7 +234,7 @@ class RunSelectionPlanner:
         )
         max_hp_power_kw = max(
             (
-                flexibility_state.steps[index].pv_surplus_forecast_kw
+                planning_state.steps[index].pv_surplus_forecast_kw
                 for index in full_indices
             ),
             default=0.0,
@@ -254,7 +254,7 @@ class RunSelectionPlanner:
             max_starts=1,
             min_run_steps=min_run_steps,
             max_preheat_target_c=max(
-                flexibility_state.steps[index].temp_max_c for index in full_indices
+                planning_state.steps[index].temp_max_c for index in full_indices
             ),
             step_count=len(full_indices),
             reason="intent_candidate_from_sustained_surplus",
