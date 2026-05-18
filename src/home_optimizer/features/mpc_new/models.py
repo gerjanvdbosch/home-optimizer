@@ -195,3 +195,7 @@ class IntentAwareMpcProblem(DomainModel):
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
     max_solver_seconds: float | None = Field(default=None, gt=0.0)
+
+    @property
+    def dt_hours(self) -> float:
+        return self.interval_minutes / 60.0
