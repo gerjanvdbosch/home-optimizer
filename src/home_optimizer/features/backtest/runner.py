@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Any
 
 from home_optimizer.features.backtest.models import (
-    MpcBacktestResult,
     MpcBacktestPvDiagnostics,
+    MpcBacktestResult,
     MpcBacktestStepResult,
     MpcBacktestSummary,
 )
@@ -14,9 +14,9 @@ from home_optimizer.features.mpc.models import (
     ExecutionTargetStep,
     HeatPumpSequencerState,
     LinearThermalControlModel,
-    MpcControlMode,
     MpcConstraints,
     MpcControllerRequest,
+    MpcControlMode,
     MpcHorizonStep,
     MpcInitialState,
     MpcObjectiveBreakdown,
@@ -24,13 +24,22 @@ from home_optimizer.features.mpc.models import (
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
 )
+from home_optimizer.features.mpc_new.controller_service import IntentAwareMpcControllerService
+from home_optimizer.features.mpc_new.models import (
+    IntentAwareMpcControllerRequest,
+    RunExecutionState,
+    RunIntentExecutionTargetStep,
+    RunIntentPlan,
+)
 
 
 class SpaceHeatingMpcBacktestRunner:
     def __init__(
         self,
         *,
-        controller: SpaceHeatingMpcControllerService | None = None,
+        controller: SpaceHeatingMpcControllerService
+        | IntentAwareMpcControllerService
+        | None = None,
     ) -> None:
         self.controller = controller or SpaceHeatingMpcControllerService()
 
@@ -75,6 +84,8 @@ class SpaceHeatingMpcBacktestRunner:
         missing_forecast_count = 0
         forecast_coverage_ratio = 1.0
         current_sequencer_state = HeatPumpSequencerState()
+        current_run_execution_state = RunExecutionState()
+        previous_intent_plan: RunIntentPlan | None = None
 
         for index in range(len(timeline) - 1):
             realized_horizon = timeline[index : index + horizon_steps]
@@ -103,15 +114,27 @@ class SpaceHeatingMpcBacktestRunner:
             current_forecast_step = horizon[0]
             current_realized_step = timeline[index]
 
-            request = MpcControllerRequest(
-                interval_minutes=interval_minutes,
-                horizon=horizon,
-                control_mode=control_mode,
-                sequencer_state=current_sequencer_state,
-                constraints=resolved_constraints,
-                objective_weights=resolved_weights,
-                max_solver_seconds=max_solver_seconds,
-            )
+            if isinstance(self.controller, IntentAwareMpcControllerService):
+                request = IntentAwareMpcControllerRequest(
+                    interval_minutes=interval_minutes,
+                    horizon=horizon,
+                    control_mode=control_mode,
+                    run_execution_state=current_run_execution_state,
+                    previous_intent_plan=previous_intent_plan,
+                    constraints=resolved_constraints,
+                    objective_weights=resolved_weights,
+                    max_solver_seconds=max_solver_seconds,
+                )
+            else:
+                request = MpcControllerRequest(
+                    interval_minutes=interval_minutes,
+                    horizon=horizon,
+                    control_mode=control_mode,
+                    sequencer_state=current_sequencer_state,
+                    constraints=resolved_constraints,
+                    objective_weights=resolved_weights,
+                    max_solver_seconds=max_solver_seconds,
+                )
             plan = self.controller.plan(
                 request,
                 control_model=control_model,
@@ -187,8 +210,7 @@ class SpaceHeatingMpcBacktestRunner:
                         first_step.useful_preheat_target_c
                         if plan.feasible and plan.steps
                         else float(
-                            current_forecast_step.target_temp_c
-                            or current_forecast_step.temp_min_c
+                            current_forecast_step.target_temp_c or current_forecast_step.temp_min_c
                         )
                     ),
                     preheat_active=(
@@ -207,9 +229,7 @@ class SpaceHeatingMpcBacktestRunner:
                         else float(current_forecast_step.preheat_budget_share_kwh)
                     ),
                     preheat_charge_kwh=(
-                        first_step.preheat_charge_kwh
-                        if plan.feasible and plan.steps
-                        else 0.0
+                        first_step.preheat_charge_kwh if plan.feasible and plan.steps else 0.0
                     ),
                     preheat_opportunity_score=(
                         first_step.preheat_opportunity_score
@@ -220,13 +240,19 @@ class SpaceHeatingMpcBacktestRunner:
                     historical_q_heat_eff_kw=historical_q_heat_eff_kw,
                     hp_electric_power_kw=current_forecast_step.hp_electric_power_forecast_kw,
                     pv_forecast_kw=current_forecast_step.pv_available_power_forecast_kw,
-                    pv_realized_kw=float(current_realized_step.pv_available_power_realized_kw or 0.0),
+                    pv_realized_kw=float(
+                        current_realized_step.pv_available_power_realized_kw or 0.0
+                    ),
                     solar_irradiance_forecast_wm2=current_forecast_step.solar_irradiance_forecast_w_m2,
                     solar_irradiance_realized_wm2=current_realized_step.solar_irradiance_realized_w_m2,
                     solar_gain_forecast_kw=current_forecast_step.solar_gain_kw,
-                    solar_gain_realized_kw=float(current_realized_step.solar_gain_realized_kw or 0.0),
+                    solar_gain_realized_kw=float(
+                        current_realized_step.solar_gain_realized_kw or 0.0
+                    ),
                     base_load_forecast_kw=current_forecast_step.base_load_power_forecast_kw,
-                    base_load_realized_kw=float(current_realized_step.base_load_power_realized_kw or 0.0),
+                    base_load_realized_kw=float(
+                        current_realized_step.base_load_power_realized_kw or 0.0
+                    ),
                     pv_surplus_forecast_kw=max(
                         current_forecast_step.pv_available_power_forecast_kw
                         - current_forecast_step.base_load_power_forecast_kw,
@@ -275,8 +301,7 @@ class SpaceHeatingMpcBacktestRunner:
                         first_step.useful_preheat_target_c
                         if plan.feasible and plan.steps
                         else float(
-                            current_forecast_step.target_temp_c
-                            or current_forecast_step.temp_min_c
+                            current_forecast_step.target_temp_c or current_forecast_step.temp_min_c
                         )
                     ),
                     hp_on=applied_hp_on,
@@ -293,97 +318,146 @@ class SpaceHeatingMpcBacktestRunner:
                 next_state=next_state.model_copy(update={"q_heat_eff_kw": q_heat_eff_kw}),
                 hp_on=applied_hp_on,
             )
-            executed_target = ExecutionTargetStep(
-                timestamp_utc=current_forecast_step.timestamp_utc,
-                economic_target_c=float(
-                    first_step.economic_target_c
-                    if first_step is not None
-                    else current_forecast_step.economic_target_c or current_forecast_step.temp_min_c
-                ),
-                preheat_target_c=float(
-                    first_step.useful_preheat_target_c
-                    if first_step is not None
-                    else current_forecast_step.max_preheat_target_c or current_forecast_step.temp_min_c
-                ),
-                active_preheat_block_id=(
-                    first_step.preheat_block_id
-                    if first_step is not None
-                    else current_forecast_step.preheat_block_id
-                ),
-                remaining_block_budget_kwh=0.0,
-                block_budget_share_kwh=(
-                    first_step.preheat_budget_share_kwh
-                    if first_step is not None
-                    else float(current_forecast_step.preheat_budget_share_kwh)
-                ),
-                block_cumulative_budget_target_kwh=float(
-                    current_forecast_step.preheat_block_cumulative_target_kwh
-                ),
-                storage_target_kwh=float(current_forecast_step.preheat_block_budget_kwh),
-                max_preheat_target_c=float(
-                    current_forecast_step.max_preheat_target_c or current_forecast_step.temp_max_c
-                ),
-                start_allowed_for_preheat=bool(
-                    first_step.hp_start_allowed if first_step is not None else current_forecast_step.hp_start_allowed
-                ),
-                start_reason_hint=(
-                    first_step.start_reason if first_step is not None else current_forecast_step.start_reason_hint
-                ),
-                sequencer_mode=(
-                    first_step.sequencer_mode if first_step is not None else current_forecast_step.sequencer_mode
-                ),
-                active_run_id=(
-                    first_step.active_run_id if first_step is not None else current_forecast_step.active_run_id
-                ),
-                hp_must_be_on=bool(
-                    first_step.hp_must_be_on if first_step is not None else current_forecast_step.hp_must_be_on
-                ),
-                hp_must_be_off=bool(
-                    first_step.hp_must_be_off if first_step is not None else current_forecast_step.hp_must_be_off
-                ),
-                hp_start_allowed=bool(
-                    first_step.hp_start_allowed if first_step is not None else current_forecast_step.hp_start_allowed
-                ),
-                stop_reason_hint=(
-                    first_step.stop_reason if first_step is not None else current_forecast_step.stop_reason_hint
-                ),
-                committed_on_until_utc=(
-                    first_step.committed_on_until_utc
-                    if first_step is not None
-                    else current_forecast_step.committed_on_until_utc
-                ),
-                locked_off_until_utc=(
-                    first_step.locked_off_until_utc
-                    if first_step is not None
-                    else current_forecast_step.locked_off_until_utc
-                ),
-                starts_used_in_block=(
-                    first_step.starts_used_in_block if first_step is not None else current_forecast_step.starts_used_in_block
-                ),
-                run_budget_used_kwh=(
-                    first_step.run_budget_used_kwh if first_step is not None else current_forecast_step.run_budget_used_kwh
-                ),
-                starts_blocked_by_lockout=bool(
-                    first_step.starts_blocked_by_lockout if first_step is not None else current_forecast_step.starts_blocked_by_lockout
-                ),
-                starts_blocked_by_max_starts=bool(
-                    first_step.starts_blocked_by_max_starts if first_step is not None else current_forecast_step.starts_blocked_by_max_starts
-                ),
-                starts_blocked_by_existing_commitment=bool(
-                    first_step.starts_blocked_by_existing_commitment if first_step is not None else current_forecast_step.starts_blocked_by_existing_commitment
-                ),
-                stop_conditions=[],
-            )
-            if hasattr(self.controller, "advance_sequencer_state"):
-                current_sequencer_state = self.controller.advance_sequencer_state(
-                    request_key=None,
-                    state=current_sequencer_state,
+            if isinstance(self.controller, IntentAwareMpcControllerService):
+                previous_intent_plan = plan.run_intent_plan
+                executed_target = (
+                    plan.execution_targets[0]
+                    if plan.execution_targets
+                    else self._fallback_intent_target(current_forecast_step, first_step)
+                )
+                current_run_execution_state = self.controller.advance_execution_state(
+                    state=current_run_execution_state,
                     executed_step=current_forecast_step,
                     executed_target=executed_target,
                     executed_hp_on=applied_hp_on,
                     interval_minutes=interval_minutes,
-                    preheat_charge_kwh=first_step.preheat_charge_kwh if first_step is not None else 0.0,
+                    preheat_charge_kwh=first_step.preheat_charge_kwh
+                    if first_step is not None
+                    else 0.0,
                 )
+            else:
+                executed_target = ExecutionTargetStep(
+                    timestamp_utc=current_forecast_step.timestamp_utc,
+                    economic_target_c=float(
+                        first_step.economic_target_c
+                        if first_step is not None
+                        else current_forecast_step.economic_target_c
+                        or current_forecast_step.temp_min_c
+                    ),
+                    preheat_target_c=float(
+                        first_step.useful_preheat_target_c
+                        if first_step is not None
+                        else current_forecast_step.max_preheat_target_c
+                        or current_forecast_step.temp_min_c
+                    ),
+                    active_preheat_block_id=(
+                        first_step.preheat_block_id
+                        if first_step is not None
+                        else current_forecast_step.preheat_block_id
+                    ),
+                    remaining_block_budget_kwh=0.0,
+                    block_budget_share_kwh=(
+                        first_step.preheat_budget_share_kwh
+                        if first_step is not None
+                        else float(current_forecast_step.preheat_budget_share_kwh)
+                    ),
+                    block_cumulative_budget_target_kwh=float(
+                        current_forecast_step.preheat_block_cumulative_target_kwh
+                    ),
+                    storage_target_kwh=float(current_forecast_step.preheat_block_budget_kwh),
+                    max_preheat_target_c=float(
+                        current_forecast_step.max_preheat_target_c
+                        or current_forecast_step.temp_max_c
+                    ),
+                    start_allowed_for_preheat=bool(
+                        first_step.hp_start_allowed
+                        if first_step is not None
+                        else current_forecast_step.hp_start_allowed
+                    ),
+                    start_reason_hint=(
+                        first_step.start_reason
+                        if first_step is not None
+                        else current_forecast_step.start_reason_hint
+                    ),
+                    sequencer_mode=(
+                        first_step.sequencer_mode
+                        if first_step is not None
+                        else current_forecast_step.sequencer_mode
+                    ),
+                    active_run_id=(
+                        first_step.active_run_id
+                        if first_step is not None
+                        else current_forecast_step.active_run_id
+                    ),
+                    hp_must_be_on=bool(
+                        first_step.hp_must_be_on
+                        if first_step is not None
+                        else current_forecast_step.hp_must_be_on
+                    ),
+                    hp_must_be_off=bool(
+                        first_step.hp_must_be_off
+                        if first_step is not None
+                        else current_forecast_step.hp_must_be_off
+                    ),
+                    hp_start_allowed=bool(
+                        first_step.hp_start_allowed
+                        if first_step is not None
+                        else current_forecast_step.hp_start_allowed
+                    ),
+                    stop_reason_hint=(
+                        first_step.stop_reason
+                        if first_step is not None
+                        else current_forecast_step.stop_reason_hint
+                    ),
+                    committed_on_until_utc=(
+                        first_step.committed_on_until_utc
+                        if first_step is not None
+                        else current_forecast_step.committed_on_until_utc
+                    ),
+                    locked_off_until_utc=(
+                        first_step.locked_off_until_utc
+                        if first_step is not None
+                        else current_forecast_step.locked_off_until_utc
+                    ),
+                    starts_used_in_block=(
+                        first_step.starts_used_in_block
+                        if first_step is not None
+                        else current_forecast_step.starts_used_in_block
+                    ),
+                    run_budget_used_kwh=(
+                        first_step.run_budget_used_kwh
+                        if first_step is not None
+                        else current_forecast_step.run_budget_used_kwh
+                    ),
+                    starts_blocked_by_lockout=bool(
+                        first_step.starts_blocked_by_lockout
+                        if first_step is not None
+                        else current_forecast_step.starts_blocked_by_lockout
+                    ),
+                    starts_blocked_by_max_starts=bool(
+                        first_step.starts_blocked_by_max_starts
+                        if first_step is not None
+                        else current_forecast_step.starts_blocked_by_max_starts
+                    ),
+                    starts_blocked_by_existing_commitment=bool(
+                        first_step.starts_blocked_by_existing_commitment
+                        if first_step is not None
+                        else current_forecast_step.starts_blocked_by_existing_commitment
+                    ),
+                    stop_conditions=[],
+                )
+                if hasattr(self.controller, "advance_sequencer_state"):
+                    current_sequencer_state = self.controller.advance_sequencer_state(
+                        request_key=None,
+                        state=current_sequencer_state,
+                        executed_step=current_forecast_step,
+                        executed_target=executed_target,
+                        executed_hp_on=applied_hp_on,
+                        interval_minutes=interval_minutes,
+                        preheat_charge_kwh=first_step.preheat_charge_kwh
+                        if first_step is not None
+                        else 0.0,
+                    )
 
         if step_results:
             last_step = step_results[-1]
@@ -410,7 +484,9 @@ class SpaceHeatingMpcBacktestRunner:
                 }
             )
 
-        average_solver_runtime = total_solver_runtime_seconds / len(step_results) if step_results else 0.0
+        average_solver_runtime = (
+            total_solver_runtime_seconds / len(step_results) if step_results else 0.0
+        )
         return MpcBacktestResult(
             exogenous_mode=exogenous_mode,
             control_mode=control_mode,
@@ -448,6 +524,72 @@ class SpaceHeatingMpcBacktestRunner:
         )
 
     @staticmethod
+    def _fallback_intent_target(
+        current_forecast_step: MpcHorizonStep,
+        first_step,
+    ) -> RunIntentExecutionTargetStep:
+        return RunIntentExecutionTargetStep(
+            timestamp_utc=current_forecast_step.timestamp_utc,
+            active_intent_id=None,
+            active_run_id=(
+                first_step.active_run_id
+                if first_step is not None
+                else current_forecast_step.active_run_id
+            ),
+            eligible_intent_id=None,
+            hp_must_be_on=bool(
+                first_step.hp_must_be_on
+                if first_step is not None
+                else current_forecast_step.hp_must_be_on
+            ),
+            hp_must_be_off=bool(
+                first_step.hp_must_be_off
+                if first_step is not None
+                else current_forecast_step.hp_must_be_off
+            ),
+            hp_start_allowed=bool(
+                first_step.hp_start_allowed
+                if first_step is not None
+                else current_forecast_step.hp_start_allowed
+            ),
+            target_charge_remaining_kwh=0.0,
+            max_preheat_target_c=float(
+                current_forecast_step.max_preheat_target_c or current_forecast_step.temp_max_c
+            ),
+            start_reason_hint=(
+                first_step.start_reason
+                if first_step is not None
+                else current_forecast_step.start_reason_hint
+            ),
+            stop_reason_hint=(
+                first_step.stop_reason
+                if first_step is not None
+                else current_forecast_step.stop_reason_hint
+            ),
+            committed_on_until_utc=(
+                first_step.committed_on_until_utc
+                if first_step is not None
+                else current_forecast_step.committed_on_until_utc
+            ),
+            locked_off_until_utc=(
+                first_step.locked_off_until_utc
+                if first_step is not None
+                else current_forecast_step.locked_off_until_utc
+            ),
+            mode=(
+                first_step.sequencer_mode
+                if first_step is not None
+                else current_forecast_step.sequencer_mode
+            ),
+            starts_blocked_no_intent=not bool(
+                first_step.hp_start_allowed
+                if first_step is not None
+                else current_forecast_step.hp_start_allowed
+            ),
+            comfort_fallback_allowed=True,
+        )
+
+    @staticmethod
     def _merge_replay_horizon(
         *,
         realized_horizon: list[MpcHorizonStep],
@@ -461,8 +603,12 @@ class SpaceHeatingMpcBacktestRunner:
                         "outdoor_temp_c": replay_step.outdoor_temp_c,
                         "solar_gain_kw": replay_step.solar_gain_kw,
                         "solar_gain_mass_kw": replay_step.solar_gain_mass_kw,
-                        "solar_irradiance_forecast_w_m2": replay_step.solar_irradiance_forecast_w_m2,
-                        "pv_available_power_forecast_kw": replay_step.pv_available_power_forecast_kw,
+                        "solar_irradiance_forecast_w_m2": (
+                            replay_step.solar_irradiance_forecast_w_m2
+                        ),
+                        "pv_available_power_forecast_kw": (
+                            replay_step.pv_available_power_forecast_kw
+                        ),
                         "base_load_power_forecast_kw": replay_step.base_load_power_forecast_kw,
                         "price_eur_kwh": replay_step.price_eur_kwh,
                         "import_price_eur_kwh": replay_step.import_price_eur_kwh,
@@ -481,15 +627,9 @@ class SpaceHeatingMpcBacktestRunner:
             comfort_low=left.comfort_low + right.comfort_low,
             active_comfort_high=left.active_comfort_high + right.active_comfort_high,
             passive_comfort_high=left.passive_comfort_high + right.passive_comfort_high,
-            tracking_under_target=(
-                left.tracking_under_target + right.tracking_under_target
-            ),
-            tracking_over_target=(
-                left.tracking_over_target + right.tracking_over_target
-            ),
-            unnecessary_heating=(
-                left.unnecessary_heating + right.unnecessary_heating
-            ),
+            tracking_under_target=(left.tracking_under_target + right.tracking_under_target),
+            tracking_over_target=(left.tracking_over_target + right.tracking_over_target),
+            unnecessary_heating=(left.unnecessary_heating + right.unnecessary_heating),
             terminal=left.terminal + right.terminal,
             start=left.start + right.start,
             runtime=left.runtime + right.runtime,
@@ -519,9 +659,7 @@ class SpaceHeatingMpcBacktestRunner:
     ) -> MpcObjectiveBreakdown:
         tracking_under_c = max(useful_preheat_target_c - planned_room_temp_c, 0.0)
         tracking_over_c = max(planned_room_temp_c - useful_preheat_target_c, 0.0)
-        active_heating = hp_on or (
-            q_heat_eff_kw > objective_weights.q_heat_eff_active_threshold_kw
-        )
+        active_heating = hp_on or (q_heat_eff_kw > objective_weights.q_heat_eff_active_threshold_kw)
         pv_surplus_kw = max(
             0.0,
             current_step.pv_available_power_forecast_kw - current_step.base_load_power_forecast_kw,
@@ -533,11 +671,7 @@ class SpaceHeatingMpcBacktestRunner:
         dt_hours = interval_minutes / 60.0
         captured_pv_kwh = pv_self_consumable_kw * dt_hours
         return MpcObjectiveBreakdown(
-            comfort_low=(
-                objective_weights.comfort_low
-                * dt_hours
-                * slack_low_c
-            ),
+            comfort_low=(objective_weights.comfort_low * dt_hours * slack_low_c),
             active_comfort_high=(
                 float(objective_weights.active_comfort_high or 0.0)
                 * dt_hours
@@ -553,9 +687,7 @@ class SpaceHeatingMpcBacktestRunner:
             tracking_under_target=objective_weights.tracking_under_target * tracking_under_c,
             tracking_over_target=objective_weights.tracking_over_target * tracking_over_c,
             unnecessary_heating=(
-                objective_weights.unnecessary_heating
-                * tracking_over_c
-                * float(int(active_heating))
+                objective_weights.unnecessary_heating * tracking_over_c * float(int(active_heating))
             ),
             terminal=0.0,
             start=objective_weights.start * float(int(start)),
@@ -566,10 +698,7 @@ class SpaceHeatingMpcBacktestRunner:
                 hp_on=hp_on,
                 interval_minutes=interval_minutes,
             ),
-            pv_self_consumption_reward=(
-                objective_weights.pv_self_consumption
-                * captured_pv_kwh
-            ),
+            pv_self_consumption_reward=(objective_weights.pv_self_consumption * captured_pv_kwh),
             captured_pv_kwh=captured_pv_kwh,
             preheat_budget_shortfall=0.0,
         )
@@ -700,8 +829,7 @@ class SpaceHeatingMpcBacktestRunner:
     @staticmethod
     def _baseline_site_energy_cost(current_step: MpcHorizonStep) -> float:
         baseline_net_power_kw = (
-            current_step.base_load_power_forecast_kw
-            - current_step.pv_available_power_forecast_kw
+            current_step.base_load_power_forecast_kw - current_step.pv_available_power_forecast_kw
         )
         baseline_import_kw = max(baseline_net_power_kw, 0.0)
         baseline_export_kw = max(-baseline_net_power_kw, 0.0)
@@ -803,27 +931,34 @@ class SpaceHeatingMpcBacktestRunner:
         for step in step_results:
             realized_pv_surplus_kwh += step.pv_surplus_realized_kw * dt_hours
             forecast_pv_surplus_kwh += step.pv_surplus_forecast_kw * dt_hours
-            hp_energy_kwh = (
-                step.hp_electric_power_kw * float(int(step.mpc_hp_on)) * dt_hours
-            )
+            hp_energy_kwh = step.hp_electric_power_kw * float(int(step.mpc_hp_on)) * dt_hours
             mpc_hp_energy_kwh += hp_energy_kwh
             if step.preheat_block_id is not None:
                 preheat_block_ids.add(step.preheat_block_id)
             preheat_budget_electric_kwh += step.preheat_budget_share_kwh
             if step.preheat_active:
                 used_preheat_budget_kwh += step.preheat_charge_kwh
-            mpc_hp_energy_during_realized_pv_surplus_kwh += min(
-                step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
-                step.pv_surplus_realized_kw,
-            ) * dt_hours
-            mpc_hp_energy_during_forecast_pv_surplus_kwh += min(
-                step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
-                step.pv_surplus_forecast_kw,
-            ) * dt_hours
-            mpc_realized_pv_surplus_capture_kwh += min(
-                step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
-                step.pv_surplus_realized_kw,
-            ) * dt_hours
+            mpc_hp_energy_during_realized_pv_surplus_kwh += (
+                min(
+                    step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                    step.pv_surplus_realized_kw,
+                )
+                * dt_hours
+            )
+            mpc_hp_energy_during_forecast_pv_surplus_kwh += (
+                min(
+                    step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                    step.pv_surplus_forecast_kw,
+                )
+                * dt_hours
+            )
+            mpc_realized_pv_surplus_capture_kwh += (
+                min(
+                    step.hp_electric_power_kw * float(int(step.mpc_hp_on)),
+                    step.pv_surplus_realized_kw,
+                )
+                * dt_hours
+            )
             if step.preheat_active:
                 missed_surplus_with_headroom_kwh += max(
                     min(step.hp_electric_power_kw, step.pv_surplus_realized_kw) * dt_hours
@@ -883,9 +1018,7 @@ class SpaceHeatingMpcBacktestRunner:
             short_run_count=sum(1 for duration in run_durations_minutes if duration < 30),
             preheat_block_count=len(preheat_block_ids),
             starts_per_preheat_block=(
-                mpc_start_count / len(preheat_block_ids)
-                if preheat_block_ids
-                else 0.0
+                mpc_start_count / len(preheat_block_ids) if preheat_block_ids else 0.0
             ),
         )
 
@@ -903,8 +1036,7 @@ class SpaceHeatingMpcBacktestRunner:
             if step.preheat_block_id is None:
                 continue
             block_budget_kwh[step.preheat_block_id] = (
-                block_budget_kwh.get(step.preheat_block_id, 0.0)
-                + step.preheat_budget_share_kwh
+                block_budget_kwh.get(step.preheat_block_id, 0.0) + step.preheat_budget_share_kwh
             )
             block_charge_kwh[step.preheat_block_id] = (
                 block_charge_kwh.get(step.preheat_block_id, 0.0)

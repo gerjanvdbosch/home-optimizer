@@ -1,17 +1,28 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
 from home_optimizer.app import AppSettings
-from home_optimizer.features.identification.service import DailyKpiService, IdentificationDatasetService
+from home_optimizer.features.identification.service import (
+    DailyKpiService,
+    IdentificationDatasetService,
+)
 from home_optimizer.web.dependencies import get_container
-from home_optimizer.web.mappers import baseline_kpi_summary_response, daily_kpi_response, identification_dataset_response
+from home_optimizer.web.mappers import (
+    baseline_kpi_summary_response,
+    daily_kpi_response,
+    identification_dataset_response,
+)
 from home_optimizer.web.ports import WebAppContainer
 from home_optimizer.web.query_params import FlexibleDatetime, FlexibleEndDatetime
-from home_optimizer.web.schemas import BaselineKpiSummaryResponse, DailyKpiResponse, IdentificationDatasetResponse
+from home_optimizer.web.schemas import (
+    BaselineKpiSummaryResponse,
+    DailyKpiResponse,
+    IdentificationDatasetResponse,
+)
 
 ContainerDependency = Annotated[WebAppContainer, Depends(get_container)]
 StartTimeQuery = Annotated[FlexibleDatetime, Query(alias="start_time")]
@@ -47,18 +58,22 @@ def create_identification_router(settings: AppSettings) -> APIRouter:
         container: ContainerDependency,
     ) -> DailyKpiResponse:
         return daily_kpi_response(
-            DailyKpiService(container.time_series_read_repository, settings).get_day_kpis(chart_date)
+            DailyKpiService(container.time_series_read_repository, settings).get_day_kpis(
+                chart_date
+            )
         )
 
     @router.get("/api/kpi-summary", response_model=BaselineKpiSummaryResponse)
     def get_baseline_kpi_summary(
         container: ContainerDependency,
-        start_date: SummaryStartDateQuery,
-        end_date: SummaryEndDateQuery,
+        start_date: SummaryStartDateQuery | None = None,
+        end_date: SummaryEndDateQuery | None = None,
     ) -> BaselineKpiSummaryResponse:
+        resolved_end_date = end_date or date.today()
+        resolved_start_date = start_date or (resolved_end_date - timedelta(days=89))
         return baseline_kpi_summary_response(
             DailyKpiService(container.time_series_read_repository, settings).get_baseline_summary(
-                start_date, end_date
+                resolved_start_date, resolved_end_date
             )
         )
 

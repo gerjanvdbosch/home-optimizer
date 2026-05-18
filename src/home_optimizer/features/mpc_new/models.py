@@ -172,9 +172,8 @@ class IntentAwareMpcPlan(DomainModel):
     feasible: bool
     objective_value: float | None = None
     solve_time_seconds: float | None = None
-    objective_breakdown: MpcObjectiveBreakdown = Field(
-        default_factory=MpcObjectiveBreakdown
-    )
+    heating_explanation: str | None = None
+    objective_breakdown: MpcObjectiveBreakdown = Field(default_factory=MpcObjectiveBreakdown)
     steps: list[MpcPlanStep] = Field(default_factory=list)
     intent_planning_state: IntentPlanningState | None = None
     run_intent_plan: RunIntentPlan | None = None

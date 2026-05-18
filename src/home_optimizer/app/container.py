@@ -11,13 +11,15 @@ from home_optimizer.app.telemetry_scheduler import TelemetryScheduler
 from home_optimizer.domain.pricing import DynamicPricing
 from home_optimizer.domain.sensor_factory import build_sensor_specs
 from home_optimizer.domain.sensors import SensorSpec
+from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunner
+from home_optimizer.features.backtest.service import SpaceHeatingMpcBacktestService
 from home_optimizer.features.forecast.service import OpenMeteoForecastService
 from home_optimizer.features.history.history_import_service import (
     HistoryImportService,
 )
 from home_optimizer.features.history.weather_import_service import WeatherImportService
-from home_optimizer.features.backtest.service import SpaceHeatingMpcBacktestService
 from home_optimizer.features.mpc import SpaceHeatingMpcPlanningService
+from home_optimizer.features.mpc_new import IntentAwareMpcControllerService
 from home_optimizer.features.pricing import (
     ElectricityPriceService,
     electricity_price_refresh_interval_seconds,
@@ -91,9 +93,7 @@ def build_container(
     location = gateway.get_location()
     open_meteo = OpenMeteoGateway()
     nordpool = (
-        NordpoolGateway()
-        if isinstance(settings.electricity_pricing, DynamicPricing)
-        else None
+        NordpoolGateway() if isinstance(settings.electricity_pricing, DynamicPricing) else None
     )
     history_import_repository = TimeSeriesWriteRepository(database, source=history_source)
     telemetry_repository = TimeSeriesWriteRepository(database, source=telemetry_source)
@@ -151,12 +151,14 @@ def build_container(
         forecast_service,
         interval_seconds=settings.forecast_poll_interval_seconds,
     )
+    intent_aware_mpc_controller = IntentAwareMpcControllerService()
     space_heating_mpc_planning_service = SpaceHeatingMpcPlanningService(
         samples_reader=dataset_repository,
         active_room_model_reader=model_version_repository,
         target_schedule=settings.room_target,
         electricity_pricing=settings.electricity_pricing,
         default_interval_minutes=settings.mpc_interval_minutes,
+        controller=intent_aware_mpc_controller,
     )
     space_heating_mpc_backtest_service = SpaceHeatingMpcBacktestService(
         samples_reader=dataset_repository,
@@ -164,6 +166,7 @@ def build_container(
         target_schedule=settings.room_target,
         electricity_pricing=settings.electricity_pricing,
         default_interval_minutes=settings.mpc_interval_minutes,
+        runner=SpaceHeatingMpcBacktestRunner(controller=intent_aware_mpc_controller),
     )
 
     return AppContainer(

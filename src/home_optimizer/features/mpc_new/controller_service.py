@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from typing import Callable
 
+from home_optimizer.features.modeling import RoomRcModel, TrainedLinearRoomModel
+from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.explain import explain_heating_plan
 from home_optimizer.features.mpc.models import (
+    ControlModelConversionOptions,
     LinearThermalControlModel,
+    MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
     Rc2StateMpcInitialState,
@@ -32,12 +36,14 @@ class IntentAwareMpcControllerService:
         control_model_provider: Callable[
             [],
             LinearThermalControlModel | Rc2StateThermalControlModel,
-        ] | None = None,
+        ]
+        | None = None,
         horizon_provider: Callable[[], list[MpcHorizonStep]] | None = None,
         initial_state_provider: Callable[
             [],
             MpcInitialState | Rc2StateMpcInitialState,
-        ] | None = None,
+        ]
+        | None = None,
         planning_assessor: IntentPlanningAssessor | None = None,
         planner: RunSelectionPlanner | None = None,
         sequencer: IntentDrivenSequencer | None = None,
@@ -114,13 +120,20 @@ class IntentAwareMpcControllerService:
             feasible=base_plan.feasible,
             objective_value=base_plan.objective_value,
             solve_time_seconds=base_plan.solve_time_seconds,
+            heating_explanation=explain_heating_plan(
+                plan=base_plan,
+                control_model=resolved_control_model,
+                initial_state=resolved_initial_state,
+                horizon=annotated_horizon,
+            ),
             objective_breakdown=base_plan.objective_breakdown,
             steps=base_plan.steps,
             intent_planning_state=planning_state,
             run_intent_plan=intent_plan,
             run_execution_state=projected_state,
             execution_targets=execution_targets,
-            diagnostics=diagnostics | {
+            diagnostics=diagnostics
+            | {
                 "heating_explanation": explain_heating_plan(
                     plan=base_plan,
                     control_model=resolved_control_model,
@@ -128,6 +141,37 @@ class IntentAwareMpcControllerService:
                     horizon=annotated_horizon,
                 )
             },
+        )
+
+    def plan_from_source_model(
+        self,
+        request: IntentAwareMpcControllerRequest | MpcControllerRequest,
+        *,
+        source_model: TrainedLinearRoomModel | RoomRcModel,
+        initial_state: MpcInitialState | Rc2StateMpcInitialState,
+        horizon: list[MpcHorizonStep] | None = None,
+        conversion_options: ControlModelConversionOptions | None = None,
+    ) -> IntentAwareMpcPlan:
+        normalized_request = (
+            request
+            if isinstance(request, IntentAwareMpcControllerRequest)
+            else IntentAwareMpcControllerRequest(
+                interval_minutes=request.interval_minutes,
+                horizon=request.horizon,
+                control_mode=request.control_mode,
+                constraints=request.constraints,
+                objective_weights=request.objective_weights,
+                max_solver_seconds=request.max_solver_seconds,
+            )
+        )
+        return self.plan(
+            normalized_request,
+            control_model=to_control_model(
+                source_model,
+                options=conversion_options,
+            ),
+            initial_state=initial_state,
+            horizon=horizon,
         )
 
     def advance_execution_state(
