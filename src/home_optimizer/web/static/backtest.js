@@ -86,6 +86,7 @@ const summaryCaptionNode = document.getElementById("backtest-summary-caption");
 const summaryBody = document.getElementById("backtest-summary-body");
 const objectiveBody = document.getElementById("backtest-objective-body");
 const solverObjectiveBody = document.getElementById("backtest-solver-objective-body");
+const startStopBody = document.getElementById("backtest-start-stop-body");
 const temperatureSummaryNode = document.getElementById("backtest-temp-summary");
 const switchSummaryNode = document.getElementById("backtest-switch-summary");
 const costSummaryNode = document.getElementById("backtest-cost-summary");
@@ -202,6 +203,12 @@ function renderSummary(payload) {
     ["Starts per preheat block", payload.pv_diagnostics.starts_per_preheat_block, 0, payload.pv_diagnostics.starts_per_preheat_block],
     ["Average run duration (min)", payload.pv_diagnostics.average_run_duration_minutes, 0, payload.pv_diagnostics.average_run_duration_minutes],
     ["Short run count", payload.pv_diagnostics.short_run_count, 0, payload.pv_diagnostics.short_run_count],
+    ["Authority total starts", payload.invariant_report.total_starts, 0, payload.invariant_report.total_starts],
+    ["Authority total stops", payload.invariant_report.total_stops, 0, payload.invariant_report.total_stops],
+    ["Starts outside intents", payload.invariant_report.starts_outside_intents, 0, payload.invariant_report.starts_outside_intents],
+    ["Emergency starts", payload.invariant_report.emergency_starts, 0, payload.invariant_report.emergency_starts],
+    ["External starts", payload.invariant_report.external_starts, 0, payload.invariant_report.external_starts],
+    ["Authority violations", payload.invariant_report.start_stop_violation_count, 0, payload.invariant_report.start_stop_violation_count],
     ["Infeasible", payload.mpc_summary.infeasible_count, payload.historical_summary.infeasible_count, payload.delta.infeasible_count],
     ["Avg solve time (s)", payload.mpc_summary.average_solver_runtime_seconds, payload.historical_summary.average_solver_runtime_seconds, payload.delta.average_solver_runtime_seconds],
   ];
@@ -230,6 +237,25 @@ function renderSummary(payload) {
         <td>${formatNumber(row[1], 3)}</td>
       </tr>
     `).join("");
+  }
+  if (startStopBody) {
+    const ledgerRows = payload.start_stop_ledger || [];
+    startStopBody.innerHTML = ledgerRows.length
+      ? ledgerRows.map((entry) => `
+        <tr>
+          <td>${chartTimestamp(entry.timestamp)}</td>
+          <td>${entry.transition}</td>
+          <td>${entry.start_reason || entry.stop_reason || "-"}</td>
+          <td>${entry.intent_type ? `${entry.intent_type}${entry.intent_id ? ` | ${entry.intent_id}` : ""}` : (entry.intent_id || "-")}</td>
+          <td>${entry.active_run_id || "-"}</td>
+          <td>${entry.sequencer_mode_before} -> ${entry.sequencer_mode_after}</td>
+        </tr>
+      `).join("")
+      : `
+        <tr>
+          <td colspan="6">Geen start/stop-overgangen geregistreerd in deze backtest.</td>
+        </tr>
+      `;
   }
   summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen | ${payload.control_mode} | ${payload.exogenous_mode}`;
 }

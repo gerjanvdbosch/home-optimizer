@@ -1,6 +1,8 @@
 from .assessor import IntentPlanningAssessor
 from .controller_service import IntentAwareMpcControllerService
 from .models import (
+    AuthorityInvariantReport,
+    AuthorityViolation,
     IntentAwareMpcControllerRequest,
     IntentAwareMpcPlan,
     IntentAwareMpcProblem,
@@ -16,6 +18,9 @@ from .models import (
     RunIntentPlan,
     RunIntentPlanningPolicy,
     RunType,
+    StartReason,
+    StartStopLedgerEntry,
+    StopReason,
 )
 from .planner import RunSelectionPlanner
 from .sequencer import IntentDrivenSequencer
@@ -23,6 +28,8 @@ from .solver import IntentAwareMpcSolver
 
 __all__ = [
     "IntentPlanningAssessor",
+    "AuthorityInvariantReport",
+    "AuthorityViolation",
     "IntentAwareMpcControllerRequest",
     "IntentAwareMpcControllerService",
     "IntentAwareMpcPlan",
@@ -42,4 +49,7 @@ __all__ = [
     "RunIntentPlanningPolicy",
     "RunSelectionPlanner",
     "RunType",
+    "StartReason",
+    "StartStopLedgerEntry",
+    "StopReason",
 ]

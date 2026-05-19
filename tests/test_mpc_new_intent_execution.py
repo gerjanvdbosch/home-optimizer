@@ -274,7 +274,7 @@ def test_comfort_fallback_outside_intent_only_at_low_comfort_risk() -> None:
     assert fallback_plan.run_intent_plan is not None
     assert fallback_plan.run_intent_plan.selected_intent_count == 0
     assert fallback_plan.execution_targets[0].hp_must_be_on is True
-    assert fallback_plan.execution_targets[0].start_reason_hint == "comfort_low_risk"
+    assert fallback_plan.execution_targets[0].start_reason_hint == "emergency_comfort_low"
     assert blocked_plan.execution_targets[0].hp_start_allowed is False
     assert blocked_plan.execution_targets[0].starts_blocked_no_intent is True
 
@@ -374,3 +374,115 @@ def test_sequencer_only_starts_for_intent_or_safety() -> None:
     )
 
     assert targets[0].hp_start_allowed is False
+
+
+def test_comfort_bridge_start_uses_preheat_bridge_reason() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    intent = PreheatRunIntent(
+        intent_id="bridge-intent",
+        run_type="preheat",
+        source_block_id=0,
+        start_window_start_utc=start_time,
+        start_window_end_utc=start_time + timedelta(minutes=20),
+        latest_start_utc=start_time + timedelta(minutes=20),
+        planned_start_utc=start_time + timedelta(minutes=10),
+        planned_end_utc=start_time + timedelta(minutes=30),
+        min_run_steps=2,
+        target_charge_kwh=0.4,
+        target_post_solar_min_temp_c=19.0,
+        max_preheat_target_c=21.0,
+        max_starts=1,
+        priority=1,
+        valid_until_utc=start_time + timedelta(minutes=30),
+    )
+    sequencer = IntentDrivenSequencer()
+    horizon = _build_horizon(
+        start_time=start_time,
+        steps=1,
+        pv_by_step={},
+        outdoor_by_step={0: 12.0},
+    )
+    targets, _ = sequencer.build_execution_targets(
+        horizon=horizon,
+        planning_state=_controller().planning_assessor.assess(
+            interval_minutes=10,
+            control_model=_model(),
+            initial_state=MpcInitialState(room_temp_c=19.02, hp_on=False, off_steps=4),
+            horizon=horizon,
+            constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
+        ),
+        intent_plan=RunIntentPlan(intents=[intent], selected_intent_count=1),
+        constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
+        execution_state=RunExecutionState(),
+        interval_minutes=10,
+    )
+
+    assert targets[0].hp_must_be_on is True
+    assert targets[0].start_reason_hint == "preheat_intent_comfort_bridge"
+
+
+def test_missing_expired_intent_reset_gets_stop_reason() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    sequencer = IntentDrivenSequencer()
+    horizon = _build_horizon(
+        start_time=start_time,
+        steps=1,
+        pv_by_step={},
+        outdoor_by_step={0: 12.0},
+    )
+    targets, projected_state = sequencer.build_execution_targets(
+        horizon=horizon,
+        planning_state=_controller().planning_assessor.assess(
+            interval_minutes=10,
+            control_model=_model(),
+            initial_state=MpcInitialState(room_temp_c=20.0, hp_on=True, on_steps=2),
+            horizon=horizon,
+            constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
+        ),
+        intent_plan=RunIntentPlan(),
+        constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
+        execution_state=RunExecutionState(
+            active_intent_id="missing-intent",
+            active_run_id="run-1",
+            mode="PREHEAT_RUNNING",
+            previous_hp_on=True,
+            on_steps=2,
+        ),
+        interval_minutes=10,
+    )
+
+    assert targets[0].hp_must_be_off is True
+    assert targets[0].stop_reason_hint == "missing_or_expired_intent_reset"
+    assert projected_state.mode == "LOCKED_OUT"
+
+
+def test_advance_execution_state_records_authority_ledger() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    controller = _controller()
+    horizon = _build_horizon(
+        start_time=start_time,
+        steps=4,
+        pv_by_step={0: 3.5, 1: 3.5, 2: 0.0, 3: 0.0},
+        temp_max_c=22.0,
+    )
+    plan = controller.plan(
+        IntentAwareMpcControllerRequest(
+            interval_minutes=10,
+            horizon=horizon,
+            constraints=MpcConstraints(min_on_steps=1, min_off_steps=1),
+        ),
+        control_model=_model(),
+        initial_state=MpcInitialState(room_temp_c=19.4, hp_on=False, off_steps=4),
+    )
+
+    started = controller.advance_execution_state(
+        state=RunExecutionState(),
+        executed_step=horizon[0],
+        executed_target=plan.execution_targets[0],
+        executed_hp_on=True,
+        interval_minutes=10,
+        preheat_charge_kwh=0.2,
+    )
+
+    assert started.start_stop_ledger[-1].transition == "start"
+    assert started.start_stop_ledger[-1].start_reason == "preheat_intent"

@@ -1040,6 +1040,7 @@ def test_backtest_page_renders_navigation_and_controls() -> None:
     assert 'id="backtest-pv-capture-chart"' in response.text
     assert 'id="backtest-objective-body"' in response.text
     assert 'id="backtest-solver-objective-body"' in response.text
+    assert 'id="backtest-start-stop-body"' in response.text
 
 
 def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
@@ -1078,9 +1079,13 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert payload["historical_summary"]["estimated_energy_cost_eur"] == 0.2
     assert payload["pv_diagnostics"]["realized_pv_surplus_kwh"] == pytest.approx(0.26)
     assert payload["pv_diagnostics"]["mpc_realized_pv_surplus_capture_ratio"] == pytest.approx(0.9230769231)
+    assert payload["invariant_report"]["total_starts"] == 0
+    assert payload["invariant_report"]["start_stop_violation_count"] == 0
+    assert payload["start_stop_ledger"] == []
     assert payload["delta"]["estimated_energy_cost_eur"] == pytest.approx(-0.03, abs=1e-9)
     assert payload["delta"]["runtime_minutes"] == 0
     assert payload["steps"][0]["mpc_hp_on"] is True
+    assert payload["steps"][0]["start_reason"] is None
     assert payload["steps"][0]["q_heat_eff_kw"] == 0.0
     assert payload["steps"][0]["pv_forecast_kw"] == 2.0
     assert payload["steps"][0]["pv_realized_kw"] == 2.0

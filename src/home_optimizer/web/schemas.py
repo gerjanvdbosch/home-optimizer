@@ -366,6 +366,41 @@ class MpcBacktestSummaryResponse(BaseModel):
     slack_usage_count: int
 
 
+class StartStopLedgerEntryResponse(BaseModel):
+    timestamp: datetime
+    transition: str
+    hp_on_previous: bool
+    hp_on_current: bool
+    start_reason: str | None = None
+    stop_reason: str | None = None
+    intent_id: str | None = None
+    intent_type: str | None = None
+    active_run_id: str | None = None
+    sequencer_mode_before: str
+    sequencer_mode_after: str
+    hp_must_be_on: bool
+    hp_must_be_off: bool
+    hp_start_allowed: bool
+    comfort_low_risk: bool
+    comfort_high_risk: bool
+    predicted_min_temp_without_start: float | None = None
+    room_temp_c: float | None = None
+    mass_temp_c: float | None = None
+    q_heat_eff_kw: float
+
+
+class AuthorityInvariantReportResponse(BaseModel):
+    total_starts: int
+    total_stops: int
+    starts_by_reason: dict[str, int]
+    stops_by_reason: dict[str, int]
+    starts_outside_intents: int
+    emergency_starts: int
+    external_starts: int
+    start_stop_violation_count: int
+    violation_breakdown: dict[str, int]
+
+
 class MpcBacktestPvDiagnosticsResponse(BaseModel):
     realized_pv_surplus_kwh: float
     forecast_pv_surplus_kwh: float
@@ -408,6 +443,8 @@ class MpcBacktestStepResponse(BaseModel):
     historical_hp_on: bool
     start: bool
     stop: bool
+    start_reason: str | None = None
+    stop_reason: str | None = None
     preheat_active: bool
     preheat_block_id: int | None = None
     preheat_budget_share_kwh: float
@@ -457,6 +494,8 @@ class MpcBacktestResponse(BaseModel):
     mpc_summary: MpcBacktestSummaryResponse
     historical_summary: MpcBacktestSummaryResponse
     pv_diagnostics: MpcBacktestPvDiagnosticsResponse
+    invariant_report: AuthorityInvariantReportResponse
+    start_stop_ledger: list[StartStopLedgerEntryResponse]
     delta: MpcBacktestDeltaResponse
     total_solver_runtime_seconds: float
     steps: list[MpcBacktestStepResponse]

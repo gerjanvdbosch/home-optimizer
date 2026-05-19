@@ -30,6 +30,38 @@ IntentExecutionMode = Literal[
     "LOCKED_OUT",
     "SAFETY_STOP",
 ]
+StartReason = Literal[
+    "preheat_intent",
+    "comfort_recovery_intent",
+    "preheat_intent_comfort_bridge",
+    "emergency_comfort_low",
+    "external_plant",
+    "manual_override",
+]
+StopReason = Literal[
+    "intent_completed",
+    "storage_target_reached",
+    "post_solar_hold_sufficient",
+    "comfort_high_risk",
+    "safety_stop",
+    "intent_expired",
+    "lockout_entered",
+    "manual_override",
+    "external_plant",
+    "missing_or_expired_intent_reset",
+]
+AuthorityViolationType = Literal[
+    "start_without_valid_reason",
+    "stop_without_valid_reason",
+    "start_without_intent_or_emergency",
+    "hp_start_allowed_false_but_start_true",
+    "hp_must_be_on_true_but_hp_on_false",
+    "hp_must_be_off_true_but_hp_on_true",
+    "comfort_fallback_without_comfort_low_risk",
+    "solver_created_start",
+    "stale_intent_start",
+    "missing_or_expired_intent_not_reset",
+]
 
 
 class PreheatRunIntent(DomainModel):
@@ -89,13 +121,15 @@ class RunExecutionState(DomainModel):
     locked_off_until_utc: datetime | None = None
     target_charge_kwh: float = Field(default=0.0, ge=0.0)
     used_charge_kwh: float = Field(default=0.0, ge=0.0)
-    stop_reason: str | None = None
-    start_reason: str | None = None
+    stop_reason: StopReason | None = None
+    start_reason: StartReason | None = None
     previous_hp_on: bool = False
     on_steps: int = Field(default=0, ge=0)
     off_steps: int = Field(default=0, ge=0)
     active_source_block_id: int | None = Field(default=None, ge=0)
     active_intent_started_at_utc: datetime | None = None
+    start_stop_ledger: list["StartStopLedgerEntry"] = Field(default_factory=list)
+    authority_violations: list["AuthorityViolation"] = Field(default_factory=list)
 
 
 class RunIntentExecutionTargetStep(DomainModel):
@@ -108,13 +142,20 @@ class RunIntentExecutionTargetStep(DomainModel):
     hp_start_allowed: bool = False
     target_charge_remaining_kwh: float = Field(default=0.0, ge=0.0)
     max_preheat_target_c: float = 0.0
-    start_reason_hint: str | None = None
-    stop_reason_hint: str | None = None
+    intent_type: RunType | None = None
+    start_reason_hint: StartReason | None = None
+    stop_reason_hint: StopReason | None = None
     committed_on_until_utc: datetime | None = None
     locked_off_until_utc: datetime | None = None
     mode: IntentExecutionMode = "IDLE"
     starts_blocked_no_intent: bool = False
     comfort_fallback_allowed: bool = False
+    predicted_min_temp_without_start: float | None = None
+    room_temp_c: float | None = None
+    mass_temp_c: float | None = None
+    q_heat_eff_kw: float = Field(default=0.0, ge=0.0)
+    comfort_low_risk: bool = False
+    comfort_high_risk: bool = False
 
 
 class RunIntentPlanningPolicy(DomainModel):
@@ -180,6 +221,10 @@ class IntentAwareMpcPlan(DomainModel):
     run_execution_state: RunExecutionState | None = None
     execution_targets: list[RunIntentExecutionTargetStep] = Field(default_factory=list)
     diagnostics: dict[str, float | int | str] = Field(default_factory=dict)
+    start_stop_ledger: list["StartStopLedgerEntry"] = Field(default_factory=list)
+    invariant_report: "AuthorityInvariantReport" = Field(
+        default_factory=lambda: AuthorityInvariantReport()
+    )
 
 
 class IntentAwareMpcProblem(DomainModel):
@@ -198,3 +243,44 @@ class IntentAwareMpcProblem(DomainModel):
     @property
     def dt_hours(self) -> float:
         return self.interval_minutes / 60.0
+
+
+class StartStopLedgerEntry(DomainModel):
+    timestamp: datetime
+    transition: Literal["start", "stop"]
+    hp_on_previous: bool
+    hp_on_current: bool
+    start_reason: StartReason | None = None
+    stop_reason: StopReason | None = None
+    intent_id: str | None = None
+    intent_type: RunType | None = None
+    active_run_id: str | None = None
+    sequencer_mode_before: IntentExecutionMode
+    sequencer_mode_after: IntentExecutionMode
+    hp_must_be_on: bool = False
+    hp_must_be_off: bool = False
+    hp_start_allowed: bool = False
+    comfort_low_risk: bool = False
+    comfort_high_risk: bool = False
+    predicted_min_temp_without_start: float | None = None
+    room_temp_c: float | None = None
+    mass_temp_c: float | None = None
+    q_heat_eff_kw: float = Field(default=0.0, ge=0.0)
+
+
+class AuthorityViolation(DomainModel):
+    timestamp: datetime
+    violation: AuthorityViolationType
+    details: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class AuthorityInvariantReport(DomainModel):
+    total_starts: int = 0
+    total_stops: int = 0
+    starts_by_reason: dict[str, int] = Field(default_factory=dict)
+    stops_by_reason: dict[str, int] = Field(default_factory=dict)
+    starts_outside_intents: int = 0
+    emergency_starts: int = 0
+    external_starts: int = 0
+    start_stop_violation_count: int = 0
+    violation_breakdown: dict[str, int] = Field(default_factory=dict)

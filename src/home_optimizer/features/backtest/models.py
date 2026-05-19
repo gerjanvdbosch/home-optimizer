@@ -6,6 +6,12 @@ from pydantic import Field
 
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.features.mpc.models import MpcObjectiveBreakdown
+from home_optimizer.features.mpc_new.models import (
+    AuthorityInvariantReport,
+    StartReason,
+    StartStopLedgerEntry,
+    StopReason,
+)
 
 
 class MpcBacktestPvDiagnostics(DomainModel):
@@ -36,6 +42,8 @@ class MpcBacktestStepResult(DomainModel):
     historical_hp_on: bool
     start: bool
     stop: bool
+    start_reason: StartReason | None = None
+    stop_reason: StopReason | None = None
     planned_room_temp_c: float = 0.0
     useful_preheat_target_c: float = 0.0
     preheat_active: bool = False
@@ -100,6 +108,10 @@ class MpcBacktestResult(DomainModel):
     historical_summary: MpcBacktestSummary
     pv_diagnostics: MpcBacktestPvDiagnostics = Field(
         default_factory=MpcBacktestPvDiagnostics
+    )
+    start_stop_ledger: list[StartStopLedgerEntry] = Field(default_factory=list)
+    invariant_report: AuthorityInvariantReport = Field(
+        default_factory=AuthorityInvariantReport
     )
     mpc_objective_breakdown: MpcObjectiveBreakdown
     solver_objective_breakdown: MpcObjectiveBreakdown

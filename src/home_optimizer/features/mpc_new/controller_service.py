@@ -16,6 +16,7 @@ from home_optimizer.features.mpc.models import (
 )
 from home_optimizer.features.mpc_new.assessor import IntentPlanningAssessor
 from home_optimizer.features.mpc_new.models import (
+    AuthorityInvariantReport,
     IntentAwareMpcControllerRequest,
     IntentAwareMpcPlan,
     IntentAwareMpcProblem,
@@ -107,11 +108,20 @@ class IntentAwareMpcControllerService:
             max_solver_seconds=request.max_solver_seconds,
         )
         annotated_horizon = self.solver.annotate_horizon(problem)
-        base_plan = self.solver.solve(problem)
+        try:
+            base_plan = self.solver.solve(problem)
+        except ValueError as exc:
+            base_plan = self._solver_error_plan(str(exc))
+        invariant_report = self._build_invariant_report(
+            plan_steps=base_plan.steps,
+            execution_targets=execution_targets,
+            execution_state=request.run_execution_state,
+        )
         diagnostics = self._summarize_plan(
             plan_intents=intent_plan,
             execution_targets=execution_targets,
             plan_steps=base_plan.steps,
+            invariant_report=invariant_report,
         )
         return IntentAwareMpcPlan(
             control_mode=request.control_mode,
@@ -132,6 +142,12 @@ class IntentAwareMpcControllerService:
             run_intent_plan=intent_plan,
             run_execution_state=projected_state,
             execution_targets=execution_targets,
+            start_stop_ledger=(
+                request.run_execution_state.start_stop_ledger
+                if request.run_execution_state is not None
+                else []
+            ),
+            invariant_report=invariant_report,
             diagnostics=diagnostics
             | {
                 "heating_explanation": explain_heating_plan(
@@ -226,16 +242,14 @@ class IntentAwareMpcControllerService:
         plan_intents: RunIntentPlan,
         execution_targets: list[RunIntentExecutionTargetStep],
         plan_steps,
+        invariant_report: AuthorityInvariantReport,
     ) -> dict[str, float | int]:
-        starts_outside_intents = 0
         comfort_fallback_run_count = 0
         short_run_count = 0
         run_durations: list[int] = []
         current_run_length = 0
         for target, step in zip(execution_targets, plan_steps, strict=False):
-            if step.start and target.active_intent_id is None:
-                starts_outside_intents += 1
-            if step.start and target.start_reason_hint == "comfort_low_risk":
+            if step.start and target.start_reason_hint == "emergency_comfort_low":
                 comfort_fallback_run_count += 1
             if step.hp_on:
                 current_run_length += 1
@@ -260,11 +274,100 @@ class IntentAwareMpcControllerService:
                 int(intent.replacement_reason is not None) for intent in plan_intents.intents
             ),
             "comfort_fallback_run_count": comfort_fallback_run_count,
-            "starts_outside_intents": starts_outside_intents,
+            "starts_outside_intents": invariant_report.starts_outside_intents,
             "starts_blocked_no_intent": starts_blocked_no_intent,
             "short_run_count": short_run_count,
             "average_run_duration": (
                 float(sum(run_durations) / len(run_durations)) if run_durations else 0.0
             ),
             "post_solar_hold_prediction_error": 0.0,
+            "total_starts": invariant_report.total_starts,
+            "total_stops": invariant_report.total_stops,
+            "emergency_starts": invariant_report.emergency_starts,
+            "external_starts": invariant_report.external_starts,
+            "start_stop_violation_count": invariant_report.start_stop_violation_count,
         }
+
+    @staticmethod
+    def _solver_error_plan(message: str):
+        from home_optimizer.features.mpc.models import MpcObjectiveBreakdown, MpcPlan
+
+        return MpcPlan(
+            status="error",
+            termination_condition="infeasible",
+            feasible=False,
+            objective_breakdown=MpcObjectiveBreakdown(),
+            heating_explanation=message,
+            steps=[],
+        )
+
+    @staticmethod
+    def _build_invariant_report(
+        *,
+        plan_steps,
+        execution_targets: list[RunIntentExecutionTargetStep],
+        execution_state: RunExecutionState | None,
+    ) -> AuthorityInvariantReport:
+        total_starts = 0
+        total_stops = 0
+        starts_by_reason: dict[str, int] = {}
+        stops_by_reason: dict[str, int] = {}
+        starts_outside_intents = 0
+        emergency_starts = 0
+        external_starts = 0
+        violation_breakdown: dict[str, int] = {}
+        for step, target in zip(plan_steps, execution_targets, strict=False):
+            if step.start:
+                total_starts += 1
+                if step.start_reason is not None:
+                    starts_by_reason[step.start_reason] = starts_by_reason.get(
+                        step.start_reason, 0
+                    ) + 1
+                if target.active_intent_id is None and step.start_reason != "emergency_comfort_low":
+                    starts_outside_intents += 1
+                if step.start_reason == "emergency_comfort_low":
+                    emergency_starts += 1
+                if step.start_reason == "external_plant":
+                    external_starts += 1
+                if not target.hp_start_allowed and not target.hp_must_be_on:
+                    violation_breakdown["hp_start_allowed_false_but_start_true"] = (
+                        violation_breakdown.get("hp_start_allowed_false_but_start_true", 0) + 1
+                    )
+            if step.stop:
+                total_stops += 1
+                if step.stop_reason is not None:
+                    stops_by_reason[step.stop_reason] = stops_by_reason.get(
+                        step.stop_reason, 0
+                    ) + 1
+            if target.hp_must_be_on and not step.hp_on:
+                violation_breakdown["hp_must_be_on_true_but_hp_on_false"] = (
+                    violation_breakdown.get("hp_must_be_on_true_but_hp_on_false", 0) + 1
+                )
+            if target.hp_must_be_off and step.hp_on:
+                violation_breakdown["hp_must_be_off_true_but_hp_on_true"] = (
+                    violation_breakdown.get("hp_must_be_off_true_but_hp_on_true", 0) + 1
+                )
+            if step.start and step.start_reason is None:
+                violation_breakdown["start_without_valid_reason"] = (
+                    violation_breakdown.get("start_without_valid_reason", 0) + 1
+                )
+            if step.stop and step.stop_reason is None:
+                violation_breakdown["stop_without_valid_reason"] = (
+                    violation_breakdown.get("stop_without_valid_reason", 0) + 1
+                )
+        if execution_state is not None:
+            for violation in execution_state.authority_violations:
+                violation_breakdown[violation.violation] = (
+                    violation_breakdown.get(violation.violation, 0) + 1
+                )
+        return AuthorityInvariantReport(
+            total_starts=total_starts,
+            total_stops=total_stops,
+            starts_by_reason=starts_by_reason,
+            stops_by_reason=stops_by_reason,
+            starts_outside_intents=starts_outside_intents,
+            emergency_starts=emergency_starts,
+            external_starts=external_starts,
+            start_stop_violation_count=sum(violation_breakdown.values()),
+            violation_breakdown=violation_breakdown,
+        )

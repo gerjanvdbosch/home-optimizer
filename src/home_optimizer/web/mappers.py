@@ -21,6 +21,7 @@ from home_optimizer.features.modeling import (
     StoredModelVersionSummary,
 )
 from home_optimizer.web.schemas import (
+    AuthorityInvariantReportResponse,
     BaselineKpiSummaryResponse,
     ChartPointResponse,
     ChartSeriesResponse,
@@ -43,6 +44,7 @@ from home_optimizer.web.schemas import (
     RoomModelVersionDetailResponse,
     RoomModelVersionSummaryResponse,
     SegmentValidationResponse,
+    StartStopLedgerEntryResponse,
     TrainRoomModelResponse,
 )
 
@@ -309,6 +311,13 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
         pv_diagnostics=MpcBacktestPvDiagnosticsResponse(
             **result.pv_diagnostics.model_dump()
         ),
+        invariant_report=AuthorityInvariantReportResponse(
+            **result.invariant_report.model_dump()
+        ),
+        start_stop_ledger=[
+            StartStopLedgerEntryResponse(**entry.model_dump())
+            for entry in result.start_stop_ledger
+        ],
         delta=MpcBacktestDeltaResponse(
             comfort_violation_minutes=(
                 result.mpc_summary.comfort_violation_minutes

@@ -201,6 +201,12 @@ class SpaceHeatingMpcBacktestRunner:
                     historical_hp_on=historical_hp_on,
                     start=start,
                     stop=stop,
+                    start_reason=(
+                        first_step.start_reason if first_step is not None else None
+                    ),
+                    stop_reason=(
+                        first_step.stop_reason if first_step is not None else None
+                    ),
                     planned_room_temp_c=(
                         first_step.predicted_room_temp_c
                         if plan.feasible and plan.steps
@@ -517,6 +523,10 @@ class SpaceHeatingMpcBacktestRunner:
             pv_diagnostics=self._pv_diagnostics(
                 step_results,
                 interval_minutes=interval_minutes,
+            ),
+            start_stop_ledger=current_run_execution_state.start_stop_ledger,
+            invariant_report=self._invariant_report_from_execution_state(
+                current_run_execution_state
             ),
             mpc_objective_breakdown=executed_path_objective_breakdown,
             solver_objective_breakdown=solver_cumulative_objective_breakdown,
@@ -1050,4 +1060,53 @@ class SpaceHeatingMpcBacktestRunner:
             objective_weights.preheat_budget_shortfall
             * max(block_budget_kwh[block_id] - block_charge_kwh.get(block_id, 0.0), 0.0)
             for block_id in block_budget_kwh
+        )
+
+    @staticmethod
+    def _invariant_report_from_execution_state(
+        state: RunExecutionState,
+    ):
+        from home_optimizer.features.mpc_new.models import AuthorityInvariantReport
+
+        total_starts = 0
+        total_stops = 0
+        starts_by_reason: dict[str, int] = {}
+        stops_by_reason: dict[str, int] = {}
+        starts_outside_intents = 0
+        emergency_starts = 0
+        external_starts = 0
+        violation_breakdown: dict[str, int] = {}
+        for entry in state.start_stop_ledger:
+            if entry.transition == "start":
+                total_starts += 1
+                if entry.start_reason is not None:
+                    starts_by_reason[entry.start_reason] = starts_by_reason.get(
+                        entry.start_reason, 0
+                    ) + 1
+                if entry.intent_id is None and entry.start_reason != "emergency_comfort_low":
+                    starts_outside_intents += 1
+                if entry.start_reason == "emergency_comfort_low":
+                    emergency_starts += 1
+                if entry.start_reason == "external_plant":
+                    external_starts += 1
+            else:
+                total_stops += 1
+                if entry.stop_reason is not None:
+                    stops_by_reason[entry.stop_reason] = stops_by_reason.get(
+                        entry.stop_reason, 0
+                    ) + 1
+        for violation in state.authority_violations:
+            violation_breakdown[violation.violation] = (
+                violation_breakdown.get(violation.violation, 0) + 1
+            )
+        return AuthorityInvariantReport(
+            total_starts=total_starts,
+            total_stops=total_stops,
+            starts_by_reason=starts_by_reason,
+            stops_by_reason=stops_by_reason,
+            starts_outside_intents=starts_outside_intents,
+            emergency_starts=emergency_starts,
+            external_starts=external_starts,
+            start_stop_violation_count=sum(violation_breakdown.values()),
+            violation_breakdown=violation_breakdown,
         )
