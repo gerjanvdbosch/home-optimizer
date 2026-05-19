@@ -95,7 +95,6 @@ class IntentAwareMpcControllerService:
         )
         problem = IntentAwareMpcProblem(
             interval_minutes=request.interval_minutes,
-            control_mode=request.control_mode,
             control_model=resolved_control_model,
             initial_state=resolved_initial_state,
             horizon=resolved_horizon,
@@ -123,7 +122,6 @@ class IntentAwareMpcControllerService:
             invariant_report=invariant_report,
         )
         return IntentAwareMpcPlan(
-            control_mode=request.control_mode,
             status=base_plan.status,
             termination_condition=base_plan.termination_condition,
             feasible=base_plan.feasible,
@@ -173,7 +171,6 @@ class IntentAwareMpcControllerService:
             else IntentAwareMpcControllerRequest(
                 interval_minutes=request.interval_minutes,
                 horizon=request.horizon,
-                control_mode=request.control_mode,
                 constraints=request.constraints,
                 objective_weights=request.objective_weights,
                 max_solver_seconds=request.max_solver_seconds,

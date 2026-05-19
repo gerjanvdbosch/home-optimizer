@@ -22,7 +22,6 @@ from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
     MpcConstraints,
-    MpcControlMode,
     MpcHorizonStep,
     MpcObjectiveWeights,
 )
@@ -305,7 +304,6 @@ class SpaceHeatingMpcBacktestService:
         conversion_options: ControlModelConversionOptions | None = None,
         default_effective_heating_kw: float | None = None,
         exogenous_mode: str = "perfect_foresight",
-        control_mode: MpcControlMode = "hierarchical_preheat",
     ) -> MpcBacktestResult:
         resolved_start_time = ensure_utc(start_time_utc)
         resolved_end_time = ensure_utc(end_time_utc)
@@ -420,7 +418,6 @@ class SpaceHeatingMpcBacktestService:
             historical_hp_on_by_timestamp=historical_hp_on_by_timestamp,
             historical_energy_cost_by_timestamp=historical_energy_cost_by_timestamp,
             exogenous_mode=exogenous_mode,
-            control_mode=control_mode,
             forecast_replay_provider=forecast_replay_provider,
         )
 

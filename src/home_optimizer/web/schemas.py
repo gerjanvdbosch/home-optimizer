@@ -340,7 +340,6 @@ class MpcPlanSummaryResponse(BaseModel):
 
 
 class MpcPlanResponse(BaseModel):
-    control_mode: str = "hierarchical_preheat"
     status: str
     termination_condition: str
     feasible: bool
@@ -479,7 +478,6 @@ class MpcBacktestStepResponse(BaseModel):
 
 class MpcBacktestResponse(BaseModel):
     exogenous_mode: str
-    control_mode: str
     missing_forecast_count: int
     forecast_coverage_ratio: float
     model_id: str

@@ -327,7 +327,6 @@ class ExecutionTargetStep(DomainModel):
     stop_conditions: list[str] = Field(default_factory=list)
 
 
-MpcControlMode = Literal["hierarchical_preheat"]
 
 HeatPumpSequencerMode = Literal[
     "IDLE",
@@ -399,7 +398,6 @@ class MpcObjectiveWeights(DomainModel):
 
 class MpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
-    control_mode: MpcControlMode = "hierarchical_preheat"
     control_model: Rc2StateThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
@@ -519,7 +517,6 @@ class MpcObjectiveBreakdown(DomainModel):
 
 
 class MpcPlan(DomainModel):
-    control_mode: MpcControlMode = "hierarchical_preheat"
     status: str
     termination_condition: str
     feasible: bool
@@ -539,7 +536,6 @@ class MpcPlan(DomainModel):
 class MpcControllerRequest(DomainModel):
     interval_minutes: int = Field(gt=0)
     horizon: list[MpcHorizonStep]
-    control_mode: MpcControlMode = "hierarchical_preheat"
     preheat_plan: PreheatPlan | None = None
     sequencer_state: HeatPumpSequencerState | None = None
     sequencer_key: str | None = None

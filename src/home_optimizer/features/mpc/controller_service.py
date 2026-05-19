@@ -103,7 +103,6 @@ class SpaceHeatingMpcControllerService:
 
         problem = MpcProblem(
             interval_minutes=request.interval_minutes,
-            control_mode=request.control_mode,
             control_model=resolved_control_model,
             initial_state=resolved_initial_state,
             horizon=resolved_horizon,
@@ -119,7 +118,6 @@ class SpaceHeatingMpcControllerService:
         plan = self.solver.solve(problem)
         return plan.model_copy(
             update={
-                "control_mode": request.control_mode,
                 "preheat_plan": resolved_preheat_plan,
                 "thermal_flexibility": resolved_flexibility,
                 "preheat_schedule": resolved_preheat_schedule,

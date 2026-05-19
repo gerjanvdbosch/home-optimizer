@@ -186,11 +186,9 @@ class FakeSpaceHeatingMpcPlanningService:
         horizon_steps: int = 36,
         default_effective_heating_kw: float | None = None,
         max_solver_seconds: float | None = None,
-        control_mode: str = "hierarchical_preheat",
     ) -> MpcPlan:
         resolved_interval_minutes = interval_minutes or 12
         return MpcPlan(
-            control_mode=control_mode,
             status="ok",
             termination_condition="optimal",
             feasible=True,
@@ -241,10 +239,8 @@ class FakeSpaceHeatingMpcBacktestService:
         horizon_steps: int = 36,
         max_solver_seconds: float | None = None,
         exogenous_mode: str = "perfect_foresight",
-        control_mode: str = "hierarchical_preheat",
     ) -> MpcBacktestResult:
         return MpcBacktestResult(
-            control_mode=control_mode,
             exogenous_mode=exogenous_mode,
             model_id=model_id or "room-model-active",
             model_type=ROOM_RC_MODEL_KIND,
@@ -1006,7 +1002,6 @@ def test_backtest_page_renders_navigation_and_controls() -> None:
     assert 'id="backtest-end-time"' in response.text
     assert 'id="backtest-model-select"' in response.text
     assert 'id="backtest-exogenous-mode"' in response.text
-    assert 'id="backtest-control-mode"' in response.text
     assert 'id="backtest-temperature-chart"' in response.text
     assert 'id="backtest-cost-chart"' in response.text
     assert 'id="backtest-pv-chart"' in response.text
@@ -1034,7 +1029,6 @@ def test_backtest_endpoint_returns_summary_delta_and_steps() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["exogenous_mode"] == "perfect_foresight"
-    assert payload["control_mode"] == "hierarchical_preheat"
     assert payload["model_id"] == "room-model-active"
     assert payload["interval_minutes"] == 12
     assert payload["horizon_steps"] == 4

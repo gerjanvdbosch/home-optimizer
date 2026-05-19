@@ -32,10 +32,6 @@ MaxSolverSecondsQuery = Annotated[
     float | None,
     Query(alias="max_solver_seconds", gt=0.0),
 ]
-ControlModeQuery = Annotated[
-    Literal["hierarchical_preheat"] | None,
-    Query(alias="mpc_control_mode"),
-]
 
 
 def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
@@ -57,7 +53,6 @@ def _plan_response(plan: MpcPlan) -> MpcPlanResponse:
         estimated_energy_cost_eur=sum(step.estimated_energy_cost_eur for step in plan.steps),
     )
     return MpcPlanResponse(
-        control_mode=plan.control_mode,
         status=plan.status,
         termination_condition=plan.termination_condition,
         feasible=plan.feasible,
@@ -133,7 +128,6 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
         interval_minutes: IntervalQuery = None,
         default_effective_heating_kw: HeatingKwQuery = None,
         max_solver_seconds: MaxSolverSecondsQuery = None,
-        mpc_control_mode: ControlModeQuery = None,
     ) -> MpcPlanResponse:
         try:
             plan = container.space_heating_mpc_planning_service.plan(
@@ -143,7 +137,6 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
                 horizon_steps=horizon_steps,
                 default_effective_heating_kw=default_effective_heating_kw,
                 max_solver_seconds=max_solver_seconds,
-                control_mode=mpc_control_mode or "hierarchical_preheat",
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

@@ -8,7 +8,6 @@ from pydantic import Field
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.features.mpc.models import (
     MpcConstraints,
-    MpcControlMode,
     MpcHorizonStep,
     MpcInitialState,
     MpcObjectiveBreakdown,
@@ -195,7 +194,6 @@ class IntentPlanningState(DomainModel):
 class IntentAwareMpcControllerRequest(DomainModel):
     interval_minutes: int = Field(gt=0)
     horizon: list[MpcHorizonStep]
-    control_mode: MpcControlMode = "hierarchical_preheat"
     sequencer_key: str | None = None
     constraints: MpcConstraints = Field(default_factory=MpcConstraints)
     objective_weights: MpcObjectiveWeights = Field(default_factory=MpcObjectiveWeights)
@@ -206,7 +204,6 @@ class IntentAwareMpcControllerRequest(DomainModel):
 
 
 class IntentAwareMpcPlan(DomainModel):
-    control_mode: MpcControlMode = "hierarchical_preheat"
     status: str
     termination_condition: str
     feasible: bool
@@ -228,7 +225,6 @@ class IntentAwareMpcPlan(DomainModel):
 
 class IntentAwareMpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
-    control_mode: MpcControlMode = "hierarchical_preheat"
     control_model: Rc2StateThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]

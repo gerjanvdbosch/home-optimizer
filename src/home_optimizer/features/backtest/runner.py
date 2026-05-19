@@ -15,7 +15,6 @@ from home_optimizer.features.mpc.models import (
     HeatPumpSequencerState,
     MpcConstraints,
     MpcControllerRequest,
-    MpcControlMode,
     MpcHorizonStep,
     MpcInitialState,
     MpcObjectiveBreakdown,
@@ -58,7 +57,6 @@ class SpaceHeatingMpcBacktestRunner:
         historical_hp_on_by_timestamp: dict[datetime, bool] | None = None,
         historical_energy_cost_by_timestamp: dict[datetime, float] | None = None,
         exogenous_mode: str = "perfect_foresight",
-        control_mode: MpcControlMode = "hierarchical_preheat",
         forecast_replay_provider: Any | None = None,
     ) -> MpcBacktestResult:
         if interval_minutes <= 0:
@@ -117,7 +115,6 @@ class SpaceHeatingMpcBacktestRunner:
                 request = IntentAwareMpcControllerRequest(
                     interval_minutes=interval_minutes,
                     horizon=horizon,
-                    control_mode=control_mode,
                     run_execution_state=current_run_execution_state,
                     previous_intent_plan=previous_intent_plan,
                     constraints=resolved_constraints,
@@ -128,7 +125,6 @@ class SpaceHeatingMpcBacktestRunner:
                 request = MpcControllerRequest(
                     interval_minutes=interval_minutes,
                     horizon=horizon,
-                    control_mode=control_mode,
                     sequencer_state=current_sequencer_state,
                     constraints=resolved_constraints,
                     objective_weights=resolved_weights,
@@ -494,7 +490,6 @@ class SpaceHeatingMpcBacktestRunner:
         )
         return MpcBacktestResult(
             exogenous_mode=exogenous_mode,
-            control_mode=control_mode,
             missing_forecast_count=missing_forecast_count,
             forecast_coverage_ratio=forecast_coverage_ratio if step_results else 1.0,
             model_id=model_id,

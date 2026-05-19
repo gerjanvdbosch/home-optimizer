@@ -294,7 +294,6 @@ def mpc_backtest_response(result: MpcBacktestResult) -> MpcBacktestResponse:
     )
     return MpcBacktestResponse(
         exogenous_mode=result.exogenous_mode,
-        control_mode=result.control_mode,
         missing_forecast_count=result.missing_forecast_count,
         forecast_coverage_ratio=result.forecast_coverage_ratio,
         model_id=result.model_id,

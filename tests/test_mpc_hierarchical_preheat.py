@@ -264,7 +264,6 @@ def test_hierarchical_mode_limits_to_single_start_within_block() -> None:
         MpcControllerRequest(
             interval_minutes=10,
             horizon=horizon,
-            control_mode="hierarchical_preheat",
         ),
         control_model=Rc2StateThermalControlModel(
             a11=0.97,
@@ -282,7 +281,6 @@ def test_hierarchical_mode_limits_to_single_start_within_block() -> None:
     )
 
     assert plan.feasible is True
-    assert plan.control_mode == "hierarchical_preheat"
     block_starts = [step for step in plan.steps if step.preheat_block_id is not None and step.start]
     assert len(block_starts) <= 1
     assert any(step.preheat_block_id is not None for step in plan.steps)
@@ -313,7 +311,6 @@ def test_hierarchical_mode_allows_comfort_start_outside_preheat_block() -> None:
         MpcControllerRequest(
             interval_minutes=10,
             horizon=horizon,
-            control_mode="hierarchical_preheat",
         ),
         control_model=Rc2StateThermalControlModel(
             a11=0.95,

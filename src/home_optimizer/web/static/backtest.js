@@ -79,7 +79,6 @@ const endTimeInput = document.getElementById("backtest-end-time");
 const modelSelect = document.getElementById("backtest-model-select");
 const horizonStepsInput = document.getElementById("backtest-horizon-steps");
 const exogenousModeSelect = document.getElementById("backtest-exogenous-mode");
-const controlModeSelect = document.getElementById("backtest-control-mode");
 const runButton = document.getElementById("backtest-run-button");
 const statusNode = document.getElementById("backtest-status");
 const summaryCaptionNode = document.getElementById("backtest-summary-caption");
@@ -123,9 +122,6 @@ function setControlsDisabled(disabled) {
   }
   if (exogenousModeSelect) {
     exogenousModeSelect.disabled = disabled;
-  }
-  if (controlModeSelect) {
-    controlModeSelect.disabled = disabled;
   }
   if (previousDayButton) {
     previousDayButton.disabled = disabled;
@@ -257,7 +253,7 @@ function renderSummary(payload) {
         </tr>
       `;
   }
-  summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen | ${payload.control_mode} | ${payload.exogenous_mode}`;
+  summaryCaptionNode.textContent = `${payload.model_type} | ${payload.model_id} | ${payload.interval_minutes} min | ${payload.step_count} stappen | ${payload.exogenous_mode}`;
 }
 
 function objectiveBreakdownRows(breakdown) {
@@ -431,7 +427,6 @@ async function loadBacktest() {
       end_time: new Date(endTimeInput.value).toISOString(),
       horizon_steps: String(Number(horizonStepsInput.value || 36)),
       exogenous_mode: exogenousModeSelect?.value || "perfect_foresight",
-      mpc_control_mode: controlModeSelect?.value || "hierarchical_preheat",
     });
     if (modelSelect.value) {
       params.set("model_id", modelSelect.value);

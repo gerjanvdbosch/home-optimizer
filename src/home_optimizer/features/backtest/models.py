@@ -94,7 +94,6 @@ class MpcBacktestSummary(DomainModel):
 
 class MpcBacktestResult(DomainModel):
     exogenous_mode: str = "perfect_foresight"
-    control_mode: str = "hierarchical_preheat"
     missing_forecast_count: int = 0
     forecast_coverage_ratio: float = 1.0
     model_id: str
