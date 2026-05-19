@@ -13,7 +13,6 @@ from .identification import (
     IdentificationDatasetSummary,
 )
 from .modeling import (
-    RoomArxConfig,
     RoomModelingService,
     RoomModelValidationReport,
     RoomRcConfig,
@@ -72,7 +71,6 @@ __all__ = [
     "MpcPlan",
     "Rc2StateMpcInitialState",
     "Rc2StateThermalControlModel",
-    "RoomArxConfig",
     "RoomRcConfig",
     "RoomModelValidationReport",
     "SegmentValidationReport",

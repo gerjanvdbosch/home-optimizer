@@ -8,7 +8,6 @@ from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import StoredModelVersion
 from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams, RoomRcConfig, RoomRcModel
-from home_optimizer.features.modeling.room_arx import RoomArxConfig, RoomArxModel
 from home_optimizer.features.mpc import (
     MpcInitialState,
     MpcPlan,
@@ -93,33 +92,17 @@ def test_mpc_preparation_uses_configured_fixed_pricing_for_dataset_build(monkeyp
 
 def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkeypatch) -> None:
     start_time = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
-    source_model = RoomArxModel(
+    source_model = RoomRcModel(
         trained_from_utc=start_time - timedelta(days=1),
         trained_to_utc=start_time,
         interval_minutes=10,
-        config=RoomArxConfig(
-            room_temperature_lags=[0],
-            outdoor_temperature_lags=[0],
-            thermal_output_lags=[0],
-            solar_gain_lags=[0],
-            occupied_flag_lags=[0],
-            shutter_position_lags=[0],
-            solar_shutter_interaction_lags=[0],
-        ),
-        feature_names=[
-            "room_temperature_lag_0",
-            "outdoor_temperature_lag_0",
-            "thermal_output_lag_0",
-            "solar_gain_lag_0",
-            "occupied_flag_lag_0",
-        ],
-        intercept=0.0,
-        coefficients=[0.95, 0.03, 0.4, 0.0, 0.02],
+        config=RoomRcConfig(),
+        params=RoomRC2StateParams().to_dict(),
         sample_count=100,
     )
     version = StoredModelVersion(
         model_id="active-room-model",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
         model=source_model,
@@ -201,33 +184,17 @@ def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkey
 
 def test_space_heating_mpc_planning_service_uses_default_interval_setting(monkeypatch) -> None:
     start_time = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
-    source_model = RoomArxModel(
+    source_model = RoomRcModel(
         trained_from_utc=start_time - timedelta(days=1),
         trained_to_utc=start_time,
         interval_minutes=15,
-        config=RoomArxConfig(
-            room_temperature_lags=[0],
-            outdoor_temperature_lags=[0],
-            thermal_output_lags=[0],
-            solar_gain_lags=[0],
-            occupied_flag_lags=[0],
-            shutter_position_lags=[0],
-            solar_shutter_interaction_lags=[0],
-        ),
-        feature_names=[
-            "room_temperature_lag_0",
-            "outdoor_temperature_lag_0",
-            "thermal_output_lag_0",
-            "solar_gain_lag_0",
-            "occupied_flag_lag_0",
-        ],
-        intercept=0.0,
-        coefficients=[0.95, 0.03, 0.4, 0.0, 0.02],
+        config=RoomRcConfig(),
+        params=RoomRC2StateParams().to_dict(),
         sample_count=100,
     )
     version = StoredModelVersion(
         model_id="active-room-model",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
         model=source_model,

@@ -96,7 +96,7 @@ def test_backtest_runner_keeps_simulated_state_instead_of_resetting_to_historica
     runner = SpaceHeatingMpcBacktestRunner(controller=_StaticPlanController())
     result = runner.run(
         model_id="room-model-v1",
-        model_type="room_arx",
+        model_type="room_2r2c",
         control_model=LinearThermalControlModel(
             a=0.5,
             b_out=0.0,
@@ -215,7 +215,7 @@ def test_backtest_runner_uses_realized_exogenous_for_plant_in_forecast_replay() 
 
     result = runner.run(
         model_id="room-model-v1",
-        model_type="room_arx",
+        model_type="room_2r2c",
         control_model=LinearThermalControlModel(
             a=1.0,
             b_out=0.0,
@@ -241,7 +241,7 @@ def test_backtest_runner_computes_pv_surplus_capture_and_safe_zero_ratio() -> No
     runner = SpaceHeatingMpcBacktestRunner(controller=_StaticPlanController())
     result = runner.run(
         model_id="room-model-v1",
-        model_type="room_arx",
+        model_type="room_2r2c",
         control_model=LinearThermalControlModel(
             a=1.0,
             b_out=0.0,

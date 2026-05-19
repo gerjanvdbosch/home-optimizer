@@ -4,14 +4,11 @@ from datetime import datetime, timezone
 
 from home_optimizer.features.modeling import (
     HorizonMetric,
-    ROOM_ARX_MODEL_KIND,
     ROOM_RC_MODEL_KIND,
-    RoomArxConfig,
     RoomRcConfig,
     RoomRcModel,
     RoomModelValidationReport,
     StoredModelVersion,
-    TrainedLinearRoomModel,
     ValidationFoldResult,
 )
 from home_optimizer.infrastructure.database.model_version_repository import (
@@ -20,30 +17,32 @@ from home_optimizer.infrastructure.database.model_version_repository import (
 from home_optimizer.infrastructure.database.session import Database
 
 
-def build_model() -> TrainedLinearRoomModel:
-    return TrainedLinearRoomModel(
+def build_model() -> RoomRcModel:
+    return RoomRcModel(
         trained_from_utc=datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc),
         trained_to_utc=datetime(2026, 5, 10, 0, 0, tzinfo=timezone.utc),
         interval_minutes=10,
-        config=RoomArxConfig(
-            room_temperature_lags=[0],
-            outdoor_temperature_lags=[0],
-            thermal_output_lags=[0],
-            solar_gain_lags=[0],
-            occupied_flag_lags=[0],
-            validation_horizons_steps=[6, 36, 72, 144],
+        config=RoomRcConfig(
             min_train_rows=10,
             validation_window_rows=10,
+            validation_horizons_steps=[6, 36, 72, 144],
         ),
-        feature_names=[
-            "room_temperature_lag_0",
-            "outdoor_temperature_lag_0",
-            "thermal_output_lag_0",
-            "solar_gain_lag_0",
-            "occupied_flag_lag_0",
-        ],
-        intercept=1.23,
-        coefficients=[0.8, 0.1, 0.2, 0.01, 0.05],
+        params={
+            "R_air_out": 5.0,
+            "R_air_mass": 1.0,
+            "R_mass_out": 20.0,
+            "C_air": 0.5,
+            "C_mass": 50.0,
+            "eta_heat": 0.9,
+            "eta_solar_air": 0.2,
+            "eta_solar_mass": 0.5,
+            "eta_internal": 0.1,
+            "b_hour_sin_air": 0.0,
+            "b_hour_cos_air": 0.0,
+            "b_hour_sin_mass": 0.0,
+            "b_hour_cos_mass": 0.0,
+            "initial_mass_offset_c": 0.0,
+        },
         sample_count=200,
     )
 
@@ -143,7 +142,7 @@ def test_model_version_repository_round_trips_room_model_versions(tmp_path) -> N
 
     version = StoredModelVersion(
         model_id="room-model-v1",
-        model_type=ROOM_ARX_MODEL_KIND,
+        model_type=ROOM_RC_MODEL_KIND,
         created_at_utc=datetime(2026, 5, 11, 9, 0, tzinfo=timezone.utc),
         is_active=True,
         model=build_model(),
@@ -159,7 +158,8 @@ def test_model_version_repository_round_trips_room_model_versions(tmp_path) -> N
     assert loaded is not None
     assert loaded.model_id == "room-model-v1"
     assert loaded.is_active is True
-    assert loaded.model.feature_names == version.model.feature_names
+    assert isinstance(loaded.model, RoomRcModel)
+    assert loaded.model.params["C_mass"] == version.model.params["C_mass"]
     assert loaded.validation_report is not None
     assert loaded.validation_report.aggregate_metrics[1].mae_c == 0.6
     assert active is not None
@@ -181,7 +181,7 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
     repository.save_room_model_version(
         StoredModelVersion(
             model_id="room-model-v1",
-            model_type=ROOM_ARX_MODEL_KIND,
+            model_type=ROOM_RC_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 11, 9, 0, tzinfo=timezone.utc),
             is_active=True,
             model=build_model(),
@@ -191,7 +191,7 @@ def test_model_version_repository_switches_active_room_model(tmp_path) -> None:
     repository.save_room_model_version(
         StoredModelVersion(
             model_id="room-model-v2",
-            model_type=ROOM_ARX_MODEL_KIND,
+            model_type=ROOM_RC_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 11, 10, 0, tzinfo=timezone.utc),
             is_active=False,
             model=build_model().model_copy(

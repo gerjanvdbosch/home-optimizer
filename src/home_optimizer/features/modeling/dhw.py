@@ -13,7 +13,7 @@ class Dhw1R1CConfig(DomainModel):
 
 
 class Dhw1R1CModel(DomainModel):
-    model_kind: str = "dhw_1r1c"
+    model_kind: str = "dhw"
     notes: str = Field(
         default="Placeholder trained-model shape for a future 1-state DHW implementation."
     )

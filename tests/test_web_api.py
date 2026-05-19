@@ -28,15 +28,13 @@ from home_optimizer.features.backtest.models import (
 )
 from home_optimizer.features.modeling import (
     HorizonMetric,
-    ROOM_ARX_MODEL_KIND,
     ROOM_RC_MODEL_KIND,
-    RoomArxConfig,
     RoomModelValidationReport,
+    RoomRcConfig,
     RoomRcModel,
     SegmentValidationReport,
     StoredModelVersion,
     StoredModelVersionSummary,
-    TrainedLinearRoomModel,
     ValidationFoldResult,
 )
 from home_optimizer.features.mpc import MpcObjectiveBreakdown, MpcPlan, MpcPlanStep
@@ -108,47 +106,23 @@ class FakeModelVersionRepository:
         ]
         self.active_version = StoredModelVersion(
             model_id="room-model-active",
-            model_type=ROOM_ARX_MODEL_KIND,
+            model_type=ROOM_RC_MODEL_KIND,
             created_at_utc=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
             is_active=True,
-            model=TrainedLinearRoomModel(
+            model=RoomRcModel(
                 trained_from_utc=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc),
                 trained_to_utc=datetime(2026, 5, 7, 23, 59, tzinfo=timezone.utc),
                 interval_minutes=15,
-                config=RoomArxConfig(
-                    room_temperature_lags=[0],
-                    outdoor_temperature_lags=[0],
-                    thermal_output_lags=[0],
-                    solar_gain_lags=[0],
-                    shutter_position_lags=[0],
-                    solar_shutter_interaction_lags=[0],
-                    occupied_flag_lags=[0],
+                config=RoomRcConfig(
                     min_train_rows=10,
                     validation_window_rows=10,
                 ),
-                feature_names=[
-                    "room_temperature_lag_0",
-                    "outdoor_temperature_lag_0",
-                    "thermal_output_lag_0",
-                    "solar_gain_lag_0",
-                    "shutter_position_lag_0",
-                    "solar_shutter_interaction_lag_0",
-                    "occupied_flag_lag_0",
-                ],
-                intercept=0.0,
-                coefficients=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                params={},
                 sample_count=100,
             ),
             validation_report=RoomModelValidationReport(
                 interval_minutes=15,
-                config=RoomArxConfig(
-                    room_temperature_lags=[0],
-                    outdoor_temperature_lags=[0],
-                    thermal_output_lags=[0],
-                    solar_gain_lags=[0],
-                    shutter_position_lags=[0],
-                    solar_shutter_interaction_lags=[0],
-                    occupied_flag_lags=[0],
+                config=RoomRcConfig(
                     min_train_rows=10,
                     validation_window_rows=10,
                 ),
@@ -273,7 +247,7 @@ class FakeSpaceHeatingMpcBacktestService:
             control_mode=control_mode,
             exogenous_mode=exogenous_mode,
             model_id=model_id or "room-model-active",
-            model_type=ROOM_ARX_MODEL_KIND,
+            model_type=ROOM_RC_MODEL_KIND,
             start_time_utc=start_time_utc,
             end_time_utc=end_time_utc,
             interval_minutes=12,
@@ -1160,7 +1134,7 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["model_id"].startswith("room-model-")
-    assert payload["model_type"] == "room_arx"
+    assert payload["model_type"] == "room_2r2c"
     assert payload["interval_minutes"] == 15
     assert payload["sample_count"] > 0
     assert payload["is_active"] is True
@@ -1261,7 +1235,7 @@ def test_room_model_catalog_endpoint_lists_models() -> None:
     payload = response.json()
     assert len(payload["models"]) >= 1
     assert {model["model_type"] for model in payload["models"]} >= {
-        ROOM_ARX_MODEL_KIND,
+        ROOM_RC_MODEL_KIND,
     }
 
 

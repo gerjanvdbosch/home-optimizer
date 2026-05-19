@@ -16,11 +16,10 @@ from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling import (
     RoomRcConfig,
     RoomRcModel,
-    RoomArxConfig,
-    RoomArxModel,
     StoredModelVersion,
 )
 from home_optimizer.features.mpc import MpcInitialState
+from home_optimizer.features.mpc import Rc2StateMpcInitialState
 from home_optimizer.features.mpc import MpcObjectiveBreakdown
 from home_optimizer.features.mpc import MpcPlan, MpcPlanStep
 
@@ -91,31 +90,15 @@ def test_backtest_service_uses_backtest_window_rows_to_infer_effective_heating_k
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
-        model=RoomArxModel(
+        model=RoomRcModel(
             trained_from_utc=start_time,
             trained_to_utc=end_time,
             interval_minutes=10,
-            config=RoomArxConfig(
-                room_temperature_lags=[0],
-                outdoor_temperature_lags=[0],
-                thermal_output_lags=[0],
-                solar_gain_lags=[0],
-                occupied_flag_lags=[0],
-                shutter_position_lags=[0],
-                solar_shutter_interaction_lags=[0],
-            ),
-            feature_names=[
-                "room_temperature_lag_0",
-                "outdoor_temperature_lag_0",
-                "thermal_output_lag_0",
-                "solar_gain_lag_0",
-                "occupied_flag_lag_0",
-            ],
-            intercept=0.0,
-            coefficients=[1.0, 0.0, 0.0, 0.0, 0.0],
+            config=RoomRcConfig(),
+            params={},
             sample_count=10,
         ),
     )
@@ -248,7 +231,7 @@ def test_backtest_service_converts_solar_proxy_to_kw_for_2r2c_models(monkeypatch
     monkeypatch.setattr(
         service.preparation,
         "initial_state_from_rows",
-        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+        lambda *args, **kwargs: Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0),
     )
     monkeypatch.setattr(
         service.preparation,
@@ -298,25 +281,15 @@ def test_backtest_service_perfect_foresight_sets_forecast_and_realized_exogenous
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
-        model=RoomArxModel(
+        model=RoomRcModel(
             trained_from_utc=start_time,
             trained_to_utc=end_time,
             interval_minutes=10,
-            config=RoomArxConfig(
-                room_temperature_lags=[0],
-                outdoor_temperature_lags=[0],
-                thermal_output_lags=[0],
-                solar_gain_lags=[0],
-                occupied_flag_lags=[0],
-                shutter_position_lags=[0],
-                solar_shutter_interaction_lags=[0],
-            ),
-            feature_names=["room_temperature_lag_0"],
-            intercept=0.0,
-            coefficients=[1.0],
+            config=RoomRcConfig(),
+            params={},
             sample_count=10,
         ),
     )
@@ -354,7 +327,7 @@ def test_backtest_service_perfect_foresight_sets_forecast_and_realized_exogenous
     monkeypatch.setattr(
         service.preparation,
         "initial_state_from_rows",
-        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+        lambda *args, **kwargs: Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0),
     )
     monkeypatch.setattr(
         service.preparation,
@@ -521,25 +494,15 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
-        model=RoomArxModel(
+        model=RoomRcModel(
             trained_from_utc=start_time,
             trained_to_utc=end_time,
             interval_minutes=10,
-            config=RoomArxConfig(
-                room_temperature_lags=[0],
-                outdoor_temperature_lags=[0],
-                thermal_output_lags=[0],
-                solar_gain_lags=[0],
-                occupied_flag_lags=[0],
-                shutter_position_lags=[0],
-                solar_shutter_interaction_lags=[0],
-            ),
-            feature_names=["room_temperature_lag_0"],
-            intercept=0.0,
-            coefficients=[1.0],
+            config=RoomRcConfig(),
+            params={},
             sample_count=10,
         ),
     )
@@ -593,7 +556,7 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
     monkeypatch.setattr(
         service.preparation,
         "initial_state_from_rows",
-        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+        lambda *args, **kwargs: Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0),
     )
     monkeypatch.setattr(
         service.preparation,
@@ -747,25 +710,15 @@ def test_backtest_service_forecast_replay_derives_adjusted_solar_from_raw_window
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
-        model=RoomArxModel(
+        model=RoomRcModel(
             trained_from_utc=start_time,
             trained_to_utc=end_time,
             interval_minutes=10,
-            config=RoomArxConfig(
-                room_temperature_lags=[0],
-                outdoor_temperature_lags=[0],
-                thermal_output_lags=[0],
-                solar_gain_lags=[0],
-                occupied_flag_lags=[0],
-                shutter_position_lags=[0],
-                solar_shutter_interaction_lags=[0],
-            ),
-            feature_names=["room_temperature_lag_0"],
-            intercept=0.0,
-            coefficients=[1.0],
+            config=RoomRcConfig(),
+            params={},
             sample_count=10,
         ),
     )
@@ -817,7 +770,7 @@ def test_backtest_service_forecast_replay_derives_adjusted_solar_from_raw_window
     monkeypatch.setattr(
         service.preparation,
         "initial_state_from_rows",
-        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+        lambda *args, **kwargs: Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0),
     )
     monkeypatch.setattr(
         service.preparation,
@@ -871,25 +824,15 @@ def test_backtest_service_forecast_replay_rejects_missing_archived_forecast(monk
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_arx",
+        model_type="room_2r2c",
         created_at_utc=start_time,
         is_active=True,
-        model=RoomArxModel(
+        model=RoomRcModel(
             trained_from_utc=start_time,
             trained_to_utc=end_time,
             interval_minutes=10,
-            config=RoomArxConfig(
-                room_temperature_lags=[0],
-                outdoor_temperature_lags=[0],
-                thermal_output_lags=[0],
-                solar_gain_lags=[0],
-                occupied_flag_lags=[0],
-                shutter_position_lags=[0],
-                solar_shutter_interaction_lags=[0],
-            ),
-            feature_names=["room_temperature_lag_0"],
-            intercept=0.0,
-            coefficients=[1.0],
+            config=RoomRcConfig(),
+            params={},
             sample_count=10,
         ),
     )
@@ -917,7 +860,7 @@ def test_backtest_service_forecast_replay_rejects_missing_archived_forecast(monk
     monkeypatch.setattr(
         service.preparation,
         "initial_state_from_rows",
-        lambda *args, **kwargs: MpcInitialState(room_temp_c=20.0),
+        lambda *args, **kwargs: Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0),
     )
     monkeypatch.setattr(
         service.preparation,

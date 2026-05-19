@@ -9,9 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from home_optimizer.app import AppSettings
 from home_optimizer.features.dataset import MpcDataset, MpcDatasetService
 from home_optimizer.features.modeling import (
-    ROOM_ARX_MODEL_KIND,
     ROOM_RC_MODEL_KIND,
-    RoomArxConfig,
     RoomRcConfig,
     RoomModelingService,
     StoredModelVersion,
@@ -118,7 +116,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         validation_window_rows: ValidationWindowQuery = 144,
         min_train_rows: MinTrainRowsQuery = 96,
         activate: ActivateQuery = False,
-        model_type: ModelTypeQuery = ROOM_ARX_MODEL_KIND,
+        model_type: ModelTypeQuery = ROOM_RC_MODEL_KIND,
     ) -> TrainRoomModelResponse:
         dataset_service = MpcDatasetService(
             container.dataset_repository,
@@ -126,13 +124,7 @@ def create_modeling_router(settings: AppSettings) -> APIRouter:
         )
         modeling_service = RoomModelingService()
         resolved_interval_minutes = interval_minutes or settings.mpc_interval_minutes
-        if model_type == ROOM_ARX_MODEL_KIND:
-            config = RoomArxConfig(
-                min_train_rows=min_train_rows,
-                training_window_rows=training_window_rows,
-                validation_window_rows=validation_window_rows,
-            )
-        elif model_type == ROOM_RC_MODEL_KIND:
+        if model_type == ROOM_RC_MODEL_KIND:
             rc_kwargs: dict = dict(
                 min_train_rows=min_train_rows,
                 min_valid_train_rows=min_train_rows,
