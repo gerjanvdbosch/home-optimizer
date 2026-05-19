@@ -18,12 +18,14 @@ def build_dashboard_view_model(
     return DashboardPageViewModel(
         title=title,
         database_path=settings.database_path,
+        mpc_horizon_steps=settings.mpc_horizon_steps,
     )
 
 
 def render_template(template_name: str, view_model: DashboardPageViewModel) -> str:
     template = Template((TEMPLATES_DIR / template_name).read_text(encoding="utf-8"))
-    return template.substitute(
+    return template.safe_substitute(
         title=escape(view_model.title),
         database_path=escape(view_model.database_path),
+        mpc_horizon_steps=view_model.mpc_horizon_steps,
     )

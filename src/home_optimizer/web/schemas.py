@@ -32,6 +32,7 @@ class HistoryImportJobResponse(BaseModel):
 class DashboardPageViewModel:
     title: str
     database_path: str
+    mpc_horizon_steps: int
 
 
 class ChartPointResponse(BaseModel):

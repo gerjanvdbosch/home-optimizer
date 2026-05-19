@@ -50,7 +50,7 @@ class SpaceHeatingMpcPlanningService:
         start_time_utc: datetime,
         model_id: str | None = None,
         interval_minutes: int | None = None,
-        horizon_steps: int = 36,
+        horizon_steps: int = 144,
         constraints: MpcConstraints | None = None,
         objective_weights: MpcObjectiveWeights | None = None,
         default_effective_heating_kw: float | None = None,

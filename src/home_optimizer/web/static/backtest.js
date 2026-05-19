@@ -425,7 +425,7 @@ async function loadBacktest() {
     const params = new URLSearchParams({
       start_time: new Date(startTimeInput.value).toISOString(),
       end_time: new Date(endTimeInput.value).toISOString(),
-      horizon_steps: String(Number(horizonStepsInput.value || 36)),
+      horizon_steps: String(Number(horizonStepsInput.value || 144)),
       exogenous_mode: exogenousModeSelect?.value || "perfect_foresight",
     });
     if (modelSelect.value) {

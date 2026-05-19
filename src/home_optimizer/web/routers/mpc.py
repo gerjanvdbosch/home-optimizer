@@ -124,7 +124,7 @@ def create_mpc_router(settings: AppSettings) -> APIRouter:
         container: ContainerDependency,
         start_time: StartTimeQuery,
         model_id: ModelIdQuery = None,
-        horizon_steps: HorizonStepsQuery = 36,
+        horizon_steps: HorizonStepsQuery = settings.mpc_horizon_steps,
         interval_minutes: IntervalQuery = None,
         default_effective_heating_kw: HeatingKwQuery = None,
         max_solver_seconds: MaxSolverSecondsQuery = None,

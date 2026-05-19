@@ -43,7 +43,7 @@ def create_backtest_router(settings: AppSettings) -> APIRouter:
         start_time: StartTimeQuery = None,
         end_time: EndTimeQuery = None,
         model_id: ModelIdQuery = None,
-        horizon_steps: HorizonStepsQuery = 36,
+        horizon_steps: HorizonStepsQuery = settings.mpc_horizon_steps,
         max_solver_seconds: MaxSolverSecondsQuery = None,
         exogenous_mode: ExogenousModeQuery = "perfect_foresight",
     ) -> MpcBacktestResponse:

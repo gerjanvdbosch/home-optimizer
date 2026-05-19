@@ -82,7 +82,7 @@ class SpaceHeatingMpcPlanningRunner(Protocol):
         start_time_utc: datetime,
         model_id: str | None = None,
         interval_minutes: int | None = None,
-        horizon_steps: int = 36,
+        horizon_steps: int = 144,
         default_effective_heating_kw: float | None = None,
         max_solver_seconds: float | None = None,
     ) -> MpcPlan: ...
@@ -95,7 +95,7 @@ class SpaceHeatingMpcBacktestRunner(Protocol):
         start_time_utc: datetime,
         end_time_utc: datetime,
         model_id: str | None = None,
-        horizon_steps: int = 36,
+        horizon_steps: int = 144,
         max_solver_seconds: float | None = None,
     ) -> MpcBacktestResult: ...
 

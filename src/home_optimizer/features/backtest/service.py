@@ -297,7 +297,7 @@ class SpaceHeatingMpcBacktestService:
         start_time_utc: datetime,
         end_time_utc: datetime,
         model_id: str | None = None,
-        horizon_steps: int = 36,
+        horizon_steps: int = 144,
         constraints: MpcConstraints | None = None,
         objective_weights: MpcObjectiveWeights | None = None,
         max_solver_seconds: float | None = None,

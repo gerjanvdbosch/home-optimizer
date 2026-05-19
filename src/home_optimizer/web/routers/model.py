@@ -35,7 +35,7 @@ def create_model_router(settings: AppSettings) -> APIRouter:
     def simulate_room(
         container: ContainerDependency,
         anchor_time: AnchorTimeQuery = None,
-        horizon_steps: HorizonStepsQuery = 144,
+        horizon_steps: HorizonStepsQuery = settings.mpc_horizon_steps,
         model_id: ModelIdQuery = None,
     ) -> RoomSimulationResponse:
         if anchor_time is None:
