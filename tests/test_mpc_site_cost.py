@@ -5,11 +5,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.features.mpc import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     MpcObjectiveWeights,
     MpcProblem,
     PreheatPlan,
@@ -50,15 +51,19 @@ def test_site_cost_prefers_pv_surplus_window_for_heating() -> None:
                 terminal=0.0,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=0.99,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.3,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.3, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.99,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.3,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.3, mass_temp_c=20.3, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -106,15 +111,19 @@ def test_target_tracking_uses_economic_target_without_pv_opportunity() -> None:
                 runtime=0.0,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=1.0,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=1.0,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -158,15 +167,19 @@ def test_forced_heating_stays_feasible_when_overheating_requires_large_slack() -
                 runtime=0.0,
             ),
             constraints=MpcConstraints(),
-            control_model=LinearThermalControlModel(
-                a=1.0,
-                b_out=0.0,
-                b_solar=0.0,
-                b_heat=10.0,
-                b_occ=0.0,
-                c=0.0,
-            ),
-            initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=1),
+            control_model=Rc2StateThermalControlModel(
+                a11=1.0,
+                a12=0.0,
+                a21=0.0,
+                a22=1.0,
+                b_out_room=0.0,
+                b_out_mass=0.0,
+                b_solar_direct_room=0.0,
+                b_heat_room=10.0,
+                b_heat_mass=0.0,
+                b_occ_room=0.0,
+),
+            initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, off_steps=1),
         ),
     )
 
@@ -202,15 +215,19 @@ def test_useful_preheat_target_stays_within_comfort_band() -> None:
 
     plan = SpaceHeatingMpcControllerService().plan(
         MpcControllerRequest(interval_minutes=15, horizon=horizon),
-        control_model=LinearThermalControlModel(
-            a=0.98,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.25,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.98,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.25,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -242,15 +259,19 @@ def test_mpc_preheats_with_pv_surplus_and_future_heat_need() -> None:
 
     plan = SpaceHeatingMpcControllerService().plan(
         MpcControllerRequest(interval_minutes=15, horizon=horizon),
-        control_model=LinearThermalControlModel(
-            a=0.94,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.5,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.8, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.94,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.5,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.8, mass_temp_c=19.8, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -288,15 +309,19 @@ def test_single_pv_spike_does_not_trigger_short_run_with_sustained_opportunity()
             horizon=horizon,
             constraints=MpcConstraints(min_on_steps=3, min_off_steps=3),
         ),
-        control_model=LinearThermalControlModel(
-            a=0.98,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.35,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.7, hp_on=False, off_steps=6),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.98,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.35,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.7, mass_temp_c=20.7, hp_on=False, off_steps=6),
     )
 
     assert plan.feasible is True
@@ -332,15 +357,19 @@ def test_sustained_pv_surplus_triggers_run_and_respects_min_on_steps() -> None:
             horizon=horizon,
             constraints=MpcConstraints(min_on_steps=3, min_off_steps=3),
         ),
-        control_model=LinearThermalControlModel(
-            a=0.97,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.45,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.97,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.45,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.3, mass_temp_c=19.3, hp_on=False, off_steps=6),
     )
 
     assert plan.feasible is True
@@ -377,15 +406,19 @@ def test_scheduler_clusters_contiguous_preheat_steps_into_single_block() -> None
 
     plan = SpaceHeatingMpcControllerService().plan(
         MpcControllerRequest(interval_minutes=10, horizon=horizon),
-        control_model=LinearThermalControlModel(
-            a=0.97,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.45,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.97,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.45,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.3, mass_temp_c=19.3, hp_on=False, off_steps=6),
     )
 
     assert plan.preheat_schedule is not None
@@ -442,15 +475,19 @@ def test_preheat_block_start_limit_keeps_single_start_in_same_block() -> None:
             horizon=horizon,
             preheat_plan=preheat_plan,
         ),
-        control_model=LinearThermalControlModel(
-            a=0.95,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.4,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.0, hp_on=False, off_steps=6),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.95,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.4,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.0, mass_temp_c=19.0, hp_on=False, off_steps=6),
     )
 
     assert plan.feasible is True
@@ -480,15 +517,19 @@ def test_mpc_avoids_unnecessary_heating_near_comfort_max() -> None:
 
     plan = SpaceHeatingMpcControllerService().plan(
         MpcControllerRequest(interval_minutes=15, horizon=horizon),
-        control_model=LinearThermalControlModel(
-            a=0.99,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.6,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.9, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.99,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.6,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.9, mass_temp_c=20.9, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -518,15 +559,19 @@ def test_mpc_does_not_chase_midpoint_target_without_pv_surplus() -> None:
 
     plan = SpaceHeatingMpcControllerService().plan(
         MpcControllerRequest(interval_minutes=15, horizon=horizon),
-        control_model=LinearThermalControlModel(
-            a=0.99,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.35,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.6, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.99,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.35,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.6, mass_temp_c=19.6, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -567,15 +612,19 @@ def test_passive_solar_gain_does_not_create_unnecessary_heating_penalty() -> Non
                 runtime=0.0,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=0.8,
-            b_heat=0.5,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.8,
+            b_heat_room=0.5,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -607,15 +656,19 @@ def test_objective_breakdown_exposes_new_components() -> None:
 
     plan = SpaceHeatingMpcControllerService().plan(
         MpcControllerRequest(interval_minutes=15, horizon=horizon),
-        control_model=LinearThermalControlModel(
-            a=0.96,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.4,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.7, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.96,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.4,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.7, mass_temp_c=19.7, hp_on=False, off_steps=1),
     )
 
     breakdown = plan.objective_breakdown
@@ -663,15 +716,19 @@ def test_passive_solar_overshoot_is_not_counted_as_active_comfort_high() -> None
                 runtime=0.0,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=1.0,
-            b_heat=0.5,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.3, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=1.0,
+            b_heat_room=0.5,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.3, mass_temp_c=20.3, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -718,15 +775,19 @@ def test_heating_above_comfort_max_creates_active_comfort_high_cost() -> None:
                 runtime=0.0,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=1.0,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=20.3, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=1.0,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.3, mass_temp_c=20.3, hp_on=False, off_steps=1),
     )
 
     assert plan.feasible is True
@@ -749,15 +810,19 @@ def test_heating_above_comfort_max_creates_active_comfort_high_cost() -> None:
                 runtime=0.0,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=1.0,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.0, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=1.0,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.0, mass_temp_c=19.0, hp_on=False, off_steps=1),
     )
 
     assert forced_heating_plan.feasible is True
@@ -803,17 +868,21 @@ def test_lingering_q_heat_eff_counts_as_active_comfort_high() -> None:
                 q_heat_eff_active_threshold_kw=0.1,
             ),
         ),
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.5,
-            b_occ=0.0,
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.5,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
             actuator_alpha=0.8,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(
-            room_temp_c=20.6,
+),
+        initial_state=Rc2StateMpcInitialState(
+            room_temp_c=20.6, mass_temp_c=20.6,
             q_heat_eff_kw=0.5,
             hp_on=False,
             off_steps=1,

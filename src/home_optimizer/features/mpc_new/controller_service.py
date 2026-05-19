@@ -7,7 +7,6 @@ from home_optimizer.features.mpc.control_model import to_control_model
 from home_optimizer.features.mpc.explain import explain_heating_plan
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
-    LinearThermalControlModel,
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
@@ -36,7 +35,7 @@ class IntentAwareMpcControllerService:
         solver: IntentAwareMpcSolver | None = None,
         control_model_provider: Callable[
             [],
-            LinearThermalControlModel | Rc2StateThermalControlModel,
+            Rc2StateThermalControlModel,
         ]
         | None = None,
         horizon_provider: Callable[[], list[MpcHorizonStep]] | None = None,
@@ -61,7 +60,7 @@ class IntentAwareMpcControllerService:
         self,
         request: IntentAwareMpcControllerRequest,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None = None,
+        control_model: Rc2StateThermalControlModel | None = None,
         initial_state: MpcInitialState | Rc2StateMpcInitialState | None = None,
         horizon: list[MpcHorizonStep] | None = None,
     ) -> IntentAwareMpcPlan:
@@ -211,8 +210,8 @@ class IntentAwareMpcControllerService:
 
     def _resolve_control_model(
         self,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None,
-    ) -> LinearThermalControlModel | Rc2StateThermalControlModel:
+        control_model: Rc2StateThermalControlModel | None,
+    ) -> Rc2StateThermalControlModel:
         if control_model is not None:
             return control_model
         if self.control_model_provider is None:

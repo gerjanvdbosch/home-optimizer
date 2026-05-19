@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from home_optimizer.features.mpc import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcHorizonStep,
     MpcInitialState,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
 )
 from home_optimizer.features.mpc_new import (
     IntentAwareMpcControllerRequest,
@@ -54,15 +55,19 @@ def _controller() -> IntentAwareMpcControllerService:
     return IntentAwareMpcControllerService()
 
 
-def _model() -> LinearThermalControlModel:
-    return LinearThermalControlModel(
-        a=0.94,
-        b_out=0.0,
-        b_solar=0.0,
-        b_heat=1.0,
-        b_occ=0.0,
-        c=0.0,
-    )
+def _model() -> Rc2StateThermalControlModel:
+    return Rc2StateThermalControlModel(
+        a11=0.94,
+        a12=0.0,
+        a21=0.0,
+        a22=1.0,
+        b_out_room=0.0,
+        b_out_mass=0.0,
+        b_solar_direct_room=0.0,
+        b_heat_room=1.0,
+        b_heat_mass=0.0,
+        b_occ_room=0.0,
+)
 
 
 def test_single_pv_window_creates_one_intent_and_one_run() -> None:
@@ -81,7 +86,7 @@ def test_single_pv_window_creates_one_intent_and_one_run() -> None:
             constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.6, hp_on=False, off_steps=3),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.6, mass_temp_c=19.6, hp_on=False, off_steps=3),
     )
 
     assert plan.feasible is True
@@ -109,7 +114,7 @@ def test_multiple_candidate_blocks_select_only_best_intent() -> None:
             constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=20.3, hp_on=False, off_steps=3),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.3, mass_temp_c=20.3, hp_on=False, off_steps=3),
     )
 
     assert plan.run_intent_plan is not None
@@ -147,7 +152,7 @@ def test_active_intent_stays_stable_for_small_forecast_changes() -> None:
             constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.2, hp_on=False, off_steps=3),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.2, mass_temp_c=19.2, hp_on=False, off_steps=3),
     )
     first_target = first_plan.execution_targets[0]
     next_state = controller.advance_execution_state(
@@ -173,7 +178,7 @@ def test_active_intent_stays_stable_for_small_forecast_changes() -> None:
             run_execution_state=next_state,
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.6, hp_on=True, on_steps=1),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.6, mass_temp_c=19.6, hp_on=True, on_steps=1),
     )
 
     assert second_plan.run_intent_plan is not None
@@ -235,7 +240,7 @@ def test_intent_replaces_only_when_improvement_is_large() -> None:
             run_execution_state=previous_state,
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.5, hp_on=False, off_steps=3),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.5, mass_temp_c=19.5, hp_on=False, off_steps=3),
     )
 
     assert second_plan.run_intent_plan is not None
@@ -257,7 +262,7 @@ def test_comfort_fallback_outside_intent_only_at_low_comfort_risk() -> None:
     fallback_plan = controller.plan(
         IntentAwareMpcControllerRequest(interval_minutes=10, horizon=no_pv_horizon),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.02, hp_on=False, off_steps=4),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.02, mass_temp_c=19.02, hp_on=False, off_steps=4),
     )
     blocked_horizon = _build_horizon(
         start_time=start_time,
@@ -268,7 +273,7 @@ def test_comfort_fallback_outside_intent_only_at_low_comfort_risk() -> None:
     blocked_plan = controller.plan(
         IntentAwareMpcControllerRequest(interval_minutes=10, horizon=blocked_horizon),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=21.2, hp_on=False, off_steps=4),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=21.2, mass_temp_c=21.2, hp_on=False, off_steps=4),
     )
 
     assert fallback_plan.run_intent_plan is not None
@@ -291,7 +296,7 @@ def test_sequencer_preserves_active_intent_id_over_replans() -> None:
     first_plan = controller.plan(
         IntentAwareMpcControllerRequest(interval_minutes=10, horizon=horizon),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.1, hp_on=False, off_steps=4),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.1, mass_temp_c=19.1, hp_on=False, off_steps=4),
     )
     next_state = controller.advance_execution_state(
         state=RunExecutionState(),
@@ -315,7 +320,7 @@ def test_sequencer_preserves_active_intent_id_over_replans() -> None:
             run_execution_state=next_state,
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.4, hp_on=True, on_steps=1),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.4, mass_temp_c=19.4, hp_on=True, on_steps=1),
     )
 
     assert second_plan.execution_targets[0].active_intent_id == next_state.active_intent_id
@@ -333,7 +338,7 @@ def test_future_intent_metadata_does_not_leak_into_realized_state() -> None:
     plan = controller.plan(
         IntentAwareMpcControllerRequest(interval_minutes=10, horizon=horizon),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, off_steps=4),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, off_steps=4),
     )
     first_target = plan.execution_targets[0]
     advanced = controller.advance_execution_state(
@@ -363,7 +368,7 @@ def test_sequencer_only_starts_for_intent_or_safety() -> None:
         planning_state=_controller().planning_assessor.assess(
             interval_minutes=10,
             control_model=_model(),
-            initial_state=MpcInitialState(room_temp_c=22.0, hp_on=False, off_steps=4),
+            initial_state=Rc2StateMpcInitialState(room_temp_c=22.0, mass_temp_c=22.0, hp_on=False, off_steps=4),
             horizon=horizon,
             constraints=MpcConstraints(),
         ),
@@ -407,7 +412,7 @@ def test_comfort_bridge_start_uses_preheat_bridge_reason() -> None:
         planning_state=_controller().planning_assessor.assess(
             interval_minutes=10,
             control_model=_model(),
-            initial_state=MpcInitialState(room_temp_c=19.02, hp_on=False, off_steps=4),
+            initial_state=Rc2StateMpcInitialState(room_temp_c=19.02, mass_temp_c=19.02, hp_on=False, off_steps=4),
             horizon=horizon,
             constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
         ),
@@ -435,7 +440,7 @@ def test_missing_expired_intent_reset_gets_stop_reason() -> None:
         planning_state=_controller().planning_assessor.assess(
             interval_minutes=10,
             control_model=_model(),
-            initial_state=MpcInitialState(room_temp_c=20.0, hp_on=True, on_steps=2),
+            initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=True, on_steps=2),
             horizon=horizon,
             constraints=MpcConstraints(min_on_steps=2, min_off_steps=1),
         ),
@@ -472,7 +477,7 @@ def test_advance_execution_state_records_authority_ledger() -> None:
             constraints=MpcConstraints(min_on_steps=1, min_off_steps=1),
         ),
         control_model=_model(),
-        initial_state=MpcInitialState(room_temp_c=19.4, hp_on=False, off_steps=4),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.4, mass_temp_c=19.4, hp_on=False, off_steps=4),
     )
 
     started = controller.advance_execution_state(

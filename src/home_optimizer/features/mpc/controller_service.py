@@ -10,7 +10,6 @@ from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.models import (
     ControlModelConversionOptions,
     ExecutionTargetStep,
-    LinearThermalControlModel,
     MpcControllerRequest,
     MpcHorizonBuildRequest,
     MpcHorizonStep,
@@ -34,7 +33,7 @@ class SpaceHeatingMpcControllerService:
         solver: SpaceHeatingMpcSolver | None = None,
         control_model_provider: Callable[
             [],
-            LinearThermalControlModel | Rc2StateThermalControlModel,
+            Rc2StateThermalControlModel,
         ] | None = None,
         horizon_provider: Callable[[], list[MpcHorizonStep]] | None = None,
         initial_state_provider: Callable[
@@ -59,7 +58,7 @@ class SpaceHeatingMpcControllerService:
         self,
         request: MpcControllerRequest,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None = None,
+        control_model: Rc2StateThermalControlModel | None = None,
         initial_state: MpcInitialState | Rc2StateMpcInitialState | None = None,
         horizon: list[MpcHorizonStep] | None = None,
     ) -> MpcPlan:
@@ -158,8 +157,8 @@ class SpaceHeatingMpcControllerService:
 
     def _resolve_control_model(
         self,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None,
-    ) -> LinearThermalControlModel | Rc2StateThermalControlModel:
+        control_model: Rc2StateThermalControlModel | None,
+    ) -> Rc2StateThermalControlModel:
         if control_model is not None:
             return control_model
         if self.control_model_provider is None:

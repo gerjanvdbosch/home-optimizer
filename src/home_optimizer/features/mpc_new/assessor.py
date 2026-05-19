@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcHorizonStep,
     MpcInitialState,
@@ -21,7 +20,7 @@ class IntentPlanningAssessor:
         self,
         *,
         interval_minutes: int,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: Sequence[MpcHorizonStep],
         constraints: MpcConstraints,
@@ -167,7 +166,7 @@ class IntentPlanningAssessor:
         horizon: Sequence[MpcHorizonStep],
         no_heat_rollout: Sequence[tuple[float, float | None, float]],
         max_import_price: float,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         dt_hours: float,
     ) -> list[float]:
         if not horizon:
@@ -228,7 +227,7 @@ class IntentPlanningAssessor:
         self,
         *,
         step: MpcHorizonStep,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         room_temp_c: float,
         dt_hours: float,
     ) -> float:
@@ -276,7 +275,7 @@ class IntentPlanningAssessor:
     @staticmethod
     def _one_step_room_heat_gain_c(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         step: MpcHorizonStep,
     ) -> float:
         if isinstance(control_model, Rc2StateThermalControlModel):
@@ -288,7 +287,7 @@ class IntentPlanningAssessor:
     @staticmethod
     def _rollout_without_heating_states(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: Sequence[MpcHorizonStep],
     ) -> list[tuple[float, float | None, float]]:

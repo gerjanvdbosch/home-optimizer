@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from home_optimizer.features.mpc.explain import rollout_without_heating
 from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcHorizonStep,
     MpcInitialState,
@@ -58,7 +57,7 @@ class SpaceHeatingPreheatScheduler:
         flexibility_state: ThermalFlexibilityState,
         constraints: MpcConstraints,
         interval_minutes: int,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel | None = None,
+        control_model: Rc2StateThermalControlModel | None = None,
         initial_state: MpcInitialState | Rc2StateMpcInitialState | None = None,
         horizon: list[MpcHorizonStep] | None = None,
     ) -> PreheatSchedule:
@@ -187,7 +186,7 @@ class SpaceHeatingPreheatScheduler:
         candidate_blocks: list[PreheatBlock],
         required_preheat_charge_kwh: float,
         flexibility_state: ThermalFlexibilityState,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: list[MpcHorizonStep],
         interval_minutes: int,
@@ -323,7 +322,7 @@ class SpaceHeatingPreheatScheduler:
         self,
         *,
         interval_minutes: int,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: list[MpcHorizonStep],
         constraints: MpcConstraints,
@@ -699,7 +698,7 @@ class SpaceHeatingPreheatScheduler:
     def _simulate_span(
         self,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         horizon: list[MpcHorizonStep],
         start_index: int,
@@ -721,7 +720,7 @@ class SpaceHeatingPreheatScheduler:
     def _select_best_run_in_block(
         self,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         horizon: list[MpcHorizonStep],
         block: PreheatBlock,
@@ -799,7 +798,7 @@ class SpaceHeatingPreheatScheduler:
     def _evaluate_run_candidate(
         self,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state_at_start: _PlanningState,
         horizon: list[MpcHorizonStep],
         block: PreheatBlock,
@@ -945,7 +944,7 @@ class SpaceHeatingPreheatScheduler:
     def _simulate_future_no_heat_summary(
         self,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         horizon: list[MpcHorizonStep],
         start_index: int,
@@ -1046,7 +1045,7 @@ class SpaceHeatingPreheatScheduler:
     @staticmethod
     def _simulate_step(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         step: MpcHorizonStep,
         hp_on: bool,
@@ -1127,7 +1126,7 @@ class SpaceHeatingPreheatScheduler:
     @staticmethod
     def _one_step_room_heat_gain_c(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         step: MpcHorizonStep,
     ) -> float:
         if isinstance(control_model, Rc2StateThermalControlModel):

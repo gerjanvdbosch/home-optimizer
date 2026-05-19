@@ -7,7 +7,6 @@ from pydantic import Field
 
 from home_optimizer.domain.models import DomainModel
 from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcControlMode,
     MpcHorizonStep,
@@ -230,7 +229,7 @@ class IntentAwareMpcPlan(DomainModel):
 class IntentAwareMpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
     control_mode: MpcControlMode = "hierarchical_preheat"
-    control_model: Rc2StateThermalControlModel | LinearThermalControlModel
+    control_model: Rc2StateThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
     intent_planning_state: IntentPlanningState | None = None

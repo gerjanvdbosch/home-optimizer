@@ -12,36 +12,6 @@ from home_optimizer.domain.pricing import PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 
 
-class LinearThermalControlModel(DomainModel):
-    a: float
-    b_out: float
-    b_solar: float
-    b_heat: float
-    b_occ: float
-    actuator_alpha: float = Field(default=0.0, ge=0.0, lt=1.0)
-    c: float = 0.0
-    notes: str = Field(
-        default="Control-oriented linear 1-state room temperature model for space-heating MPC."
-    )
-
-    def predict_next_temperature(
-        self,
-        *,
-        room_temp_c: float,
-        outdoor_temp_c: float,
-        solar_gain_kw: float,
-        heating_effect_kw: float,
-        occupied: float,
-    ) -> float:
-        return float(
-            (self.a * room_temp_c)
-            + (self.b_out * outdoor_temp_c)
-            + (self.b_solar * solar_gain_kw)
-            + (self.b_heat * heating_effect_kw)
-            + (self.b_occ * occupied)
-            + self.c
-        )
-
 
 class Rc2StateThermalControlModel(DomainModel):
     a11: float
@@ -430,7 +400,7 @@ class MpcObjectiveWeights(DomainModel):
 class MpcProblem(DomainModel):
     interval_minutes: int = Field(gt=0)
     control_mode: MpcControlMode = "hierarchical_preheat"
-    control_model: Rc2StateThermalControlModel | LinearThermalControlModel
+    control_model: Rc2StateThermalControlModel
     initial_state: Rc2StateMpcInitialState | MpcInitialState
     horizon: list[MpcHorizonStep]
     preheat_plan: PreheatPlan | None = None

@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from home_optimizer.features.mpc import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     PreheatBlock,
     SpaceHeatingFlexibilityAssessor,
     SpaceHeatingMpcControllerService,
@@ -41,15 +42,19 @@ def test_flexibility_assessor_sets_economic_target_above_temp_min() -> None:
 
     flexibility = SpaceHeatingFlexibilityAssessor().assess(
         interval_minutes=15,
-        control_model=LinearThermalControlModel(
-            a=0.98,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.35,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.9, hp_on=False, off_steps=1),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.98,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.35,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.9, mass_temp_c=19.9, hp_on=False, off_steps=1),
         horizon=horizon,
         constraints=MpcConstraints(),
     )
@@ -261,15 +266,19 @@ def test_hierarchical_mode_limits_to_single_start_within_block() -> None:
             horizon=horizon,
             control_mode="hierarchical_preheat",
         ),
-        control_model=LinearThermalControlModel(
-            a=0.97,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.45,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.3, hp_on=False, off_steps=6),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.97,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.45,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.3, mass_temp_c=19.3, hp_on=False, off_steps=6),
     )
 
     assert plan.feasible is True
@@ -306,15 +315,19 @@ def test_hierarchical_mode_allows_comfort_start_outside_preheat_block() -> None:
             horizon=horizon,
             control_mode="hierarchical_preheat",
         ),
-        control_model=LinearThermalControlModel(
-            a=0.95,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.45,
-            b_occ=0.0,
-            c=0.0,
-        ),
-        initial_state=MpcInitialState(room_temp_c=19.05, hp_on=False, off_steps=6),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.95,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.45,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.05, mass_temp_c=19.05, hp_on=False, off_steps=6),
     )
 
     assert plan.feasible is True
@@ -343,14 +356,18 @@ def test_model_based_run_selection_does_not_anchor_to_peak_pv_step() -> None:
         for step in range(10)
     ]
     scheduler = SpaceHeatingPreheatScheduler()
-    control_model = LinearThermalControlModel(
-        a=0.94,
-        b_out=0.0,
-        b_solar=0.0,
-        b_heat=0.55,
-        b_occ=0.0,
-        c=0.0,
-    )
+    control_model = Rc2StateThermalControlModel(
+        a11=0.94,
+        a12=0.0,
+        a21=0.0,
+        a22=1.0,
+        b_out_room=0.0,
+        b_out_mass=0.0,
+        b_solar_direct_room=0.0,
+        b_heat_room=0.55,
+        b_heat_mass=0.0,
+        b_occ_room=0.0,
+)
     block = PreheatBlock(
         block_id=0,
         start_index=0,

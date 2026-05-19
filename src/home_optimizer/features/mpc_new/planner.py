@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
     MpcConstraints,
     MpcHorizonStep,
     MpcInitialState,
@@ -49,7 +48,7 @@ class RunSelectionPlanner:
         planning_state: IntentPlanningState,
         constraints: MpcConstraints,
         interval_minutes: int,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         horizon: list[MpcHorizonStep],
         planning_policy: RunIntentPlanningPolicy | None = None,
@@ -265,7 +264,7 @@ class RunSelectionPlanner:
         *,
         block: PreheatBlock,
         planning_state: _PlanningState,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         horizon: list[MpcHorizonStep],
         interval_minutes: int,
         min_run_steps: int,
@@ -337,7 +336,7 @@ class RunSelectionPlanner:
         run_start_index: int,
         planned_run_steps: int,
         state_at_start: _PlanningState,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         horizon: list[MpcHorizonStep],
         interval_minutes: int,
         baseline_summary: dict[str, float | bool | int],
@@ -602,7 +601,7 @@ class RunSelectionPlanner:
     def _simulate_future_no_heat_summary(
         self,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         horizon: list[MpcHorizonStep],
         start_index: int,
@@ -653,7 +652,7 @@ class RunSelectionPlanner:
     def _simulate_span(
         self,
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         horizon: list[MpcHorizonStep],
         start_index: int,
@@ -673,7 +672,7 @@ class RunSelectionPlanner:
     @staticmethod
     def _simulate_step(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         state: _PlanningState,
         step: MpcHorizonStep,
         hp_on: bool,

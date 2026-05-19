@@ -6,7 +6,6 @@ import pytest
 
 from home_optimizer.features.backtest.runner import SpaceHeatingMpcBacktestRunner
 from home_optimizer.features.mpc import (
-    LinearThermalControlModel,
     MpcControllerRequest,
     MpcHorizonStep,
     MpcInitialState,
@@ -14,6 +13,7 @@ from home_optimizer.features.mpc import (
     MpcPlan,
     MpcPlanStep,
     Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     Rc2StateThermalControlModel,
 )
 
@@ -97,20 +97,24 @@ def test_backtest_runner_keeps_simulated_state_instead_of_resetting_to_historica
     result = runner.run(
         model_id="room-model-v1",
         model_type="room_2r2c",
-        control_model=LinearThermalControlModel(
-            a=0.5,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.0,
-            b_occ=0.0,
-            c=0.0,
-        ),
+        control_model=Rc2StateThermalControlModel(
+            a11=0.5,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.0,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
         timeline=[
             _step(0, realized_room_temp_c=20.0),
             _step(1, realized_room_temp_c=50.0),
             _step(2, realized_room_temp_c=60.0),
         ],
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
         interval_minutes=10,
         horizon_steps=2,
     )
@@ -216,16 +220,20 @@ def test_backtest_runner_uses_realized_exogenous_for_plant_in_forecast_replay() 
     result = runner.run(
         model_id="room-model-v1",
         model_type="room_2r2c",
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=1.0,
-            b_heat=0.0,
-            b_occ=0.0,
-            c=0.0,
-        ),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=1.0,
+            b_heat_room=0.0,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
         timeline=realized_timeline,
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
         interval_minutes=10,
         horizon_steps=1,
         exogenous_mode="forecast_replay",
@@ -242,14 +250,18 @@ def test_backtest_runner_computes_pv_surplus_capture_and_safe_zero_ratio() -> No
     result = runner.run(
         model_id="room-model-v1",
         model_type="room_2r2c",
-        control_model=LinearThermalControlModel(
-            a=1.0,
-            b_out=0.0,
-            b_solar=0.0,
-            b_heat=0.0,
-            b_occ=0.0,
-            c=0.0,
-        ),
+        control_model=Rc2StateThermalControlModel(
+            a11=1.0,
+            a12=0.0,
+            a21=0.0,
+            a22=1.0,
+            b_out_room=0.0,
+            b_out_mass=0.0,
+            b_solar_direct_room=0.0,
+            b_heat_room=0.0,
+            b_heat_mass=0.0,
+            b_occ_room=0.0,
+),
         timeline=[
             MpcHorizonStep(
                 timestamp_utc=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
@@ -290,7 +302,7 @@ def test_backtest_runner_computes_pv_surplus_capture_and_safe_zero_ratio() -> No
                 realized_room_temp_c=20.0,
             ),
         ],
-        initial_state=MpcInitialState(room_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=20.0, mass_temp_c=20.0, hp_on=False, on_steps=0, off_steps=1),
         interval_minutes=10,
         horizon_steps=1,
     )

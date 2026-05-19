@@ -13,7 +13,6 @@ from home_optimizer.features.mpc.controller_service import SpaceHeatingMpcContro
 from home_optimizer.features.mpc.models import (
     ExecutionTargetStep,
     HeatPumpSequencerState,
-    LinearThermalControlModel,
     MpcConstraints,
     MpcControllerRequest,
     MpcControlMode,
@@ -48,7 +47,7 @@ class SpaceHeatingMpcBacktestRunner:
         *,
         model_id: str,
         model_type: str,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         timeline: list[MpcHorizonStep],
         initial_state: MpcInitialState | Rc2StateMpcInitialState,
         interval_minutes: int,
@@ -716,7 +715,7 @@ class SpaceHeatingMpcBacktestRunner:
     @staticmethod
     def _predict_next_state(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         current_state: MpcInitialState | Rc2StateMpcInitialState,
         current_step: MpcHorizonStep,
         heating_effect_kw: float,
@@ -778,7 +777,7 @@ class SpaceHeatingMpcBacktestRunner:
     @staticmethod
     def _apply_heat_actuator(
         *,
-        control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+        control_model: Rc2StateThermalControlModel,
         previous_q_heat_eff_kw: float,
         commanded_hp_on: bool,
         current_step: MpcHorizonStep,

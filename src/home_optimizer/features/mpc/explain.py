@@ -4,7 +4,6 @@ from datetime import datetime
 
 from home_optimizer.domain.time import current_local_timezone
 from home_optimizer.features.mpc.models import (
-    LinearThermalControlModel,
     MpcHorizonStep,
     MpcInitialState,
     MpcPlan,
@@ -16,7 +15,7 @@ from home_optimizer.features.mpc.models import (
 def explain_heating_plan(
     *,
     plan: MpcPlan,
-    control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+    control_model: Rc2StateThermalControlModel,
     initial_state: MpcInitialState | Rc2StateMpcInitialState,
     horizon: list[MpcHorizonStep],
 ) -> str | None:
@@ -56,7 +55,7 @@ def explain_heating_plan(
 
 def rollout_without_heating(
     *,
-    control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+    control_model: Rc2StateThermalControlModel,
     initial_state: MpcInitialState | Rc2StateMpcInitialState,
     horizon: list[MpcHorizonStep],
 ) -> list[float]:
@@ -99,7 +98,7 @@ def rollout_without_heating(
 
 def rollout_with_full_heating(
     *,
-    control_model: LinearThermalControlModel | Rc2StateThermalControlModel,
+    control_model: Rc2StateThermalControlModel,
     initial_state: MpcInitialState | Rc2StateMpcInitialState,
     horizon: list[MpcHorizonStep],
 ) -> list[float]:
