@@ -7,7 +7,7 @@ from home_optimizer.domain.pricing import FixedPricing, PriceInterval
 from home_optimizer.domain.target_schedule import TemperatureTargetWindow
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import StoredModelVersion
-from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams, RoomRcConfig, RoomRcModel
+from home_optimizer.features.modeling.room_rc import RoomRC2StateParams, RoomRcConfig, RoomRcModel
 from home_optimizer.features.mpc import (
     MpcInitialState,
     MpcPlan,
@@ -102,7 +102,7 @@ def test_space_heating_mpc_planning_service_builds_plan_from_active_model(monkey
     )
     version = StoredModelVersion(
         model_id="active-room-model",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=source_model,
@@ -194,7 +194,7 @@ def test_space_heating_mpc_planning_service_uses_default_interval_setting(monkey
     )
     version = StoredModelVersion(
         model_id="active-room-model",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=source_model,
@@ -268,7 +268,7 @@ def test_space_heating_mpc_planning_service_uses_2state_initial_state_for_room_r
     )
     version = StoredModelVersion(
         model_id="active-room-rc-model",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=source_model,

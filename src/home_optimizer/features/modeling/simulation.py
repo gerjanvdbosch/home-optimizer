@@ -7,7 +7,7 @@ from home_optimizer.domain import NumericPoint, NumericSeries, normalize_utc_tim
 from home_optimizer.domain.time import ensure_utc
 from home_optimizer.features.dataset import MpcDatasetService
 from home_optimizer.features.modeling.models import RoomSimulationResult
-from home_optimizer.features.modeling.room_2r2c import RoomRcModel
+from home_optimizer.features.modeling.room_rc import RoomRcModel
 from home_optimizer.features.modeling.models import TrainedLinearRoomModel
 from home_optimizer.features.modeling.service import RoomModelingService
 

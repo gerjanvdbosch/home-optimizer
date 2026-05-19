@@ -1128,7 +1128,7 @@ def test_train_endpoint_trains_and_stores_room_model_version() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["model_id"].startswith("room-model-")
-    assert payload["model_type"] == "room_2r2c"
+    assert payload["model_type"] == "room_rc"
     assert payload["interval_minutes"] == 15
     assert payload["sample_count"] > 0
     assert payload["is_active"] is True

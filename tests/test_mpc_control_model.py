@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from home_optimizer.features.modeling import RoomRcConfig, RoomRcModel
-from home_optimizer.features.modeling.room_2r2c import (
+from home_optimizer.features.modeling.room_rc import (
     RoomRC2StateParams,
     RoomRC2StatePhysicalModel,
 )

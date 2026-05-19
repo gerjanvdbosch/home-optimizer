@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from home_optimizer.features.dataset.models import MpcDataset, MpcDatasetRow
 from home_optimizer.features.modeling.models import RoomModelValidationReport
-from home_optimizer.features.modeling.room_2r2c import (
+from home_optimizer.features.modeling.room_rc import (
     ROOM_RC_MODEL_KIND,
     RoomRcConfig,
     RoomRcModel,

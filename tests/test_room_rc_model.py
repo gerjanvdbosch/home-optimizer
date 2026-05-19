@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from home_optimizer.features.modeling.room_2r2c import (
+from home_optimizer.features.modeling.room_rc import (
     RC_VALIDITY_COLUMN,
     RoomRcConfig,
     RoomRcTrainer,

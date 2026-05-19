@@ -21,7 +21,7 @@ from home_optimizer.features.modeling import (
     StoredModelVersion,
     TrainedLinearRoomModel,
 )
-from home_optimizer.features.modeling.room_2r2c import RoomRC2StateParams
+from home_optimizer.features.modeling.room_rc import RoomRC2StateParams
 from home_optimizer.features.mpc.exogenous_features import trailing_exp_filter
 from home_optimizer.features.mpc.horizon_builder import MpcHorizonBuilder
 from home_optimizer.features.mpc.models import (

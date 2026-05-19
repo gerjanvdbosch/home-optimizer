@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from home_optimizer.features.modeling import RoomRcModel
-from home_optimizer.features.modeling.room_2r2c import (
+from home_optimizer.features.modeling.room_rc import (
     RoomRC2StateParams,
     RoomRC2StatePhysicalModel,
 )
@@ -18,7 +18,7 @@ def to_control_model(
 ) -> Rc2StateThermalControlModel:
     resolved_options = options or ControlModelConversionOptions()
     model_kind = getattr(model, "model_kind", None)
-    if model_kind == "room_2r2c":
+    if model_kind == "room_rc":
         return _rc_to_2state_control_model(model, resolved_options)
     raise ValueError(f"Unsupported model kind for MPC control conversion: {model_kind}")
 
@@ -54,7 +54,7 @@ def _rc_to_2state_control_model(
         c_room=0.0,
         c_mass=0.0,
         notes=(
-            "Control-oriented 2-state model taken directly from the exact discrete 2R2C room "
+            "Control-oriented 2-state model taken directly from the exact discrete RC room "
             "dynamics, including separate direct/filtered solar inputs and diurnal terms."
         ),
     )

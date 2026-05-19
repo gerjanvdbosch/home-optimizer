@@ -90,7 +90,7 @@ def test_backtest_service_uses_backtest_window_rows_to_infer_effective_heating_k
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=RoomRcModel(
@@ -193,7 +193,7 @@ def test_backtest_service_converts_solar_proxy_to_kw_for_2r2c_models(monkeypatch
     )
     version = StoredModelVersion(
         model_id="room-model-2r2c",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=RoomRcModel(
@@ -281,7 +281,7 @@ def test_backtest_service_perfect_foresight_sets_forecast_and_realized_exogenous
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=RoomRcModel(
@@ -494,7 +494,7 @@ def test_backtest_service_forecast_replay_uses_archived_forecast_values(monkeypa
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=RoomRcModel(
@@ -710,7 +710,7 @@ def test_backtest_service_forecast_replay_derives_adjusted_solar_from_raw_window
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=RoomRcModel(
@@ -824,7 +824,7 @@ def test_backtest_service_forecast_replay_rejects_missing_archived_forecast(monk
     )
     version = StoredModelVersion(
         model_id="room-model-active",
-        model_type="room_2r2c",
+        model_type="room_rc",
         created_at_utc=start_time,
         is_active=True,
         model=RoomRcModel(
