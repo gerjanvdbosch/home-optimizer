@@ -22,7 +22,7 @@ from home_optimizer.features.mpc.models import (
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
 )
-from home_optimizer.features.mpc_new.controller_service import IntentAwareMpcControllerService
+from home_optimizer.features.mpc_new.controller import IntentAwareMpcControllerService
 from home_optimizer.features.mpc_new.models import (
     IntentAwareMpcControllerRequest,
     RunExecutionState,

@@ -1,5 +1,5 @@
 from .assessor import IntentPlanningAssessor
-from .controller_service import IntentAwareMpcControllerService
+from .controller import IntentAwareMpcControllerService
 from .models import (
     AuthorityInvariantReport,
     AuthorityViolation,
