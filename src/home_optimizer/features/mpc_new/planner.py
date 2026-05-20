@@ -2,18 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from home_optimizer.features.mpc.models import (
+from home_optimizer.features.mpc_new.models import (
     MpcConstraints,
     MpcHorizonStep,
     MpcInitialState,
-    PreheatBlock,
-    Rc2StateMpcInitialState,
-    Rc2StateThermalControlModel,
-)
-from home_optimizer.features.mpc_new.models import (
     IntentPlanningState,
+    PreheatBlock,
     PreheatRunIntent,
     RejectedIntentCandidate,
+    Rc2StateMpcInitialState,
+    Rc2StateThermalControlModel,
     RunExecutionState,
     RunIntentPlan,
     RunIntentPlanningPolicy,
@@ -376,9 +374,8 @@ class RunSelectionPlanner:
             current_state = predicted_next_state
             if current_state.room_temp_c >= min(float(step.temp_max_c), block.max_preheat_target_c):
                 break
-            if used_charge_kwh >= block.planned_charge_kwh:
-                break
-        actual_run_steps = (run_end_index - run_start_index) + 1
+        actual_run_end_index = step_index
+        actual_run_steps = (actual_run_end_index - run_start_index) + 1
         if actual_run_steps < block.min_run_steps:
             return None
 
@@ -386,7 +383,7 @@ class RunSelectionPlanner:
             control_model=control_model,
             state=current_state,
             horizon=horizon,
-            start_index=run_end_index + 1,
+            start_index=actual_run_end_index + 1,
             end_index=block.end_index + 1,
             hp_on_indices=set(),
         )
@@ -431,18 +428,18 @@ class RunSelectionPlanner:
         if score <= 0.0:
             return None
         planned_start = horizon[run_start_index].timestamp_utc
-        planned_end = horizon[run_end_index].timestamp_utc
+        planned_end = horizon[actual_run_end_index].timestamp_utc
         intent = PreheatRunIntent(
-            intent_id=f"intent-{block.block_id}-{planned_start.isoformat()}",
+            intent_id=f"intent-{block.block_id}",
             run_type="preheat",
             source_block_id=block.block_id,
             start_window_start_utc=block.start_time_utc,
-            start_window_end_utc=horizon[max(run_end_index, block.start_index)].timestamp_utc,
+            start_window_end_utc=horizon[max(actual_run_end_index, block.start_index)].timestamp_utc,
             latest_start_utc=horizon[block.end_index - block.min_run_steps + 1].timestamp_utc,
             planned_start_utc=planned_start,
             planned_end_utc=planned_end,
             min_run_steps=block.min_run_steps,
-            target_charge_kwh=min(used_charge_kwh, block.planned_charge_kwh),
+            target_charge_kwh=used_charge_kwh,
             target_post_solar_min_temp_c=float(future_summary["min_room_temp_c"]),
             max_preheat_target_c=block.max_preheat_target_c,
             max_starts=1,

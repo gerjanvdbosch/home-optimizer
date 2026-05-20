@@ -320,10 +320,7 @@ class IntentDrivenSequencer:
             return target, projected
         comfort_low_risk = bool(
             flex_step is not None
-            and (
-                flex_step.no_heat_room_temp_c <= float(step.temp_min_c) + 0.05
-                or flex_step.post_solar_no_heat_drops_below_temp_min
-            )
+            and flex_step.post_solar_no_heat_drops_below_temp_min
         )
         comfort_high_risk = bool(
             flex_step is not None
@@ -358,7 +355,6 @@ class IntentDrivenSequencer:
             projected.locked_off_until_utc is not None
             and now < projected.locked_off_until_utc
         )
-        intent_remaining_kwh = max(projected.target_charge_kwh - projected.used_charge_kwh, 0.0)
         hp_must_be_on = False
         hp_must_be_off = False
         hp_start_allowed = False
@@ -373,34 +369,16 @@ class IntentDrivenSequencer:
                 projected.committed_on_until_utc is not None
                 and now < projected.committed_on_until_utc
             )
-            post_solar_hold_sufficient = bool(
-                flex_step is not None
-                and flex_step.post_solar_no_heat_min_temp_c is not None
-                and (
-                    flex_step.post_solar_no_heat_min_temp_c
-                    >= active_intent.target_post_solar_min_temp_c
-                )
-            )
             if comfort_high_risk:
                 mode = "SAFETY_STOP"
                 hp_must_be_off = True
                 stop_reason = "comfort_high_risk"
             elif commitment_active:
                 hp_must_be_on = True
-            elif (
-                intent_remaining_kwh <= 0.01
-                or post_solar_hold_sufficient
-                or now > active_intent.valid_until_utc
-            ):
+            elif now > active_intent.planned_end_utc or now > active_intent.valid_until_utc:
                 mode = "LOCKED_OUT"
                 hp_must_be_off = True
-                stop_reason = (
-                    "storage_target_reached"
-                    if intent_remaining_kwh <= 0.01
-                    else "post_solar_hold_sufficient"
-                    if post_solar_hold_sufficient
-                    else "intent_expired"
-                )
+                stop_reason = "intent_completed"
                 projected.locked_off_until_utc = now + timedelta(
                     minutes=interval_minutes * max(constraints.min_off_steps, 1)
                 )

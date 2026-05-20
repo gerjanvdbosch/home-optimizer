@@ -403,9 +403,9 @@ def test_comfort_bridge_start_uses_preheat_bridge_reason() -> None:
     sequencer = IntentDrivenSequencer()
     horizon = _build_horizon(
         start_time=start_time,
-        steps=1,
+        steps=2,
         pv_by_step={},
-        outdoor_by_step={0: 12.0},
+        outdoor_by_step={0: -8.0, 1: -8.0},
     )
     targets, _ = sequencer.build_execution_targets(
         horizon=horizon,
@@ -459,6 +459,68 @@ def test_missing_expired_intent_reset_gets_stop_reason() -> None:
     assert targets[0].hp_must_be_off is True
     assert targets[0].stop_reason_hint == "missing_or_expired_intent_reset"
     assert projected_state.mode == "LOCKED_OUT"
+
+
+def test_running_preheat_does_not_stop_early_on_used_charge_before_planned_end() -> None:
+    start_time = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    sequencer = IntentDrivenSequencer()
+    horizon = _build_horizon(
+        start_time=start_time,
+        steps=4,
+        pv_by_step={0: 3.5, 1: 3.5, 2: 3.5, 3: 0.0},
+        temp_max_c=22.0,
+    )
+    planning_state = _controller().planning_assessor.assess(
+        interval_minutes=10,
+        control_model=_model(),
+        initial_state=Rc2StateMpcInitialState(room_temp_c=19.5, mass_temp_c=19.5, hp_on=True, on_steps=2),
+        horizon=horizon,
+        constraints=MpcConstraints(min_on_steps=1, min_off_steps=1),
+    )
+    intent = PreheatRunIntent(
+        intent_id="intent-stable-window",
+        run_type="preheat",
+        source_block_id=0,
+        start_window_start_utc=start_time,
+        start_window_end_utc=start_time + timedelta(minutes=20),
+        latest_start_utc=start_time,
+        planned_start_utc=start_time,
+        planned_end_utc=start_time + timedelta(minutes=20),
+        min_run_steps=1,
+        target_charge_kwh=0.2,
+        target_post_solar_min_temp_c=19.0,
+        max_preheat_target_c=21.9,
+        max_starts=1,
+        priority=100,
+        valid_until_utc=start_time + timedelta(minutes=30),
+    )
+    targets, _ = sequencer.build_execution_targets(
+        horizon=horizon,
+        planning_state=planning_state,
+        intent_plan=RunIntentPlan(intents=[intent], selected_intent_count=1),
+        constraints=MpcConstraints(min_on_steps=1, min_off_steps=1),
+        execution_state=RunExecutionState(
+            active_intent_id=intent.intent_id,
+            active_run_id="run-1",
+            mode="PREHEAT_RUNNING",
+            committed_on_until_utc=start_time,
+            active_intent_started_at_utc=start_time,
+            previous_hp_on=True,
+            on_steps=2,
+            target_charge_kwh=0.2,
+            used_charge_kwh=0.2,
+        ),
+        interval_minutes=10,
+    )
+
+    assert targets[0].hp_must_be_on is True
+    assert targets[0].stop_reason_hint is None
+    assert targets[1].hp_must_be_on is True
+    assert targets[1].stop_reason_hint is None
+    assert targets[2].hp_must_be_on is True
+    assert targets[2].stop_reason_hint is None
+    assert targets[3].hp_must_be_off is True
+    assert targets[3].stop_reason_hint == "intent_completed"
 
 
 def test_advance_execution_state_records_authority_ledger() -> None:

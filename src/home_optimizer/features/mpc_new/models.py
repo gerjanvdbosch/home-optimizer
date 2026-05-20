@@ -13,6 +13,7 @@ from home_optimizer.features.mpc.models import (
     MpcObjectiveBreakdown,
     MpcObjectiveWeights,
     MpcPlanStep,
+    PreheatBlock,
     Rc2StateMpcInitialState,
     Rc2StateThermalControlModel,
 )
