@@ -3,3 +3,4 @@
 set -euo pipefail
 
 exec python -m local "$@"
+
