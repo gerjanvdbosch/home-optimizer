@@ -5,8 +5,3 @@
 .pyrightcache/
 __pycache__/
 .venv/
-
-/database.sqlite
-/database.sqlite-shm
-/database.sqlite-wal
-/models/
