@@ -4,50 +4,41 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "home-optimizer"
-version = "0.10"
-description = "Slimme warmtepompregeling met MPC en automatische kalibratie, gericht op maximale zelfconsumptie van zonne-energie en minimale energiekosten."
+version = "0.11"
+description = "A Home Assistant add-on that learns your home's thermal behavior and uses model predictive control to schedule your heat pump around solar production and electricity prices."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-  { name = "gerjanvdbosch" },
+    { name = "gerjanvdbosch" },
 ]
 dependencies = [
-  "plotly>=5.20",
-  "httpx>=0.27",
-  "pandas>=2.2",
-  "numpy>=1.26",
-  "scipy>=1.11",
-  "fastapi>=0.110",
-  "uvicorn>=0.29",
-  "pydantic>=2.7",
-  "SQLAlchemy>=2.0",
-  "APScheduler>=3.10",
-  "PyYAML>=6.0",
-  "websocket-client>=1.7",
-  "pyomo>=6.8",
-  "highspy>=1.8",
+    "plotly>=5.20",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.7",
+    "pyomo>=6.8",
+    "highspy>=1.8",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "black>=24.0",
-  "pyflakes>=3.2",
-  "pyright>=1.1,<2.0",
-  "pytest>=8.0",
-  "ruff>=0.4",
-  "import-linter>=2.0",
+    "black>=24.0",
+    "pyflakes>=3.2",
+    "pyright>=1.1,<2.0",
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "import-linter>=2.0",
 ]
 
 [project.scripts]
-home-optimizer-addon = "home_optimizer.entrypoints.addon:main"
-home-optimizer-local = "home_optimizer.entrypoints.local:main"
+addon = "addon:main"
+local = "local:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.package-data]
-home_optimizer = ["templates/*.html"]
-"home_optimizer.web" = ["templates/*.html", "static/*.css", "static/*.js"]
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -55,7 +46,7 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests", "examples"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
@@ -79,18 +70,3 @@ reportMissingTypeStubs = false
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-
-[tool.importlinter]
-root_package = "home_optimizer"
-
-[[tool.importlinter.contracts]]
-name = "Clean architecture layers"
-type = "layers"
-layers = [
-  "home_optimizer.entrypoints",
-  "home_optimizer.web",
-  "home_optimizer.app",
-  "home_optimizer.infrastructure",
-  "home_optimizer.features",
-  "home_optimizer.domain",
-]

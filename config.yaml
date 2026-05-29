@@ -1,9 +1,10 @@
 ---
 name: "Home Optimizer"
 description: >-
-  Slimme warmtepompregeling met MPC en automatische kalibratie, gericht op 
-  maximale zelfconsumptie van zonne-energie en minimale energiekosten.
-version: "0.10"
+  A Home Assistant add-on that learns your home's thermal behavior and uses 
+  model predictive control to schedule your heat pump around solar 
+  production and electricity prices.
+version: "0.11"
 slug: "home_optimizer"
 url: "https://github.com/gerjanvandenbosch/home-optimizer"
 init: false
@@ -20,10 +21,10 @@ arch:
 
 homeassistant_api: true
 ingress: true
-ingress_port: 8099
+ingress_port: 8899
 
 ports:
-  8099/tcp: 8099
+  8099/tcp: 8899
 
 ports_description:
   8099/tcp: "Home Optimizer"
@@ -32,127 +33,9 @@ map:
   - addon_config:rw
 
 options:
-  history_import_max_days_back: 10
-
-  # PV panel orientation (used by Open-Meteo GTI forecast for PV surface)
-  # pv_azimuth: compass bearing — 0=North, 90=East, 180=South, 270=West
-  # pv_tilt: 0=horizontal, 90=vertical wall
-  pv_tilt: 50.0
-  pv_azimuth: 148.0
-  living_room_window_azimuth: 148.0
-  living_room_glass_area_m2: 8.0
-
-  boiler_tank_liters: 200
-
-  room_target:
-    - { time: "00:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
-    - { time: "08:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
-    - { time: "14:00", target: 19.5, low_margin: 0.5, high_margin: 1.5 }
-    - { time: "18:00", target: 20.0, low_margin: 0.5, high_margin: 1.5 }
-    - { time: "22:00", target: 19.0, low_margin: 0.5, high_margin: 1.5 }
-  dhw_target:
-    - { time: "00:00", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
-    - { time: "18:59", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
-    - { time: "19:00", target: 49.0, low_margin: 2.0, high_margin: 2.0 }
-    - { time: "20:00", target: 49.0, low_margin: 2.0, high_margin: 2.0 }
-    - { time: "20:01", target: 49.0, low_margin: 40.0, high_margin: 2.0 }
-
-  electricity_pricing:
-    mode: "fixed"
-    peak_price: 0.213
-    off_peak_price: 0.225
-    feed_in_tariff: 0.077
-
-  sensors:
-    room_temperature: "sensor.danfoss_15_temperature"
-    thermostat_setpoint: "sensor.danfoss_15_setpoint"
-    outdoor_temperature: "sensor.temperatuur"
-    hp_supply_temperature: "sensor.ecodan_heatpump_ca09ec_aanvoer_temp"
-    hp_supply_target_temperature: "sensor.warmtepomp_setpoint_waarde"
-    hp_return_temperature: "sensor.ecodan_heatpump_ca09ec_retour_temp"
-    dhw_top_temperature: "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
-    dhw_bottom_temperature: "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
-    boiler_ambient_temperature: "sensor.ecodan_heatpump_ca09ec_zone_1_ruimte_temp"
-    refrigerant_condensation_temperature: "sensor.ecodan_heatpump_ca09ec_koelmiddel_condensatie_temp"
-    refrigerant_liquid_line_temperature: "sensor.ecodan_heatpump_ca09ec_buitenunit_vloeistofleiding_1"
-    discharge_temperature: "sensor.ecodan_heatpump_ca09ec_ontladingstemperatuur"
-    compressor_frequency: "sensor.ecodan_heatpump_compressor_frequentie"
-    defrost_active: "binary_sensor.ecodan_heatpump_ca09ec_status_defrost"
-    booster_heater_active: "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater"
-    hp_flow: "sensor.ecodan_heatpump_ca09ec_flow_waarde"
-    hp_mode: "sensor.warmtepomp_mode"
-    pv_total_kwh: "sensor.pv_energie_totaal"
-    hp_electric_total_kwh: "sensor.warmtepomp_verbruikt_gerapporteerd_totaal"
-    p1_import_total_kwh: "sensor.p1_meter_energy_import"
-    p1_export_total_kwh: "sensor.p1_meter_energy_export"
-    # Power in Watts
-    hp_electric_power: "sensor.warmtepomp_geschat_vermogen"
-    p1_net_power: "sensor.p1_meter_power"
-    pv_output_power: "sensor.pv_output"
-    # Shutter position (100%=open, 0%=closed)
-    shutter_living_room: "sensor.woonkamer_rolluik"
-
-  database_path: "/config/database.sqlite"
   log_level: "INFO"
-  api_port: 8099
+  api_port: 8899
 
 schema:
-  history_import_max_days_back: int
-
-  pv_tilt: float
-  pv_azimuth: float
-  living_room_window_azimuth: float?
-  living_room_glass_area_m2: float?
-
-  boiler_tank_liters: int
-
-  room_target:
-    - { time: str, target: float, low_margin: float, high_margin: float }
-  dhw_target:
-    - { time: str, target: float, low_margin: float, high_margin: float }
-
-  electricity_pricing:
-    mode: list(fixed|dynamic)
-    peak_price: float?
-    off_peak_price: float?
-    feed_in_tariff: float?
-    peak_start: str?
-    peak_end: str?
-    peak_monday: bool?
-    peak_tuesday: bool?
-    peak_wednesday: bool?
-    peak_thursday: bool?
-    peak_friday: bool?
-    peak_saturday: bool?
-    peak_sunday: bool?
-
-  sensors:
-    room_temperature: str
-    thermostat_setpoint: str
-    outdoor_temperature: str
-    hp_supply_temperature: str
-    hp_supply_target_temperature: str
-    hp_return_temperature: str
-    dhw_top_temperature: str
-    dhw_bottom_temperature: str
-    boiler_ambient_temperature: str
-    refrigerant_condensation_temperature: str
-    refrigerant_liquid_line_temperature: str
-    discharge_temperature: str
-    compressor_frequency: str
-    defrost_active: str
-    booster_heater_active: str
-    hp_flow: str
-    hp_mode: str
-    pv_total_kwh: str
-    hp_electric_total_kwh: str
-    p1_import_total_kwh: str
-    p1_export_total_kwh: str
-    hp_electric_power: str
-    p1_net_power: str
-    pv_output_power: str
-    shutter_living_room: str
-
-  database_path: str
   log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
   api_port: int
