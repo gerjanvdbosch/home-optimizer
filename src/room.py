@@ -63,6 +63,7 @@ df = df.join(sh[["shutter"]], how="left")
 
 df = df.ffill().dropna()
 
+# not needed now
 df["heating"] = 0.0
 
 # solar proxy
