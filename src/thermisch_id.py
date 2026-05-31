@@ -61,25 +61,18 @@ P0 = {
     "Q_base":     250.0,           # <--- NIEUW: Start op 250 Watt interne winst
 }
 
-# Fysisch gemotiveerde bounds voor een 2023 middenwoning
 # Fysisch STRIKTE bounds voor een A-label middenwoning
 BOUNDS = {
-    # UA_env MOET tussen 30 en 90 W/K liggen (realistisch verlies gevel+dak)
-    "log_R_env": (np.log(1 / 90), np.log(1 / 30)),
-
-    # Vloer-tot-lucht weerstand (breed laten)
+    # Geef de isolatie ademruimte (tussen de 15 en 90 W/K)
+    "log_R_env": (np.log(1 / 90), np.log(1 / 15)),
     "log_R_int": (np.log(1e-4), np.log(0.08)),
 
-    # Luchtmassa: ca. 100 tot 500 kJ/K (woonkamer lucht + meubels)
-    "log_C_air": (np.log(1e5), np.log(5e5)),
-
-    # Vloermassa: ca. 8 tot 20 MJ/K (10cm betonvloer)
-    "log_C_mass": (np.log(8e6), np.log(2e7)),
+    # Lucht en vloermassa iets meer ruimte geven
+    "log_C_air": (np.log(1e5), np.log(6e5)),
+    "log_C_mass": (np.log(8e6), np.log(3e7)),
 
     "g_solar": (0.0, 4.0),
     "g_mass": (0.0, 4.0),
-
-    # Q_base mag flink hoog, want dit bevat nu interne warmte + warmte van buren!
     "Q_base": (0.0, 1500.0),
 }
 
@@ -153,54 +146,6 @@ def load_csv(dt_resample: int = DT):
     )
     # Geef nu 4 arrays terug in plaats van 3
     return df["T_room"].values, df["T_out"].values, df["P_pv"].values, df["shutter"].values
-
-
-def synthetic_data(n_days: int = 14, dt: int = DT, noise: bool = True):
-    """
-    Genereer realistische testdata met bekende parameters.
-    Gebruik dit om het model te valideren voordat je eigen data inlaadt.
-    """
-    rng = np.random.default_rng(42)
-    N = int(n_days * 86400 / dt)
-    t = np.arange(N) * dt
-
-    # Buitentemperatuur: dag/nacht + weekcyclus
-    T_out = 7 + 5 * np.sin(2 * np.pi * t / 86400 - np.pi / 2)
-    T_out += 2 * np.sin(2 * np.pi * t / (7 * 86400))
-    if noise:
-        T_out += 0.4 * rng.standard_normal(N)
-
-    # PV: alleen overdag, wisselende bewolking
-    hour = (t % 86400) / 3600
-    P_sun = np.maximum(0, 3800 * np.sin(np.pi * (hour - 6) / 12))
-    P_sun *= (hour > 6) & (hour < 18)
-    cloud = np.clip(rng.uniform(0.2, 1.0, N), 0, 1)
-    for _ in range(4):                            # smoother wolkenpatroon
-        cloud = 0.75 * cloud + 0.25 * np.roll(cloud, rng.integers(6, 48))
-    P_pv = P_sun * np.clip(cloud, 0, 1)
-
-    # Ware parameters (voor verificatie na identificatie)
-    TRUE = dict(R_env=0.018, R_int=0.004, C_air=3e5, C_mass=1.2e7,
-                g_solar=0.25, g_mass=0.08)
-
-    # Simuleer ODE met Euler (dt klein genoeg voor synthetische data)
-    T_room = np.empty(N); T_room[0] = 20.5
-    T_mass = np.empty(N); T_mass[0] = 20.0
-
-    for k in range(N - 1):
-        dTr = (dt / TRUE["C_air"]) * (
-            (T_mass[k] - T_room[k]) / TRUE["R_int"] + TRUE["g_solar"] * P_pv[k]
-        )
-        dTm = (dt / TRUE["C_mass"]) * (
-            (T_out[k]  - T_mass[k]) / TRUE["R_env"]
-            + (T_room[k] - T_mass[k]) / TRUE["R_int"]
-            + TRUE["g_mass"] * P_pv[k]
-        )
-        T_room[k + 1] = T_room[k] + dTr + (0.04 * rng.standard_normal() if noise else 0)
-        T_mass[k + 1] = T_mass[k] + dTm + (0.01 * rng.standard_normal() if noise else 0)
-
-    return t, T_room, T_out, P_pv, TRUE
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  2. THERMISCH MODEL IN CASADI
