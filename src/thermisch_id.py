@@ -50,30 +50,36 @@ from pathlib import Path
 DT = 900          # tijdstap [s]  (15 min)
 N_SHOOT = 12      # multiple-shooting nodes (meer = robuuster, trager)
 
-# Startwaarden (log-getransformeerd voor R en C zodat ze altijd positief zijn)
 P0 = {
-    "log_R_env":  np.log(0.018),   # ≈ UA 55 W/K  (goed geïsoleerde woning)
-    "log_R_int":  np.log(0.004),   # vloer ↔ lucht
-    "log_C_air":  np.log(3e5),     # ≈ 300 kJ/K
-    "log_C_mass": np.log(1.2e7),   # ≈ 12 MJ/K  (betonnen vloerverwarmingsplaat)
-    "g_solar":    0.25,            # PV-proxy → warmtewinst lucht  [-]
-    "g_mass":     0.08,            # PV-proxy → warmtewinst massa  [-]
-    "Q_base":     250.0,           # <--- NIEUW: Start op 250 Watt interne winst
+    "log_R_env":  np.log(1/55),    # UA ≈ 55 W/K (realistisch A-label)
+    "log_R_int":  np.log(1/400),   # UA_int ≈ 400 W/K
+    "log_C_air":  np.log(4e5),     # 400 kJ/K
+    "log_C_mass": np.log(1.5e7),   # 15 MJ/K
+    "g_solar":    0.4,
+    "g_mass":     0.1,
+    "Q_base":     200.0,
 }
 
-# Fysisch STRIKTE bounds voor een A-label middenwoning
+# Fysisch realistische bounds (log voor R en C)
 BOUNDS = {
-    # Geef de isolatie ademruimte (tussen de 15 en 90 W/K)
-    "log_R_env": (np.log(1 / 90), np.log(1 / 15)),
-    "log_R_int": (np.log(1e-4), np.log(0.08)),
+    # UA_env = 1/R_env: 30-90 W/K voor goede isolatie
+    "log_R_env": (np.log(1 / 90), np.log(1 / 30)),  # ≈ 0.011–0.033 K/W
 
-    # Lucht en vloermassa iets meer ruimte geven
-    "log_C_air": (np.log(1e5), np.log(6e5)),
-    "log_C_mass": (np.log(8e6), np.log(3e7)),
+    # R_int: warmteovergang vloer↔lucht, h≈6-12 W/m²K, A≈60m² → UA≈360-720 W/K
+    "log_R_int": (np.log(1 / 800), np.log(1 / 200)),  # ≈ 0.00125–0.005 K/W
 
-    "g_solar": (0.0, 4.0),
-    "g_mass": (0.0, 4.0),
-    "Q_base": (0.0, 1500.0),
+    # C_air: lucht + lichte inboedel, 0.2–0.8 MJ/K
+    "log_C_air": (np.log(2e5), np.log(8e5)),
+
+    # C_mass: betonvloer 10cm + binnenmuren, 8–25 MJ/K
+    "log_C_mass": (np.log(8e6), np.log(2.5e7)),
+
+    # Zonnewinst: PV is proxy, dus factor mag >1 maar niet extreem
+    "g_solar": (0.0, 2.0),
+    "g_mass": (0.0, 0.5),  # vloer krijgt minder directe zon
+
+    # Interne winsten: 100-600 W typisch (2 personen + apparaten)
+    "Q_base": (50.0, 600.0),
 }
 
 # ══════════════════════════════════════════════════════════════════════
