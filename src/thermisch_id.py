@@ -501,7 +501,7 @@ def plot_results(
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     print(f"  Grafiek opgeslagen: {save_path}")
     plt.show()
-    return rmse_all
+    return rmse_train, rmse_val, rmse_all
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -605,7 +605,7 @@ if __name__ == "__main__":
     print("Simulatie over volledige periode...")
     T_room_sim, T_mass_sim = simulate(p_opt, T_room[0], T_mass_0_opt, T_out, P_pv, shutter, dt=DT)
 
-    rmse = plot_results(
+    rmse_train, rmse_val, rmse_all = plot_results(
         t, T_room, T_room_sim, T_mass_sim,
         T_out, P_pv, params,
         split_idx=split,
@@ -613,12 +613,16 @@ if __name__ == "__main__":
         true_params=TRUE_PARAMS if USE_SYNTHETIC else None,
     )
 
-    print(f"RMSE totaal: {rmse:.3f}°C", end="  ")
-    if rmse < 0.30:
+    print("\nPrestatie:")
+    print(f"  RMSE train      : {rmse_train:.3f}°C")
+    print(f"  RMSE validatie  : {rmse_val:.3f}°C")
+    print(f"  RMSE totaal     : {rmse_all:.3f}°C")
+
+    if rmse_val < 0.30:
         print("→ uitstekend ✓✓")
-    elif rmse < 0.60:
+    elif rmse_val < 0.60:
         print("→ goed ✓")
-    elif rmse < 1.00:
+    elif rmse_val < 1.00:
         print("→ redelijk ~")
     else:
         print("→ verbetering gewenst  ⚠")
