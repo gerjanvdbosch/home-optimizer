@@ -552,14 +552,69 @@ def diagnose(params: dict, true_params: dict = None):
 
     # Sanity-checks
     issues = []
+
+    # --- UA_env: De "Isolatieschil" ---
     if params["UA_env"] < 15:
-        issues.append("UA_env < 15 W/K  → onrealistisch hoge isolatie?")
-    if params["UA_env"] > 250:
-        issues.append("UA_env > 250 W/K → model past data niet goed?")
-    if params["C_mass"] < 1e6:
-        issues.append("C_mass < 1 MJ/K  → betonvloer lijkt erg licht")
-    if params["tau_mass_h"] < 5:
-        issues.append("τ_massa < 5 uur  → vloer reageert onrealistisch snel")
+        issues.append(
+            f"UA_env ({params['UA_env']:.1f}) < 15 W/K: Onrealistisch goed geïsoleerd. Is er stiekem een warmtebron die niet in de data staat?")
+    if params["UA_env"] > 120:
+        issues.append(
+            f"UA_env ({params['UA_env']:.1f}) > 120 W/K: Voor een middenwoning is dit erg hoog (label E/F-niveau). Staat er ergens een raam open?")
+
+    # --- C_air: De "Snelle Massa" (Lucht + Meubels) ---
+    # Een kamer van 40m2 (100m3) heeft ~1.2e5 J/K aan lucht. Met meubels/gips erbij is 2e5 - 5e5 normaal.
+    if params["C_air"] < 1e5:
+        issues.append(
+            f"C_air ({params['C_air'] / 1e5:.1f}e5) is erg laag: De kamer zou bij de kleinste zonnestraal al oververhitten.")
+    if params["C_air"] > 1e6:
+        issues.append(
+            f"C_air ({params['C_air'] / 1e5:.1f}e5) is te hoog: De 'snelle' luchttemperatuur reageert nu even traag als een betonmuur.")
+
+    # --- C_mass: De "Trage Massa" (Vloer + Constructie) ---
+    if params["C_mass"] < 5e6:
+        issues.append(
+            f"C_mass ({params['C_mass'] / 1e6:.1f} MJ/K) is laag: De vloer lijkt geen betonvloer te zijn, of de thermische koppeling is slecht.")
+    if params["C_mass"] > 5e7:
+        issues.append(
+            f"C_mass ({params['C_mass'] / 1e6:.1f} MJ/K) is extreem hoog: Dit komt overeen met >40 cm massief beton over het hele oppervlak.")
+
+    # --- UA_int: Koppeling tussen vloer en lucht ---
+    # Typische warmteoverdrachtscoëfficiënt vloer -> lucht is ~6-10 W/m2K.
+    # Bij 50m2 vloer verwacht je UA_int rond de 300-500 W/K.
+    if params["UA_int"] < 50:
+        issues.append(
+            f"UA_int ({params['UA_int']:.0f}) is erg laag: De vloer en de lucht zijn 'ontkoppeld'. De vloer doet niet mee als buffer.")
+    if params["UA_int"] > 2000:
+        issues.append(
+            f"UA_int ({params['UA_int']:.0f}) is extreem hoog: De lucht en vloer hebben vrijwel altijd exact dezelfde temperatuur (1C model).")
+
+    # --- Q_base: Interne winsten (Apparaten + Mensen) ---
+    if params["Q_base"] < 50:
+        issues.append(f"Q_base ({params['Q_base']:.0f} W) is erg laag: Geen koelkast, router of mensen aanwezig?")
+    if params["Q_base"] > 800:
+        issues.append(
+            f"Q_base ({params['Q_base']:.0f} W) is erg hoog: Dit compenseert mogelijk voor een verwarming die stiekem aanstond.")
+
+    # --- Zonne-winsten (g_solar en g_mass) ---
+    # De PV-installatie is een proxy. Als g > 1.0, is de zonkracht op de ramen veel groter dan de PV-opwek (onwaarschijnlijk).
+    if params["g_solar"] + params["g_mass"] > 2.0:
+        issues.append(
+            f"Gezamenlijke zonne-winst ({params['g_solar'] + params['g_mass']:.2f}) is erg hoog: De PV-proxy wordt overschat.")
+    if params["g_solar"] < 0.01 and params["g_mass"] < 0.01:
+        issues.append("Zonne-winst is bijna nul: Schijnt de zon wel naar binnen, of zijn de rolluiken altijd dicht?")
+
+    # --- Tijdsconstante (Tau) ---
+    if params["tau_mass_h"] > 300:
+        issues.append(
+            f"τ_massa ({params['tau_mass_h']:.0f} uur) is > 12 dagen: Het model is 'verlamd' en reageert nauwelijks op buitentemperatuur.")
+    if params["tau_air_h"] > 10:
+        issues.append(
+            f"τ_lucht ({params['tau_air_h']:.1f} uur) is te traag: De kamertemperatuur moet sneller kunnen reageren op interne winsten.")
+
+    # --- Verhouding Massa vs Lucht ---
+    if params["C_mass"] < params["C_air"]:
+        issues.append(
+            "Fysische inconsistentie: De luchtcapaciteit is groter dan de masscapaciteit. Dit is onmogelijk in een woning.")
 
     if issues:
         print("\n  ⚠  Waarschuwingen:")
@@ -625,9 +680,4 @@ if __name__ == "__main__":
     elif rmse_val < 1.00:
         print("→ redelijk ~")
     else:
-        print("→ verbetering gewenst  ⚠")
-        print("   Tips:")
-        print("   • Meer trainingdata (>3 weken)")
-        print("   • Controleer of verwarming echt uit was")
-        print("   • Voeg ventilatiemassaflow toe als extra term")
-        print("   • Overweeg 3R3C model met scheidingswand")
+        print("→ verbetering gewenst ⚠")
