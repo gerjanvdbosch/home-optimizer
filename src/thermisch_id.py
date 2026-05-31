@@ -49,37 +49,24 @@ from pathlib import Path
 
 DT = 900          # tijdstap [s]  (15 min)
 N_SHOOT = 12      # multiple-shooting nodes (meer = robuuster, trager)
-
 P0 = {
-    "log_R_env":  np.log(1/55),    # UA ≈ 55 W/K (realistisch A-label)
-    "log_R_int":  np.log(1/400),   # UA_int ≈ 400 W/K
-    "log_C_air":  np.log(4e5),     # 400 kJ/K
-    "log_C_mass": np.log(1.5e7),   # 15 MJ/K
-    "g_solar":    0.4,
+    "log_R_env":  np.log(1/60),    # Startwaarde UA = 60
+    "log_R_int":  np.log(1/400),
+    "log_C_air":  np.log(4e5),
+    "log_C_mass": np.log(1.5e7),
+    "g_solar":    0.3,             # We weten nu dat dit rond 0.3 ligt
     "g_mass":     0.1,
-    "Q_base":     200.0,
+    "Q_base":     150.0,           # Start op 150W (realistischer)
 }
 
-# Fysisch realistische bounds (log voor R en C)
 BOUNDS = {
-    # UA_env = 1/R_env: 30-90 W/K voor goede isolatie
-    "log_R_env": (np.log(1 / 90), np.log(1 / 30)),  # ≈ 0.011–0.033 K/W
-
-    # R_int: warmteovergang vloer↔lucht, h≈6-12 W/m²K, A≈60m² → UA≈360-720 W/K
-    "log_R_int": (np.log(1 / 800), np.log(1 / 200)),  # ≈ 0.00125–0.005 K/W
-
-    # C_air: lucht + lichte inboedel, 0.2–0.8 MJ/K
+    "log_R_env": (np.log(1 / 85), np.log(1 / 40)),  # UA tussen 40 en 85 (normaal voor 2023)
+    "log_R_int": (np.log(1 / 800), np.log(1 / 100)),
     "log_C_air": (np.log(2e5), np.log(8e5)),
-
-    # C_mass: betonvloer 10cm + binnenmuren, 8–25 MJ/K
-    "log_C_mass": (np.log(8e6), np.log(2.5e7)),
-
-    # Zonnewinst: PV is proxy, dus factor mag >1 maar niet extreem
-    "g_solar": (0.0, 2.0),
-    "g_mass": (0.0, 0.5),  # vloer krijgt minder directe zon
-
-    # Interne winsten: 100-600 W typisch (2 personen + apparaten)
-    "Q_base": (50.0, 600.0),
+    "log_C_mass": (np.log(1e7), np.log(3e7)),       # Max 30 MJ/K
+    "g_solar": (0.0, 1.0),
+    "g_mass": (0.0, 0.5),
+    "Q_base": (50.0, 400.0),                        # Minimaal 50W, maximaal 400W
 }
 
 # ══════════════════════════════════════════════════════════════════════
