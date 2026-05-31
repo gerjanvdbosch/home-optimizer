@@ -58,16 +58,23 @@ P0 = {
     "log_C_mass": np.log(1.2e7),   # ≈ 12 MJ/K  (betonnen vloerverwarmingsplaat)
     "g_solar":    0.25,            # PV-proxy → warmtewinst lucht  [-]
     "g_mass":     0.08,            # PV-proxy → warmtewinst massa  [-]
+    "Q_base":     250.0,           # <--- NIEUW: Start op 250 Watt interne winst
 }
 
 # Fysisch gemotiveerde bounds voor een 2023 middenwoning
 BOUNDS = {
-    "log_R_env":  (np.log(5e-3),  np.log(0.15)),   # UA tussen 7 en 200 W/K
-    "log_R_int":  (np.log(1e-4),  np.log(0.08)),
-    "log_C_air":  (np.log(5e4),   np.log(3e6)),
-    "log_C_mass": (np.log(5e5),   np.log(3e8)),
-    "g_solar":    (0.0,           4.0),
-    "g_mass":     (0.0,           4.0),
+    "log_R_env": (np.log(5e-3), np.log(0.15)),
+    "log_R_int": (np.log(1e-4), np.log(0.08)),
+
+    # Luchtmassa: Minimaal ~150 kJ/K (normale woonkamer), Max ~1 MJ/K
+    "log_C_air": (np.log(1.5e5), np.log(1e6)),
+
+    # Vloermassa: Minimaal ~2 MJ/K (zeer lichte bouw), Max ~40 MJ/K (dikke betonvloer)
+    "log_C_mass": (np.log(2e6), np.log(4e7)),
+
+    "g_solar": (0.0, 4.0),
+    "g_mass": (0.0, 4.0),
+    "Q_base": (0.0, 1000.0),
 }
 
 
@@ -114,24 +121,33 @@ def load_csv(dt_resample: int = DT):
     pv = pv.set_index("time").sort_index()
     pv = pv[["P_pv"]].resample(RESAMPLE).mean().ffill()  # BUG-FIX 1: was "pv_power"
 
+    # ── Rolluiken (Shutters) ──────────────────────────────────────────
+    sh = pd.read_csv("data/shutter.csv")
+    sh["time"] = pd.to_datetime(sh["time"])
+    # Let op de kolomnaam in jouw csv, waarschijnlijk 'cover.woonkamer.current_position'
+    sh["shutter"] = pd.to_numeric(sh["cover.woonkamer.current_position"], errors="coerce")
+    sh = sh.set_index("time").sort_index()
+    sh = sh[["shutter"]].resample(RESAMPLE).mean().ffill()
+
     # ── Samenvoegen ───────────────────────────────────────────────────
-    df = df.join(pv, how="left").ffill().dropna(subset=["T_room", "T_out", "P_pv"])
+    df = df.join(pv, how="left")
+    df = df.join(sh, how="left").ffill().dropna(subset=["T_room", "T_out", "P_pv"])
 
-    # PV normalisatie: HA exporteert productie als negatief getal
-    # → omdraaien en schalen naar [0, 1] relatief aan het 99e percentiel
-    pv_pos = np.maximum(0.0, -df["P_pv"].values)          # BUG-FIX 2: was df["pv_power"]
-    pv_max = float(np.percentile(pv_pos, 99))              # BUG-FIX 3: schalen op de positieve reeks
-    df["P_pv"] = np.clip(pv_pos / pv_max, 0.0, 1.0) if pv_max > 0 else 0.0
+    # Normaliseer shutter naar [0, 1] (Ervan uitgaande dat 100 = open, 0 = dicht)
+    # Als er geen data is, gaan we er voor de veiligheid vanuit dat hij open is (1.0)
+    df["shutter"] = df["shutter"].fillna(100.0) / 100.0
 
-    # ── Resample naar doeltijdstap ────────────────────────────────────
-    # BUG-FIX 4: index is al 'time', .set_index("timestamp") gaf KeyError
+    # PV fix
+    df["P_pv"] = np.maximum(0.0, -df["P_pv"].values)
+
     df = (
-        df[["T_room", "T_out", "P_pv"]]
+        df[["T_room", "T_out", "P_pv", "shutter"]]  # <--- voeg shutter toe
         .resample(f"{dt_resample}s")
         .mean()
         .dropna()
     )
-    return df["T_room"].values, df["T_out"].values, df["P_pv"].values
+    # Geef nu 4 arrays terug in plaats van 3
+    return df["T_room"].values, df["T_out"].values, df["P_pv"].values, df["shutter"].values
 
 
 def synthetic_data(n_days: int = 14, dt: int = DT, noise: bool = True):
@@ -197,11 +213,11 @@ def make_rk4_step(dt: float) -> ca.Function:
         p = [log_R_env, log_R_int, log_C_air, log_C_mass, g_solar, g_mass]
     """
     x = ca.MX.sym("x", 2)
-    u = ca.MX.sym("u", 2)
-    p = ca.MX.sym("p", 6)
+    u = ca.MX.sym("u", 3)
+    p = ca.MX.sym("p", 7)   # <--- WAS 6, NU 7
 
     T_room, T_mass = x[0], x[1]
-    T_out_v, P_pv_v = u[0], u[1]
+    T_out_v, P_pv_v, shutter_v = u[0], u[1], u[2]  # <--- Shutter uitlezen
 
     # Exp-transformatie: paramters altijd positief
     R_env   = ca.exp(p[0])
@@ -210,16 +226,20 @@ def make_rk4_step(dt: float) -> ca.Function:
     C_mass  = ca.exp(p[3])
     g_solar = p[4]   # kan in principe 0 zijn (noordgerichte woning)
     g_mass  = p[5]
+    Q_base = p[6]  # <--- Uitlezen
+
+    effective_solar = P_pv_v * shutter_v
 
     # ODE rechterhand
     dT_room = (1 / C_air) * (
         (T_mass - T_room) / R_int
-        + g_solar * P_pv_v
+        + g_solar * effective_solar   # <--- Gebruik de effectieve zon
+        + Q_base  # <--- Interne warmte warmt de lucht op!
     )
     dT_mass = (1 / C_mass) * (
         (T_out_v - T_mass) / R_env
         + (T_room  - T_mass) / R_int
-        + g_mass * P_pv_v
+        + g_mass * effective_solar  # <--- Gebruik de effectieve zon
     )
 
     f = ca.Function("f", [x, u, p], [ca.vertcat(dT_room, dT_mass)])
@@ -242,6 +262,7 @@ def identify(
     T_room_meas: np.ndarray,
     T_out_data:  np.ndarray,
     P_pv_data:   np.ndarray,
+    shutter_data: np.ndarray,
     dt:       float = DT,
     n_shoot:  int   = N_SHOOT,
     verbose:  bool  = True,
@@ -276,7 +297,7 @@ def identify(
 
     # ── 3a. Parametersvector ─────────────────────────────────────────
     p_keys = list(P0.keys())
-    p = opti.variable(6)
+    p = opti.variable(len(p_keys))  # <--- NIEUW: past zich automatisch aan
     opti.set_initial(p, list(P0.values()))
 
     for i, key in enumerate(p_keys):
@@ -306,7 +327,8 @@ def identify(
             idx = i0 + k
             u_k = ca.vertcat(
                 float(T_out_data[idx]),
-                float(P_pv_data[idx])
+                float(P_pv_data[idx]),
+                float(shutter_data[idx])
             )
             xk = F(x=xk, u=u_k, p=p)["xn"]
 
@@ -351,6 +373,7 @@ def identify(
     C_mass  = float(np.exp(p_opt[3]))
     g_solar = float(p_opt[4])
     g_mass  = float(p_opt[5])
+    Q_base = float(p_opt[6])
 
     params = {
         # Primaire thermische parameters
@@ -360,13 +383,17 @@ def identify(
         "C_mass":   C_mass,
         "g_solar":  g_solar,
         "g_mass":   g_mass,
+        "Q_base": Q_base,  # <--- Toevoegen aan dict
         # Afgeleide / meer intuïtieve grootheden
         "UA_env":       1.0 / R_env,                 # transmissieverlies  [W/K]
         "UA_int":       1.0 / R_int,                 # vloer↔lucht warmteovergang [W/K]
         "tau_air_h":    C_air  * R_int / 3600,       # tijdconstante lucht  [uur]
         "tau_mass_h":   C_mass * R_env / 3600,       # tijdconstante massa  [uur]
     }
-    return params, ca.DM(p_opt)
+    # Haal de geoptimaliseerde T_mass van de allereerste tijdstap op:
+    T_mass_opt = float(sol.value(X[1, 0]))
+
+    return params, ca.DM(p_opt), T_mass_opt  # <--- return erbij
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -376,8 +403,10 @@ def identify(
 def simulate(
     p_opt:      ca.DM,
     T_room_0:   float,
+    T_mass_0:     float,   # <--- NIEUW
     T_out_data: np.ndarray,
     P_pv_data:  np.ndarray,
+    shutter_data: np.ndarray,
     dt:         float = DT,
 ):
     """
@@ -387,14 +416,14 @@ def simulate(
     F = make_rk4_step(dt)
     N = len(T_out_data)
 
-    xk = ca.DM([T_room_0, T_room_0 - 0.5])
+    xk = ca.DM([T_room_0, T_mass_0])  # <--- AANGEPAST
     T_room_sim = np.empty(N)
     T_mass_sim = np.empty(N)
     T_room_sim[0] = float(xk[0])
     T_mass_sim[0] = float(xk[1])
 
     for k in range(N - 1):
-        u_k = ca.DM([float(T_out_data[k]), float(P_pv_data[k])])
+        u_k = ca.DM([float(T_out_data[k]), float(P_pv_data[k]), float(shutter_data[k])])
         xk  = F(x=xk, u=u_k, p=p_opt)["xn"]
         T_room_sim[k + 1] = float(xk[0])
         T_mass_sim[k + 1] = float(xk[1])
@@ -416,6 +445,7 @@ def _fmt_param_rows(params: dict) -> list:
         ["C_mass",       f"{params['C_mass'] / 1e6:.2f} MJ/K"],
         ["g_solar",      f"{params['g_solar']:.4f}"],
         ["g_mass",       f"{params['g_mass']:.4f}"],
+        ["Q_base",       f"{params['Q_base']:.0f} W"],
         ["τ_lucht",      f"{params['tau_air_h']:.2f} uur"],
         ["τ_massa",      f"{params['tau_mass_h']:.1f} uur"],
     ]
@@ -544,6 +574,7 @@ def diagnose(params: dict, true_params: dict = None):
         ("C_mass (vloermassa)",      f"{params['C_mass']/1e6:.2f} MJ/K"),
         ("g_solar",                  f"{params['g_solar']:.4f}  (kamer-zonnwinst)"),
         ("g_mass",                   f"{params['g_mass']:.4f}  (vloer-zonnwinst)"),
+        ("Q_base (interne winst)",   f"{params['Q_base']:.0f} W"),
         ("τ_lucht",                  f"{params['tau_air_h']:.2f} uur  (tijdconstante lucht)"),
         ("τ_massa",                  f"{params['tau_mass_h']:.1f} uur  (tijdconstante vloer)"),
     ]
@@ -596,18 +627,13 @@ def diagnose(params: dict, true_params: dict = None):
 if __name__ == "__main__":
 
     # ── Kies databron ─────────────────────────────────────────────────
-    USE_SYNTHETIC = False  # ← zet op True voor synthetische testdata
-
-    if USE_SYNTHETIC:
-        print("Synthetische data genereren (14 dagen)...")
-        t, T_room, T_out, P_pv, TRUE_PARAMS = synthetic_data(n_days=14)
-    else:
-        # Eigen CSV:  timestamp, T_room, T_out, P_pv
-        T_room, T_out, P_pv = load_csv(dt_resample=DT)
-        N  = len(T_room)
-        t  = np.arange(N) * DT
-        TRUE_PARAMS = None
-        print(f"Data geladen: {N} punten ({N * DT / 86400:.1f} dagen)")
+    USE_SYNTHETIC = False
+    # Eigen CSV:  timestamp, T_room, T_out, P_pv
+    T_room, T_out, P_pv, shutter = load_csv(dt_resample=DT)
+    N = len(T_room)
+    t = np.arange(N) * DT
+    TRUE_PARAMS = None
+    print(f"Data geladen: {N} punten ({N * DT / 86400:.1f} dagen)")
 
     N = len(T_room)
 
@@ -618,8 +644,8 @@ if __name__ == "__main__":
 
     # ── Parameter identificatie ────────────────────────────────────────
     print("Parameter identificatie starten...")
-    params, p_opt = identify(
-        T_room[:split], T_out[:split], P_pv[:split],
+    params, p_opt, T_mass_0_opt = identify(
+        T_room[:split], T_out[:split], P_pv[:split], shutter[:split],
         dt=DT, n_shoot=N_SHOOT, verbose=False,
     )
 
@@ -627,7 +653,7 @@ if __name__ == "__main__":
 
     # ── Simuleer over VOLLEDIGE periode (incl. validatie) ─────────────
     print("Simulatie over volledige periode...")
-    T_room_sim, T_mass_sim = simulate(p_opt, T_room[0], T_out, P_pv, dt=DT)
+    T_room_sim, T_mass_sim = simulate(p_opt, T_room[0], T_mass_0_opt, T_out, P_pv, shutter, dt=DT)
 
     rmse = plot_results(
         t, T_room, T_room_sim, T_mass_sim,
