@@ -62,21 +62,26 @@ P0 = {
 }
 
 # Fysisch gemotiveerde bounds voor een 2023 middenwoning
+# Fysisch STRIKTE bounds voor een A-label middenwoning
 BOUNDS = {
-    "log_R_env": (np.log(5e-3), np.log(0.15)),
+    # UA_env MOET tussen 30 en 90 W/K liggen (realistisch verlies gevel+dak)
+    "log_R_env": (np.log(1 / 90), np.log(1 / 30)),
+
+    # Vloer-tot-lucht weerstand (breed laten)
     "log_R_int": (np.log(1e-4), np.log(0.08)),
 
-    # Luchtmassa: Minimaal ~150 kJ/K (normale woonkamer), Max ~1 MJ/K
-    "log_C_air": (np.log(1.5e5), np.log(1e6)),
+    # Luchtmassa: ca. 100 tot 500 kJ/K (woonkamer lucht + meubels)
+    "log_C_air": (np.log(1e5), np.log(5e5)),
 
-    # Vloermassa: Minimaal ~2 MJ/K (zeer lichte bouw), Max ~40 MJ/K (dikke betonvloer)
-    "log_C_mass": (np.log(2e6), np.log(4e7)),
+    # Vloermassa: ca. 8 tot 20 MJ/K (10cm betonvloer)
+    "log_C_mass": (np.log(8e6), np.log(2e7)),
 
     "g_solar": (0.0, 4.0),
     "g_mass": (0.0, 4.0),
-    "Q_base": (0.0, 1000.0),
-}
 
+    # Q_base mag flink hoog, want dit bevat nu interne warmte + warmte van buren!
+    "Q_base": (0.0, 1500.0),
+}
 
 # ══════════════════════════════════════════════════════════════════════
 #  1. DATA  —  laad CSV of gebruik synthetische testdata
