@@ -142,7 +142,7 @@ def load_csv(dt_resample: int = DT):
     df["shutter"] = df["shutter"].fillna(100.0) / 100.0
 
     # PV fix
-    df["P_pv"] = np.maximum(0.0, -df["P_pv"].values)
+    df["P_pv"] = np.maximum(0.0, df["P_pv"].values)
 
     df = (
         df[["T_room", "T_out", "P_pv", "shutter"]]  # <--- voeg shutter toe
@@ -645,6 +645,14 @@ if __name__ == "__main__":
     t = np.arange(N) * DT
     TRUE_PARAMS = None
     print(f"Data geladen: {N} punten ({N * DT / 86400:.1f} dagen)")
+
+    # Voeg dit toe na load_csv() om te debuggen:
+    print(f"P_pv stats: min={P_pv.min():.1f}W, max={P_pv.max():.1f}W, mean={P_pv.mean():.1f}W")
+    print(f"Aantal nul-waarden: {(P_pv == 0).sum()} / {len(P_pv)} ({(P_pv == 0).mean() * 100:.1f}%)")
+    print(f"Aantal >100W: {(P_pv > 100).sum()} / {len(P_pv)}")
+
+    print(f"Shutter stats: min={shutter.min():.2f}, max={shutter.max():.2f}, mean={shutter.mean():.2f}")
+    print(f"Shutter >0.5: {(shutter > 0.5).mean() * 100:.1f}% van de tijd")
 
     N = len(T_room)
 
