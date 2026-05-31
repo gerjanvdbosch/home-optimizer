@@ -37,8 +37,8 @@ Datavereisten voor goede identificatie:
 """
 
 import numpy as np
-import casadi as ca
 import pandas as pd
+import casadi as ca
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from pathlib import Path
@@ -76,12 +76,19 @@ BOUNDS = {
 # ══════════════════════════════════════════════════════════════════════
 
 def load_csv(dt_resample: int = DT):
+    """
+    Laad meetdata uit Home Assistant CSV-exports.
+
+    Verwacht:
+        data/temp.csv  — kolommen: time, entity_id, °C.value
+        data/pv.csv    — kolommen: time, W.value
+                         (PV-productie als negatief getal, zoals HA het exporteert)
+
+    Tip: verwijder periodes met actieve verwarming/koeling vóór het inladen.
+    """
     RESAMPLE = "5min"
 
-    # ==========================================================
-    # LOAD DATA  (identiek aan origineel)
-    # ==========================================================
-
+    # ── Temperatuurdata ───────────────────────────────────────────────
     df_temp = pd.read_csv("data/temp.csv")
     df_temp["time"] = pd.to_datetime(df_temp["time"])
     df_temp["temp"] = pd.to_numeric(df_temp["°C.value"], errors="coerce")
@@ -90,43 +97,39 @@ def load_csv(dt_resample: int = DT):
         index="time",
         columns="entity_id",
         values="temp",
-        aggfunc="last"
+        aggfunc="last",
     )
+    df.columns.name = None   # verwijder MultiIndex-naam
 
     df = df.rename(columns={
-        "danfoss_15_temperature": "T_room",
+        "danfoss_15_temperature":            "T_room",
         "ecodan_heatpump_ca09ec_buiten_temp": "T_out",
     })
+    df = df.sort_index().resample(RESAMPLE).mean().ffill()
 
-    df = df.sort_index()
-
+    # ── PV-data ───────────────────────────────────────────────────────
     pv = pd.read_csv("data/pv.csv")
     pv["time"] = pd.to_datetime(pv["time"])
     pv["P_pv"] = pd.to_numeric(pv["W.value"], errors="coerce")
     pv = pv.set_index("time").sort_index()
+    pv = pv[["P_pv"]].resample(RESAMPLE).mean().ffill()  # BUG-FIX 1: was "pv_power"
 
-    # sh = pd.read_csv("data/shutter.csv")
-    # sh["time"] = pd.to_datetime(sh["time"])
-    # sh["shutter"] = pd.to_numeric(sh["cover.woonkamer.current_position"], errors="coerce")
-    # sh = sh.set_index("time").sort_index()
+    # ── Samenvoegen ───────────────────────────────────────────────────
+    df = df.join(pv, how="left").ffill().dropna(subset=["T_room", "T_out", "P_pv"])
 
-    df = df.resample(RESAMPLE).mean().ffill()
-    pv = pv.resample(RESAMPLE).mean().ffill()
-    # sh = sh.resample(RESAMPLE).mean().ffill()
+    # PV normalisatie: HA exporteert productie als negatief getal
+    # → omdraaien en schalen naar [0, 1] relatief aan het 99e percentiel
+    pv_pos = np.maximum(0.0, -df["P_pv"].values)          # BUG-FIX 2: was df["pv_power"]
+    pv_max = float(np.percentile(pv_pos, 99))              # BUG-FIX 3: schalen op de positieve reeks
+    df["P_pv"] = np.clip(pv_pos / pv_max, 0.0, 1.0) if pv_max > 0 else 0.0
 
-    df = df.join(pv[["pv_power"]], how="left")
-    # df = df.join(sh[["shutter"]], how="left")
-    df = df.ffill().dropna()
-
-    pv_max = df["pv_power"].quantile(0.99)
-    df["P_pv"] = np.clip(np.maximum(0, -df["pv_power"]) / pv_max, 0, 1)
-
+    # ── Resample naar doeltijdstap ────────────────────────────────────
+    # BUG-FIX 4: index is al 'time', .set_index("timestamp") gaf KeyError
     df = (
-        df
-        .set_index("timestamp")
+        df[["T_room", "T_out", "P_pv"]]
         .resample(f"{dt_resample}s")
         .mean()
-        .dropna(subset=["T_room", "T_out", "P_pv"])
+        .dropna()
     )
     return df["T_room"].values, df["T_out"].values, df["P_pv"].values
 
@@ -593,7 +596,7 @@ def diagnose(params: dict, true_params: dict = None):
 if __name__ == "__main__":
 
     # ── Kies databron ─────────────────────────────────────────────────
-    USE_SYNTHETIC = False    # ← zet op False en geef CSV-pad op voor eigen data
+    USE_SYNTHETIC = False  # ← zet op True voor synthetische testdata
 
     if USE_SYNTHETIC:
         print("Synthetische data genereren (14 dagen)...")
