@@ -21,6 +21,8 @@ dependencies = [
     "pydantic>=2.7",
     "pyomo>=6.8",
     "highspy>=1.8",
+    "skforecast>=0.22",
+    "optuna>=4.8",
 ]
 
 [project.optional-dependencies]
