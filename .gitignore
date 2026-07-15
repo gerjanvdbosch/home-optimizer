@@ -1,4 +1,5 @@
 .DS_Store
+.env
 .idea/
 .import_linter_cache/
 .pyright/
