@@ -2,4 +2,6 @@
 
 set -euo pipefail
 
+echo "Starting Home Optimizer..."
+
 exec python -m web.app

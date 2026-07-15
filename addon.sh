@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-bashio::log.info "Starting Home Optimizer addon..."
-bashio::log.info "Options: $(bashio::config)"
+bashio::log.info "Starting Home Optimizer..."
 
 exec python -m web.app
