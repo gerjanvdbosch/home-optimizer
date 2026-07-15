@@ -2,5 +2,4 @@
 
 set -euo pipefail
 
-exec python -m local "$@"
-
+exec python -m web.app "$@"

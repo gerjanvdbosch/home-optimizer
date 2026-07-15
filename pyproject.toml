@@ -34,8 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-addon = "addon:main"
-local = "local:main"
+web = "web:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
