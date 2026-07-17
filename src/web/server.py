@@ -8,13 +8,22 @@ from fastapi.templating import Jinja2Templates
 from app.settings import load_settings
 from infrastructure.influx import InfluxDatabase
 
+BASE_DIR = Path(__file__).resolve().parent
+
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="src/web/static"), name="static")
+
+app.mount(
+    "/static",
+    StaticFiles(directory=BASE_DIR / "static"),
+    name="static",
+)
 
 settings = load_settings()
 db = InfluxDatabase(settings)
 
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates = Jinja2Templates(
+    directory=BASE_DIR / "templates",
+)
 
 
 @app.get("/", response_class=HTMLResponse)
