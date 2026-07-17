@@ -16,6 +16,9 @@ class InfluxDatabase:
             database=settings.influx_database,
         )
 
+    def query(self, query: str) -> ResultSet:
+        return cast(ResultSet, self.client.query(query))
+
     def get_entity_values(
         self,
         measurement: str,
@@ -29,5 +32,4 @@ class InfluxDatabase:
             f"LIMIT {limit}"
         )
 
-        result = cast(ResultSet, self.client.query(query))
-        return list(result.get_points())
+        return list(self.query(query).get_points())
