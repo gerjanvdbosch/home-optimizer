@@ -3,15 +3,17 @@ from typing import cast
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
+from app.settings import Settings
+
 
 class InfluxDatabase:
-    def __init__(self):
+    def __init__(self, settings: Settings):
         self.client = InfluxDBClient(
-            host="homeassistant.local",
-            port=8086,
-            username="home_assistant",
-            password="home_assistant",
-            database="home_assistant",
+            host=settings.influx_host,
+            port=settings.influx_port,
+            username=settings.influx_username,
+            password=settings.influx_password,
+            database=settings.influx_database,
         )
 
     def get_entity_values(

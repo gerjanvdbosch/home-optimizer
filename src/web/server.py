@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 
+from app.settings import load_settings
 from infrastructure.influx import InfluxDatabase
 
 app = FastAPI()
-db = InfluxDatabase()
+settings = load_settings()
+db = InfluxDatabase(settings)
 
 
 @app.get("/")

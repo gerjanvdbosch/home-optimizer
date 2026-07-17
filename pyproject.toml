@@ -23,6 +23,7 @@ dependencies = [
     "skforecast>=0.22",
     "optuna>=4.8",
     "influxdb>=5.3",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

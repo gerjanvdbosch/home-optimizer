@@ -33,8 +33,18 @@ map:
   - addon_config:rw
 
 options:
+  influx_host: "a0d7b954-influxdb"
+  influx_port: 8086
+  influx_username: ""
+  influx_password: ""
+  influx_database: "home_assistant"
   log_level: "INFO"
 
 schema:
+  influx_host: str
+  influx_port: int
+  influx_username: str
+  influx_password: password
+  influx_database: str
   log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
 
