@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from datetime import datetime
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class Settings(BaseModel):
@@ -28,10 +30,31 @@ class Settings(BaseModel):
     )
 
 
+class TimeSeriesPoint(BaseModel):
+    time: datetime
+    value: float | None
+
+
+class SensorReference(BaseModel):
+    entity_id: str
+    attribute: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def from_tuple(cls, value):
+        if isinstance(value, (list, tuple)):
+            return {
+                "entity_id": value[0],
+                "attribute": value[1],
+            }
+
+        return value
+
+
 class SolarForecast(BaseModel):
-    p10: tuple[str, str]
-    p50: tuple[str, str]
-    p90: tuple[str, str]
+    p10: SensorReference
+    p50: SensorReference
+    p90: SensorReference
 
 
 class UpdateRequest(BaseModel):

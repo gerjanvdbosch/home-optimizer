@@ -40,9 +40,4 @@ async def dashboard(request: Request):
 async def update(request: UpdateRequest):
     entity, attribute = request.solar_forecast.p10
 
-    # points = db.get_entity_values(measurement="W", entity_id="pv_output", limit=10)
-    #
-    # for point in points:
-    #     print(point)
-
     return {"ok"}
