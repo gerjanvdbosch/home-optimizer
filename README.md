@@ -10,6 +10,9 @@ production and electricity prices.
 Home Optimizer requires the **InfluxDB add-on (v1)** for Home Assistant to 
 store and retrieve historical sensor data used for training and optimization.
 
+See the [InfluxDB documentation](https://www.home-assistant.io/integrations/influxdb/) 
+for installation and configuration.
+
 
 ## Update API
 
