@@ -5,11 +5,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.settings import load_settings
-from app.state_service import StateService
+from app.container import Container
 from domain.models import UpdateRequest
-from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
-from infrastructure.storage import JsonStorage
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -21,11 +18,7 @@ app.mount(
     name="static",
 )
 
-settings = load_settings()
-db = InfluxDatabase(settings)
-storage = JsonStorage(BASE_DIR / "data" / "state.json")
-resolver = InfluxSensorResolver(db)
-state_service = StateService(db, resolver, storage)
+container = Container()
 
 templates = Jinja2Templates(
     directory=BASE_DIR / "templates",
@@ -43,6 +36,6 @@ async def dashboard(request: Request):
 
 @app.post("/api/update")
 async def update(request: UpdateRequest):
-    state_service.update(request)
+    container.state_service.update(request)
 
     return {"ok": True}
