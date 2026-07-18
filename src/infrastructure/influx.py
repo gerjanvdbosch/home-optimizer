@@ -4,7 +4,7 @@ from typing import cast
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from domain.models import SensorReference, Settings, TimeSeriesPoint
+from domain.models import SensorReferenceRequest, Settings, TimeSeriesPoint
 
 
 class InfluxDatabase:
@@ -54,7 +54,7 @@ class InfluxSensorResolver:
 
     def resolve(
         self,
-        sensor: SensorReference,
+        sensor: SensorReferenceRequest,
     ) -> tuple[str, str, str]:
         measurements = self.db.query("SHOW MEASUREMENTS")
 

@@ -35,7 +35,18 @@ class TimeSeriesPoint(BaseModel):
     value: float | None
 
 
-class SensorReference(BaseModel):
+class SolarForecastState(BaseModel):
+    p10: list[TimeSeriesPoint]
+    p50: list[TimeSeriesPoint]
+    p90: list[TimeSeriesPoint]
+
+
+class OptimizerState(BaseModel):
+    updated: datetime
+    solar_forecast: SolarForecastState
+
+
+class SensorReferenceRequest(BaseModel):
     entity_id: str
     attribute: str
 
@@ -51,11 +62,14 @@ class SensorReference(BaseModel):
         return value
 
 
-class SolarForecast(BaseModel):
-    p10: SensorReference
-    p50: SensorReference
-    p90: SensorReference
+class SolarForecastRequest(BaseModel):
+    p10: SensorReferenceRequest
+    p50: SensorReferenceRequest
+    p90: SensorReferenceRequest
+
+    def items(self):
+        return self.model_dump().items()
 
 
 class UpdateRequest(BaseModel):
-    solar_forecast: SolarForecast
+    solar_forecast: SolarForecastRequest
