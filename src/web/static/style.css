@@ -1,6 +1,8 @@
 body {
     background-color: #111;
     padding: 18px;
+    color: #fff;
+    font-family: Roboto, "Noto Sans", "Segoe UI", Arial, sans-serif;
 }
 
 .plotly-notifier {
