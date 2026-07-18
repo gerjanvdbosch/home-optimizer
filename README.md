@@ -50,7 +50,7 @@ Add the following configuration to your Home Assistant `configuration.yaml`:
 ```yaml
 rest_command:
   home_optimizer_api:
-    url: "http://127.0.0.1:8899/api/{{ endpoint }}"
+    url: "http://127.0.0.1:8099/api/{{ endpoint }}"
     method: POST
     headers:
       content-type: "application/json"

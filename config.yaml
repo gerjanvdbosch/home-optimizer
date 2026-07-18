@@ -21,10 +21,10 @@ arch:
 
 homeassistant_api: true
 ingress: true
-ingress_port: 8899
+ingress_port: 8099
 
 ports:
-  8099/tcp: 8899
+  8099/tcp: 8099
 
 ports_description:
   8099/tcp: "Home Optimizer"
