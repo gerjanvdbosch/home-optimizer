@@ -34,7 +34,7 @@ async def dashboard(request: Request):
         request=request,
         name="dashboard.html",
         context={
-            "chart": solar_forecast_chart(state),
+            "solar_chart": solar_forecast_chart(state),
         },
     )
 
