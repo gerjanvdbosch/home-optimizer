@@ -12,5 +12,7 @@ class Container:
         self.resolver = InfluxSensorResolver(self.influx)
 
         self.state_service = StateService(
-            influx=self.influx, resolver=self.resolver, storage=JsonStorage("data/state.json")
+            influx=self.influx,
+            resolver=self.resolver,
+            storage=JsonStorage(settings.data_path / "state.json"),
         )

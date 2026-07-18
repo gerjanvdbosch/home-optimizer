@@ -11,7 +11,10 @@ def load_settings() -> Settings:
     options = Path("/data/options.json")
 
     if options.exists():
-        return Settings(**json.loads(options.read_text()))
+        return Settings(
+            **json.loads(options.read_text()),
+            data_path=Path("/data"),
+        )
 
     load_dotenv()
 

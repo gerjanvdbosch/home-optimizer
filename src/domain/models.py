@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -24,6 +25,10 @@ class Settings(BaseModel):
     influx_database: str = Field(
         default="home_assistant",
         description="InfluxDB database",
+    )
+    data_path: Path = Field(
+        default=Path("data"),
+        description="Data path",
     )
     log_level: str = Field(
         default="INFO",
