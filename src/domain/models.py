@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -30,9 +31,22 @@ class Settings(BaseModel):
     )
 
 
-class TimeSeriesPoint(BaseModel):
+class InfluxSensor(BaseModel):
+    measurement: str
+    entity_id: str
+    field: str
+
+
+T = TypeVar("T")
+
+
+class TimeSeriesPoint(BaseModel, Generic[T]):
     time: datetime
-    value: float | None
+    value: T
+
+
+class TimeSeries(BaseModel, Generic[T]):
+    points: list[TimeSeriesPoint[T]]
 
 
 class SolarForecastState(BaseModel):
@@ -68,7 +82,11 @@ class SolarForecastRequest(BaseModel):
     p90: SensorReferenceRequest
 
     def items(self):
-        return self.model_dump().items()
+        return (
+            ("p10", self.p10),
+            ("p50", self.p50),
+            ("p90", self.p90),
+        )
 
 
 class UpdateRequest(BaseModel):

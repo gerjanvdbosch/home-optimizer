@@ -6,3 +6,4 @@
 .pyrightcache/
 __pycache__/
 .venv/
+/data/

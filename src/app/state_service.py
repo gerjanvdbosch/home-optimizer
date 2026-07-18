@@ -1,41 +1,43 @@
 from datetime import datetime, timedelta, timezone
 
-from domain.models import OptimizerState, SolarForecastState
+from domain.models import OptimizerState, SolarForecastState, UpdateRequest
+from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
+from infrastructure.storage import JsonStorage
 
 
 class StateService:
     def __init__(
         self,
-        influx,
-        resolver,
-        storage,
+        influx: InfluxDatabase,
+        resolver: InfluxSensorResolver,
+        storage: JsonStorage,
     ):
         self.influx = influx
         self.resolver = resolver
         self.storage = storage
 
-    def update(self, request) -> None:
-        start = datetime.now(timezone.utc)
-        end = start + timedelta(days=1)
+    def load(self) -> OptimizerState:
+        return OptimizerState(**self.storage.load())
+
+    def update(
+        self,
+        request: UpdateRequest,
+    ) -> None:
+        now = datetime.now(timezone.utc)
 
         forecast = {}
 
-        for name, sensor in request.solar_forecast.model_dump().items():
-            measurement, entity_id, field = self.resolver.resolve(sensor)
+        for name, sensor in request.solar_forecast.items():
+            influx_sensor = self.resolver.resolve(sensor)
 
-            forecast[name] = [
-                point
-                for point in self.influx.query_series(
-                    measurement=measurement,
-                    entity_id=entity_id,
-                    field=field,
-                    start=start,
-                    end=end,
-                )
-            ]
+            forecast[name] = self.influx.query_last(
+                measurement=influx_sensor.measurement,
+                entity_id=influx_sensor.entity_id,
+                field=influx_sensor.field,
+            )
 
         state = OptimizerState(
-            updated=start,
+            updated=now,
             solar_forecast=SolarForecastState(**forecast),
         )
 
