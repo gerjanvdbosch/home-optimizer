@@ -12,7 +12,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
         fig.add_trace(
             go.Scatter(
                 x=[p["time"] for p in points],
-                y=[p["value"] for p in points],
+                y=[p["watts"] for p in points],
                 mode="lines",
                 name=name,
             )

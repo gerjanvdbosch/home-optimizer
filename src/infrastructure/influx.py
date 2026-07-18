@@ -1,10 +1,9 @@
-from datetime import datetime, timezone
 from typing import cast
 
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from domain.models import InfluxSensor, SensorReferenceRequest, Settings, TimeSeriesPoint
+from domain.models import InfluxPoint, InfluxSensor, SensorReferenceRequest, Settings
 
 
 class InfluxDatabase:
@@ -20,32 +19,12 @@ class InfluxDatabase:
     def query(self, query: str) -> ResultSet:
         return cast(ResultSet, self.client.query(query))
 
-    # def query_series(
-    #     self, measurement: str, entity_id: str, field: str, start: datetime, end: datetime
-    # ) -> list[TimeSeriesPoint]:
-    #     start = start.astimezone(timezone.utc)
-    #     end = end.astimezone(timezone.utc)
-    #
-    #     query = f"""
-    #            SELECT {field} AS value
-    #            FROM "{measurement}"
-    #            WHERE
-    #                "entity_id" = '{entity_id}'
-    #                AND time >= '{start.isoformat()}'
-    #                AND time < '{end.isoformat()}'
-    #            fill(null)
-    #        """
-    #
-    #     result = self.query(query)
-    #
-    #     return [TimeSeriesPoint(**point) for point in result.get_points()]
-
-    def query_last(
+    def find(
         self,
         measurement: str,
         entity_id: str,
         field: str,
-    ) -> TimeSeriesPoint | None:
+    ) -> InfluxPoint | None:
         query = f"""
         SELECT "{field}" AS value
         FROM "{measurement}"
@@ -60,12 +39,13 @@ class InfluxDatabase:
         if not points:
             return None
 
-        return TimeSeriesPoint(**points[0])
+        return InfluxPoint(**points[0])
 
 
 class InfluxSensorResolver:
     def __init__(self, db: InfluxDatabase):
         self.db = db
+        self.cache: dict[str, InfluxSensor] = {}
 
     def resolve(
         self,
@@ -75,6 +55,11 @@ class InfluxSensorResolver:
 
         entity_id = sensor.entity_id.removeprefix("sensor.")
 
+        cache_key = f"{entity_id}.{sensor.attribute}"
+
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+
         for measurement in measurements.get_points():
             name = measurement["name"]
 
@@ -83,11 +68,15 @@ class InfluxSensorResolver:
             for field in fields.get_points():
                 field_name = field["fieldKey"]
 
-                if field_name.startswith(sensor.attribute):
-                    return InfluxSensor(
+                if field_name.startswith(sensor.attribute + "_"):
+                    influx_sensor = InfluxSensor(
                         measurement=name,
                         entity_id=entity_id,
                         field=field_name,
                     )
+
+                    self.cache[cache_key] = influx_sensor
+
+                    return influx_sensor
 
         raise ValueError(f"Sensor not found: {sensor.entity_id}.{sensor.attribute}")

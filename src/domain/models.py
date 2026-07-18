@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -37,22 +37,20 @@ class InfluxSensor(BaseModel):
     field: str
 
 
-T = TypeVar("T")
-
-
-class TimeSeriesPoint(BaseModel, Generic[T]):
+class InfluxPoint(BaseModel):
     time: datetime
-    value: T
+    value: Any
 
 
-class TimeSeries(BaseModel, Generic[T]):
-    points: list[TimeSeriesPoint[T]]
+class SolarForecastPoint(BaseModel):
+    time: datetime
+    watts: float
 
 
 class SolarForecastState(BaseModel):
-    p10: list[TimeSeriesPoint]
-    p50: list[TimeSeriesPoint]
-    p90: list[TimeSeriesPoint]
+    p10: list[SolarForecastPoint]
+    p50: list[SolarForecastPoint]
+    p90: list[SolarForecastPoint]
 
 
 class OptimizerState(BaseModel):

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from domain.models import OptimizerState, SolarForecastState, UpdateRequest
+from domain.parser import parse_solar_forecast
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.storage import JsonStorage
 
@@ -30,11 +31,13 @@ class StateService:
         for name, sensor in request.solar_forecast.items():
             influx_sensor = self.resolver.resolve(sensor)
 
-            forecast[name] = self.influx.query_last(
+            raw = self.influx.find(
                 measurement=influx_sensor.measurement,
                 entity_id=influx_sensor.entity_id,
                 field=influx_sensor.field,
             )
+
+            forecast[name] = parse_solar_forecast(raw)
 
         state = OptimizerState(
             updated=now,
