@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -48,14 +48,14 @@ class SolarForecastPoint(BaseModel):
 
 
 class SolarForecastState(BaseModel):
-    p10: list[SolarForecastPoint]
-    p50: list[SolarForecastPoint]
-    p90: list[SolarForecastPoint]
+    p10: list[SolarForecastPoint] = Field(default_factory=list)
+    p50: list[SolarForecastPoint] = Field(default_factory=list)
+    p90: list[SolarForecastPoint] = Field(default_factory=list)
 
 
 class OptimizerState(BaseModel):
-    updated: datetime
-    solar_forecast: SolarForecastState
+    updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    solar_forecast: SolarForecastState = Field(default_factory=SolarForecastState)
 
 
 class SensorReferenceRequest(BaseModel):

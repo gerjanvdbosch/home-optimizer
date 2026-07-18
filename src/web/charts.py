@@ -40,7 +40,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
             t=90,
             b=80,
         ),
-        height=600,
+        height=400,
         font=dict(
             color="#cccccc",
         ),
