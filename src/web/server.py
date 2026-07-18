@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.settings import load_settings
+from domain.models import UpdateRequest
 from infrastructure.influx import InfluxDatabase
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -35,11 +36,13 @@ async def dashboard(request: Request):
     )
 
 
-@app.get("/api/update")
-async def update():
-    points = db.get_entity_values(measurement="W", entity_id="pv_output", limit=10)
+@app.post("/api/update")
+async def update(request: UpdateRequest):
+    entity, attribute = request.solar_forecast.p10
 
-    for point in points:
-        print(point)
+    # points = db.get_entity_values(measurement="W", entity_id="pv_output", limit=10)
+    #
+    # for point in points:
+    #     print(point)
 
     return {"ok"}

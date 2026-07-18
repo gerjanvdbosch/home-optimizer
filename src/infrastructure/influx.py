@@ -3,7 +3,7 @@ from typing import cast
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from app.settings import Settings
+from domain.models import Settings
 
 
 class InfluxDatabase:
