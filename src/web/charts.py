@@ -36,8 +36,8 @@ def solar_forecast_chart(state: OptimizerState) -> str:
         plot_bgcolor="#2b2b2b",
         margin=dict(
             l=70,
-            r=40,
-            t=90,
+            r=20,
+            t=70,
             b=80,
         ),
         height=400,
