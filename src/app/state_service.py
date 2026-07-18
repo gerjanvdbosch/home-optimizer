@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from domain.models import OptimizerState, SolarForecastState, UpdateRequest
 from domain.parser import parse_solar_forecast
