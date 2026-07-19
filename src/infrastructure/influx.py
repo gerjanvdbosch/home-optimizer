@@ -1,9 +1,9 @@
-from typing import cast
+from typing import cast, Any
 
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from domain.models import InfluxPoint, InfluxSensor, SensorReferenceRequest, Settings
+from domain.models import InfluxSensor, SensorReferenceRequest, Settings
 
 
 class InfluxDatabase:
@@ -24,7 +24,7 @@ class InfluxDatabase:
         measurement: str,
         entity_id: str,
         field: str,
-    ) -> InfluxPoint | None:
+    ) -> dict[str, Any] | None:
         query = f"""
         SELECT "{field}" AS value
         FROM "{measurement}"
@@ -39,7 +39,7 @@ class InfluxDatabase:
         if not points:
             return None
 
-        return InfluxPoint(**points[0])
+        return points[0]
 
 
 class InfluxSensorResolver:

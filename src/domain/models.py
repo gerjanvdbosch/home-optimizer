@@ -42,11 +42,6 @@ class InfluxSensor(BaseModel):
     field: str
 
 
-class InfluxPoint(BaseModel):
-    time: datetime
-    value: Any
-
-
 class SolarForecastPoint(BaseModel):
     time: datetime
     watts: float

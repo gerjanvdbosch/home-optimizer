@@ -31,13 +31,13 @@ class StateService:
         for name, sensor in request.solar_forecast.items():
             influx_sensor = self.resolver.resolve(sensor)
 
-            raw = self.influx.find(
+            point = self.influx.find(
                 measurement=influx_sensor.measurement,
                 entity_id=influx_sensor.entity_id,
                 field=influx_sensor.field,
             )
 
-            forecast[name] = parse_solar_forecast(raw)
+            forecast[name] = parse_solar_forecast(point)
 
         state = OptimizerState(
             updated=now,

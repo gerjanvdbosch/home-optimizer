@@ -1,14 +1,15 @@
 import ast
 from datetime import datetime
+from typing import Any
 
-from domain.models import InfluxPoint, SolarForecastPoint
+from domain.models import SolarForecastPoint
 
 
-def parse_solar_forecast(raw: InfluxPoint | None) -> list[SolarForecastPoint]:
-    if raw is None:
+def parse_solar_forecast(point: dict[str, Any] | None) -> list[SolarForecastPoint]:
+    if point is None:
         return []
 
-    values = ast.literal_eval(raw.value)
+    values = ast.literal_eval(point["value"])
 
     return [
         SolarForecastPoint(
