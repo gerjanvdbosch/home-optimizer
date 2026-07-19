@@ -1,7 +1,7 @@
 from app.settings import load_settings
 from app.state_service import StateService
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
-from infrastructure.storage import MemoryStorage
+from infrastructure.storage import JsonStorage
 
 
 class Container:
@@ -14,6 +14,6 @@ class Container:
         self.state_service = StateService(
             influx=self.influx,
             resolver=self.resolver,
-            storage=MemoryStorage(),
-            # storage=JsonStorage(settings.data_path / "state.json"),
+            # storage=MemoryStorage(),
+            storage=JsonStorage(settings.data_path / "state.json"),
         )

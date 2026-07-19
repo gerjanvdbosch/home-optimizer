@@ -18,6 +18,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
                 line=dict(
                     width=3,
                 ),
+                hovertemplate=("%{y:.0f} W<extra>%{fullData.name}</extra>"),
             )
         )
 
@@ -32,6 +33,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
                     width=3,
                 ),
                 connectgaps=True,
+                hovertemplate=("%{y:.0f} W<extra>%{fullData.name}</extra>"),
             )
         )
 
