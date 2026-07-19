@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -36,6 +36,22 @@ class Settings(BaseModel):
     )
 
 
+Aggregation = Literal[
+    "mean",
+    "last",
+    "first",
+    "min",
+    "max",
+    "sum",
+    "median",
+]
+
+
+class Resample(BaseModel):
+    interval: str
+    aggregation: Aggregation
+
+
 class InfluxSensor(BaseModel):
     measurement: str
     entity_id: str
@@ -43,6 +59,11 @@ class InfluxSensor(BaseModel):
 
 
 class SolarForecastPoint(BaseModel):
+    time: datetime
+    watts: float
+
+
+class PvProductionPoint(BaseModel):
     time: datetime
     watts: float
 
@@ -56,6 +77,7 @@ class SolarForecastState(BaseModel):
 class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     solar_forecast: SolarForecastState = Field(default_factory=SolarForecastState)
+    pv_production: list[PvProductionPoint] = Field(default_factory=list)
 
 
 class SensorReferenceRequest(BaseModel):
@@ -64,7 +86,13 @@ class SensorReferenceRequest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def from_tuple(cls, value):
+    def resolve(cls, value):
+        if isinstance(value, str):
+            return {
+                "entity_id": value,
+                "attribute": "value",
+            }
+
         if isinstance(value, (list, tuple)):
             return {
                 "entity_id": value[0],
@@ -89,3 +117,4 @@ class SolarForecastRequest(BaseModel):
 
 class UpdateRequest(BaseModel):
     solar_forecast: SolarForecastRequest
+    pv_production: SensorReferenceRequest

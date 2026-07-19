@@ -32,7 +32,8 @@ actions:
             "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
             "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
             "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
-          }
+          },
+          "pv_production": "sensor.pv_output"
         } | to_json }}
 ```
 

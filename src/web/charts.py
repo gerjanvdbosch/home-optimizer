@@ -23,7 +23,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
 
     fig.update_layout(
         title=dict(
-            text="Solar forecast · power generation",
+            text="Solar forecast",
             x=0.02,
             y=0.95,
             font=dict(

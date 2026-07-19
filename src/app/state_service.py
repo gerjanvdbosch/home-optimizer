@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from domain.models import OptimizerState, SolarForecastState, UpdateRequest
-from domain.parser import parse_solar_forecast
+from domain.models import OptimizerState, Resample, SolarForecastState, UpdateRequest
+from domain.parser import parse_pv_production, parse_solar_forecast
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.storage import JsonStorage
 
@@ -39,9 +39,31 @@ class StateService:
 
             forecast[name] = parse_solar_forecast(point)
 
+        influx_sensor = self.resolver.resolve(request.pv_production)
+
+        start = now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        production_points = self.influx.find_series(
+            measurement=influx_sensor.measurement,
+            entity_id=influx_sensor.entity_id,
+            field=influx_sensor.field,
+            start=start,
+            end=now,
+            resample=Resample(
+                aggregation="mean",
+                interval="5m",
+            ),
+        )
+
         state = OptimizerState(
             updated=now,
             solar_forecast=SolarForecastState(**forecast),
+            pv_production=parse_pv_production(production_points),
         )
 
         self.storage.save(state.model_dump())
