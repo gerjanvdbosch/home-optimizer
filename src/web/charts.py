@@ -16,8 +16,23 @@ def solar_forecast_chart(state: OptimizerState) -> str:
                 mode="lines",
                 name=name,
                 line=dict(
+                    width=2,
+                    dash="dot",
+                ),
+            )
+        )
+
+    if state.pv_production:
+        fig.add_trace(
+            go.Scatter(
+                x=[p.time for p in state.pv_production],
+                y=[p.watts for p in state.pv_production],
+                mode="lines",
+                name="PV production",
+                line=dict(
                     width=3,
                 ),
+                connectgaps=True,
             )
         )
 
