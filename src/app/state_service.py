@@ -1,9 +1,8 @@
 from datetime import datetime, timezone
 
-from domain.models import OptimizerState, Resample, SolarForecastState, UpdateRequest
+from domain.models import OptimizerState, Resample, SolarForecastState, Storage, UpdateRequest
 from domain.parser import parse_pv_production, parse_solar_forecast
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
-from infrastructure.storage import JsonStorage
 
 
 class StateService:
@@ -11,7 +10,7 @@ class StateService:
         self,
         influx: InfluxDatabase,
         resolver: InfluxSensorResolver,
-        storage: JsonStorage,
+        storage: Storage,
     ):
         self.influx = influx
         self.resolver = resolver

@@ -16,8 +16,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
                 mode="lines",
                 name=name,
                 line=dict(
-                    width=2,
-                    dash="dot",
+                    width=3,
                 ),
             )
         )
@@ -52,7 +51,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
         margin=dict(
             l=70,
             r=20,
-            t=70,
+            t=60,
             b=80,
         ),
         height=400,

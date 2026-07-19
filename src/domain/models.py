@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol, Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -34,6 +34,12 @@ class Settings(BaseModel):
         default="INFO",
         description="Logging level",
     )
+
+
+class Storage(Protocol):
+    def save(self, data: dict[str, Any]) -> None: ...
+
+    def load(self) -> dict[str, Any]: ...
 
 
 Aggregation = Literal[
