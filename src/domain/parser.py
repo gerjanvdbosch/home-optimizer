@@ -8,7 +8,7 @@ from domain.time import parse_datetime
 def parse_solar_forecast(point: dict[str, Any] | None) -> list[SolarForecastPoint]:
     if point is None:
         return []
-    print(point)
+
     values = ast.literal_eval(point["value"])
 
     return [

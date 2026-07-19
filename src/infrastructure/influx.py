@@ -70,7 +70,7 @@ class InfluxDatabase:
         GROUP BY time({resample.interval})
         fill(previous)
         """
-        print(query)
+
         result = self.query(query)
 
         return list(result.get_points())
