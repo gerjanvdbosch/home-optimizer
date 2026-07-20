@@ -3,39 +3,31 @@ import plotly.graph_objects as go
 from domain.models import OptimizerState
 
 
-def solar_forecast_chart(state: OptimizerState) -> str:
-    forecast = state.solar_forecast.model_dump()
+def add_series(
+    fig: go.Figure,
+    name: str,
+    points: list,
+) -> None:
+    fig.add_trace(
+        go.Scatter(
+            x=[p.time for p in points],
+            y=[p.watts for p in points],
+            mode="lines",
+            name=name,
+            line=dict(width=3),
+            connectgaps=True,
+            hovertemplate="%{y:.0f} W<extra>%{fullData.name}</extra>",
+        )
+    )
 
+
+def solar_forecast_chart(state: OptimizerState) -> str:
     fig = go.Figure()
 
-    for name, points in forecast.items():
-        fig.add_trace(
-            go.Scatter(
-                x=[p["time"] for p in points],
-                y=[p["watts"] for p in points],
-                mode="lines",
-                name=name,
-                line=dict(
-                    width=3,
-                ),
-                hovertemplate=("%{y:.0f} W<extra>%{fullData.name}</extra>"),
-            )
-        )
+    for name, points in state.solar_forecast.items():
+        add_series(fig, name, points)
 
-    if state.pv_production:
-        fig.add_trace(
-            go.Scatter(
-                x=[p.time for p in state.pv_production],
-                y=[p.watts for p in state.pv_production],
-                mode="lines",
-                name="PV production",
-                line=dict(
-                    width=3,
-                ),
-                connectgaps=True,
-                hovertemplate=("%{y:.0f} W<extra>%{fullData.name}</extra>"),
-            )
-        )
+    add_series(fig, "PV production", state.pv_production)
 
     fig.update_layout(
         title=dict(

@@ -74,6 +74,13 @@ class SolarForecastState(BaseModel):
     p50: list[PowerPoint] = Field(default_factory=list)
     p90: list[PowerPoint] = Field(default_factory=list)
 
+    def items(self):
+        return (
+            ("p10", self.p10),
+            ("p50", self.p50),
+            ("p90", self.p90),
+        )
+
 
 class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
