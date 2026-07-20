@@ -1,18 +1,18 @@
 import ast
 from typing import Any
 
-from domain.models import PvProductionPoint, SolarForecastPoint
+from domain.models import PowerPoint
 from domain.time import parse_datetime
 
 
-def parse_solar_forecast(point: dict[str, Any] | None) -> list[SolarForecastPoint]:
+def parse_solar_forecast(point: dict[str, Any] | None) -> list[PowerPoint]:
     if point is None:
         return []
 
     values = ast.literal_eval(point["value"])
 
     return [
-        SolarForecastPoint(
+        PowerPoint(
             time=parse_datetime(timestamp),
             watts=float(watts),
         )
@@ -22,9 +22,9 @@ def parse_solar_forecast(point: dict[str, Any] | None) -> list[SolarForecastPoin
 
 def parse_pv_production(
     points: list[dict],
-) -> list[PvProductionPoint]:
+) -> list[PowerPoint]:
     return [
-        PvProductionPoint(
+        PowerPoint(
             time=parse_datetime(point["time"]),
             watts=float(point["value"]),
         )

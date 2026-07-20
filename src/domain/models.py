@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Protocol, Any
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -64,26 +64,21 @@ class InfluxSensor(BaseModel):
     field: str
 
 
-class SolarForecastPoint(BaseModel):
-    time: datetime
-    watts: float
-
-
-class PvProductionPoint(BaseModel):
+class PowerPoint(BaseModel):
     time: datetime
     watts: float
 
 
 class SolarForecastState(BaseModel):
-    p10: list[SolarForecastPoint] = Field(default_factory=list)
-    p50: list[SolarForecastPoint] = Field(default_factory=list)
-    p90: list[SolarForecastPoint] = Field(default_factory=list)
+    p10: list[PowerPoint] = Field(default_factory=list)
+    p50: list[PowerPoint] = Field(default_factory=list)
+    p90: list[PowerPoint] = Field(default_factory=list)
 
 
 class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     solar_forecast: SolarForecastState = Field(default_factory=SolarForecastState)
-    pv_production: list[PvProductionPoint] = Field(default_factory=list)
+    pv_production: list[PowerPoint] = Field(default_factory=list)
 
 
 class SensorReferenceRequest(BaseModel):
