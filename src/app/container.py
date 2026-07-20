@@ -1,6 +1,8 @@
 from app.logger import configure_logger
 from app.settings import load_settings
 from app.state_service import StateService
+from app.training_service import TrainingService
+from features.generator import SolarForecastFeatureGenerator
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.storage import JsonStorage
 
@@ -19,4 +21,10 @@ class Container:
             resolver=self.resolver,
             # storage=MemoryStorage(),
             storage=JsonStorage(settings.data_path / "state.json"),
+        )
+
+        self.training_service = TrainingService(
+            influx=self.influx,
+            resolver=self.resolver,
+            generator=SolarForecastFeatureGenerator(),
         )

@@ -43,6 +43,30 @@ Where:
 * `p50` – Entity ID and attribute containing the median (expected) forecast.
 * `p90` – Entity ID and attribute containing the 90th percentile forecast.
 
+
+## Train API
+
+The `/api/train` endpoint is called from a Home Assistant automation using a 
+`rest_command`.
+
+Example automation action:
+```yaml
+actions:
+  - action: rest_command.home_optimizer_api
+    data:
+      endpoint: train
+      payload: |
+        {{ {
+          "solar_forecast": {
+            "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
+            "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
+            "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
+          },
+          "pv_production": "sensor.pv_output",
+          "days": 90
+        } | to_json }}
+```
+
 ### REST Command
 
 Home Optimizer is called from Home Assistant using a `rest_command`.

@@ -126,3 +126,9 @@ class SolarForecastRequest(BaseModel):
 class UpdateRequest(BaseModel):
     solar_forecast: SolarForecastRequest
     pv_production: SensorReferenceRequest
+
+
+class TrainRequest(BaseModel):
+    solar_forecast: SolarForecastRequest
+    pv_production: SensorReferenceRequest
+    days: int = 90

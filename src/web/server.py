@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.container import Container
-from domain.models import UpdateRequest
+from domain.models import TrainRequest, UpdateRequest
 from web.charts import solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,5 +47,12 @@ async def state():
 @app.post("/api/update")
 async def update(request: UpdateRequest):
     container.state_service.update(request)
+
+    return {"ok": True}
+
+
+@app.post("/api/train")
+async def train(request: TrainRequest):
+    container.training_service.train(request)
 
     return {"ok": True}
