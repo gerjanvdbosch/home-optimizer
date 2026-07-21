@@ -114,7 +114,7 @@ class TrainingService:
                     rows.append(
                         {
                             "time": time.replace(second=0, microsecond=0),
-                            "target_time": target_time,
+                            "target_time": target_time.replace(second=0, microsecond=0),
                             "forecast": name,
                             "watts": float(watts),
                         }

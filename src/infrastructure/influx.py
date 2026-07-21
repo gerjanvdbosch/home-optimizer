@@ -68,7 +68,6 @@ class InfluxDatabase:
         if resample:
             query += f"""
         GROUP BY time({resample.interval})
-        fill(previous)
         """
 
         result = self.query(query)
