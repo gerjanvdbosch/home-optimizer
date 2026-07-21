@@ -8,6 +8,16 @@ class SolarForecastFeatureGenerator:
     forecast_columns: list[str] = field(default_factory=lambda: ["p10", "p50", "p90"])
     forecast_lags: list[int] = field(default_factory=lambda: [1, 2, 4, 8, 12])
 
+    forecast_ages: list[str] = field(
+        default_factory=lambda: [
+            "2h",
+            "4h",
+            "8h",
+            "12h",
+            "24h",
+        ]
+    )
+
     epsilon: float = 10.0
 
     include_spread: bool = True
