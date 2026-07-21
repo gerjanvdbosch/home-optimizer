@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from domain.models import Resample, TrainRequest
+from domain.models import Resample, Storage, TrainRequest
 from domain.time import parse_datetime
 from features.generator import SolarForecastFeatureGenerator
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
@@ -15,10 +15,12 @@ class TrainingService:
         influx: InfluxDatabase,
         resolver: InfluxSensorResolver,
         generator: SolarForecastFeatureGenerator,
+        storage: Storage,
     ):
         self.influx = influx
         self.resolver = resolver
         self.generator = generator
+        self.storage = storage
 
     def train(
         self,
@@ -36,6 +38,8 @@ class TrainingService:
         )
 
         df = self.generator.transform(df)
+
+        self.storage.save(df.tail(100).to_dict(orient="records"))
 
         print(df)
 
@@ -59,6 +63,9 @@ class TrainingService:
             end=end,
         )
 
+        print(forecast[["time", "target_time"]].head(10))
+        print(production.head(10))
+
         return (
             forecast.merge(
                 production,
@@ -66,7 +73,7 @@ class TrainingService:
                 how="inner",
             )
             .sort_values(
-                ["target_time", "issue_time"],
+                ["target_time", "time"],
             )
             .reset_index(drop=True)
         )
@@ -91,15 +98,23 @@ class TrainingService:
             )
 
             for point in points:
-                issue_time = parse_datetime(point["time"])
+                time = parse_datetime(point["time"])
 
                 value = ast.literal_eval(point["value"])
 
                 for target_time, watts in value.items():
+                    target_time = parse_datetime(target_time)
+
+                    if target_time < time:
+                        continue
+
+                    if target_time - time > timedelta(hours=24):
+                        continue
+
                     rows.append(
                         {
-                            "issue_time": issue_time,
-                            "target_time": parse_datetime(target_time),
+                            "time": time.replace(second=0, microsecond=0),
+                            "target_time": target_time,
                             "forecast": name,
                             "watts": float(watts),
                         }
@@ -113,7 +128,7 @@ class TrainingService:
         return (
             df.pivot_table(
                 index=[
-                    "issue_time",
+                    "time",
                     "target_time",
                 ],
                 columns="forecast",
@@ -124,7 +139,7 @@ class TrainingService:
             .sort_values(
                 [
                     "target_time",
-                    "issue_time",
+                    "time",
                 ]
             )
             .reset_index(drop=True)
@@ -148,7 +163,7 @@ class TrainingService:
             start=start,
             end=end,
             resample=Resample(
-                interval="5m",
+                interval="30m",
                 aggregation="mean",
             ),
         )

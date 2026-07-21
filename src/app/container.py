@@ -20,11 +20,15 @@ class Container:
             influx=self.influx,
             resolver=self.resolver,
             # storage=MemoryStorage(),
-            storage=JsonStorage(settings.data_path / "state.json"),
+            storage=JsonStorage(path=settings.data_path / "state.json"),
         )
 
         self.training_service = TrainingService(
             influx=self.influx,
             resolver=self.resolver,
             generator=SolarForecastFeatureGenerator(),
+            storage=JsonStorage(
+                path=settings.data_path / "training.json",
+                format=True,
+            ),
         )

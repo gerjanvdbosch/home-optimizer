@@ -6,8 +6,9 @@ from domain.models import Storage
 
 
 class JsonStorage(Storage):
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, format: bool = False):
         self.path = Path(path)
+        self.format = format
 
     def save(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(
@@ -21,6 +22,7 @@ class JsonStorage(Storage):
             json.dumps(
                 data,
                 default=str,
+                indent=2 if self.format else None,
             ),
             encoding="utf-8",
         )

@@ -7,4 +7,5 @@ def parse_datetime(value: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
 
-    return dt.astimezone(datetime.now().astimezone().tzinfo)
+    # return dt.astimezone(datetime.now().astimezone().tzinfo)
+    return dt.astimezone(UTC)
