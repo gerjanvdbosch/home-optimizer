@@ -108,7 +108,7 @@ class TrainingService:
                     if target_time < time:
                         continue
 
-                    if target_time - time > timedelta(hours=24):
+                    if target_time - time > timedelta(hours=48):
                         continue
 
                     rows.append(
