@@ -42,6 +42,8 @@ class TrainingService:
 
         df = self.generator.transform(df)
 
+        self.storage.save(df.tail(100).to_dict(orient="records"))
+
         feature_columns = self._feature_columns(df)
 
         split = int(len(df) * 0.8)
