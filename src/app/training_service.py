@@ -5,6 +5,7 @@ import pandas as pd
 
 from domain.models import Resample, Storage, TrainRequest
 from domain.time import parse_datetime
+from features.forecaster import SolarForecaster
 from features.generator import SolarForecastFeatureGenerator
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 
@@ -15,11 +16,13 @@ class TrainingService:
         influx: InfluxDatabase,
         resolver: InfluxSensorResolver,
         generator: SolarForecastFeatureGenerator,
+        forecaster: SolarForecaster,
         storage: Storage,
     ):
         self.influx = influx
         self.resolver = resolver
         self.generator = generator
+        self.forecaster = forecaster
         self.storage = storage
 
     def train(
@@ -39,11 +42,35 @@ class TrainingService:
 
         df = self.generator.transform(df)
 
-        self.storage.save(df.tail(100).to_dict(orient="records"))
+        feature_columns = self._feature_columns(df)
 
-        print(df)
+        split = int(len(df) * 0.8)
 
-        # fit(df)
+        train = df.iloc[:split]
+        test = df.iloc[split:]
+
+        X_train = train[feature_columns]
+        y_train = train["pv_production"]
+
+        X_test = test[feature_columns]
+        y_test = test["pv_production"]
+
+        self.forecaster.fit(
+            y=y_train,
+            exog=X_train,
+        )
+
+        prediction = self.forecaster.predict(
+            steps=len(X_test),
+            exog=X_test,
+        )
+
+        metrics = self.forecaster.evaluate(
+            y_true=y_test,
+            y_pred=prediction,
+        )
+
+        print(metrics)
 
     def _load(
         self,
@@ -178,3 +205,16 @@ class TrainingService:
         ]
 
         return pd.DataFrame(rows)
+
+    def _feature_columns(
+        self,
+        df: pd.DataFrame,
+    ) -> list[str]:
+
+        excluded = {
+            "time",
+            "target_time",
+            "pv_production",
+        }
+
+        return [column for column in df.columns if column not in excluded]

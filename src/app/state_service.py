@@ -55,7 +55,7 @@ class StateService:
             end=now,
             resample=Resample(
                 aggregation="mean",
-                interval="5m",
+                interval="30m",
             ),
         )
 
