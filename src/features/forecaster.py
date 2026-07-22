@@ -14,7 +14,7 @@ class SolarForecaster:
         *,
         steps: int = 48,
         lags: int = 4,
-        max_iter: int = 500,
+        max_iter: int = 10,
         learning_rate: float = 0.05,
         random_state: int = 42,
     ) -> None:
