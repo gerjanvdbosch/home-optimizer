@@ -2,40 +2,33 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from skforecast.preprocessing import CalendarFeatures
-from skforecast.recursive import ForecasterRecursive
+from skforecast.direct import ForecasterDirect
+from skforecast.model_selection import TimeSeriesFold, backtesting_forecaster
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
 class SolarForecaster:
+
     def __init__(
         self,
+        *,
+        steps: int = 48,
         lags: int = 4,
         max_iter: int = 500,
         learning_rate: float = 0.05,
         random_state: int = 42,
     ) -> None:
 
-        calendar = CalendarFeatures(
-            features=[
-                "month",
-                "week",
-                "day_of_week",
-                "hour",
-            ],
-            encoding="cyclical",
-            keep_original_columns=False,
-        )
+        self.steps = steps
 
-        self.forecaster = ForecasterRecursive(
+        self.forecaster = ForecasterDirect(
             estimator=HistGradientBoostingRegressor(
                 max_iter=max_iter,
                 learning_rate=learning_rate,
                 random_state=random_state,
             ),
             lags=lags,
-            # calendar_features=calendar,
+            steps=steps,
         )
 
     def fit(
@@ -49,37 +42,40 @@ class SolarForecaster:
             exog=exog,
         )
 
+    def backtest(
+        self,
+        y: pd.Series,
+        exog: pd.DataFrame,
+    ):
+
+        cv = TimeSeriesFold(
+            steps=self.steps,
+            initial_train_size=int(len(y) * 0.8),
+            refit=True,
+        )
+
+        metrics, predictions = backtesting_forecaster(
+            forecaster=self.forecaster,
+            y=y,
+            exog=exog,
+            cv=cv,
+            metric=[
+                "mean_absolute_error",
+                "mean_squared_error",
+            ],
+        )
+
+        return metrics, predictions
+
     def predict(
         self,
-        steps: int,
         exog: pd.DataFrame,
     ) -> pd.Series:
 
         return self.forecaster.predict(
-            steps=steps,
+            steps=self.steps,
             exog=exog,
         )
-
-    def evaluate(
-        self,
-        y_true: pd.Series,
-        y_pred: pd.Series,
-    ) -> dict[str, float]:
-
-        mae = mean_absolute_error(
-            y_true,
-            y_pred,
-        )
-
-        rmse = mean_squared_error(
-            y_true,
-            y_pred,
-        )
-
-        return {
-            "mae": mae,
-            "rmse": rmse,
-        }
 
     def save(
         self,

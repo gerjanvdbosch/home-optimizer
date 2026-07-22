@@ -1,5 +1,6 @@
 import ast
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 import pandas as pd
 
@@ -42,37 +43,27 @@ class TrainingService:
 
         df = self.generator.transform(df)
 
-        self.storage.save(df.tail(100).to_dict(orient="records"))
-
-        feature_columns = self._feature_columns(df)
-
-        split = int(len(df) * 0.8)
-
-        train = df.iloc[:split]
-        test = df.iloc[split:]
-
-        X_train = train[feature_columns]
-        y_train = train["pv_production"]
-
-        X_test = test[feature_columns]
-        y_test = test["pv_production"]
-
-        self.forecaster.fit(
-            y=y_train,
-            exog=X_train,
+        records = cast(
+            dict[str, Any],
+            cast(object, df.tail(100).to_dict(orient="records")),
         )
 
-        prediction = self.forecaster.predict(
-            steps=len(X_test),
-            exog=X_test,
+        self.storage.save(records)
+
+        y = df["pv_production"]
+        X = df.drop(
+            columns=[
+                "pv_production",
+            ]
         )
 
-        metrics = self.forecaster.evaluate(
-            y_true=y_test,
-            y_pred=prediction,
+        metrics, predictions = self.forecaster.backtest(
+            y=y,
+            exog=X,
         )
 
         print(metrics)
+        print(predictions)
 
     def _load(
         self,
@@ -207,16 +198,3 @@ class TrainingService:
         ]
 
         return pd.DataFrame(rows)
-
-    def _feature_columns(
-        self,
-        df: pd.DataFrame,
-    ) -> list[str]:
-
-        excluded = {
-            "time",
-            "target_time",
-            "pv_production",
-        }
-
-        return [column for column in df.columns if column not in excluded]
