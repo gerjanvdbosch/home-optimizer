@@ -4,9 +4,9 @@ from typing import Any, cast
 
 import pandas as pd
 
-from domain.models import Resample, Storage, TrainRequest
+from domain.models import Resample, SensorReferenceRequest, Storage, TrainRequest
 from domain.time import parse_datetime
-from features.forecaster import SolarForecaster
+from features.forecaster import DhwForecaster, SolarForecaster
 from features.generator import SolarForecastFeatureGenerator
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 
@@ -51,6 +51,53 @@ class TrainingService:
         self.storage.save(records)
 
         # self.forecaster.fit(df)
+
+        df = self._load_boiler_features(
+            start=start,
+            end=end,
+        )
+
+        dhw = DhwForecaster(lags=96)
+
+        dhw.fit(
+            temperature=df["temp"],
+            exog=df[
+                [
+                    "mode",
+                ]
+            ],
+        )
+
+        metrics, predictions = dhw.backtest(
+            temperature=df["temp"],
+            exog=df[
+                [
+                    "mode",
+                ]
+            ],
+        )
+
+        print(metrics)
+
+        future_index = pd.date_range(
+            start=df.index[-1] + pd.Timedelta("15min"),
+            periods=24,
+            freq="15min",
+        )
+
+        future_exog = pd.DataFrame(
+            {
+                "mode": ["Uit"] * 24,
+            },
+            index=future_index,
+        )
+
+        future = dhw.predict(
+            steps=24,
+            exog=future_exog,
+        )
+
+        print(future)
 
     def _load(
         self,
@@ -185,3 +232,76 @@ class TrainingService:
         ]
 
         return pd.DataFrame(rows)
+
+    def _load_boiler_features(self, start, end):
+
+        temp_sensor = self.resolver.resolve(
+            SensorReferenceRequest(
+                entity_id="sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
+                attribute="value",
+            )
+        )
+
+        mode_sensor = self.resolver.resolve(
+            SensorReferenceRequest(
+                entity_id="sensor.ecodan_heatpump_ca09ec_status_bedrijf",
+                attribute="state",
+            )
+        )
+
+        temp_points = self.influx.find_series(
+            measurement=temp_sensor.measurement,
+            entity_id=temp_sensor.entity_id,
+            field=temp_sensor.field,
+            start=start,
+            end=end,
+            resample=Resample(
+                interval="15m",
+                aggregation="mean",
+            ),
+        )
+
+        mode_points = self.influx.find_series(
+            measurement=mode_sensor.measurement,
+            entity_id=mode_sensor.entity_id,
+            field=mode_sensor.field,
+            start=start,
+            end=end,
+        )
+
+        temp = pd.DataFrame(
+            {
+                "time": [parse_datetime(p["time"]) for p in temp_points if p["value"] is not None],
+                "temp": [float(p["value"]) for p in temp_points if p["value"] is not None],
+            }
+        )
+
+        mode = pd.DataFrame(
+            {
+                "time": [parse_datetime(p["time"]) for p in mode_points if p["value"] is not None],
+                "mode": [str(p["value"]) for p in mode_points if p["value"] is not None],
+            }
+        )
+
+        df = pd.merge_asof(
+            temp.sort_values("time"),
+            mode.sort_values("time"),
+            on="time",
+            direction="backward",
+        )
+
+        return (
+            df.set_index("time")
+            .sort_index()
+            .resample("15min")
+            .agg(
+                {
+                    "temp": "mean",
+                    "mode": "last",
+                }
+            )
+            .assign(
+                mode=lambda x: x["mode"].ffill().fillna("Uit"),
+                temp=lambda x: x["temp"].interpolate(),
+            )
+        )
