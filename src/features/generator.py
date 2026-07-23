@@ -44,10 +44,6 @@ class SolarForecastFeatureGenerator:
                 df[self.target_column] - df[self.time_column]
             ).dt.total_seconds() / 60
 
-            df["forecast_age"] = (
-                df[self.time_column] - df.groupby(self.target_column)[self.time_column].shift(1)
-            ).dt.total_seconds() / 60
-
         lag_columns = list(self.forecast_columns)
 
         if self.include_spread:

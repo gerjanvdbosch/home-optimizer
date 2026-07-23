@@ -50,20 +50,7 @@ class TrainingService:
 
         self.storage.save(records)
 
-        # y = df["pv_production"]
-        # X = df.drop(
-        #     columns=[
-        #         "pv_production",
-        #     ]
-        # )
-        #
-        # metrics, predictions = self.forecaster.backtest(
-        #     y=y,
-        #     exog=X,
-        # )
-        #
-        # print(metrics)
-        # print(predictions)
+        # self.forecaster.fit(df)
 
     def _load(
         self,
