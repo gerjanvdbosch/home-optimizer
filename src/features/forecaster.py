@@ -60,8 +60,10 @@ class DhwForecaster:
             features=[
                 "hour",
                 "day_of_week",
+                "week",
                 "weekend",
                 "month",
+                "quarter",
             ],
         )
 
