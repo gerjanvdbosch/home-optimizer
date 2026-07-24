@@ -77,6 +77,24 @@ class DhwForecaster:
             encoding="cyclical",
         )
 
+        # series = data[["T_top", "T_bottom", "delta_T"]]
+        #
+        # forecaster_top = ForecasterDirectMultiVariate(
+        #     regressor=XGBRegressor(n_estimators=300, max_depth=5, learning_rate=0.05),
+        #     level="T_top",
+        #     lags=24,
+        #     steps=96,
+        # )
+        # forecaster_bottom = ForecasterDirectMultiVariate(
+        #     regressor=XGBRegressor(n_estimators=300, max_depth=5, learning_rate=0.05),
+        #     level="T_bottom",
+        #     lags=24,
+        #     steps=96,
+        # )
+        #
+        # forecaster_top.fit(series=series, exog=exog_data)
+        # forecaster_bottom.fit(series=series, exog=exog_data)
+
         self.forecaster = ForecasterRecursive(
             estimator=model,
             lags=lags,
