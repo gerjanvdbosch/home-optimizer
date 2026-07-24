@@ -1,8 +1,14 @@
 from pathlib import Path
+from typing import cast
 
 import joblib
 import pandas as pd
-from skforecast.model_selection import TimeSeriesFold, backtesting_forecaster
+from optuna import Study
+from skforecast.model_selection import (
+    TimeSeriesFold,
+    backtesting_forecaster,
+    bayesian_search_forecaster,
+)
 from skforecast.preprocessing import CalendarFeatures, RollingFeatures
 from skforecast.recursive import ForecasterRecursive
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -46,25 +52,29 @@ class DhwForecaster:
         window_features = RollingFeatures(
             stats=[
                 "mean",
+                "std",
                 "min",
                 "max",
             ],
             window_sizes=[
                 4,
                 16,
+                48,
                 96,
             ],
         )
 
         calendar_features = CalendarFeatures(
             features=[
+                "minute",
                 "hour",
-                "day_of_week",
                 "week",
-                "weekend",
                 "month",
                 "quarter",
+                "day_of_week",
+                "weekend",
             ],
+            encoding="cyclical",
         )
 
         self.forecaster = ForecasterRecursive(
@@ -73,6 +83,10 @@ class DhwForecaster:
             calendar_features=calendar_features,
             window_features=window_features,
         )
+
+        self.best_params = None
+        self.best_score = None
+        self.tuning_results = None
 
     def fit(self, temperature: pd.Series, exog: pd.DataFrame | None = None):
         temperature = temperature.sort_index()
@@ -134,3 +148,65 @@ class DhwForecaster:
 
     def load(self, path: str | Path):
         return joblib.load(path)
+
+    def tune(
+        self,
+        temperature: pd.Series,
+        exog: pd.DataFrame | None = None,
+        steps: int = 24,
+        n_trials: int = 20,
+    ):
+        cv = TimeSeriesFold(
+            steps=steps,
+            initial_train_size=int(len(temperature) * 0.7),
+            refit=False,
+        )
+
+        def search_space(trial):
+            return {
+                "lags": trial.suggest_categorical("lags", [24, 48, 72, 96]),
+                "learning_rate": trial.suggest_float(
+                    "learning_rate",
+                    0.01,
+                    0.2,
+                    log=True,
+                ),
+                "max_depth": trial.suggest_int(
+                    "max_depth",
+                    3,
+                    10,
+                ),
+                "max_iter": trial.suggest_int(
+                    "max_iter",
+                    100,
+                    500,
+                    step=50,
+                ),
+                "min_samples_leaf": trial.suggest_int(
+                    "min_samples_leaf",
+                    10,
+                    80,
+                ),
+            }
+
+        results, study = bayesian_search_forecaster(
+            forecaster=self.forecaster,
+            y=temperature,
+            exog=exog,
+            cv=cv,
+            metric="mean_absolute_error",
+            search_space=search_space,
+            n_trials=n_trials,
+            random_state=42,
+            return_best=True,
+        )
+
+        study = cast(Study, study)
+
+        best_trial = study.best_trial
+
+        self.tuning_results = results
+        self.best_params = best_trial.params
+        self.best_score = best_trial.value
+
+        return self

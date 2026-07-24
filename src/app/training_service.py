@@ -68,6 +68,18 @@ class TrainingService:
             ],
         )
 
+        dhw.tune(
+            temperature=df["temp"],
+            exog=df[
+                [
+                    "mode",
+                ]
+            ],
+        )
+
+        print(dhw.best_params)
+        print(dhw.best_score)
+
         metrics, predictions = dhw.backtest(
             temperature=df["temp"],
             exog=df[
