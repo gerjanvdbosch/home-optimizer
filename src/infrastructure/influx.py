@@ -99,6 +99,7 @@ class InfluxSensorResolver:
                         measurement=name,
                         entity_id="",
                         field=field["fieldKey"],
+                        value_type=field["fieldType"],
                     )
                 )
 
@@ -136,6 +137,7 @@ class InfluxSensorResolver:
                     measurement=influx_sensor.measurement,
                     entity_id=entity_id,
                     field=field_name,
+                    value_type=influx_sensor.value_type,
                 )
 
                 self.cache[cache_key] = resolved

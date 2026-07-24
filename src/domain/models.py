@@ -62,6 +62,7 @@ class InfluxSensor(BaseModel):
     measurement: str
     entity_id: str
     field: str
+    value_type: str | None = None
 
 
 class PowerPoint(BaseModel):

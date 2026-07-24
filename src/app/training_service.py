@@ -50,8 +50,6 @@ class TrainingService:
 
         self.storage.save(records)
 
-        # self.forecaster.fit(df)
-
         df = self._load_boiler_features(
             start=start,
             end=end,
