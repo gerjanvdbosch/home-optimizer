@@ -44,12 +44,23 @@ class Storage(Protocol):
 
 Aggregation = Literal[
     "mean",
+    "count",
     "last",
     "first",
     "min",
     "max",
     "sum",
     "median",
+    "spread",
+    "stddev",
+]
+
+FillMethod = Literal[
+    "none",
+    "null",
+    "number",
+    "previous",
+    "linear",
 ]
 
 
@@ -119,6 +130,14 @@ class SensorReference(BaseModel):
             }
 
         return value
+
+
+class Feature(BaseModel):
+    name: str
+    sensor: SensorReference
+    aggregation: Aggregation = "mean"
+    interval: str = "15m"
+    fill: FillMethod = "none"
 
 
 class SolarForecastRequest(BaseModel):
