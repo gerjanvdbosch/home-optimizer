@@ -16,8 +16,10 @@ for installation and configuration.
 
 ## Update API
 
-The `/api/update` endpoint is called from a Home Assistant automation using a 
-`rest_command`.
+The `/api/update` endpoint is called from a Home Assistant automation using a
+`rest_command`. It registers the Home Assistant sensor mappings for later use
+by the training and optimization endpoints and updates the current optimizer
+state.
 
 Example automation action:
 
@@ -28,20 +30,25 @@ actions:
       endpoint: update
       payload: |
         {{ {
-          "solar_forecast": {
-            "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
-            "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
-            "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
+          "solar": {
+            "production": "sensor.pv_output",
+            "forecast": {
+                "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
+                "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
+                "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
+              },
           },
-          "pv_production": "sensor.pv_output"
+          "heat_pump": {
+            "mode": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
+            "supply_temperature": "sensor.ecodan_heatpump_ca09ec_aanvoer_temp",
+            "return_temperature": "sensor.ecodan_heatpump_ca09ec_retour_temp",
+            "boiler_temperature": {
+              "top": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
+              "bottom": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
+            },
+          }
         } | to_json }}
 ```
-
-Where:
-
-* `p10` – Entity ID and attribute containing the 10th percentile forecast.
-* `p50` – Entity ID and attribute containing the median (expected) forecast.
-* `p90` – Entity ID and attribute containing the 90th percentile forecast.
 
 
 ## Train API
@@ -57,19 +64,19 @@ actions:
       endpoint: train
       payload: |
         {{ {
-          "solar_forecast": {
-            "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
-            "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
-            "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
-          },
-          "pv_production": "sensor.pv_output",
           "days": 90
         } | to_json }}
 ```
 
 ## Tune API
 
+TODO
+
+
 ## Back test API
+
+TODO
+
 
 ### REST Command
 

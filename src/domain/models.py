@@ -70,6 +70,15 @@ class PowerPoint(BaseModel):
     watts: float
 
 
+class TemperaturePoint(BaseModel):
+    time: datetime
+    temperature: float
+
+
+class BoilerState(BaseModel):
+    temperature_top: list[TemperaturePoint]
+
+
 class SolarForecastState(BaseModel):
     p10: list[PowerPoint] = Field(default_factory=list)
     p50: list[PowerPoint] = Field(default_factory=list)
@@ -87,6 +96,7 @@ class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     solar_forecast: SolarForecastState = Field(default_factory=SolarForecastState)
     pv_production: list[PowerPoint] = Field(default_factory=list)
+    boiler: list[BoilerState] = Field(default_factory=list)
 
 
 class SensorReferenceRequest(BaseModel):
