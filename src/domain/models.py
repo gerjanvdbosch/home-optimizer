@@ -99,7 +99,7 @@ class OptimizerState(BaseModel):
     boiler: list[BoilerState] = Field(default_factory=list)
 
 
-class SensorReferenceRequest(BaseModel):
+class SensorReference(BaseModel):
     entity_id: str
     attribute: str
 
@@ -122,9 +122,9 @@ class SensorReferenceRequest(BaseModel):
 
 
 class SolarForecastRequest(BaseModel):
-    p10: SensorReferenceRequest
-    p50: SensorReferenceRequest
-    p90: SensorReferenceRequest
+    p10: SensorReference
+    p50: SensorReference
+    p90: SensorReference
 
     def items(self):
         return (
@@ -136,10 +136,10 @@ class SolarForecastRequest(BaseModel):
 
 class UpdateRequest(BaseModel):
     solar_forecast: SolarForecastRequest
-    pv_production: SensorReferenceRequest
+    pv_production: SensorReference
 
 
 class TrainRequest(BaseModel):
     solar_forecast: SolarForecastRequest
-    pv_production: SensorReferenceRequest
+    pv_production: SensorReference
     days: int = 90

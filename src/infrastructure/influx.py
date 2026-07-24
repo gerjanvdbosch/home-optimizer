@@ -4,7 +4,7 @@ from typing import Any, cast
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from domain.models import InfluxSensor, Resample, SensorReferenceRequest, Settings
+from domain.models import InfluxSensor, Resample, SensorReference, Settings
 
 
 class InfluxDatabase:
@@ -107,7 +107,7 @@ class InfluxSensorResolver:
 
     def resolve(
         self,
-        sensor: SensorReferenceRequest,
+        sensor: SensorReference,
     ) -> InfluxSensor:
         self.load_schema()
 

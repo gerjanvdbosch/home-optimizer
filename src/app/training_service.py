@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pandas as pd
 
-from domain.models import Resample, SensorReferenceRequest, Storage, TrainRequest
+from domain.models import Resample, SensorReference, Storage, TrainRequest
 from domain.time import parse_datetime
 from features.forecaster import DhwForecaster, SolarForecaster
 from features.generator import SolarForecastFeatureGenerator
@@ -246,14 +246,14 @@ class TrainingService:
     def _load_boiler_features(self, start, end):
 
         temp_sensor = self.resolver.resolve(
-            SensorReferenceRequest(
+            SensorReference(
                 entity_id="sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
                 attribute="value",
             )
         )
 
         mode_sensor = self.resolver.resolve(
-            SensorReferenceRequest(
+            SensorReference(
                 entity_id="sensor.ecodan_heatpump_ca09ec_status_bedrijf",
                 attribute="state",
             )
