@@ -67,6 +67,10 @@ actions:
         } | to_json }}
 ```
 
+## Tune API
+
+## Back test API
+
 ### REST Command
 
 Home Optimizer is called from Home Assistant using a `rest_command`.
