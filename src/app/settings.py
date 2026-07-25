@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from domain.models import Settings
+from domain.models.models import Settings
 
 
 def load_settings() -> Settings:

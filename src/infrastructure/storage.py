@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from domain.models import Storage
+from domain.models.models import Storage
 
 
 class JsonStorage(Storage):

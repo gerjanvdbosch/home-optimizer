@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pandas as pd
 
-from domain.models import Resample, SensorReference, Storage, TrainRequest
+from domain.models.models import Resample, SensorReference, Storage, TrainRequest
 from domain.time import parse_datetime
 from features.forecasters.base import DhwForecaster, SolarForecaster
 from features.generator import SolarForecastFeatureGenerator

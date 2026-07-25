@@ -1,6 +1,6 @@
 import plotly.graph_objects as go
 
-from domain.models import OptimizerState
+from domain.models.models import OptimizerState
 
 
 def add_series(

@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from domain.models import OptimizerState, Resample, SolarForecastState, Storage, UpdateRequest
+from domain.models.models import (
+    OptimizerState,
+    Resample,
+    SolarForecastState,
+    Storage,
+    UpdateRequest,
+)
 from domain.parser import parse_pv_production, parse_solar_forecast
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 

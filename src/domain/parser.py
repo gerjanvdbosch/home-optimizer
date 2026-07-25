@@ -1,7 +1,7 @@
 import ast
 from typing import Any
 
-from domain.models import PowerPoint
+from domain.models.models import PowerPoint
 from domain.time import parse_datetime
 
 

@@ -3,8 +3,16 @@ from typing import Any, cast
 
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
+from pydantic import BaseModel
 
-from domain.models import InfluxSensor, Resample, SensorReference, Settings
+from domain.models.models import Settings, SensorReference
+
+
+class InfluxSensor(BaseModel):
+    measurement: str
+    entity_id: str
+    field: str
+    value_type: str | None = None
 
 
 class InfluxDatabase:

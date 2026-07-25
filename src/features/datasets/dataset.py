@@ -1,13 +1,5 @@
-from datetime import datetime
-
-import pandas as pd
-
-
-from datetime import datetime
-
-import pandas as pd
-
-from domain.models import DatasetSpec, SensorSpec
+from domain.models.common import DataLoader
+from domain.models.models import DatasetSpec, SensorSpec
 
 
 class DatasetLoader:
@@ -176,17 +168,7 @@ class DatasetBuilder:
 #         )
 
 
-from datetime import datetime
-
-import pandas as pd
-
-from domain.models import (
-    TimeSeriesSpec,
-    Resample,
-)
-
-
-class TimeSeriesLoader:
+class TimeSeriesLoader(DataLoader):
 
     def __init__(
         self,
@@ -249,7 +231,7 @@ class TimeSeriesLoader:
         return df
 
 
-class ForecastLoader:
+class ForecastLoader(DataLoader):
 
     def __init__(
         self,
