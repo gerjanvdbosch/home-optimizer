@@ -1,19 +1,144 @@
-from pydantic import BaseModel
+from datetime import timedelta
+from pathlib import Path
+from typing import Literal
 
-from domain.models import SensorReference
+from pydantic import BaseModel, Field, model_validator
+
+Aggregation = Literal[
+    "mean",
+    "count",
+    "last",
+    "first",
+    "min",
+    "max",
+    "sum",
+    "median",
+    "spread",
+    "stddev",
+]
+
+FillMethod = Literal[
+    "none",
+    "null",
+    "number",
+    "previous",
+    "linear",
+]
+
+
+class Settings(BaseModel):
+    influx_host: str = Field(
+        default="homeassistant.local",
+        description="InfluxDB host",
+    )
+    influx_port: int = Field(
+        default=8086,
+        description="InfluxDB port",
+    )
+    influx_username: str = Field(
+        default="",
+        description="InfluxDB username",
+    )
+    influx_password: str = Field(
+        default="",
+        description="InfluxDB password",
+    )
+    influx_database: str = Field(
+        default="home_assistant",
+        description="InfluxDB database",
+    )
+    data_path: Path = Field(
+        default=Path("data"),
+        description="Data path",
+    )
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level",
+    )
+
+
+class InfluxSensor(BaseModel):
+    measurement: str
+    entity_id: str
+    field: str
+    value_type: str | None = None
+
+
+class SensorReference(BaseModel):
+    entity_id: str = Field()
+    attribute: str = Field()
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve(cls, value):
+        if isinstance(value, str):
+            return {
+                "entity_id": value,
+                "attribute": "value",
+            }
+
+        if isinstance(value, (list, tuple)):
+            return {
+                "entity_id": value[0],
+                "attribute": value[1],
+            }
+
+        return value
+
+
+class DataSpec(BaseModel):
+    name: str
+    sensor: SensorReference
+
+
+class TimeSeriesSpec(DataSpec):
+    aggregation: Aggregation = "mean"
+    interval: str = "15min"
+    fill: FillMethod = "none"
+
+
+class ForecastSpec(DataSpec):
+    horizon: timedelta = timedelta(hours=48)
+
+
+class DatasetSpec(BaseModel):
+    data: list[TimeSeriesSpec | ForecastSpec]
+
+
+class SolarForecastConfig(BaseModel):
+    p10: SensorReference = Field(description="10 percentile")
+    p50: SensorReference = Field(description="50 percentile")
+    p90: SensorReference = Field(description="90 percentile")
+
+    def items(self):
+        return (
+            ("p10", self.p10),
+            ("p50", self.p50),
+            ("p90", self.p90),
+        )
 
 
 class SolarConfig(BaseModel):
-    production: SensorReference
-    forecast: dict[str, SensorReference]
+    production: SensorReference = Field()
+    forecast: SolarForecastConfig = Field()
 
 
 class BoilerTemperatureConfig(BaseModel):
-    top: SensorReference
-    bottom: SensorReference
+    top: SensorReference = Field()
+    bottom: SensorReference = Field()
 
 
 class HeatPumpConfig(BaseModel):
-    supply_temperature: SensorReference
-    return_temperature: SensorReference
-    boiler_temperature: BoilerTemperatureConfig
+    mode: SensorReference = Field()
+    supply_temperature: SensorReference = Field()
+    return_temperature: SensorReference = Field()
+    boiler_temperature: BoilerTemperatureConfig = Field()
+
+
+class UpdateConfig(BaseModel):
+    solar: SolarConfig = Field()
+    heat_pump: HeatPumpConfig = Field()
+
+
+class TrainConfig(BaseModel):
+    days: int = Field(default=90)

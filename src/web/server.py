@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.container import Container
 from domain.models import TrainRequest, UpdateRequest
-from web.charts import solar_forecast_chart
+from web.charts.solar import solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
 

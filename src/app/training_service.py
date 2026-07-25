@@ -6,7 +6,7 @@ import pandas as pd
 
 from domain.models import Resample, SensorReference, Storage, TrainRequest
 from domain.time import parse_datetime
-from features.forecaster import DhwForecaster, SolarForecaster
+from features.forecasters.base import DhwForecaster, SolarForecaster
 from features.generator import SolarForecastFeatureGenerator
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 
