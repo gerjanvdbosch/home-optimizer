@@ -5,7 +5,7 @@ from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 from pydantic import BaseModel
 
-from domain.models.models import Settings, SensorReference
+from domain.models.config import SensorReference, Settings
 
 
 class InfluxSensor(BaseModel):
@@ -57,10 +57,12 @@ class InfluxDatabase:
         field: str,
         start: datetime,
         end: datetime,
-        resample: Resample | None = None,
+        interval: str | None = None,
+        aggregation: str | None = None,
+        fill: str = "null",
     ) -> list[dict[str, Any]]:
-        if resample:
-            select = f'{resample.aggregation}("{field}")'
+        if interval and aggregation:
+            select = f'{aggregation}("{field}")'
         else:
             select = f'"{field}"'
 
@@ -73,9 +75,9 @@ class InfluxDatabase:
             AND time < '{end.isoformat()}'
         """
 
-        if resample:
+        if interval and aggregation:
             query += f"""
-        GROUP BY time({resample.interval}) fill(null)
+        GROUP BY time({interval}) fill({fill})
         """
 
         result = self.query(query)

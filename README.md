@@ -42,9 +42,9 @@ actions:
             "mode": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
             "supply_temperature": "sensor.ecodan_heatpump_ca09ec_aanvoer_temp",
             "return_temperature": "sensor.ecodan_heatpump_ca09ec_retour_temp",
-            "boiler_temperature": {
-              "top": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
-              "bottom": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
+            "boiler": {
+              "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
+              "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
             },
           }
         } | to_json }}

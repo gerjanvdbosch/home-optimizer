@@ -1,32 +1,32 @@
 import ast
 from typing import Any
 
-from domain.models.models import PowerPoint
+from domain.models.state import FloatPoint
 from domain.time import parse_datetime
 
 
-def parse_solar_forecast(point: dict[str, Any] | None) -> list[PowerPoint]:
+def parse_forecast(point: dict[str, Any] | None) -> list[FloatPoint]:
     if point is None:
         return []
 
     values = ast.literal_eval(point["value"])
 
     return [
-        PowerPoint(
+        FloatPoint(
             time=parse_datetime(timestamp),
-            watts=float(watts),
+            value=float(value),
         )
-        for timestamp, watts in values.items()
+        for timestamp, value in values.items()
     ]
 
 
-def parse_pv_production(
+def parse_timeseries(
     points: list[dict],
-) -> list[PowerPoint]:
+) -> list[FloatPoint]:
     return [
-        PowerPoint(
+        FloatPoint(
             time=parse_datetime(point["time"]),
-            watts=float(point["value"]),
+            value=float(point["value"]),
         )
         for point in points
         if point["value"] is not None

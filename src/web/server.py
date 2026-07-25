@@ -5,9 +5,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.container import Container
-from domain.models.models import TrainRequest, UpdateRequest
-from web.charts.solar import solar_forecast_chart
+from app.bootstrap import create_container
+from domain.models.config import HomeConfig, TrainConfig
+from web.chart import solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -19,7 +19,7 @@ app.mount(
     name="static",
 )
 
-container = Container()
+container = create_container()
 
 templates = Jinja2Templates(
     directory=BASE_DIR / "templates",
@@ -28,7 +28,7 @@ templates = Jinja2Templates(
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    state = container.state_service.load()
+    state = container.state_updater.load()
 
     return templates.TemplateResponse(
         request=request,
@@ -41,18 +41,32 @@ async def dashboard(request: Request):
 
 @app.get("/api/state")
 async def state():
-    return container.state_service.load()
+    return container.state_updater.load()
 
 
 @app.post("/api/update")
-async def update(request: UpdateRequest):
-    container.state_service.update(request)
+async def update(config: HomeConfig):
+    container.state_updater.update(config)
 
     return {"ok": True}
 
 
 @app.post("/api/train")
-async def train(request: TrainRequest):
-    container.training_service.train(request)
+async def train(config: TrainConfig):
+    container.trainer.train(config)
 
     return {"ok": True}
+
+
+# @app.post("/api/backtest")
+# async def backtest(config: TrainConfig):
+#     container.trainer.train(config)
+#
+#     return {"ok": True}
+#
+#
+# @app.post("/api/tune")
+# async def backtest(config: TrainConfig):
+#     container.trainer.tune(config)
+#
+#     return {"ok": True}

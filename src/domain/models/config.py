@@ -92,8 +92,8 @@ class DataSpec(BaseModel):
 
 
 class TimeSeriesSpec(DataSpec):
-    aggregation: Aggregation = "mean"
-    interval: str = "15min"
+    aggregation: Aggregation | None = None
+    interval: str = "1min"
     fill: FillMethod = "none"
 
 
@@ -102,7 +102,7 @@ class ForecastSpec(DataSpec):
 
 
 class DatasetSpec(BaseModel):
-    data: list[TimeSeriesSpec | ForecastSpec]
+    specs: list[DataSpec] = []
 
 
 class SolarForecastConfig(BaseModel):
@@ -123,19 +123,19 @@ class SolarConfig(BaseModel):
     forecast: SolarForecastConfig = Field()
 
 
-class BoilerTemperatureConfig(BaseModel):
-    top: SensorReference = Field()
-    bottom: SensorReference = Field()
+class BoilerConfig(BaseModel):
+    top_temperature: SensorReference = Field()
+    bottom_temperature: SensorReference = Field()
 
 
 class HeatPumpConfig(BaseModel):
     mode: SensorReference = Field()
     supply_temperature: SensorReference = Field()
     return_temperature: SensorReference = Field()
-    boiler_temperature: BoilerTemperatureConfig = Field()
+    boiler: BoilerConfig = Field()
 
 
-class UpdateConfig(BaseModel):
+class HomeConfig(BaseModel):
     solar: SolarConfig = Field()
     heat_pump: HeatPumpConfig = Field()
 

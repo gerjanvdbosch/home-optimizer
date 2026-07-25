@@ -8,9 +8,9 @@ class FloatPoint(BaseModel):
     value: float
 
 
-class BoilerState(BaseModel):
-    temperature_top: list[FloatPoint]
-    temperature_bottom: list[FloatPoint]
+class StringPoint(BaseModel):
+    time: datetime
+    value: str
 
 
 class SolarForecastState(BaseModel):
@@ -26,8 +26,24 @@ class SolarForecastState(BaseModel):
         )
 
 
+class SolarState(BaseModel):
+    production: list[FloatPoint] = Field(default_factory=list)
+    forecast: SolarForecastState = Field(default_factory=SolarForecastState)
+
+
+class BoilerState(BaseModel):
+    top_temperature: list[FloatPoint] = Field(default_factory=list)
+    bottom_temperature: list[FloatPoint] = Field(default_factory=list)
+
+
+class HeatPumpState(BaseModel):
+    mode: list[StringPoint] = Field(default_factory=list)
+    supply_temperature: list[FloatPoint] = Field(default_factory=list)
+    return_temperature: list[FloatPoint] = Field(default_factory=list)
+    boiler: BoilerState = Field(default_factory=BoilerState)
+
+
 class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    solar_forecast: SolarForecastState = Field(default_factory=SolarForecastState)
-    pv_production: list[FloatPoint] = Field(default_factory=list)
-    boiler: list[BoilerState] = Field(default_factory=list)
+    solar: SolarState = Field(default_factory=SolarState)
+    heat_pump: HeatPumpState = Field(default_factory=HeatPumpState)

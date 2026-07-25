@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 import pandas as pd
 
@@ -12,7 +12,10 @@ class Storage(Protocol):
     def load(self) -> dict[str, Any]: ...
 
 
-class DataLoader(Protocol):
+T = TypeVar("T", bound=DataSpec, contravariant=True)
+
+
+class DataLoader(Protocol[T]):
     def supports(self, spec: DataSpec) -> bool: ...
 
-    def load(self, spec: DataSpec, start: datetime, end: datetime) -> pd.DataFrame: ...
+    def load(self, spec: T, start: datetime, end: datetime) -> pd.DataFrame: ...
