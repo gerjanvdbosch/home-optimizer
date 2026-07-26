@@ -19,9 +19,7 @@ class JsonStorage:
             exist_ok=True,
         )
 
-        temp_path = self.path.with_suffix(".tmp")
-
-        temp_path.write_text(
+        self.path.write_text(
             json.dumps(
                 obj,
                 default=str,
@@ -29,8 +27,6 @@ class JsonStorage:
             ),
             encoding="utf-8",
         )
-
-        temp_path.replace(self.path)
 
     def load(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -41,6 +37,3 @@ class JsonStorage:
                 encoding="utf-8",
             )
         )
-
-
-# class JoblibStorage

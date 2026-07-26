@@ -16,6 +16,7 @@ from features.dataset import (
     DatasetLoader,
     TimeSeriesLoader,
 )
+from features.forecasters.boiler import BoilerTopForecaster
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.repository import ConfigRepository, StateRepository
 from infrastructure.storage import JsonStorage
@@ -62,7 +63,10 @@ def create_container() -> Container:
 
     trainer = Trainer(
         loader=dataset_loader,
-        forecasters=[],
+        path=settings.data_path / "models",
+        forecasters=[
+            BoilerTopForecaster(),
+        ],
     )
 
     return Container(

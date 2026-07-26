@@ -42,8 +42,7 @@ class AttributeTimeSeriesDefinition(DataDefinition):
     fill: FillMethod = "none"
 
 
-class AttributeSeriesDefinition(DataDefinition):
-    pass
+class AttributeSeriesDefinition(DataDefinition): ...
 
 
 class DatasetDefinition(BaseModel):
