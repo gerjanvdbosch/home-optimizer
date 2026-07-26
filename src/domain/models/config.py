@@ -1,12 +1,12 @@
-from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-
-class HeatPumpMode(StrEnum):
-    HEAT = "heat"
-    COOL = "cool"
+HeatPumpMode = Literal[
+    "heat",
+    "cool",
+]
 
 
 class Settings(BaseModel):
@@ -73,13 +73,6 @@ class SolarForecastConfig(BaseModel):
     p10: SensorReference = Field(description="10e percentile")
     p50: SensorReference = Field(description="50e percentile")
     p90: SensorReference = Field(description="90e percentile")
-
-    def items(self):
-        return (
-            ("p10", self.p10),
-            ("p50", self.p50),
-            ("p90", self.p90),
-        )
 
 
 class SolarConfig(BaseModel):

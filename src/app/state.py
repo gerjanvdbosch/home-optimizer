@@ -1,15 +1,23 @@
 from datetime import datetime, timezone
 
+from domain.mapper import StateMapper
 from domain.models.config import AppConfig
+from domain.models.dataset import DatasetDefinition
 from domain.models.state import OptimizerState
-from features.dataset import DatasetLoader
+from features.dataset import DatasetBuilder, DatasetLoader
 from infrastructure.repository import StateRepository
 
 
 class StateManager:
-    def __init__(self, loader: DatasetLoader, repository: StateRepository):
+    def __init__(
+        self,
+        loader: DatasetLoader,
+        repository: StateRepository,
+        mapper: StateMapper,
+    ):
         self.loader = loader
         self.repository = repository
+        self.mapper = mapper
 
     def load(self) -> OptimizerState:
         return self.repository.load()
@@ -24,11 +32,50 @@ class StateManager:
             microsecond=0,
         )
 
-        # dataset = self._dataset()
+        data = self.loader.load(
+            self._dataset(config),
+            start,
+            now,
+        )
 
-        # data = self.loader.load(dataset, start, now)
+        state = self.mapper.map(data)
 
-        # data = mapper.transform(data)
-        # print(data)
+        self.repository.save(state)
 
-        # self.repository.save(state)
+    def _dataset(self, config: AppConfig) -> DatasetDefinition:
+        return (
+            DatasetBuilder()
+            .attribute_series(
+                "solar_p10",
+                config.solar.forecast.p10,
+            )
+            .attribute_series(
+                "solar_p50",
+                config.solar.forecast.p50,
+            )
+            .attribute_series(
+                "solar_p90",
+                config.solar.forecast.p90,
+            )
+            .timeseries(
+                "pv_production",
+                config.solar.production,
+                aggregation="mean",
+                interval="15m",
+            )
+            .timeseries(
+                "boiler_top_temperature",
+                config.heat_pump.boiler.top_temperature,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
+            .timeseries(
+                "boiler_bottom_temperature",
+                config.heat_pump.boiler.bottom_temperature,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
+            .build()
+        )

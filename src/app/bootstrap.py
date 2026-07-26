@@ -8,8 +8,14 @@ from dotenv import load_dotenv
 
 from app.state import StateManager
 from app.training import Trainer
+from domain.mapper import StateMapper
 from domain.models.config import Settings
-from features.dataset import DatasetLoader, ForecastLoader, TimeSeriesLoader
+from features.dataset import (
+    AttributeSeriesLoader,
+    AttributeTimeSeriesLoader,
+    DatasetLoader,
+    TimeSeriesLoader,
+)
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.repository import ConfigRepository, StateRepository
 from infrastructure.storage import JsonStorage
@@ -33,7 +39,8 @@ def create_container() -> Container:
     dataset_loader = DatasetLoader(
         loaders=[
             TimeSeriesLoader(influx, resolver),
-            ForecastLoader(influx, resolver),
+            AttributeTimeSeriesLoader(influx, resolver),
+            AttributeSeriesLoader(influx, resolver),
         ],
     )
 
@@ -50,6 +57,7 @@ def create_container() -> Container:
     state_manager = StateManager(
         loader=dataset_loader,
         repository=state_repository,
+        mapper=StateMapper(),
     )
 
     trainer = Trainer(

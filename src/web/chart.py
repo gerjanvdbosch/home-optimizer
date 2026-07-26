@@ -1,6 +1,7 @@
 import plotly.graph_objects as go
 
 from domain.models.state import OptimizerState
+from domain.time import to_local_time
 
 
 def add_series(
@@ -10,8 +11,8 @@ def add_series(
 ) -> None:
     fig.add_trace(
         go.Scatter(
-            x=[p.time for p in points],
-            y=[p.watts for p in points],
+            x=[to_local_time(p.time) for p in points],
+            y=[p.value for p in points],
             mode="lines",
             name=name,
             line=dict(width=3),

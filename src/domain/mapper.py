@@ -1,51 +1,49 @@
-import ast
-from typing import Any
+from datetime import datetime, timezone
 
-from domain.models.state import FloatPoint
-from domain.time import parse_datetime
+import pandas as pd
+
+from domain.models.state import (
+    BoilerMeasurements,
+    ForecastState,
+    HeatPumpMeasurements,
+    MeasurementState,
+    OptimizerState,
+    SeriesPoint,
+    SolarForecast,
+    SolarMeasurements,
+)
 
 
 class StateMapper:
-
-    def map(
-        self,
-        values,
-    ) -> OptimizerState:
+    def map(self, df: pd.DataFrame) -> OptimizerState:
         return OptimizerState(
             updated=datetime.now(timezone.utc),
             measurements=MeasurementState(
-                solar=SolarMeasurements(production=parse_timeseries(values["production"])),
+                solar=SolarMeasurements(production=self.parse_series(df, "pv_production")),
                 heat_pump=HeatPumpMeasurements(
-                    supply_temperature=parse_timeseries(values["supply_temperature"])
+                    boiler=BoilerMeasurements(
+                        top_temperature=self.parse_series(df, "boiler_top_temperature"),
+                        bottom_temperature=self.parse_series(df, "boiler_bottom_temperature"),
+                    ),
                 ),
             ),
-            forecast=ForecastState(solar=SolarForecast(p50=parse_forecast(values["p50"]))),
+            forecast=ForecastState(
+                solar=SolarForecast(
+                    p10=self.parse_series(df, "solar_p10"),
+                    p50=self.parse_series(df, "solar_p50"),
+                    p90=self.parse_series(df, "solar_p90"),
+                )
+            ),
         )
 
+    def parse_series(self, df: pd.DataFrame, column: str) -> list[SeriesPoint]:
+        if column not in df.columns:
+            return []
 
-def parse_forecast(point: dict[str, Any] | None) -> list[FloatPoint]:
-    if point is None:
-        return []
-
-    values = ast.literal_eval(point["value"])
-
-    return [
-        FloatPoint(
-            time=parse_datetime(timestamp),
-            value=float(value),
-        )
-        for timestamp, value in values.items()
-    ]
-
-
-def parse_timeseries(
-    points: list[dict],
-) -> list[FloatPoint]:
-    return [
-        FloatPoint(
-            time=parse_datetime(point["time"]),
-            value=float(point["value"]),
-        )
-        for point in points
-        if point["value"] is not None
-    ]
+        return [
+            SeriesPoint(
+                time=row["time"],
+                value=row[column],
+            )
+            for _, row in df[["time", column]].dropna().iterrows()
+        ]

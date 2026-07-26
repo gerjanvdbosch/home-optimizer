@@ -1,16 +1,18 @@
 import ast
 from datetime import datetime
+from functools import reduce
 
 import pandas as pd
 
 from domain.models.config import SensorReference
 from domain.models.dataset import (
-    DatasetDefinition,
-    DataDefinition,
     Aggregation,
+    AttributeSeriesDefinition,
+    AttributeTimeSeriesDefinition,
+    DataDefinition,
+    DatasetDefinition,
     FillMethod,
     TimeSeriesDefinition,
-    ForecastDefinition,
 )
 from domain.models.interface import DataLoader
 from domain.time import parse_datetime
@@ -23,11 +25,11 @@ class DatasetLoader:
     def load(self, dataset: DatasetDefinition, start: datetime, end: datetime) -> pd.DataFrame:
         frames: list[pd.DataFrame] = []
 
-        for spec in dataset.specs:
-            loader = self._find(spec)
+        for definition in dataset.definitions:
+            loader = self._find(definition)
 
             frame = loader.load(
-                spec=spec,
+                definition=definition,
                 start=start,
                 end=end,
             )
@@ -36,42 +38,44 @@ class DatasetLoader:
 
         return self._merge(frames)
 
-    def _find(self, spec: DataDefinition):
+    def _find(self, definition: DataDefinition):
         for loader in self.loaders:
-            if loader.supports(spec):
+            if loader.supports(definition):
                 return loader
 
-        raise ValueError(f"No loader found for sensor: {spec.name}")
+        raise ValueError(f"No loader found for sensor: {definition.name}")
 
     def _merge(self, frames: list[pd.DataFrame]) -> pd.DataFrame:
+        frames = [frame for frame in frames if not frame.empty]
+
         if not frames:
             return pd.DataFrame()
 
-        result = frames[0]
-
-        for frame in frames[1:]:
-            result = result.merge(
-                frame,
+        result = reduce(
+            lambda left, right: left.merge(
+                right,
                 on="time",
                 how="outer",
-            )
+            ),
+            frames,
+        )
 
         return result.sort_values("time").reset_index(drop=True)
 
 
 class DatasetBuilder:
     def __init__(self):
-        self._specs: list[DataDefinition] = []
+        self._definitions: list[DataDefinition] = []
 
     def timeseries(
         self,
         name: str,
         sensor: SensorReference,
         aggregation: Aggregation | None = None,
-        interval: str = "1min",
+        interval: str = "1m",
         fill: FillMethod = "none",
     ) -> "DatasetBuilder":
-        self._specs.append(
+        self._definitions.append(
             TimeSeriesDefinition(
                 name=name,
                 sensor=sensor,
@@ -83,21 +87,37 @@ class DatasetBuilder:
 
         return self
 
-    def forecast(self, name: str, sensor: SensorReference) -> "DatasetBuilder":
-        self._specs.append(
-            ForecastDefinition(
+    def attribute_timeseries(
+        self,
+        name: str,
+        sensor: SensorReference,
+        aggregation: Aggregation | None = None,
+        interval: str = "1m",
+        fill: FillMethod = "none",
+    ) -> "DatasetBuilder":
+        self._definitions.append(
+            AttributeTimeSeriesDefinition(
                 name=name,
                 sensor=sensor,
+                aggregation=aggregation,
+                interval=interval,
+                fill=fill,
             )
         )
 
         return self
 
-    # def sensor(self, name: str, sensor: SensorReference):
-    #     pass  # current value
+    def attribute_series(self, name: str, sensor: SensorReference):
+        self._definitions.append(
+            AttributeSeriesDefinition(
+                name=name,
+                sensor=sensor,
+            )
+        )
+        return self
 
     def build(self) -> DatasetDefinition:
-        return DatasetDefinition(specs=self._specs)
+        return DatasetDefinition(definitions=self._definitions)
 
 
 class TimeSeriesLoader(DataLoader):
@@ -105,11 +125,13 @@ class TimeSeriesLoader(DataLoader):
         self.influx = influx
         self.resolver = resolver
 
-    def supports(self, spec):
-        return isinstance(spec, TimeSeriesDefinition)
+    def supports(self, definition):
+        return isinstance(definition, TimeSeriesDefinition)
 
-    def load(self, spec: TimeSeriesDefinition, start: datetime, end: datetime) -> pd.DataFrame:
-        sensor = self.resolver.resolve(spec.sensor)
+    def load(
+        self, definition: TimeSeriesDefinition, start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        sensor = self.resolver.resolve(definition.sensor)
 
         points = self.influx.find_series(
             measurement=sensor.measurement,
@@ -117,14 +139,15 @@ class TimeSeriesLoader(DataLoader):
             field=sensor.field,
             start=start,
             end=end,
-            aggregation=spec.aggregation,
-            interval=spec.interval,
+            aggregation=definition.aggregation,
+            interval=definition.interval,
+            fill=definition.fill,
         )
 
         rows = [
             {
                 "time": parse_datetime(point["time"]),
-                spec.name: point["value"],
+                definition.name: point["value"],
             }
             for point in points
             if point["value"] is not None
@@ -132,25 +155,19 @@ class TimeSeriesLoader(DataLoader):
 
         df = pd.DataFrame(rows)
 
-        # if spec.fill == "ffill":
-        #     df[spec.name] = df[spec.name].ffill()
-        #
-        # elif spec.fill == "interpolate":
-        #     df[spec.name] = df[spec.name].astype(float).interpolate()
-
         return df
 
 
-class ForecastLoader(DataLoader):
+class AttributeTimeSeriesLoader(DataLoader):
     def __init__(self, influx, resolver):
         self.influx = influx
         self.resolver = resolver
 
-    def supports(self, spec):
-        return isinstance(spec, ForecastDefinition)
+    def supports(self, definition):
+        return isinstance(definition, AttributeTimeSeriesDefinition)
 
-    def load(self, spec, start, end) -> pd.DataFrame:
-        sensor = self.resolver.resolve(spec.sensor)
+    def load(self, definition: AttributeTimeSeriesDefinition, start, end) -> pd.DataFrame:
+        sensor = self.resolver.resolve(definition.sensor)
 
         points = self.influx.find_series(
             measurement=sensor.measurement,
@@ -158,6 +175,9 @@ class ForecastLoader(DataLoader):
             field=sensor.field,
             start=start,
             end=end,
+            aggregation=definition.aggregation,
+            interval=definition.interval,
+            fill=definition.fill,
         )
 
         rows = []
@@ -165,12 +185,47 @@ class ForecastLoader(DataLoader):
         for point in points:
             values = ast.literal_eval(point["value"])
 
-            for target_time, watts in values.items():
+            for target_time, value in values.items():
                 rows.append(
                     {
                         "time": parse_datetime(target_time),
-                        spec.name: float(watts),
+                        definition.name: float(value),
                     }
                 )
+
+        return pd.DataFrame(rows)
+
+
+class AttributeSeriesLoader(DataLoader):
+    def __init__(self, influx, resolver):
+        self.influx = influx
+        self.resolver = resolver
+
+    def supports(self, definition):
+        return isinstance(definition, AttributeSeriesDefinition)
+
+    def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
+        sensor = self.resolver.resolve(definition.sensor)
+
+        point = self.influx.find(
+            measurement=sensor.measurement,
+            entity_id=sensor.entity_id,
+            field=sensor.field,
+        )
+
+        if point is None:
+            return pd.DataFrame()
+
+        rows = []
+
+        values = ast.literal_eval(point["value"])
+
+        for target_time, value in values.items():
+            rows.append(
+                {
+                    "time": parse_datetime(target_time),
+                    definition.name: float(value),
+                }
+            )
 
         return pd.DataFrame(rows)

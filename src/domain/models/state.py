@@ -9,7 +9,7 @@ T = TypeVar("T")
 
 
 class SeriesPoint(BaseModel, Generic[T]):
-    timestamp: datetime
+    time: datetime
     value: T
 
 
@@ -23,7 +23,7 @@ class BoilerMeasurements(BaseModel):
 
 
 class HeatPumpMeasurements(BaseModel):
-    mode: HeatPumpMode = HeatPumpMode.HEAT
+    mode: HeatPumpMode = "heat"
     status: list[SeriesPoint[str]] = Field(default_factory=list)
     supply_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     return_temperature: list[SeriesPoint[float]] = Field(default_factory=list)

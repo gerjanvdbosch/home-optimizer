@@ -1,30 +1,28 @@
-from datetime import timedelta
-from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel
 
 from domain.models.config import SensorReference
 
+Aggregation = Literal[
+    "mean",
+    "count",
+    "last",
+    "first",
+    "min",
+    "max",
+    "sum",
+    "median",
+    "spread",
+    "stddev",
+]
 
-class Aggregation(StrEnum):
-    MEAN = "mean"
-    COUNT = "count"
-    LAST = "last"
-    FIRST = "first"
-    MIN = "min"
-    MAX = "max"
-    SUM = "sum"
-    MEDIAN = "median"
-    SPREAD = "spread"
-    STDDEV = "stddev"
-
-
-class FillMethod(StrEnum):
-    NONE = "none"
-    NULL = "null"
-    NUMBER = "number"
-    PREVIOUS = "previous"
-    LINEAR = "linear"
+FillMethod = Literal[
+    "none",
+    "null",
+    "previous",
+    "linear",
+]
 
 
 class DataDefinition(BaseModel):
@@ -35,12 +33,18 @@ class DataDefinition(BaseModel):
 class TimeSeriesDefinition(DataDefinition):
     aggregation: Aggregation | None = None
     interval: str = "1min"
-    fill: FillMethod = FillMethod.NONE
+    fill: FillMethod = "none"
 
 
-class ForecastDefinition(DataDefinition):
-    horizon: timedelta = timedelta(hours=48)
+class AttributeTimeSeriesDefinition(DataDefinition):
+    aggregation: Aggregation | None = None
+    interval: str = "1min"
+    fill: FillMethod = "none"
+
+
+class AttributeSeriesDefinition(DataDefinition):
+    pass
 
 
 class DatasetDefinition(BaseModel):
-    specs: list[DataDefinition] = []
+    definitions: list[DataDefinition] = []
