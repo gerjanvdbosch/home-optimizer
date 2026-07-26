@@ -24,10 +24,10 @@ def add_series(
 def solar_forecast_chart(state: OptimizerState) -> str:
     fig = go.Figure()
 
-    for name, points in state.solar_forecast.items():
+    for name, points in state.forecast.solar.items():
         add_series(fig, name, points)
 
-    add_series(fig, "PV production", state.pv_production)
+    add_series(fig, "PV production", state.measurements.solar.production)
 
     fig.update_layout(
         title=dict(

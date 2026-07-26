@@ -1,18 +1,25 @@
 import json
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.container import Container
-from app.state_update import StateUpdater
-from app.trainer import Trainer
+from app.state import StateManager
+from app.training import Trainer
 from domain.models.config import Settings
-from features.dataset.builder import DatasetLoader
-from features.dataset.loader import ForecastLoader, TimeSeriesLoader
+from features.dataset import DatasetLoader, ForecastLoader, TimeSeriesLoader
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
+from infrastructure.repository import ConfigRepository, StateRepository
 from infrastructure.storage import JsonStorage
+
+
+@dataclass(slots=True)
+class Container:
+    config_repository: ConfigRepository
+    state_manager: StateManager
+    trainer: Trainer
 
 
 def create_container() -> Container:
@@ -30,23 +37,29 @@ def create_container() -> Container:
         ],
     )
 
-    trainer = Trainer(
-        forecasters=[],
-        storage=JsonStorage(
-            settings.data_path / "training.json",
-            format=True,
-        ),
+    config_repository = ConfigRepository(
+        JsonStorage(settings.data_path / "config.json"),
     )
 
-    state_updater = StateUpdater(
-        loader=dataset_loader,
-        storage=JsonStorage(
+    state_repository = StateRepository(
+        JsonStorage(
             settings.data_path / "state.json",
-        ),
+        )
+    )
+
+    state_manager = StateManager(
+        loader=dataset_loader,
+        repository=state_repository,
+    )
+
+    trainer = Trainer(
+        loader=dataset_loader,
+        forecasters=[],
     )
 
     return Container(
-        state_updater=state_updater,
+        config_repository=config_repository,
+        state_manager=state_manager,
         trainer=trainer,
     )
 

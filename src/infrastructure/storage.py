@@ -2,15 +2,18 @@ import json
 from pathlib import Path
 from typing import Any
 
-from domain.models.models import Storage
+from pydantic import BaseModel
 
 
-class JsonStorage(Storage):
+class JsonStorage:
     def __init__(self, path: str | Path, format: bool = False):
         self.path = Path(path)
         self.format = format
 
-    def save(self, data: dict[str, Any]) -> None:
+    def save(self, obj: dict[str, Any] | BaseModel) -> None:
+        if isinstance(obj, BaseModel):
+            obj = obj.model_dump(mode="json")
+
         self.path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -20,7 +23,7 @@ class JsonStorage(Storage):
 
         temp_path.write_text(
             json.dumps(
-                data,
+                obj,
                 default=str,
                 indent=2 if self.format else None,
             ),
@@ -40,12 +43,4 @@ class JsonStorage(Storage):
         )
 
 
-class MemoryStorage(Storage):
-    def __init__(self):
-        self.data: dict[str, Any] = {}
-
-    def save(self, data: dict[str, Any]) -> None:
-        self.data = data
-
-    def load(self) -> dict[str, Any]:
-        return self.data
+# class JoblibStorage

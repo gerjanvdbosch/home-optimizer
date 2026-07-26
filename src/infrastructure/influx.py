@@ -6,6 +6,7 @@ from influxdb.resultset import ResultSet
 from pydantic import BaseModel
 
 from domain.models.config import SensorReference, Settings
+from domain.models.dataset import Aggregation, FillMethod
 
 
 class InfluxSensor(BaseModel):
@@ -58,8 +59,8 @@ class InfluxDatabase:
         start: datetime,
         end: datetime,
         interval: str | None = None,
-        aggregation: str | None = None,
-        fill: str = "null",
+        aggregation: Aggregation | None = None,
+        fill: FillMethod = FillMethod.NONE,
     ) -> list[dict[str, Any]]:
         if interval and aggregation:
             select = f'{aggregation}("{field}")'

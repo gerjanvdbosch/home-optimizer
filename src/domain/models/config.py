@@ -1,29 +1,12 @@
-from datetime import timedelta
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-Aggregation = Literal[
-    "mean",
-    "count",
-    "last",
-    "first",
-    "min",
-    "max",
-    "sum",
-    "median",
-    "spread",
-    "stddev",
-]
 
-FillMethod = Literal[
-    "none",
-    "null",
-    "number",
-    "previous",
-    "linear",
-]
+class HeatPumpMode(StrEnum):
+    HEAT = "heat"
+    COOL = "cool"
 
 
 class Settings(BaseModel):
@@ -86,29 +69,10 @@ class SensorReference(BaseModel):
         return value
 
 
-class DataSpec(BaseModel):
-    name: str
-    sensor: SensorReference
-
-
-class TimeSeriesSpec(DataSpec):
-    aggregation: Aggregation | None = None
-    interval: str = "1min"
-    fill: FillMethod = "none"
-
-
-class ForecastSpec(DataSpec):
-    horizon: timedelta = timedelta(hours=48)
-
-
-class DatasetSpec(BaseModel):
-    specs: list[DataSpec] = []
-
-
 class SolarForecastConfig(BaseModel):
-    p10: SensorReference = Field(description="10 percentile")
-    p50: SensorReference = Field(description="50 percentile")
-    p90: SensorReference = Field(description="90 percentile")
+    p10: SensorReference = Field(description="10e percentile")
+    p50: SensorReference = Field(description="50e percentile")
+    p90: SensorReference = Field(description="90e percentile")
 
     def items(self):
         return (
@@ -129,16 +93,17 @@ class BoilerConfig(BaseModel):
 
 
 class HeatPumpConfig(BaseModel):
+    status: SensorReference = Field()
     mode: SensorReference = Field()
     supply_temperature: SensorReference = Field()
     return_temperature: SensorReference = Field()
     boiler: BoilerConfig = Field()
 
 
-class HomeConfig(BaseModel):
+class AppConfig(BaseModel):
     solar: SolarConfig = Field()
     heat_pump: HeatPumpConfig = Field()
 
 
-class TrainConfig(BaseModel):
+class TrainRequest(BaseModel):
     days: int = Field(default=90)

@@ -5,6 +5,24 @@ from domain.models.state import FloatPoint
 from domain.time import parse_datetime
 
 
+class StateMapper:
+
+    def map(
+        self,
+        values,
+    ) -> OptimizerState:
+        return OptimizerState(
+            updated=datetime.now(timezone.utc),
+            measurements=MeasurementState(
+                solar=SolarMeasurements(production=parse_timeseries(values["production"])),
+                heat_pump=HeatPumpMeasurements(
+                    supply_temperature=parse_timeseries(values["supply_temperature"])
+                ),
+            ),
+            forecast=ForecastState(solar=SolarForecast(p50=parse_forecast(values["p50"]))),
+        )
+
+
 def parse_forecast(point: dict[str, Any] | None) -> list[FloatPoint]:
     if point is None:
         return []
