@@ -115,11 +115,12 @@ class BoilerForecaster(SeriesForecaster):
                 interval="15m",
                 fill="previous",
             )
-            # .timeseries(
-            #     "state",
-            #     config.heat_pump.status,
-            #     aggregation="first",
-            #     interval="15m",
-            # )
+            .timeseries(
+                "state",
+                config.heat_pump.state,
+                interval="15m",
+                aggregation="first",
+                fill="previous",
+            )
             .build()
         )

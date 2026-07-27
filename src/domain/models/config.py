@@ -1,3 +1,4 @@
+from email.policy import default
 from pathlib import Path
 from typing import Literal
 
@@ -54,7 +55,7 @@ class InfluxSensor(BaseModel):
 
 class SensorReference(BaseModel):
     entity_id: str = Field()
-    attribute: str = Field()
+    attribute: str | None = Field(default=None)
 
     @model_validator(mode="before")
     @classmethod
@@ -62,7 +63,7 @@ class SensorReference(BaseModel):
         if isinstance(value, str):
             return {
                 "entity_id": value,
-                "attribute": "value",
+                "attribute": None,
             }
 
         if isinstance(value, (list, tuple)):

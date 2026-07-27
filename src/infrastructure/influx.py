@@ -3,17 +3,9 @@ from typing import Any, cast
 
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
-from pydantic import BaseModel
 
-from domain.models.config import SensorReference, Settings
+from domain.models.config import InfluxSensor, SensorReference, Settings
 from domain.models.dataset import Aggregation, FillMethod
-
-
-class InfluxSensor(BaseModel):
-    measurement: str
-    entity_id: str
-    field: str
-    value_type: str | None = None
 
 
 class InfluxDatabase:
@@ -131,9 +123,7 @@ class InfluxSensorResolver:
         for influx_sensor in self.schema:
             field_name = influx_sensor.field
 
-            if not (
-                field_name == sensor.attribute or field_name.startswith(sensor.attribute + "_")
-            ):
+            if field_name not in self._candidate_fields(sensor):
                 continue
 
             query = f"""
@@ -156,3 +146,9 @@ class InfluxSensorResolver:
                 return resolved
 
         raise ValueError(f"Sensor not found: {sensor.entity_id}.{sensor.attribute}")
+
+    def _candidate_fields(self, sensor: SensorReference) -> list[str]:
+        if sensor.attribute is None:
+            return ["value", "state"]
+
+        return [sensor.attribute, f"{sensor.attribute}_str"]
