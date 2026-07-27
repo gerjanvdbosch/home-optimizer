@@ -65,6 +65,9 @@ class BoilerForecaster(SeriesForecaster):
             "exog": df[["state"]],
         }
 
+    def backtest_results(self, df: pd.DataFrame, metric: pd.DataFrame, predictions: pd.DataFrame):
+        pass
+
     def tune_arguments(self, df: pd.DataFrame):
         return {
             "series": df[["T_top", "T_bottom"]],

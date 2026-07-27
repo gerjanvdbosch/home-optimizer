@@ -50,6 +50,7 @@ class Trainer:
     def _get_forecaster(self, name: ForecasterType) -> Forecaster:
         for forecaster in self.forecasters:
             if forecaster.name == name:
+                forecaster.load(self.path)
                 return forecaster
 
         raise ValueError(f"Unknown forecaster: {name}")
