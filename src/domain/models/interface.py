@@ -4,7 +4,7 @@ from typing import Protocol, TypeVar
 
 import pandas as pd
 
-from domain.models.config import AppConfig
+from domain.models.config import AppConfig, ForecasterType
 from domain.models.dataset import DataDefinition, DatasetDefinition
 
 T = TypeVar("T", bound=DataDefinition, contravariant=True)
@@ -18,7 +18,7 @@ class DataLoader(Protocol[T]):
 
 class Forecaster(Protocol):
     @property
-    def name(self) -> str: ...
+    def name(self) -> ForecasterType: ...
 
     def dataset(self, config: AppConfig) -> DatasetDefinition: ...
 

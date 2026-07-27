@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from domain.models.config import AppConfig, TrainRequest
+from domain.models.config import AppConfig, BacktestRequest, ForecasterType, TrainRequest
 from domain.models.interface import Forecaster
 from features.dataset import DatasetLoader
 
@@ -28,3 +28,28 @@ class Trainer:
 
             forecaster.fit(df)
             forecaster.save(self.path)
+
+    def backtest(self, config: AppConfig, request: BacktestRequest):
+        forecaster = self._get_forecaster(request.forecaster)
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=request.days)
+
+        dataset = forecaster.dataset(config)
+
+        df = self.loader.load(dataset, start, end)
+
+        result, result2 = forecaster.backtest(df)
+
+        print(result)
+        print(result2)
+
+    def tune(self, request: TrainRequest):
+        pass
+
+    def _get_forecaster(self, name: ForecasterType) -> Forecaster:
+        for forecaster in self.forecasters:
+            if forecaster.name == name:
+                return forecaster
+
+        raise ValueError(f"Unknown forecaster: {name}")

@@ -6,13 +6,17 @@ from skforecast.direct import ForecasterDirectMultiVariate
 from skforecast.preprocessing import CalendarFeatures, RollingFeatures
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from domain.models.config import AppConfig
+from domain.models.config import AppConfig, ForecasterType
 from domain.models.dataset import DatasetDefinition
 from features.dataset import DatasetBuilder
-from features.forecaster import BaseForecaster
+from features.forecaster import SeriesForecaster
 
 
-class BoilerTopForecaster(BaseForecaster):
+class BoilerForecaster(SeriesForecaster):
+    @property
+    def name(self) -> ForecasterType:
+        return "boiler"
+
     def create(self):
         return ForecasterDirectMultiVariate(
             estimator=HistGradientBoostingRegressor(
@@ -48,6 +52,7 @@ class BoilerTopForecaster(BaseForecaster):
                 [
                     "T_top",
                     "T_bottom",
+                    # "status",
                 ]
             ]
         }
@@ -62,18 +67,31 @@ class BoilerTopForecaster(BaseForecaster):
                 [
                     "T_top",
                     "T_bottom",
+                    # "status",
                 ]
             ]
         }
 
     def backtest_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[["T_top", "T_bottom"]],
+            "series": df[
+                [
+                    "T_top",
+                    "T_bottom",
+                    # "status",
+                ]
+            ],
         }
 
     def tune_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[["T_top", "T_bottom"]],
+            "series": df[
+                [
+                    "T_top",
+                    "T_bottom",
+                    "status",
+                ]
+            ],
         }
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
@@ -120,9 +138,11 @@ class BoilerTopForecaster(BaseForecaster):
                 interval="15m",
                 fill="previous",
             )
+            # .timeseries(
+            #     "status",
+            #     config.heat_pump.status,
+            #     aggregation="first",
+            #     interval="15m",
+            # )
             .build()
         )
-
-    @property
-    def name(self) -> str:
-        return "boiler_top"

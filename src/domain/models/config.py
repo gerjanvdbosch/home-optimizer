@@ -8,6 +8,11 @@ HeatPumpMode = Literal[
     "cool",
 ]
 
+ForecasterType = Literal[
+    "solar",
+    "boiler",
+]
+
 
 class Settings(BaseModel):
     influx_host: str = Field(
@@ -99,4 +104,10 @@ class AppConfig(BaseModel):
 
 
 class TrainRequest(BaseModel):
+    forecaster: ForecasterType | None = Field(default=None)
+    days: int = Field(default=90)
+
+
+class BacktestRequest(BaseModel):
+    forecaster: ForecasterType
     days: int = Field(default=90)

@@ -40,7 +40,6 @@ actions:
           },
           "heat_pump": {
             "status": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
-            "mode": "sensor.warmtepomp_gekozen_mode",
             "supply_temperature": "sensor.ecodan_heatpump_ca09ec_aanvoer_temp",
             "return_temperature": "sensor.ecodan_heatpump_ca09ec_retour_temp",
             "boiler": {

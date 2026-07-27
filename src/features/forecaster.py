@@ -9,7 +9,9 @@ from skforecast.base import ForecasterBase
 from skforecast.model_selection import (
     TimeSeriesFold,
     backtesting_forecaster,
+    backtesting_forecaster_multiseries,
     bayesian_search_forecaster,
+    bayesian_search_forecaster_multiseries,
 )
 
 from domain.models.interface import Forecaster
@@ -81,6 +83,7 @@ class BaseForecaster(Forecaster):
         )
 
         return backtesting_forecaster(
+            metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=cv,
             **self.backtest_arguments(df),
@@ -132,4 +135,49 @@ class BaseForecaster(Forecaster):
         )
 
     def load(self, path: Path) -> None:
-        self.forecaster = joblib.load(path)
+        self.forecaster = joblib.load(
+            path / f"{self.name}.joblib",
+        )
+
+
+class SeriesForecaster(BaseForecaster):
+    def backtest(self, df, steps=24):
+        df = self.prepare(df)
+
+        cv = TimeSeriesFold(
+            steps=steps,
+            initial_train_size=int(len(df) * 0.7),
+            refit=False,
+            fixed_train_size=False,
+        )
+
+        return backtesting_forecaster_multiseries(
+            metric="mean_absolute_error",
+            forecaster=self.forecaster,
+            cv=cv,
+            **self.backtest_arguments(df),
+        )
+
+    def tune(
+        self,
+        df: pd.DataFrame,
+        steps: int = 24,
+        n_trials: int = 10,
+    ):
+        df = self.prepare(df)
+
+        cv = TimeSeriesFold(
+            steps=steps,
+            initial_train_size=int(len(df) * 0.7),
+            refit=False,
+        )
+
+        return bayesian_search_forecaster_multiseries(
+            forecaster=self.forecaster,
+            cv=cv,
+            search_space=self.search_space,
+            n_trials=n_trials,
+            random_state=42,
+            return_best=True,
+            **self.tune_arguments(df),
+        )
