@@ -57,6 +57,12 @@ class StateManager:
                 "solar_p90",
                 config.solar.forecast.p90,
             )
+            # .timeseries(
+            #     "heat_pump_state",
+            #     config.heat_pump.state,
+            #     aggregation="median",
+            #     interval="15m",
+            # )
             .timeseries(
                 "pv_production",
                 config.solar.production,

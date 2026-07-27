@@ -48,13 +48,8 @@ class BoilerForecaster(SeriesForecaster):
 
     def fit_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[
-                [
-                    "T_top",
-                    "T_bottom",
-                    # "status",
-                ]
-            ]
+            "series": df[["T_top", "T_bottom"]],
+            "exog": df[["state"]],
         }
 
     def predict_arguments(
@@ -62,36 +57,18 @@ class BoilerForecaster(SeriesForecaster):
         last_window: pd.DataFrame,
         df: pd.DataFrame | None = None,
     ):
-        return {
-            "last_window": last_window[
-                [
-                    "T_top",
-                    "T_bottom",
-                    # "status",
-                ]
-            ]
-        }
+        return {"last_window": last_window[["T_top", "T_bottom"]]}
 
     def backtest_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[
-                [
-                    "T_top",
-                    "T_bottom",
-                    # "status",
-                ]
-            ],
+            "series": df[["T_top", "T_bottom"]],
+            "exog": df[["state"]],
         }
 
     def tune_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[
-                [
-                    "T_top",
-                    "T_bottom",
-                    "status",
-                ]
-            ],
+            "series": df[["T_top", "T_bottom"]],
+            "exog": df[["state"]],
         }
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
@@ -139,7 +116,7 @@ class BoilerForecaster(SeriesForecaster):
                 fill="previous",
             )
             # .timeseries(
-            #     "status",
+            #     "state",
             #     config.heat_pump.status,
             #     aggregation="first",
             #     interval="15m",

@@ -91,8 +91,7 @@ class BoilerConfig(BaseModel):
 
 
 class HeatPumpConfig(BaseModel):
-    status: SensorReference = Field()
-    mode: SensorReference = Field()
+    state: SensorReference = Field()
     supply_temperature: SensorReference = Field()
     return_temperature: SensorReference = Field()
     boiler: BoilerConfig = Field()

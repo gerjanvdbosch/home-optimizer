@@ -21,6 +21,7 @@ class StateMapper:
             measurements=MeasurementState(
                 solar=SolarMeasurements(production=self._parse_series(df, "pv_production")),
                 heat_pump=HeatPumpMeasurements(
+                    state=self._parse_series(df, "heat_pump_state"),
                     boiler=BoilerMeasurements(
                         top_temperature=self._parse_series(df, "boiler_top_temperature"),
                         bottom_temperature=self._parse_series(df, "boiler_bottom_temperature"),
