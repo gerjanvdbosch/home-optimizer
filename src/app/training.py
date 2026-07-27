@@ -22,6 +22,9 @@ class Trainer:
         start = end - timedelta(days=request.days)
 
         for forecaster in self.forecasters:
+            if request.forecaster and forecaster.name != request.forecaster:
+                continue
+
             dataset = forecaster.dataset(config)
 
             df = self.loader.load(dataset, start, end)
