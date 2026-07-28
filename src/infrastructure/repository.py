@@ -1,3 +1,5 @@
+import pandas as pd
+
 from domain.models.config import AppConfig
 from domain.models.state import OptimizerState
 from infrastructure.storage import JsonStorage
@@ -33,3 +35,14 @@ class StateRepository:
             return OptimizerState()
 
         return OptimizerState.model_validate(data)
+
+
+class BacktestRepository:
+    def __init__(self, storage: JsonStorage):
+        self.storage = storage
+
+    def save(self, df: pd.DataFrame):
+        self.storage.save(df)
+
+    def load(self):
+        return self.storage.load()

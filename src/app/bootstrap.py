@@ -18,7 +18,7 @@ from features.dataset import (
 )
 from features.forecasters.boiler import BoilerForecaster
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
-from infrastructure.repository import ConfigRepository, StateRepository
+from infrastructure.repository import BacktestRepository, ConfigRepository, StateRepository
 from infrastructure.storage import JsonStorage
 
 
@@ -55,6 +55,10 @@ def create_container() -> Container:
         )
     )
 
+    backtest_repository = BacktestRepository(
+        JsonStorage(settings.data_path / "backtest.json"),
+    )
+
     state_manager = StateManager(
         loader=dataset_loader,
         repository=state_repository,
@@ -63,6 +67,7 @@ def create_container() -> Container:
 
     trainer = Trainer(
         loader=dataset_loader,
+        repository=backtest_repository,
         path=settings.data_path / "models",
         forecasters=[
             BoilerForecaster(),

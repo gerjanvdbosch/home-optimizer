@@ -4,16 +4,19 @@ from pathlib import Path
 from domain.models.config import AppConfig, BacktestRequest, ForecasterType, TrainRequest
 from domain.models.interface import Forecaster
 from features.dataset import DatasetLoader
+from infrastructure.repository import BacktestRepository
 
 
 class Trainer:
     def __init__(
         self,
         loader: DatasetLoader,
+        repository: BacktestRepository,
         path: Path,
         forecasters: list[Forecaster],
     ):
         self.loader = loader
+        self.repository = repository
         self.path = path
         self.forecasters = forecasters
 
@@ -42,10 +45,9 @@ class Trainer:
 
         df = self.loader.load(dataset, start, end)
 
-        result, result2 = forecaster.backtest(df)
+        metric, result = forecaster.backtest(df)
 
-        print(result)
-        print(result2)
+        self.repository.save(result)
 
     def tune(self, request: TrainRequest):
         pass
