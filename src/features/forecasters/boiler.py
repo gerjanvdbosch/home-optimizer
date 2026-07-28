@@ -1,21 +1,33 @@
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 from optuna import Trial
 from skforecast.direct import ForecasterDirectMultiVariate
+from skforecast.model_selection import (
+    backtesting_forecaster_multiseries,
+    bayesian_search_forecaster_multiseries,
+)
 from skforecast.preprocessing import CalendarFeatures, RollingFeatures
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from domain.models.config import AppConfig, ForecasterType
 from domain.models.dataset import DatasetDefinition
 from features.dataset import DatasetBuilder
-from features.forecaster import SeriesForecaster
+from features.forecaster import BaseForecaster
 
 
-class BoilerForecaster(SeriesForecaster):
+class BoilerForecaster(BaseForecaster):
     @property
     def name(self) -> ForecasterType:
         return "boiler"
+
+    @property
+    def series_columns(self):
+        return ["T_top", "T_bottom"]
+
+    @property
+    def exog_columns(self):
+        return ["state"]
 
     def create(self):
         return ForecasterDirectMultiVariate(
@@ -46,10 +58,18 @@ class BoilerForecaster(SeriesForecaster):
             ),
         )
 
+    @property
+    def backtest_function(self) -> Callable[..., Any]:
+        return backtesting_forecaster_multiseries
+
+    @property
+    def tune_function(self) -> Callable[..., Any]:
+        return bayesian_search_forecaster_multiseries
+
     def fit_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[["T_top", "T_bottom"]],
-            "exog": df[["state"]],
+            "series": df[self.series_columns],
+            "exog": df[self.exog_columns],
         }
 
     def predict_arguments(
@@ -57,21 +77,28 @@ class BoilerForecaster(SeriesForecaster):
         last_window: pd.DataFrame,
         df: pd.DataFrame | None = None,
     ):
-        return {"last_window": last_window[["T_top", "T_bottom"]]}
+        return {"last_window": last_window[self.series_columns]}
 
     def backtest_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[["T_top", "T_bottom"]],
-            "exog": df[["state"]],
+            "series": df[self.series_columns],
+            "exog": df[self.exog_columns],
         }
 
-    def backtest_results(self, df: pd.DataFrame, metric: pd.DataFrame, predictions: pd.DataFrame):
-        pass
+    def backtest_results(
+        self, df: pd.DataFrame, metric: pd.DataFrame, result: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        actuals = df.loc[result.index, "T_top"]
+
+        result = result.copy()
+        result["actual"] = actuals
+
+        return metric, result
 
     def tune_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[["T_top", "T_bottom"]],
-            "exog": df[["state"]],
+            "series": df[self.series_columns],
+            "exog": df[self.exog_columns],
         }
 
     def search_space(self, trial: Trial) -> dict[str, Any]:

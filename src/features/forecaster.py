@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import joblib
 import pandas as pd
@@ -9,9 +9,7 @@ from skforecast.base import ForecasterBase
 from skforecast.model_selection import (
     TimeSeriesFold,
     backtesting_forecaster,
-    backtesting_forecaster_multiseries,
     bayesian_search_forecaster,
-    bayesian_search_forecaster_multiseries,
 )
 
 from domain.models.interface import Forecaster
@@ -23,6 +21,14 @@ class BaseForecaster(Forecaster):
 
     @abstractmethod
     def create(self) -> ForecasterBase: ...
+
+    @property
+    def backtest_function(self) -> Callable[..., Any]:
+        return backtesting_forecaster
+
+    @property
+    def tune_function(self) -> Callable[..., Any]:
+        return bayesian_search_forecaster
 
     @abstractmethod
     def fit_arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
@@ -36,6 +42,11 @@ class BaseForecaster(Forecaster):
 
     @abstractmethod
     def backtest_arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def backtest_results(
+        self, df: pd.DataFrame, metric: pd.DataFrame, result: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
 
     @abstractmethod
     def tune_arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
@@ -75,18 +86,17 @@ class BaseForecaster(Forecaster):
     ):
         df = self.prepare(df)
 
-        cv = TimeSeriesFold(
-            steps=steps,
-            initial_train_size=int(len(df) * 0.7),
-            refit=False,
-            fixed_train_size=False,
-        )
-
-        return backtesting_forecaster(
+        metric, result = self.backtest_function(
             metric="mean_absolute_error",
             forecaster=self.forecaster,
-            cv=cv,
+            cv=self.create_cv(df, steps),
             **self.backtest_arguments(df),
+        )
+
+        return self.backtest_results(
+            df=df,
+            metric=metric,
+            result=result,
         )
 
     def tune(
@@ -96,12 +106,6 @@ class BaseForecaster(Forecaster):
         n_trials: int = 10,
     ):
         df = self.prepare(df)
-
-        cv = TimeSeriesFold(
-            steps=steps,
-            initial_train_size=int(len(df) * 0.7),
-            refit=False,
-        )
 
         # study = cast(Study, study)
 
@@ -113,14 +117,22 @@ class BaseForecaster(Forecaster):
 
         # return results, study
 
-        return bayesian_search_forecaster(
+        return self.tune_function(
             forecaster=self.forecaster,
-            cv=cv,
+            cv=self.create_cv(df, steps),
             search_space=self.search_space,
             n_trials=n_trials,
             random_state=42,
             return_best=True,
             **self.tune_arguments(df),
+        )
+
+    def create_cv(self, df: pd.DataFrame, steps: int) -> TimeSeriesFold:
+        return TimeSeriesFold(
+            steps=steps,
+            initial_train_size=int(len(df) * 0.7),
+            refit=False,
+            fixed_train_size=False,
         )
 
     def save(self, path: Path) -> None:
@@ -137,47 +149,4 @@ class BaseForecaster(Forecaster):
     def load(self, path: Path) -> None:
         self.forecaster = joblib.load(
             path / f"{self.name}.joblib",
-        )
-
-
-class SeriesForecaster(BaseForecaster):
-    def backtest(self, df, steps=24):
-        df = self.prepare(df)
-
-        cv = TimeSeriesFold(
-            steps=steps,
-            initial_train_size=int(len(df) * 0.7),
-            refit=False,
-            fixed_train_size=False,
-        )
-
-        return backtesting_forecaster_multiseries(
-            metric="mean_absolute_error",
-            forecaster=self.forecaster,
-            cv=cv,
-            **self.backtest_arguments(df),
-        )
-
-    def tune(
-        self,
-        df: pd.DataFrame,
-        steps: int = 24,
-        n_trials: int = 10,
-    ):
-        df = self.prepare(df)
-
-        cv = TimeSeriesFold(
-            steps=steps,
-            initial_train_size=int(len(df) * 0.7),
-            refit=False,
-        )
-
-        return bayesian_search_forecaster_multiseries(
-            forecaster=self.forecaster,
-            cv=cv,
-            search_space=self.search_space,
-            n_trials=n_trials,
-            random_state=42,
-            return_best=True,
-            **self.tune_arguments(df),
         )
