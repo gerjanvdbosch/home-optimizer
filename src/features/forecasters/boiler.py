@@ -27,7 +27,7 @@ class BoilerForecaster(BaseForecaster):
 
     @property
     def exog_columns(self):
-        return ["state"]
+        return ["state", "T_supply"]
 
     def create(self):
         return ForecasterDirectMultiVariate(
@@ -145,6 +145,13 @@ class BoilerForecaster(BaseForecaster):
             .timeseries(
                 "T_bottom",
                 config.heat_pump.boiler.bottom_temperature,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
+            .timeseries(
+                "T_supply",
+                config.heat_pump.supply_temperature,
                 aggregation="mean",
                 interval="15m",
                 fill="previous",

@@ -114,4 +114,4 @@ class BacktestRequest(BaseModel):
 
 
 class TuneRequest(BacktestRequest):
-    trails: int = Field(default=10)
+    trails: int = Field(default=3)

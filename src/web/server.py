@@ -62,6 +62,14 @@ async def train(request: TrainRequest):
     return {"ok": True}
 
 
+# @app.post("/api/predict")
+# async def predict(request: TrainRequest):
+#     config = container.config_repository.load()
+#     container.trainer.train(config, request)
+#
+#     return {"ok": True}
+
+
 @app.post("/api/backtest")
 async def backtest(request: BacktestRequest):
     config = container.config_repository.load()
