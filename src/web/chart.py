@@ -1,10 +1,8 @@
-from datetime import datetime
-
 import pandas as pd
 import plotly.graph_objects as go
 
 from domain.models.state import OptimizerState
-from domain.time import to_local_time
+from domain.time import to_local_time, to_local_series
 
 
 def add_series(
@@ -87,7 +85,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
 def backtest_chart(results: list[dict]) -> str:
     df = pd.DataFrame(results)
 
-    df["time"] = pd.to_datetime(df["index"]).dt.tz_convert(datetime.now().astimezone().tzinfo)
+    df["time"] = to_local_series(pd.to_datetime(df["index"]))
 
     fig = go.Figure()
 
