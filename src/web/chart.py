@@ -1,8 +1,9 @@
 import pandas as pd
 import plotly.graph_objects as go
 
+from domain.models.interface import JsonType
 from domain.models.state import OptimizerState
-from domain.time import to_local_time, to_local_series
+from domain.time import to_local_series, to_local_time
 
 
 def add_series(
@@ -82,7 +83,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
     )
 
 
-def backtest_chart(results: list[dict]) -> str:
+def backtest_chart(results: JsonType) -> str:
     df = pd.DataFrame(results)
 
     df["time"] = to_local_series(pd.to_datetime(df["index"]))

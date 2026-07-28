@@ -1,12 +1,15 @@
-from optuna import Study
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import pandas as pd
+from optuna import Study
 
 from domain.models.config import AppConfig, ForecasterType
 from domain.models.dataset import DataDefinition, DatasetDefinition
+
+JsonType = dict[str, Any] | list[Any]
+
 
 T = TypeVar("T", bound=DataDefinition, contravariant=True)
 

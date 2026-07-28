@@ -1,11 +1,10 @@
 import json
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel
 
-JsonData = dict[str, Any] | list[Any]
+from domain.models.interface import JsonType
 
 
 class JsonStorage:
@@ -13,7 +12,7 @@ class JsonStorage:
         self.path = Path(path)
         self.format = format
 
-    def save(self, obj: JsonData | BaseModel | pd.DataFrame) -> None:
+    def save(self, obj: JsonType | BaseModel | pd.DataFrame) -> None:
         if isinstance(obj, BaseModel):
             obj = obj.model_dump(mode="json")
 
@@ -34,7 +33,7 @@ class JsonStorage:
             encoding="utf-8",
         )
 
-    def load(self) -> JsonData:
+    def load(self) -> JsonType:
         if not self.path.exists():
             return {}
 
