@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -85,7 +87,7 @@ def solar_forecast_chart(state: OptimizerState) -> str:
 def backtest_chart(results: list[dict]) -> str:
     df = pd.DataFrame(results)
 
-    df["time"] = pd.to_datetime(df["index"])
+    df["time"] = pd.to_datetime(df["index"]).dt.tz_convert(datetime.now().astimezone().tzinfo)
 
     fig = go.Figure()
 
