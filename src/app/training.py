@@ -38,6 +38,8 @@ class Trainer:
             if request.forecaster and forecaster.name != request.forecaster:
                 continue
 
+            forecaster.load(self.path)
+
             dataset = forecaster.dataset(config)
 
             df = self.loader.load(dataset, start, end)
