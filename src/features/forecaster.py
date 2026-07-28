@@ -131,7 +131,7 @@ class BaseForecaster(Forecaster):
         return TimeSeriesFold(
             steps=steps,
             initial_train_size=int(len(df) * 0.7),
-            refit=True,
+            refit=False,
             fixed_train_size=False,
         )
 

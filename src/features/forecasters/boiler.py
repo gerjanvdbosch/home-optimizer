@@ -31,6 +31,7 @@ class BoilerForecaster(BaseForecaster):
 
     def create(self):
         return ForecasterDirectMultiVariate(
+            forecaster_id=self.name,
             estimator=HistGradientBoostingRegressor(
                 max_iter=300,
                 learning_rate=0.05,
