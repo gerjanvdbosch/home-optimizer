@@ -147,9 +147,12 @@ class BaseForecaster(Forecaster):
         )
 
     def load(self, path: Path) -> None:
+        file_name = path / f"{self.name}.joblib"
+
+        if not file_name.exists():
+            return
+
         self.forecaster = cast(
             ForecasterBase,
-            load_forecaster(
-                str(path / f"{self.name}.joblib"),
-            ),
+            load_forecaster(str(file_name)),
         )
