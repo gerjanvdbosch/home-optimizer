@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 import joblib
 import pandas as pd
-from optuna import Trial
+from optuna import Study, Trial
 from skforecast.base import ForecasterBase
 from skforecast.model_selection import (
     TimeSeriesFold,
@@ -104,23 +104,23 @@ class BaseForecaster(Forecaster):
         df: pd.DataFrame,
         steps: int = 24,
         n_trials: int = 10,
-    ):
+    ) -> tuple[pd.DataFrame, Study]:
         df = self.prepare(df)
 
-        # study = cast(Study, study)
-
-        # best_trial = study.best_trial
-        #
-        # self.tuning_results = results
-        # self.best_params = best_trial.params
-        # self.best_score = best_trial.value
-
-        # return results, study
+        # study = optuna.create_study(
+        #     study_name=f"{self.name}_forecaster",
+        #     storage="sqlite:///data/optuna.db",
+        #     load_if_exists=True,
+        #     direction="minimize",
+        # )
 
         return self.tune_function(
+            metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps),
             search_space=self.search_space,
+            # study_name=study.study_name,
+            # storage=study._storage,
             n_trials=n_trials,
             random_state=42,
             return_best=True,

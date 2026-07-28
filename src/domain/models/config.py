@@ -111,3 +111,7 @@ class TrainRequest(BaseModel):
 class BacktestRequest(BaseModel):
     forecaster: ForecasterType
     days: int = Field(default=90)
+
+
+class TuneRequest(BacktestRequest):
+    trails: int = Field(default=10)

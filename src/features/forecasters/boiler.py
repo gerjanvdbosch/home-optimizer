@@ -88,10 +88,10 @@ class BoilerForecaster(BaseForecaster):
     def backtest_results(
         self, df: pd.DataFrame, metric: pd.DataFrame, result: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        actuals = df.loc[result.index, "T_top"]
+        actual = df.loc[result.index, "T_top"]
 
         result = result.copy()
-        result["actual"] = actuals
+        result["actual"] = actual
 
         return metric, result
 
@@ -103,28 +103,31 @@ class BoilerForecaster(BaseForecaster):
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {
-            "lags": trial.suggest_categorical("lags", [24, 48, 72, 96]),
+            "lags": trial.suggest_categorical(
+                "lags",
+                [48, 96, 192],
+            ),
             "learning_rate": trial.suggest_float(
                 "learning_rate",
-                0.01,
-                0.2,
+                0.02,
+                0.08,
                 log=True,
             ),
             "max_depth": trial.suggest_int(
                 "max_depth",
                 3,
-                10,
+                5,
             ),
             "max_iter": trial.suggest_int(
                 "max_iter",
-                100,
-                500,
-                step=50,
+                150,
+                400,
+                step=25,
             ),
             "min_samples_leaf": trial.suggest_int(
                 "min_samples_leaf",
-                10,
-                80,
+                20,
+                50,
             ),
         }
 

@@ -100,7 +100,7 @@ def load_settings() -> Settings:
         influx_username=os.getenv("INFLUX_USERNAME", ""),
         influx_password=os.getenv("INFLUX_PASSWORD", ""),
         influx_database=os.getenv("INFLUX_DATABASE", "home_assistant"),
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        log_level=os.getenv("LOG_LEVEL", "DEBUG"),
     )
 
 

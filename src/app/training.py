@@ -1,7 +1,17 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from domain.models.config import AppConfig, BacktestRequest, ForecasterType, TrainRequest
+import pandas as pd
+from optuna import Study
+
+from domain.models.config import (
+    AppConfig,
+    BacktestRequest,
+    ForecasterType,
+    TrainRequest,
+    TuneRequest,
+)
 from domain.models.interface import Forecaster
 from features.dataset import DatasetLoader
 from infrastructure.repository import BacktestRepository
@@ -35,7 +45,7 @@ class Trainer:
             forecaster.fit(df)
             forecaster.save(self.path)
 
-    def backtest(self, config: AppConfig, request: BacktestRequest):
+    def backtest(self, config: AppConfig, request: BacktestRequest) -> pd.DataFrame:
         forecaster = self._get_forecaster(request.forecaster)
 
         end = datetime.now(timezone.utc)
@@ -49,8 +59,23 @@ class Trainer:
 
         self.repository.save(result)
 
-    def tune(self, request: TrainRequest):
-        pass
+        return metric
+
+    def tune(self, config: AppConfig, request: TuneRequest) -> Study:
+        forecaster = self._get_forecaster(request.forecaster)
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=request.days)
+
+        dataset = forecaster.dataset(config)
+
+        df = self.loader.load(dataset, start, end)
+
+        results, study = forecaster.tune(df, n_trials=request.trails)
+
+        logging.debug(results)
+
+        return study
 
     def _get_forecaster(self, name: ForecasterType) -> Forecaster:
         for forecaster in self.forecasters:

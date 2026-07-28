@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
-from domain.models.config import AppConfig, BacktestRequest, TrainRequest
+from domain.models.config import AppConfig, BacktestRequest, TrainRequest, TuneRequest
 from web.chart import backtest_chart, solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,14 +65,17 @@ async def train(request: TrainRequest):
 @app.post("/api/backtest")
 async def backtest(request: BacktestRequest):
     config = container.config_repository.load()
-    container.trainer.backtest(config, request)
 
-    return {"ok": True}
+    return container.trainer.backtest(config, request)
 
 
 @app.post("/api/tune")
-async def tune(request: TrainRequest):
+async def tune(request: TuneRequest):
     config = container.config_repository.load()
-    container.trainer.tune(request)
 
-    return {"ok": True}
+    study = container.trainer.tune(config, request)
+
+    return {
+        "best_value": study.best_value,
+        "best_params": study.best_params,
+    }

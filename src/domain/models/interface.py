@@ -1,3 +1,4 @@
+from optuna import Study
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -38,7 +39,7 @@ class Forecaster(Protocol):
         df: pd.DataFrame,
         steps: int = 24,
         n_trials: int = 10,
-    ) -> tuple[pd.DataFrame, object]: ...
+    ) -> tuple[pd.DataFrame, Study]: ...
 
     def save(self, path: Path) -> None: ...
 
