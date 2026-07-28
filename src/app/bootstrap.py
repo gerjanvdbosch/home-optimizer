@@ -27,6 +27,7 @@ class Container:
     config_repository: ConfigRepository
     state_manager: StateManager
     trainer: Trainer
+    backtest_repository: BacktestRepository
 
 
 def create_container() -> Container:
@@ -78,6 +79,7 @@ def create_container() -> Container:
         config_repository=config_repository,
         state_manager=state_manager,
         trainer=trainer,
+        backtest_repository=backtest_repository,
     )
 
 

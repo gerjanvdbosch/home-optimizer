@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
 from domain.models.config import AppConfig, BacktestRequest, TrainRequest
-from web.chart import solar_forecast_chart
+from web.chart import backtest_chart, solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -29,12 +29,14 @@ templates = Jinja2Templates(
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     state = container.state_manager.load()
+    backtest = container.backtest_repository.load()
 
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
             "solar_chart": solar_forecast_chart(state),
+            "backtest_chart": backtest_chart(backtest),
         },
     )
 
