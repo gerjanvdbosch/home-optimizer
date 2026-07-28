@@ -75,6 +75,8 @@ class Trainer:
 
         logging.debug(results)
 
+        forecaster.save(self.path)
+
         return study
 
     def _get_forecaster(self, name: ForecasterType) -> Forecaster:

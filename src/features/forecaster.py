@@ -1,8 +1,7 @@
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
-import joblib
 import pandas as pd
 from optuna import Study, Trial
 from skforecast.base import ForecasterBase
@@ -11,6 +10,7 @@ from skforecast.model_selection import (
     backtesting_forecaster,
     bayesian_search_forecaster,
 )
+from skforecast.utils import load_forecaster, save_forecaster
 
 from domain.models.interface import Forecaster
 
@@ -131,7 +131,7 @@ class BaseForecaster(Forecaster):
         return TimeSeriesFold(
             steps=steps,
             initial_train_size=int(len(df) * 0.7),
-            refit=False,
+            refit=True,
             fixed_train_size=False,
         )
 
@@ -141,12 +141,15 @@ class BaseForecaster(Forecaster):
             exist_ok=True,
         )
 
-        joblib.dump(
+        save_forecaster(
             self.forecaster,
-            path / f"{self.name}.joblib",
+            str(path / f"{self.name}.joblib"),
         )
 
     def load(self, path: Path) -> None:
-        self.forecaster = joblib.load(
-            path / f"{self.name}.joblib",
+        self.forecaster = cast(
+            ForecasterBase,
+            load_forecaster(
+                str(path / f"{self.name}.joblib"),
+            ),
         )
