@@ -27,6 +27,7 @@ class HeatPumpMeasurements(BaseModel):
     state: list[SeriesPoint[str]] = Field(default_factory=list)
     supply_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     return_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
+    compressor_frequency: list[SeriesPoint[float]] = Field(default_factory=list)
     boiler: BoilerMeasurements = Field(default_factory=BoilerMeasurements)
 
 

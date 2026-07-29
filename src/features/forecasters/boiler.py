@@ -27,7 +27,7 @@ class BoilerForecaster(BaseForecaster):
 
     @property
     def exog_columns(self):
-        return ["state", "T_supply"]
+        return ["state", "compressor_freq", "T_supply"]
 
     def create(self):
         return ForecasterDirectMultiVariate(
@@ -106,7 +106,7 @@ class BoilerForecaster(BaseForecaster):
         return {
             "lags": trial.suggest_categorical(
                 "lags",
-                [48, 96, 192],
+                [24, 48, 96],
             ),
             "learning_rate": trial.suggest_float(
                 "learning_rate",
@@ -117,13 +117,13 @@ class BoilerForecaster(BaseForecaster):
             "max_depth": trial.suggest_int(
                 "max_depth",
                 3,
-                5,
+                6,
             ),
             "max_iter": trial.suggest_int(
                 "max_iter",
-                150,
-                400,
-                step=25,
+                100,
+                300,
+                step=50,
             ),
             "min_samples_leaf": trial.suggest_int(
                 "min_samples_leaf",
@@ -135,6 +135,20 @@ class BoilerForecaster(BaseForecaster):
     def dataset(self, config: AppConfig) -> DatasetDefinition:
         return (
             DatasetBuilder()
+            .timeseries(
+                "state",
+                config.heat_pump.state,
+                interval="15m",
+                aggregation="first",
+                fill="previous",
+            )
+            .timeseries(
+                "compressor_freq",
+                config.heat_pump.compressor_frequency,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
             .timeseries(
                 "T_top",
                 config.heat_pump.boiler.top_temperature,
@@ -154,13 +168,6 @@ class BoilerForecaster(BaseForecaster):
                 config.heat_pump.supply_temperature,
                 aggregation="mean",
                 interval="15m",
-                fill="previous",
-            )
-            .timeseries(
-                "state",
-                config.heat_pump.state,
-                interval="15m",
-                aggregation="first",
                 fill="previous",
             )
             .build()
