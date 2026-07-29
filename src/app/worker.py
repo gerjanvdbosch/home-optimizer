@@ -1,6 +1,8 @@
 import logging
 from multiprocessing import Process, Queue
 
+from joblib import parallel_backend
+
 from domain.models.config import Job, JobType
 
 
@@ -36,43 +38,38 @@ class Worker:
             self.process.terminate()
 
     def _run(self):
-        container = self.container_factory()
+        with parallel_backend("threading", n_jobs=1):
+            container = self.container_factory()
 
-        logging.info("Worker started")
+            logging.info("Worker started")
 
-        while True:
-            job = self.queue.get()
+            while True:
+                job = self.queue.get()
 
-            if job is None:
-                logging.info("Worker stopped")
-                break
+                if job is None:
+                    logging.info("Worker stopped")
+                    break
 
-            try:
-                self._execute(container, job)
+                try:
+                    self._execute(container, job)
 
-            except Exception:
-                logging.exception(
-                    "Job failed: %s",
-                    job.type,
-                )
+                except Exception:
+                    logging.exception(
+                        "Job failed: %s",
+                        job.type,
+                    )
 
     def _execute(self, container, job: Job):
         config = container.config_repository.load()
 
         match job.type:
             case JobType.FIT:
-                container.forecasting.fit(
-                    config,
-                    job.request,
-                )
+                container.forecasting.fit(config, job.request)
 
                 logging.info("Fit finished")
 
             case JobType.TUNE:
-                study = container.forecasting.tune(
-                    config,
-                    job.request,
-                )
+                study = container.forecasting.tune(config, job.request)
 
                 logging.info(
                     "Tune finished %.3f %s",
@@ -81,10 +78,7 @@ class Worker:
                 )
 
             case JobType.BACKTEST:
-                metric = container.forecasting.backtest(
-                    config,
-                    job.request,
-                )
+                metric = container.forecasting.backtest(config, job.request)
 
                 logging.info(
                     "Backtest finished %s",
