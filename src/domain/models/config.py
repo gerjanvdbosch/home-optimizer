@@ -1,4 +1,5 @@
-from email.policy import default
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Literal
 
@@ -116,3 +117,16 @@ class BacktestRequest(BaseModel):
 
 class TuneRequest(BacktestRequest):
     trails: int = Field(default=3)
+
+
+class JobType(str, Enum):
+    FIT = "fit"
+    TUNE = "tune"
+    BACKTEST = "backtest"
+
+
+@dataclass
+class Job:
+    id: str
+    type: JobType
+    request: FitRequest | TuneRequest | BacktestRequest

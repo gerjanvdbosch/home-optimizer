@@ -87,6 +87,7 @@ class BaseForecaster(Forecaster):
         df = self.prepare(df)
 
         metric, result = self.backtest_function(
+            n_jobs=1,
             metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps),
@@ -115,6 +116,7 @@ class BaseForecaster(Forecaster):
         # )
 
         return self.tune_function(
+            n_jobs=1,
             metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps),

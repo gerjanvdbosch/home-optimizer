@@ -1,3 +1,5 @@
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -6,20 +8,36 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
-from domain.models.config import AppConfig, BacktestRequest, FitRequest, TuneRequest
+from app.worker import Worker
+from domain.models.config import AppConfig, BacktestRequest, FitRequest, Job, JobType, TuneRequest
 from web.chart import backtest_chart, solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI()
+
+container = create_container()
+
+worker = Worker(create_container)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker.start()
+
+    yield
+
+    worker.stop()
+
+
+app = FastAPI(
+    lifespan=lifespan,
+)
 
 app.mount(
     "/static",
     StaticFiles(directory=BASE_DIR / "static"),
     name="static",
 )
-
-container = create_container()
 
 templates = Jinja2Templates(
     directory=BASE_DIR / "templates",
@@ -41,6 +59,11 @@ async def dashboard(request: Request):
     )
 
 
+@app.get("/api/status")
+async def status():
+    return {"status": ""}
+
+
 @app.get("/api/state")
 async def state():
     return container.state_manager.load()
@@ -56,34 +79,43 @@ async def update(config: AppConfig):
 
 @app.post("/api/fit")
 async def train(request: FitRequest):
-    config = container.config_repository.load()
-    container.forecasting.fit(config, request)
+    worker.submit(
+        Job(
+            id=uuid.uuid4().hex,
+            type=JobType.FIT,
+            request=request,
+        )
+    )
 
-    return {"ok": True}
+    return {"status": "queued"}
 
 
 # @app.post("/api/predict")
 # async def predict(request: FitRequest):
-#     config = container.config_repository.load()
-#     container.forecasting.train(config, request)
-#
 #     return {"ok": True}
 
 
 @app.post("/api/backtest")
 async def backtest(request: BacktestRequest):
-    config = container.config_repository.load()
+    worker.submit(
+        Job(
+            id=uuid.uuid4().hex,
+            type=JobType.BACKTEST,
+            request=request,
+        )
+    )
 
-    return container.forecasting.backtest(config, request)
+    return {"status": "queued"}
 
 
 @app.post("/api/tune")
 async def tune(request: TuneRequest):
-    config = container.config_repository.load()
+    worker.submit(
+        Job(
+            id=uuid.uuid4().hex,
+            type=JobType.TUNE,
+            request=request,
+        )
+    )
 
-    study = container.forecasting.tune(config, request)
-
-    return {
-        "best_value": study.best_value,
-        "best_params": study.best_params,
-    }
+    return {"status": "queued"}

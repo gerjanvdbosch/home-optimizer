@@ -30,6 +30,9 @@ class Forecasting:
         self.path = path
         self.forecasters = forecasters
 
+    def predict(self, config: AppConfig):
+        pass
+
     def fit(self, config: AppConfig, request: FitRequest):
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=request.days)
