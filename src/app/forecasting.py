@@ -8,8 +8,8 @@ from optuna import Study
 from domain.models.config import (
     AppConfig,
     BacktestRequest,
+    FitRequest,
     ForecasterType,
-    TrainRequest,
     TuneRequest,
 )
 from domain.models.interface import Forecaster
@@ -17,7 +17,7 @@ from features.dataset import DatasetLoader
 from infrastructure.repository import BacktestRepository
 
 
-class Trainer:
+class Forecasting:
     def __init__(
         self,
         loader: DatasetLoader,
@@ -30,7 +30,7 @@ class Trainer:
         self.path = path
         self.forecasters = forecasters
 
-    def train(self, config: AppConfig, request: TrainRequest):
+    def fit(self, config: AppConfig, request: FitRequest):
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=request.days)
 

@@ -103,7 +103,7 @@ class AppConfig(BaseModel):
     heat_pump: HeatPumpConfig = Field()
 
 
-class TrainRequest(BaseModel):
+class FitRequest(BaseModel):
     forecaster: ForecasterType | None = Field(default=None)
     days: int = Field(default=90)
 

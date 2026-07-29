@@ -51,9 +51,9 @@ actions:
 ```
 
 
-## Train API
+## Fit API
 
-The `/api/train` endpoint is called from a Home Assistant automation using a 
+The `/api/fit` endpoint is called from a Home Assistant automation using a 
 `rest_command`.
 
 Example automation action:
@@ -61,21 +61,51 @@ Example automation action:
 actions:
   - action: rest_command.home_optimizer_api
     data:
-      endpoint: train
+      endpoint: fit
       payload: |
         {{ {
           "days": 90
         } | to_json }}
 ```
 
+
+## Backtest API
+
+The `/api/backtest` endpoint is called from a Home Assistant automation using a 
+`rest_command`.
+
+Example automation action:
+```yaml
+actions:
+  - action: rest_command.home_optimizer_api
+    data:
+      endpoint: backtest
+      payload: |
+        {{ {
+          "days": 90,
+          "forecaster": "boiler"
+        } | to_json }}
+```
+
+
 ## Tune API
 
-TODO
+The `/api/tune` endpoint is called from a Home Assistant automation using a 
+`rest_command`.
 
-
-## Back test API
-
-TODO
+Example automation action:
+```yaml
+actions:
+  - action: rest_command.home_optimizer_api
+    data:
+      endpoint: tune
+      payload: |
+        {{ {
+          "days": 90,
+          "forecaster": "boiler",
+          "trails": 3
+        } | to_json }}
+```
 
 
 ### REST Command
@@ -94,4 +124,15 @@ rest_command:
     headers:
       content-type: "application/json"
     payload: "{{ payload }}"
+```
+
+## Development
+
+To run Home Optimizer locally:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+./run.sh
 ```

@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.state import StateManager
-from app.training import Trainer
+from app.forecasting import Forecasting
 from domain.mapper import StateMapper
 from domain.models.config import Settings
 from features.dataset import (
@@ -26,7 +26,7 @@ from infrastructure.storage import JsonStorage
 class Container:
     config_repository: ConfigRepository
     state_manager: StateManager
-    trainer: Trainer
+    forecasting: Forecasting
     backtest_repository: BacktestRepository
 
 
@@ -66,7 +66,7 @@ def create_container() -> Container:
         mapper=StateMapper(),
     )
 
-    trainer = Trainer(
+    forecasting = Forecasting(
         loader=dataset_loader,
         repository=backtest_repository,
         path=settings.data_path / "models",
@@ -78,7 +78,7 @@ def create_container() -> Container:
     return Container(
         config_repository=config_repository,
         state_manager=state_manager,
-        trainer=trainer,
+        forecasting=forecasting,
         backtest_repository=backtest_repository,
     )
 
