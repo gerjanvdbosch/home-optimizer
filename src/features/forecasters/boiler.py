@@ -33,14 +33,15 @@ class BoilerForecaster(BaseForecaster):
         return ForecasterDirectMultiVariate(
             forecaster_id=self.name,
             estimator=HistGradientBoostingRegressor(
-                max_iter=300,
-                learning_rate=0.05,
-                max_depth=8,
+                max_iter=100,
+                learning_rate=0.045,
+                max_depth=3,
+                min_samples_leaf=21,
                 random_state=42,
             ),
             level="T_top",
             steps=96,
-            lags=24,
+            lags=48,
             window_features=RollingFeatures(
                 stats=["mean", "std", "min", "max"],
                 window_sizes=[4, 16, 48, 96],
