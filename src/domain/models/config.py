@@ -100,20 +100,20 @@ class HeatPumpConfig(BaseModel):
     boiler: BoilerConfig = Field()
 
 
-class AppConfig(BaseModel):
+class Config(BaseModel):
     solar: SolarConfig = Field()
     heat_pump: HeatPumpConfig = Field()
 
 
-class FitRequest(BaseModel):
+class FitParams(BaseModel):
     forecaster: ForecasterType | None = Field(default=None)
     days: int = Field(default=90)
 
 
-class BacktestRequest(BaseModel):
+class BacktestParams(BaseModel):
     forecaster: ForecasterType
     days: int = Field(default=90)
 
 
-class TuneRequest(BacktestRequest):
+class TuneParams(BacktestParams):
     trails: int = Field(default=3)

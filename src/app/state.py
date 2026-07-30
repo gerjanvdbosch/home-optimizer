@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from domain.mapper import StateMapper
-from domain.models.config import AppConfig
+from domain.models.config import Config
 from domain.models.dataset import DatasetDefinition
 from domain.models.state import OptimizerState
 from features.dataset import DatasetBuilder, DatasetLoader
@@ -22,7 +22,7 @@ class StateManager:
     def load(self) -> OptimizerState:
         return self.repository.load()
 
-    def update(self, config: AppConfig) -> None:
+    def update(self, config: Config) -> None:
         now = datetime.now(timezone.utc)
 
         start = now.replace(
@@ -42,7 +42,7 @@ class StateManager:
 
         self.repository.save(state)
 
-    def _dataset(self, config: AppConfig) -> DatasetDefinition:
+    def _dataset(self, config: Config) -> DatasetDefinition:
         return (
             DatasetBuilder()
             .attribute_series(

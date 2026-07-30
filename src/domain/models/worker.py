@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from domain.models.config import BacktestRequest, FitRequest, TuneRequest
+from domain.models.config import BacktestParams, FitParams, TuneParams
 
 
 class JobType(str, Enum):
@@ -14,7 +14,7 @@ class JobType(str, Enum):
 class Job:
     id: str
     type: JobType
-    request: FitRequest | TuneRequest | BacktestRequest
+    params: FitParams | TuneParams | BacktestParams
 
 
 class WorkerState(str, Enum):

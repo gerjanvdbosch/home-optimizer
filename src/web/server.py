@@ -10,31 +10,30 @@ from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
 from app.worker import Worker
-from domain.models.config import AppConfig, BacktestRequest, FitRequest, TuneRequest
+from domain.models.config import BacktestParams, Config, FitParams, TuneParams
 from domain.models.worker import Job, JobType
 from web.chart import backtest_chart, solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
 
 
-container = create_container()
-
-manager = Manager()
-
-worker = Worker(create_container, manager)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.container = create_container()
 
-    worker.start()
+    app.state.manager = Manager()
 
-    app.state.worker = worker
+    app.state.worker = Worker(
+        create_container,
+        app.state.manager,
+    )
+
+    app.state.worker.start()
 
     yield
 
-    worker.stop()
-    manager.shutdown()
+    app.state.worker.stop()
+    app.state.manager.shutdown()
 
 
 app = FastAPI(
@@ -54,6 +53,8 @@ templates = Jinja2Templates(
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
+    container = request.app.state.container
+
     state = container.state_manager.load()
     backtest = container.backtest_repository.load()
 
@@ -68,17 +69,19 @@ async def dashboard(request: Request):
 
 
 @app.get("/api/status")
-async def status():
-    return list(worker.jobs.values())
+async def status(request: Request):
+    return list(request.app.state.worker.jobs.values())
 
 
 @app.get("/api/state")
-async def state():
-    return container.state_manager.load()
+async def state(request: Request):
+    return request.app.state.container.state_manager.load()
 
 
 @app.post("/api/update")
-async def update(config: AppConfig):
+async def update(config: Config, request: Request):
+    container = request.app.state.container
+
     container.config_repository.save(config)
     container.state_manager.update(config)
 
@@ -86,44 +89,53 @@ async def update(config: AppConfig):
 
 
 @app.post("/api/fit")
-async def train(request: FitRequest):
-    worker.submit(
-        Job(
-            id=uuid.uuid4().hex,
-            type=JobType.FIT,
-            request=request,
-        )
+async def fit(request: Request, params: FitParams):
+    job = Job(
+        id=uuid.uuid4().hex,
+        type=JobType.FIT,
+        params=params,
     )
 
-    return {"status": "queued"}
+    request.app.state.worker.submit(job)
+
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }
 
 
 # @app.post("/api/predict")
-# async def predict(request: FitRequest):
+# async def predict(request: Request, params: FitParams):
 #     return {"ok": True}
 
 
 @app.post("/api/backtest")
-async def backtest(request: BacktestRequest):
-    worker.submit(
-        Job(
-            id=uuid.uuid4().hex,
-            type=JobType.BACKTEST,
-            request=request,
-        )
+async def backtest(request: Request, params: BacktestParams):
+    job = Job(
+        id=uuid.uuid4().hex,
+        type=JobType.BACKTEST,
+        params=params,
     )
 
-    return {"status": "queued"}
+    request.app.state.worker.submit(job)
+
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }
 
 
 @app.post("/api/tune")
-async def tune(request: TuneRequest):
-    worker.submit(
-        Job(
-            id=uuid.uuid4().hex,
-            type=JobType.TUNE,
-            request=request,
-        )
+async def tune(request: Request, params: TuneParams):
+    job = Job(
+        id=uuid.uuid4().hex,
+        type=JobType.TUNE,
+        params=params,
     )
 
-    return {"status": "queued"}
+    request.app.state.worker.submit(job)
+
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }

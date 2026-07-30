@@ -6,11 +6,11 @@ import pandas as pd
 from optuna import Study
 
 from domain.models.config import (
-    AppConfig,
-    BacktestRequest,
-    FitRequest,
+    Config,
+    BacktestParams,
+    FitParams,
     ForecasterType,
-    TuneRequest,
+    TuneParams,
 )
 from domain.models.interface import Forecaster
 from features.dataset import DatasetLoader
@@ -30,15 +30,15 @@ class Forecasting:
         self.path = path
         self.forecasters = forecasters
 
-    def predict(self, config: AppConfig):
+    def predict(self, config: Config):
         pass
 
-    def fit(self, config: AppConfig, request: FitRequest):
+    def fit(self, config: Config, params: FitParams):
         end = datetime.now(timezone.utc)
-        start = end - timedelta(days=request.days)
+        start = end - timedelta(days=params.days)
 
         for forecaster in self.forecasters:
-            if request.forecaster and forecaster.name != request.forecaster:
+            if params.forecaster and forecaster.name != params.forecaster:
                 continue
 
             forecaster.load(self.path)
@@ -50,11 +50,11 @@ class Forecasting:
             forecaster.fit(df)
             forecaster.save(self.path)
 
-    def backtest(self, config: AppConfig, request: BacktestRequest) -> pd.DataFrame:
-        forecaster = self._get_forecaster(request.forecaster)
+    def backtest(self, config: Config, params: BacktestParams) -> pd.DataFrame:
+        forecaster = self._get_forecaster(params.forecaster)
 
         end = datetime.now(timezone.utc)
-        start = end - timedelta(days=request.days)
+        start = end - timedelta(days=params.days)
 
         dataset = forecaster.dataset(config)
 
@@ -66,17 +66,17 @@ class Forecasting:
 
         return metric
 
-    def tune(self, config: AppConfig, request: TuneRequest) -> Study:
-        forecaster = self._get_forecaster(request.forecaster)
+    def tune(self, config: Config, params: TuneParams) -> Study:
+        forecaster = self._get_forecaster(params.forecaster)
 
         end = datetime.now(timezone.utc)
-        start = end - timedelta(days=request.days)
+        start = end - timedelta(days=params.days)
 
         dataset = forecaster.dataset(config)
 
         df = self.loader.load(dataset, start, end)
 
-        results, study = forecaster.tune(df, n_trials=request.trails)
+        results, study = forecaster.tune(df, n_trials=params.trails)
 
         logging.debug(results)
 

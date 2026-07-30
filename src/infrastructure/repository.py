@@ -1,6 +1,6 @@
 import pandas as pd
 
-from domain.models.config import AppConfig
+from domain.models.config import Config
 from domain.models.state import OptimizerState
 from infrastructure.storage import JsonStorage
 
@@ -9,16 +9,16 @@ class ConfigRepository:
     def __init__(self, storage: JsonStorage):
         self.storage = storage
 
-    def save(self, config: AppConfig) -> None:
+    def save(self, config: Config) -> None:
         self.storage.save(config)
 
-    def load(self) -> AppConfig:
+    def load(self) -> Config:
         data = self.storage.load()
 
         if not data:
             raise Exception("No config found, run update first")
 
-        return AppConfig.model_validate(data)
+        return Config.model_validate(data)
 
 
 class StateRepository:

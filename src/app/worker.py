@@ -105,12 +105,12 @@ class Worker:
 
         match job.type:
             case JobType.FIT:
-                container.forecasting.fit(config, job.request)
+                container.forecasting.fit(config, job.params)
 
                 logging.info("Fit finished")
 
             case JobType.TUNE:
-                study = container.forecasting.tune(config, job.request)
+                study = container.forecasting.tune(config, job.params)
 
                 logging.info(
                     "Tune finished %.3f %s",
@@ -119,7 +119,7 @@ class Worker:
                 )
 
             case JobType.BACKTEST:
-                metric = container.forecasting.backtest(config, job.request)
+                metric = container.forecasting.backtest(config, job.params)
 
                 logging.info(
                     "Backtest finished %s",

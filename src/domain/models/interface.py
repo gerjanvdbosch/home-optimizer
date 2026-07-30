@@ -5,7 +5,7 @@ from typing import Any, Protocol, TypeVar
 import pandas as pd
 from optuna import Study
 
-from domain.models.config import AppConfig, ForecasterType
+from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DataDefinition, DatasetDefinition
 
 JsonType = dict[str, Any] | list[Any]
@@ -24,7 +24,7 @@ class Forecaster(Protocol):
     @property
     def name(self) -> ForecasterType: ...
 
-    def dataset(self, config: AppConfig) -> DatasetDefinition: ...
+    def dataset(self, config: Config) -> DatasetDefinition: ...
 
     def fit(self, df: pd.DataFrame): ...
 
