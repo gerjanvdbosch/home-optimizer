@@ -105,15 +105,9 @@ class BaseForecaster(Forecaster):
         df: pd.DataFrame,
         steps: int = 24,
         n_trials: int = 10,
+        study_storage: str | Path | None = None,
     ) -> tuple[pd.DataFrame, Study]:
         df = self.prepare(df)
-
-        # study = optuna.create_study(
-        #     study_name=f"{self.name}_forecaster",
-        #     storage="sqlite:///data/optuna.db",
-        #     load_if_exists=True,
-        #     direction="minimize",
-        # )
 
         return self.tune_function(
             n_jobs=1,
@@ -121,11 +115,15 @@ class BaseForecaster(Forecaster):
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps),
             search_space=self.search_space,
-            # study_name=study.study_name,
-            # storage=study._storage,
             n_trials=n_trials,
             random_state=42,
             return_best=True,
+            kwargs_create_study={
+                "study_name": self.name,
+                "storage": study_storage,
+                "load_if_exists": True,
+                "direction": "minimize",
+            },
             **self.tune_arguments(df),
         )
 

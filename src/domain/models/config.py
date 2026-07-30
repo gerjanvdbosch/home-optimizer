@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Literal
 
@@ -88,6 +86,7 @@ class SolarConfig(BaseModel):
 
 
 class BoilerConfig(BaseModel):
+    setpoint: SensorReference = Field()
     top_temperature: SensorReference = Field()
     bottom_temperature: SensorReference = Field()
 

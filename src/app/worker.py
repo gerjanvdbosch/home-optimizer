@@ -34,9 +34,9 @@ class Worker:
         }
 
         logging.info(
-            "Queued %s job %s",
-            job.type.value,
+            "Job queued: id=%s type=%s",
             job.id,
+            job.type.value,
         )
 
         self.queue.put(job)
@@ -71,27 +71,28 @@ class Worker:
                 )
 
                 logging.info(
-                    "Running %s job %s",
-                    job.type.value,
+                    "Job started: id=%s type=%s",
                     job.id,
+                    job.type.value,
                 )
 
                 try:
                     self._execute(container, job)
 
-                except Exception as e:
+                    logging.info(
+                        "Job completed: id=%s type=%s",
+                        job.id,
+                        job.type.value,
+                    )
+
+                except Exception:
                     logging.exception(
-                        "Job failed: %s",
-                        job.type,
+                        "Job failed: id=%s type=%s",
+                        job.id,
+                        job.type.value,
                     )
 
                 finally:
-                    logging.info(
-                        "Finished %s job %s",
-                        job.type.value,
-                        job.id,
-                    )
-
                     del self.jobs[job.id]
 
     def _update_job(self, job_id: str, **kwargs):
@@ -100,28 +101,12 @@ class Worker:
         self.jobs[job_id] = job
 
     def _execute(self, container, job: Job):
-
         config = container.config_repository.load()
 
         match job.type:
             case JobType.FIT:
                 container.forecasting.fit(config, job.params)
-
-                logging.info("Fit finished")
-
             case JobType.TUNE:
-                study = container.forecasting.tune(config, job.params)
-
-                logging.info(
-                    "Tune finished %.3f %s",
-                    study.best_value,
-                    study.best_params,
-                )
-
+                container.forecasting.tune(config, job.params)
             case JobType.BACKTEST:
-                metric = container.forecasting.backtest(config, job.params)
-
-                logging.info(
-                    "Backtest finished %s",
-                    metric,
-                )
+                container.forecasting.backtest(config, job.params)

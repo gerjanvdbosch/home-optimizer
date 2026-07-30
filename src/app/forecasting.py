@@ -6,8 +6,8 @@ import pandas as pd
 from optuna import Study
 
 from domain.models.config import (
-    Config,
     BacktestParams,
+    Config,
     FitParams,
     ForecasterType,
     TuneParams,
@@ -47,6 +47,8 @@ class Forecasting:
 
             df = self.loader.load(dataset, start, end)
 
+            logging.info("Fit finished: ")
+
             forecaster.fit(df)
             forecaster.save(self.path)
 
@@ -62,6 +64,11 @@ class Forecasting:
 
         metric, result = forecaster.backtest(df)
 
+        logging.info(
+            "Backtest finished: metric=%s",
+            metric,
+        )
+
         self.repository.save(result)
 
         return metric
@@ -76,9 +83,17 @@ class Forecasting:
 
         df = self.loader.load(dataset, start, end)
 
-        results, study = forecaster.tune(df, n_trials=params.trails)
+        results, study = forecaster.tune(
+            df,
+            n_trials=params.trails,
+            study_storage=f"sqlite:///{self.path / 'optuna.db'}",
+        )
 
-        logging.debug(results)
+        logging.info(
+            "Tune finished: value=%.3f params=%s",
+            study.best_value,
+            study.best_params,
+        )
 
         forecaster.save(self.path)
 

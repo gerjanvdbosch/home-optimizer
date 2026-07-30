@@ -27,7 +27,7 @@ class BoilerForecaster(BaseForecaster):
 
     @property
     def exog_columns(self):
-        return ["state", "compressor_freq", "T_supply"]
+        return ["state", "compressor_freq", "T_setpoint", "T_supply"]
 
     def create(self):
         return ForecasterDirectMultiVariate(
@@ -146,6 +146,13 @@ class BoilerForecaster(BaseForecaster):
             .timeseries(
                 "compressor_freq",
                 config.heat_pump.compressor_frequency,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
+            .timeseries(
+                "T_setpoint",
+                config.heat_pump.boiler.setpoint,
                 aggregation="mean",
                 interval="15m",
                 fill="previous",

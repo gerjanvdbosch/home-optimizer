@@ -47,7 +47,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 88
 target-version = "py311"
 src = ["src", "tests"]
 
@@ -57,7 +57,7 @@ select = ["E", "F", "I", "B"]
 [tool.ruff.lint.per-file-ignores]
 
 [tool.black]
-line-length = 100
+line-length = 88
 target-version = ["py311"]
 
 [tool.pyright]
