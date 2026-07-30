@@ -1,16 +1,18 @@
 import logging
+from datetime import UTC, datetime
 from multiprocessing import Process, Queue
 
 from joblib import parallel_backend
 
-from domain.models.config import Job, JobType
+from domain.models.worker import Job, JobType
 
 
 class Worker:
-    def __init__(self, container_factory):
+    def __init__(self, container_factory, manager):
         self.queue: Queue = Queue()
         self.container_factory = container_factory
         self.process: Process | None = None
+        self.jobs = manager.dict()
 
     def start(self):
         if self.process and self.process.is_alive():
@@ -24,6 +26,19 @@ class Worker:
         self.process.start()
 
     def submit(self, job: Job):
+        self.jobs[job.id] = {
+            "id": job.id,
+            "type": job.type.value,
+            "state": "queued",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+
+        logging.info(
+            "Queued %s job %s",
+            job.type.value,
+            job.id,
+        )
+
         self.queue.put(job)
 
     def stop(self):
@@ -50,16 +65,42 @@ class Worker:
                     logging.info("Worker stopped")
                     break
 
+                self._update_job(
+                    job.id,
+                    state="running",
+                )
+
+                logging.info(
+                    "Running %s job %s",
+                    job.type.value,
+                    job.id,
+                )
+
                 try:
                     self._execute(container, job)
 
-                except Exception:
+                except Exception as e:
                     logging.exception(
                         "Job failed: %s",
                         job.type,
                     )
 
+                finally:
+                    logging.info(
+                        "Finished %s job %s",
+                        job.type.value,
+                        job.id,
+                    )
+
+                    del self.jobs[job.id]
+
+    def _update_job(self, job_id: str, **kwargs):
+        job = dict(self.jobs[job_id])
+        job.update(kwargs)
+        self.jobs[job_id] = job
+
     def _execute(self, container, job: Job):
+
         config = container.config_repository.load()
 
         match job.type:

@@ -1,5 +1,6 @@
 import uuid
 from contextlib import asynccontextmanager
+from multiprocessing import Manager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -9,7 +10,8 @@ from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
 from app.worker import Worker
-from domain.models.config import AppConfig, BacktestRequest, FitRequest, Job, JobType, TuneRequest
+from domain.models.config import AppConfig, BacktestRequest, FitRequest, TuneRequest
+from domain.models.worker import Job, JobType
 from web.chart import backtest_chart, solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,16 +19,22 @@ BASE_DIR = Path(__file__).resolve().parent
 
 container = create_container()
 
-worker = Worker(create_container)
+manager = Manager()
+
+worker = Worker(create_container, manager)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     worker.start()
+
+    app.state.worker = worker
 
     yield
 
     worker.stop()
+    manager.shutdown()
 
 
 app = FastAPI(
@@ -61,7 +69,7 @@ async def dashboard(request: Request):
 
 @app.get("/api/status")
 async def status():
-    return {"status": ""}
+    return list(worker.jobs.values())
 
 
 @app.get("/api/state")
