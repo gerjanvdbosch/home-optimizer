@@ -42,3 +42,7 @@ class JsonStorage:
                 encoding="utf-8",
             )
         )
+
+    def remove(self) -> None:
+        if self.path.exists():
+            self.path.unlink()

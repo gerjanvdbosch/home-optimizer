@@ -102,7 +102,7 @@ actions:
         {{ {
           "days": 90,
           "forecaster": "boiler",
-          "trails": 3
+          "trails": 10
         } | to_json }}
 ```
 
