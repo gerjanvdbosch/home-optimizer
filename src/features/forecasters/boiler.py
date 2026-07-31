@@ -1,13 +1,9 @@
-from typing import Any, Callable
+from typing import Any
 
 import pandas as pd
 from optuna import Trial
-from skforecast.direct import ForecasterDirectMultiVariate
-from skforecast.model_selection import (
-    backtesting_forecaster_multiseries,
-    bayesian_search_forecaster_multiseries,
-)
 from skforecast.preprocessing import CalendarFeatures, RollingFeatures
+from skforecast.recursive import ForecasterRecursive
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from domain.models.config import Config, ForecasterType
@@ -22,25 +18,29 @@ class BoilerForecaster(BaseForecaster):
         return "boiler"
 
     @property
-    def series_columns(self):
-        return ["T_top", "T_bottom"]
+    def target_column(self) -> str:
+        return "T_top"
 
     @property
-    def exog_columns(self):
-        return ["state", "compressor_freq", "T_setpoint", "T_supply"]
+    def exog_columns(self) -> list[str]:
+        return [
+            "T_bottom",
+            "state",
+            "compressor_freq",
+            "T_setpoint",
+            "T_supply",
+        ]
 
     def create(self):
-        return ForecasterDirectMultiVariate(
+        return ForecasterRecursive(
             forecaster_id=self.name,
             estimator=HistGradientBoostingRegressor(
-                max_iter=100,
-                learning_rate=0.045,
+                max_iter=150,
+                learning_rate=0.05,
                 max_depth=3,
-                min_samples_leaf=21,
+                min_samples_leaf=20,
                 random_state=42,
             ),
-            level="T_top",
-            steps=96,
             lags=48,
             window_features=RollingFeatures(
                 stats=["mean", "std", "min", "max"],
@@ -60,17 +60,9 @@ class BoilerForecaster(BaseForecaster):
             ),
         )
 
-    @property
-    def backtest_function(self) -> Callable[..., Any]:
-        return backtesting_forecaster_multiseries
-
-    @property
-    def tune_function(self) -> Callable[..., Any]:
-        return bayesian_search_forecaster_multiseries
-
     def fit_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[self.series_columns],
+            "y": df[self.target_column],
             "exog": df[self.exog_columns],
         }
 
@@ -79,27 +71,32 @@ class BoilerForecaster(BaseForecaster):
         last_window: pd.DataFrame,
         df: pd.DataFrame | None = None,
     ):
-        return {"last_window": last_window[self.series_columns]}
+        return {"last_window": last_window[self.exog_columns]}
 
     def backtest_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[self.series_columns],
+            "y": df[self.target_column],
             "exog": df[self.exog_columns],
         }
 
     def backtest_results(
-        self, df: pd.DataFrame, metric: pd.DataFrame, result: pd.DataFrame
+        self,
+        df: pd.DataFrame,
+        metric: pd.DataFrame,
+        result: pd.DataFrame,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        actual = df.loc[result.index, "T_top"]
-
         result = result.copy()
-        result["actual"] = actual
+
+        result["actual"] = df.loc[
+            result.index,
+            self.target_column,
+        ]
 
         return metric, result
 
     def tune_arguments(self, df: pd.DataFrame):
         return {
-            "series": df[self.series_columns],
+            "y": df[self.target_column],
             "exog": df[self.exog_columns],
         }
 
@@ -107,29 +104,32 @@ class BoilerForecaster(BaseForecaster):
         return {
             "lags": trial.suggest_categorical(
                 "lags",
-                [24, 48, 96],
+                [
+                    48,
+                    96,
+                    192,
+                ],
             ),
             "learning_rate": trial.suggest_float(
                 "learning_rate",
-                0.02,
-                0.08,
-                log=True,
+                0.03,
+                0.07,
             ),
             "max_depth": trial.suggest_int(
                 "max_depth",
-                3,
-                6,
+                2,
+                5,
             ),
             "max_iter": trial.suggest_int(
                 "max_iter",
-                100,
-                300,
+                50,
+                250,
                 step=50,
             ),
             "min_samples_leaf": trial.suggest_int(
                 "min_samples_leaf",
-                20,
-                50,
+                10,
+                40,
             ),
         }
 

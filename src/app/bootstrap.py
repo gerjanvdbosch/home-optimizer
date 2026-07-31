@@ -18,7 +18,11 @@ from features.dataset import (
 )
 from features.forecasters.boiler import BoilerForecaster
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
-from infrastructure.repository import BacktestRepository, ConfigRepository, StateRepository
+from infrastructure.repository import (
+    BacktestRepository,
+    ConfigRepository,
+    StateRepository,
+)
 from infrastructure.storage import JsonStorage
 
 
