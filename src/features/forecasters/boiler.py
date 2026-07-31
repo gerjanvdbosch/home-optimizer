@@ -35,17 +35,29 @@ class BoilerForecaster(BaseForecaster):
         return ForecasterRecursive(
             forecaster_id=self.name,
             estimator=HistGradientBoostingRegressor(
-                max_iter=150,
-                learning_rate=0.05,
-                max_depth=3,
-                min_samples_leaf=20,
+                learning_rate=0.031,
+                max_depth=5,
+                max_iter=250,
+                min_samples_leaf=16,
                 random_state=42,
             ),
             lags=48,
-            window_features=RollingFeatures(
-                stats=["mean", "std", "min", "max"],
-                window_sizes=[4, 16, 48, 96],
-            ),
+            # window_features=RollingFeatures(
+            #     stats=[
+            #         "mean",
+            #         "mean",
+            #         "mean",
+            #         "mean",
+            #         "mean",
+            #     ],
+            #     window_sizes=[
+            #         4,
+            #         16,
+            #         48,
+            #         96,
+            #         192,
+            #     ],
+            # ),
             calendar_features=CalendarFeatures(
                 features=[
                     "minute",
