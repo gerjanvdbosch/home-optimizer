@@ -7,13 +7,15 @@
     <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
-    <h1>Home Optimizer</h1>
-    <div class="chart-container">
-        {{ solar_chart | safe }}
-    </div>
-
-    <div class="chart-container">
-        {{ backtest_chart | safe }}
-    </div>
+<h1>Home Optimizer</h1>
+{% if backtest_chart %}
+<div class="chart-container">
+    {{ backtest_chart | safe }}
+</div>
+{% else %}
+<div class="chart-container">
+    {{ solar_chart | safe }}
+</div>
+{% endif %}
 </body>
 </html>

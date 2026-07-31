@@ -7,6 +7,7 @@ from optuna import Study
 
 from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DataDefinition, DatasetDefinition
+from domain.models.state import BacktestResult
 
 JsonType = dict[str, Any] | list[Any]
 
@@ -24,6 +25,18 @@ class Forecaster(Protocol):
     @property
     def name(self) -> ForecasterType: ...
 
+    @property
+    def target_column(self) -> str: ...
+
+    @property
+    def exog_columns(self) -> list[str]: ...
+
+    @property
+    def y_axis(self) -> str: ...
+
+    @property
+    def unit(self) -> str: ...
+
     def dataset(self, config: Config) -> DatasetDefinition: ...
 
     def fit(self, df: pd.DataFrame): ...
@@ -35,7 +48,7 @@ class Forecaster(Protocol):
         steps: int = 24,
     ) -> pd.Series: ...
 
-    def backtest(self, df: pd.DataFrame, steps: int = 24) -> tuple[pd.DataFrame, pd.DataFrame]: ...
+    def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult: ...
 
     def tune(
         self,

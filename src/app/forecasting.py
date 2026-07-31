@@ -2,9 +2,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pandas as pd
-from optuna import Study
-
 from domain.models.config import (
     BacktestParams,
     Config,
@@ -52,7 +49,7 @@ class Forecasting:
             forecaster.fit(df)
             forecaster.save(self.path)
 
-    def backtest(self, config: Config, params: BacktestParams) -> pd.DataFrame:
+    def backtest(self, config: Config, params: BacktestParams):
         forecaster = self._get_forecaster(params.forecaster)
 
         end = datetime.now(timezone.utc)
@@ -62,18 +59,16 @@ class Forecasting:
 
         df = self.loader.load(dataset, start, end)
 
-        metric, result = forecaster.backtest(df)
+        result = forecaster.backtest(df)
 
         logging.info(
-            "Backtest finished: metric=%s",
-            metric,
+            "Backtest finished: mae=%.3f",
+            result.mae,
         )
 
         self.repository.save(result)
 
-        return metric
-
-    def tune(self, config: Config, params: TuneParams) -> Study:
+    def tune(self, config: Config, params: TuneParams):
         forecaster = self._get_forecaster(params.forecaster)
 
         end = datetime.now(timezone.utc)
@@ -96,8 +91,6 @@ class Forecasting:
         )
 
         forecaster.save(self.path)
-
-        return study
 
     def _get_forecaster(self, name: ForecasterType) -> Forecaster:
         for forecaster in self.forecasters:

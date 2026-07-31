@@ -18,6 +18,14 @@ class BoilerForecaster(BaseForecaster):
         return "boiler"
 
     @property
+    def y_axis(self) -> str:
+        return "Temperature"
+
+    @property
+    def unit(self) -> str:
+        return "°C"
+
+    @property
     def target_column(self) -> str:
         return "T_top"
 
@@ -42,22 +50,6 @@ class BoilerForecaster(BaseForecaster):
                 random_state=42,
             ),
             lags=48,
-            # window_features=RollingFeatures(
-            #     stats=[
-            #         "mean",
-            #         "mean",
-            #         "mean",
-            #         "mean",
-            #         "mean",
-            #     ],
-            #     window_sizes=[
-            #         4,
-            #         16,
-            #         48,
-            #         96,
-            #         192,
-            #     ],
-            # ),
             calendar_features=CalendarFeatures(
                 features=[
                     "minute",
@@ -72,7 +64,7 @@ class BoilerForecaster(BaseForecaster):
             ),
         )
 
-    def fit_arguments(self, df: pd.DataFrame):
+    def arguments(self, df: pd.DataFrame):
         return {
             "y": df[self.target_column],
             "exog": df[self.exog_columns],
@@ -84,33 +76,6 @@ class BoilerForecaster(BaseForecaster):
         df: pd.DataFrame | None = None,
     ):
         return {"last_window": last_window[self.exog_columns]}
-
-    def backtest_arguments(self, df: pd.DataFrame):
-        return {
-            "y": df[self.target_column],
-            "exog": df[self.exog_columns],
-        }
-
-    def backtest_results(
-        self,
-        df: pd.DataFrame,
-        metric: pd.DataFrame,
-        result: pd.DataFrame,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        result = result.copy()
-
-        result["actual"] = df.loc[
-            result.index,
-            self.target_column,
-        ]
-
-        return metric, result
-
-    def tune_arguments(self, df: pd.DataFrame):
-        return {
-            "y": df[self.target_column],
-            "exog": df[self.exog_columns],
-        }
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {

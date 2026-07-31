@@ -13,6 +13,7 @@ from skforecast.model_selection import (
 from skforecast.utils import load_forecaster, save_forecaster
 
 from domain.models.interface import Forecaster
+from domain.models.state import BacktestResult
 
 
 class BaseForecaster(Forecaster):
@@ -31,7 +32,7 @@ class BaseForecaster(Forecaster):
         return bayesian_search_forecaster
 
     @abstractmethod
-    def fit_arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
+    def arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
 
     @abstractmethod
     def predict_arguments(
@@ -39,17 +40,6 @@ class BaseForecaster(Forecaster):
         last_window: pd.DataFrame,
         df: pd.DataFrame | None = None,
     ) -> dict[str, Any]: ...
-
-    @abstractmethod
-    def backtest_arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
-
-    @abstractmethod
-    def backtest_results(
-        self, df: pd.DataFrame, metric: pd.DataFrame, result: pd.DataFrame
-    ) -> tuple[pd.DataFrame, pd.DataFrame]: ...
-
-    @abstractmethod
-    def tune_arguments(self, df: pd.DataFrame) -> dict[str, Any]: ...
 
     @abstractmethod
     def search_space(self, trial: Trial) -> dict[str, Any]: ...
@@ -60,7 +50,7 @@ class BaseForecaster(Forecaster):
     def fit(self, df: pd.DataFrame):
         df = self.prepare(df)
 
-        self.forecaster.fit(**self.fit_arguments(df))
+        self.forecaster.fit(**self.arguments(df))
 
     def predict(
         self,
@@ -83,7 +73,7 @@ class BaseForecaster(Forecaster):
         self,
         df: pd.DataFrame,
         steps: int = 24,
-    ):
+    ) -> BacktestResult:
         df = self.prepare(df)
 
         metric, result = self.backtest_function(
@@ -91,10 +81,10 @@ class BaseForecaster(Forecaster):
             metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps),
-            **self.backtest_arguments(df),
+            **self.arguments(df),
         )
 
-        return self.backtest_results(
+        return self.backtest_result(
             df=df,
             metric=metric,
             result=result,
@@ -124,15 +114,39 @@ class BaseForecaster(Forecaster):
                 "load_if_exists": True,
                 "direction": "minimize",
             },
-            **self.tune_arguments(df),
+            **self.arguments(df),
         )
 
     def create_cv(self, df: pd.DataFrame, steps: int) -> TimeSeriesFold:
         return TimeSeriesFold(
             steps=steps,
             initial_train_size=int(len(df) * 0.7),
-            refit=False,
+            refit=True,
             fixed_train_size=False,
+        )
+
+    def backtest_result(
+        self,
+        df: pd.DataFrame,
+        metric: pd.DataFrame,
+        result: pd.DataFrame,
+    ) -> BacktestResult:
+        result = result.copy()
+
+        result["actual"] = df.loc[result.index, self.target_column]
+
+        return BacktestResult(
+            name=self.name,
+            y_axis=self.y_axis,
+            unit=self.unit,
+            mae=float(metric["mean_absolute_error"].iloc[0]),
+            points=[
+                {
+                    "time": str(index),
+                    **{str(key): float(value) for key, value in row.items()},
+                }
+                for index, row in result.iterrows()
+            ],
         )
 
     def save(self, path: Path) -> None:

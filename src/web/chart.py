@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from domain.models.interface import JsonType
-from domain.models.state import OptimizerState
+from domain.models.state import BacktestResult, OptimizerState
 from domain.time import to_local_series, to_local_time
 
 
@@ -83,40 +83,49 @@ def solar_forecast_chart(state: OptimizerState) -> str:
     )
 
 
-def backtest_chart(results: JsonType) -> str:
-    df = pd.DataFrame(results)
+def backtest_chart(result: BacktestResult | None) -> str:
+    if result is None:
+        return ""
 
-    df["time"] = to_local_series(pd.to_datetime(df["index"]))
+    df = pd.DataFrame(result.points)
+
+    df["time"] = to_local_series(pd.to_datetime(df["time"]))
 
     fig = go.Figure()
 
-    fig.add_trace(
-        go.Scatter(
-            x=df["time"],
-            y=df["actual"],
-            mode="lines",
-            name="Actual",
-            line=dict(width=3),
-            connectgaps=True,
-            hovertemplate="%{y:.1f} °C<extra>%{fullData.name}</extra>",
+    if "actual" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=df["actual"],
+                mode="lines",
+                name="Actual",
+                line=dict(width=3),
+                connectgaps=True,
+                hovertemplate=(
+                    f"%{{y:.1f}} {result.unit}<extra>%{{fullData.name}}</extra>"
+                ),
+            )
         )
-    )
 
-    fig.add_trace(
-        go.Scatter(
-            x=df["time"],
-            y=df["pred"],
-            mode="lines",
-            name="Prediction",
-            line=dict(width=3),
-            connectgaps=True,
-            hovertemplate="%{y:.1f} °C<extra>%{fullData.name}</extra>",
+    if "pred" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=df["pred"],
+                mode="lines",
+                name="Prediction",
+                line=dict(width=3),
+                connectgaps=True,
+                hovertemplate=(
+                    f"%{{y:.1f}} {result.unit}<extra>%{{fullData.name}}</extra>"
+                ),
+            )
         )
-    )
 
     fig.update_layout(
         title=dict(
-            text="Backtest",
+            text=f"{result.name.capitalize()} backtest - MAE {result.mae:.3f}",
             x=0.02,
             y=0.95,
             font=dict(
@@ -144,7 +153,7 @@ def backtest_chart(results: JsonType) -> str:
             tickfont=dict(size=12),
         ),
         yaxis=dict(
-            title="Temperature (°C)",
+            title=f"{result.y_axis} ({result.unit})",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.08)",
             zeroline=False,

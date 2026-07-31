@@ -3,7 +3,7 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-from domain.models.config import HeatPumpMode
+from domain.models.config import ForecasterType, HeatPumpMode
 
 T = TypeVar("T")
 
@@ -59,7 +59,9 @@ class WeatherForecast(BaseModel):
 
 class ForecastState(BaseModel):
     solar: SolarForecast = Field(default_factory=SolarForecast)
-    electricity_price: ElectricityPriceForecast = Field(default_factory=ElectricityPriceForecast)
+    electricity_price: ElectricityPriceForecast = Field(
+        default_factory=ElectricityPriceForecast
+    )
     weather: WeatherForecast = Field(default_factory=WeatherForecast)
 
 
@@ -80,3 +82,11 @@ class OptimizerState(BaseModel):
     measurements: MeasurementState = Field(default_factory=MeasurementState)
     forecast: ForecastState = Field(default_factory=ForecastState)
     schedule: ScheduleState | None = None
+
+
+class BacktestResult(BaseModel):
+    name: ForecasterType
+    y_axis: str
+    unit: str
+    mae: float
+    points: list[dict[str, object]]
