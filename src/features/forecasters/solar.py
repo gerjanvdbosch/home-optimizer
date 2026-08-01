@@ -165,7 +165,7 @@ class SolarForecaster(BaseForecaster):
                 "production",
                 config.solar.production,
                 interval="15m",
-                aggregation="first",
+                aggregation="mean",
                 fill="none",
             )
             .attribute_timeseries(
@@ -173,18 +173,21 @@ class SolarForecaster(BaseForecaster):
                 config.solar.forecast.p10,
                 interval="1m",
                 aggregation="last",
+                target_interval="15min",
             )
             .attribute_timeseries(
                 "p50",
                 config.solar.forecast.p50,
                 interval="1m",
                 aggregation="last",
+                target_interval="15min",
             )
             .attribute_timeseries(
                 "p90",
                 config.solar.forecast.p90,
                 interval="1m",
                 aggregation="last",
+                target_interval="15min",
             )
             .join("p50", "p10", on=("time", "target_time"), how="inner")
             .join("p50", "p90", on=("time", "target_time"), how="inner")

@@ -69,7 +69,7 @@ class DatasetLoader:
                 result = result.merge(
                     frame,
                     on="time",
-                    how="left",
+                    how="outer",
                 )
 
             return result.reset_index(drop=True)
@@ -160,6 +160,7 @@ class DatasetBuilder:
         aggregation: Aggregation | None = None,
         interval: str = "1m",
         fill: FillMethod = "none",
+        target_interval: str | None = None,
     ) -> "DatasetBuilder":
         """
         Load a time series of attribute snapshots.
@@ -185,6 +186,7 @@ class DatasetBuilder:
                 aggregation=aggregation,
                 interval=interval,
                 fill=fill,
+                target_interval=target_interval,
             )
         )
 
@@ -339,7 +341,42 @@ class AttributeTimeSeriesLoader(DataLoader):
                     }
                 )
 
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+
+        if df.empty or definition.target_interval is None:
+            return df
+
+        return self._resample_target_time(
+            df,
+            value_column=definition.name,
+            interval=definition.target_interval,
+        )
+
+    def _resample_target_time(
+        self,
+        df: pd.DataFrame,
+        value_column: str,
+        interval: str,
+    ) -> pd.DataFrame:
+        frames = []
+
+        for forecast_time, group in df.groupby("time", sort=False):
+            group = group.sort_values("target_time").copy()
+
+            group = (
+                group.set_index("target_time")[[value_column]]
+                .resample(interval)
+                .ffill()
+                .reset_index()
+            )
+
+            group["time"] = forecast_time
+
+            frames.append(group)
+
+        return pd.concat(frames, ignore_index=True)[
+            ["time", "target_time", value_column]
+        ]
 
 
 class AttributeSeriesLoader(DataLoader):

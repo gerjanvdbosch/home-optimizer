@@ -42,6 +42,7 @@ class AttributeTimeSeriesDefinition(DataDefinition):
     aggregation: Aggregation | None = None
     interval: str = "1min"
     fill: FillMethod = "none"
+    target_interval: str | None = None
 
 
 class AttributeSeriesDefinition(DataDefinition): ...
