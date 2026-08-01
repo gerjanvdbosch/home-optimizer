@@ -1,8 +1,8 @@
 import ast
 from datetime import datetime
-from functools import reduce
 
 import pandas as pd
+from pandas._typing import MergeHow
 
 from domain.models.config import SensorReference
 from domain.models.dataset import (
@@ -12,6 +12,7 @@ from domain.models.dataset import (
     DataDefinition,
     DatasetDefinition,
     FillMethod,
+    JoinDefinition,
     TimeSeriesDefinition,
 )
 from domain.models.interface import DataLoader
@@ -19,55 +20,104 @@ from domain.time import parse_datetime
 
 
 class DatasetLoader:
-    def __init__(self, loaders: list):
+    def __init__(self, loaders: list[DataLoader]):
         self.loaders = loaders
 
     def load(
-        self, dataset: DatasetDefinition, start: datetime, end: datetime
+        self,
+        dataset: DatasetDefinition,
+        start: datetime,
+        end: datetime,
     ) -> pd.DataFrame:
-        frames: list[pd.DataFrame] = []
+        frames: dict[str, pd.DataFrame] = {}
 
         for definition in dataset.definitions:
             loader = self._find(definition)
 
-            frame = loader.load(
+            frames[definition.name] = loader.load(
                 definition=definition,
                 start=start,
                 end=end,
             )
 
-            frames.append(frame)
+        return self._merge(
+            frames=frames,
+            joins=dataset.joins,
+        )
 
-        return self._merge(frames)
-
-    def _find(self, definition: DataDefinition):
+    def _find(self, definition: DataDefinition) -> DataLoader:
         for loader in self.loaders:
             if loader.supports(definition):
                 return loader
 
         raise ValueError(f"No loader found for sensor: {definition.name}")
 
-    def _merge(self, frames: list[pd.DataFrame]) -> pd.DataFrame:
-        frames = [frame for frame in frames if not frame.empty]
-
+    def _merge(
+        self,
+        frames: dict[str, pd.DataFrame],
+        joins: list[JoinDefinition],
+    ) -> pd.DataFrame:
         if not frames:
             return pd.DataFrame()
 
-        result = reduce(
-            lambda left, right: left.merge(
-                right,
-                on="time",
-                how="outer",
-            ),
-            frames,
-        )
+        if not joins:
+            frames_iter = iter(frames.values())
 
-        return result.sort_values("time").reset_index(drop=True)
+            result = next(frames_iter).copy()
+
+            for frame in frames_iter:
+                result = result.merge(
+                    frame,
+                    on="time",
+                    how="left",
+                )
+
+            return result.reset_index(drop=True)
+
+        result = frames[joins[0].left].copy()
+        used = {joins[0].left}
+
+        for join in joins:
+            if join.left not in used:
+                raise ValueError(
+                    f"Cannot join '{join.left}': it is not part of the current dataset"
+                )
+
+            if len(join.left_on) != len(join.right_on):
+                raise ValueError(
+                    "left_on and right_on must contain the same number of columns"
+                )
+
+            right = frames[join.right].copy()
+
+            result = result.merge(
+                right,
+                left_on=list(join.left_on),
+                right_on=list(join.right_on),
+                how=join.how,
+                suffixes=("", f"_{join.right}"),
+            )
+
+            for left_key, right_key in zip(
+                join.left_on,
+                join.right_on,
+                strict=True,
+            ):
+                if left_key != right_key:
+                    result = result.drop(
+                        columns=f"{right_key}_{join.right}",
+                        errors="ignore",
+                    )
+
+            used.add(join.right)
+
+        return result.reset_index(drop=True)
 
 
 class DatasetBuilder:
     def __init__(self):
         self._definitions: list[DataDefinition] = []
+        self._joins: list[JoinDefinition] = []
 
     def timeseries(
         self,
@@ -163,8 +213,52 @@ class DatasetBuilder:
         )
         return self
 
+    def join(
+        self,
+        left: str,
+        right: str,
+        on: tuple[str, ...] | None = None,
+        left_on: tuple[str, ...] | None = None,
+        right_on: tuple[str, ...] | None = None,
+        how: MergeHow = "left",
+    ) -> "DatasetBuilder":
+        if on is not None:
+            left_on = right_on = on
+
+        if left_on is None or right_on is None:
+            raise ValueError(
+                "Either 'on' or both 'left_on' and 'right_on' must be provided"
+            )
+
+        if len(left_on) != len(right_on):
+            raise ValueError("left_on and right_on must have the same length")
+
+        self._joins.append(
+            JoinDefinition(
+                left=left,
+                right=right,
+                left_on=left_on,
+                right_on=right_on,
+                how=how,
+            )
+        )
+
+        return self
+
     def build(self) -> DatasetDefinition:
-        return DatasetDefinition(definitions=self._definitions)
+        names = {definition.name for definition in self._definitions}
+
+        for join in self._joins:
+            if join.left not in names:
+                raise ValueError(f"Unknown join source: {join.left}")
+
+            if join.right not in names:
+                raise ValueError(f"Unknown join source: {join.right}")
+
+        return DatasetDefinition(
+            definitions=self._definitions,
+            joins=self._joins,
+        )
 
 
 class TimeSeriesLoader(DataLoader):
