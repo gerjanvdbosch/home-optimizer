@@ -80,25 +80,33 @@ class SolarForecaster(BaseForecaster):
         )
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
-        forecast_columns = ["p10", "p50", "p90"]
 
         df = df.copy()
+        df = df[df["target_time"] >= df["time"]]
 
-        df["time"] = pd.to_datetime(df["time"])
-        df["target_time"] = pd.to_datetime(df["target_time"])
+        df = df.dropna(subset=[self.target_column])
 
-        result = []
+        print(df)
 
-        for forecast_time, group in df.groupby("time"):
-            group = group.set_index("target_time").sort_index()
+        # forecast_columns = ["p10", "p50", "p90"]
+        #
+        # df["time"] = pd.to_datetime(df["time"])
+        # df["target_time"] = pd.to_datetime(df["target_time"])
+        #
+        # result = []
+        #
+        # for forecast_time, group in df.groupby("time"):
+        #     group = group.set_index("target_time").sort_index()
+        #
+        #     group = group[forecast_columns].resample("15min").ffill()
+        #
+        #     group["time"] = forecast_time
+        #
+        #     result.append(group.reset_index())
+        #
+        # return pd.concat(result, ignore_index=True)
 
-            group = group[forecast_columns].resample("15min").ffill()
-
-            group["time"] = forecast_time
-
-            result.append(group.reset_index())
-
-        return pd.concat(result, ignore_index=True)
+        return df
 
     def arguments(self, df: pd.DataFrame):
         return {
@@ -163,14 +171,29 @@ class SolarForecaster(BaseForecaster):
             .attribute_timeseries(
                 "p10",
                 config.solar.forecast.p10,
+                interval="1m",
+                aggregation="last",
             )
             .attribute_timeseries(
                 "p50",
                 config.solar.forecast.p50,
+                interval="1m",
+                aggregation="last",
             )
             .attribute_timeseries(
                 "p90",
                 config.solar.forecast.p90,
+                interval="1m",
+                aggregation="last",
+            )
+            .join("p50", "p10", on=("time", "target_time"), how="inner")
+            .join("p50", "p90", on=("time", "target_time"), how="inner")
+            .join(
+                "p50",
+                "production",
+                left_on=("target_time",),
+                right_on=("time",),
+                how="left",
             )
             .build()
         )
