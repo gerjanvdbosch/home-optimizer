@@ -77,6 +77,20 @@ class DatasetBuilder:
         interval: str = "1m",
         fill: FillMethod = "none",
     ) -> "DatasetBuilder":
+        """
+        Load a regular time series.
+
+        Each row represents a value at a specific point in time. The `time`
+        column represents the timestamp at which the value applies.
+
+        Example:
+            time   | value
+            -------|------
+            10:00  | 300
+            10:15  | 400
+            10:30  | 500
+        """
+
         self._definitions.append(
             TimeSeriesDefinition(
                 name=name,
@@ -97,6 +111,23 @@ class DatasetBuilder:
         interval: str = "1m",
         fill: FillMethod = "none",
     ) -> "DatasetBuilder":
+        """
+        Load a time series of attribute snapshots.
+
+        Each row represents a forecast or snapshot created at `time` for a
+        specific `target_time`. The `time` column indicates when the snapshot
+        was created, while `target_time` indicates when the value applies.
+
+        Example:
+            time  | target_time  | p50
+            ------|--------------|----
+            10:00 | 10:00        | 300
+            10:00 | 10:30        | 400
+            10:00 | 11:00        | 500
+            10:30 | 10:30        | 320
+            10:30 | 11:00        | 450
+        """
+
         self._definitions.append(
             AttributeTimeSeriesDefinition(
                 name=name,
@@ -110,6 +141,20 @@ class DatasetBuilder:
         return self
 
     def attribute_series(self, name: str, sensor: SensorReference):
+        """
+        Load a single attribute series.
+
+        Each row represents a value at a specific point in time. The `time`
+        column represents the timestamp at which the value applies.
+
+        Example:
+            time   | p50
+            -------|----
+            10:00  | 300
+            10:30  | 400
+            11:00  | 500
+        """
+
         self._definitions.append(
             AttributeSeriesDefinition(
                 name=name,
@@ -133,20 +178,6 @@ class TimeSeriesLoader(DataLoader):
     def load(
         self, definition: TimeSeriesDefinition, start: datetime, end: datetime
     ) -> pd.DataFrame:
-        """
-        Load a regular time series.
-
-        Each row represents a value at a specific point in time. The `time`
-        column represents the timestamp at which the value applies.
-
-        Example:
-            time   | value
-            -------|------
-            10:00  | 300
-            10:15  | 400
-            10:30  | 500
-        """
-
         sensor = self.resolver.resolve(definition.sensor)
 
         points = self.influx.find_series(
@@ -185,22 +216,6 @@ class AttributeTimeSeriesLoader(DataLoader):
     def load(
         self, definition: AttributeTimeSeriesDefinition, start, end
     ) -> pd.DataFrame:
-        """
-        Load a time series of attribute snapshots.
-
-        Each row represents a forecast or snapshot created at `time` for a
-        specific `target_time`. The `time` column indicates when the snapshot
-        was created, while `target_time` indicates when the value applies.
-
-        Example:
-            time  | target_time | p50
-            ------|--------------|----
-            10:00 | 10:00        | 300
-            10:00 | 10:30        | 400
-            10:00 | 11:00        | 500
-            10:30 | 10:30        | 320
-            10:30 | 11:00        | 450
-        """
         sensor = self.resolver.resolve(definition.sensor)
 
         points = self.influx.find_series(
@@ -242,20 +257,6 @@ class AttributeSeriesLoader(DataLoader):
         return isinstance(definition, AttributeSeriesDefinition)
 
     def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
-        """
-        Load a single attribute series.
-
-        Each row represents a value at a specific point in time. The `time`
-        column represents the timestamp at which the value applies.
-
-        Example:
-            time   | p50
-            -------|----
-            10:00  | 300
-            10:30  | 400
-            11:00  | 500
-        """
-
         sensor = self.resolver.resolve(definition.sensor)
 
         point = self.influx.find(
