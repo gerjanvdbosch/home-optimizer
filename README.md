@@ -45,7 +45,11 @@ actions:
               "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
               "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
             },
-          }
+          },
+          "presence": [
+            "device_tracker.iphone_gerjan",
+            "device_tracker.phone_partner"
+          ]
         } | to_json }}
 ```
 
@@ -102,7 +106,7 @@ actions:
         {{ {
           "days": 90,
           "forecaster": "boiler",
-          "trails": 10
+          "trails": 5
         } | to_json }}
 ```
 

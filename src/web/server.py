@@ -84,6 +84,7 @@ async def update(config: Config, request: Request):
 
     container.config_repository.save(config)
     container.state_manager.update(config)
+    container.backtest_repository.clear()
 
     return {"ok": True}
 

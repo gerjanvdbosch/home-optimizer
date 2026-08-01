@@ -1,3 +1,7 @@
+import logging
+
+from pydantic import ValidationError
+
 from domain.models.config import Config
 from domain.models.state import BacktestResult, OptimizerState
 from infrastructure.storage import JsonStorage
@@ -48,4 +52,13 @@ class BacktestRepository:
         if not data:
             return
 
-        return BacktestResult.model_validate(data)
+        try:
+            return BacktestResult.model_validate(data)
+
+        except ValidationError as e:
+            logging.warning("Invalid backtest result: %s", e)
+
+            return None
+
+    def clear(self) -> None:
+        self.storage.remove()
