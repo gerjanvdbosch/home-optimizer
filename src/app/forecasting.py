@@ -44,9 +44,10 @@ class Forecasting:
 
             df = self.loader.load(dataset, start, end)
 
-            logging.info("Fit finished: ")
-
             forecaster.fit(df)
+
+            # logging.info("Fit finished: ")
+
             forecaster.save(self.path)
 
     def backtest(self, config: Config, params: BacktestParams):
