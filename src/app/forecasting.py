@@ -86,9 +86,9 @@ class Forecasting:
         )
 
         logging.info(
-            "Tune finished: value=%.3f params=%s",
+            "Tune finished: mae=%.3f %s",
             study.best_value,
-            study.best_params,
+            " ".join(f"{key}={value}" for key, value in study.best_params.items()),
         )
 
         forecaster.save(self.path)

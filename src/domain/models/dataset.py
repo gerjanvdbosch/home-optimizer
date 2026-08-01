@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from typing import Literal
 
+from pandas._typing import MergeHow
 from pydantic import BaseModel
 
 from domain.models.config import SensorReference
@@ -45,5 +47,15 @@ class AttributeTimeSeriesDefinition(DataDefinition):
 class AttributeSeriesDefinition(DataDefinition): ...
 
 
+@dataclass(frozen=True)
+class JoinDefinition:
+    left: str
+    right: str
+    left_on: tuple[str, ...]
+    right_on: tuple[str, ...]
+    how: MergeHow = "left"
+
+
 class DatasetDefinition(BaseModel):
     definitions: list[DataDefinition] = []
+    joins: list[JoinDefinition]
