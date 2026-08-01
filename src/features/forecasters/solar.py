@@ -1,6 +1,179 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 import pandas as pd
+from optuna import Trial
+from skforecast.preprocessing import CalendarFeatures
+from skforecast.recursive import ForecasterRecursive
+from sklearn.ensemble import HistGradientBoostingRegressor
+
+from domain.models.config import Config, ForecasterType
+from domain.models.dataset import DatasetDefinition
+from features.dataset import DatasetBuilder
+from features.forecaster import BaseForecaster
+
+
+class SolarForecaster(BaseForecaster):
+    @property
+    def name(self) -> ForecasterType:
+        return "solar"
+
+    @property
+    def y_axis(self) -> str:
+        return "Power"
+
+    @property
+    def unit(self) -> str:
+        return "W"
+
+    @property
+    def target_column(self) -> str:
+        return "production"
+
+    @property
+    def exog_columns(self) -> list[str]:
+        return [
+            "p10",
+            "p50",
+            "p90",
+            "spread",
+            "spread_relative",
+            "lead_time",
+            "p50_asof_2h",
+            "p50_asof_4h",
+            "p50_asof_8h",
+            "p50_asof_12h",
+            "p50_asof_24h",
+            "p50_delta_2h",
+            "p50_delta_4h",
+            "p50_delta_8h",
+            "p50_delta_12h",
+            "p50_delta_24h",
+            "p50_delta_relative_2h",
+            "p50_delta_relative_4h",
+            "p50_delta_relative_8h",
+            "p50_delta_relative_12h",
+            "p50_delta_relative_24h",
+        ]
+
+    def create(self):
+        return ForecasterRecursive(
+            forecaster_id=self.name,
+            estimator=HistGradientBoostingRegressor(
+                learning_rate=0.05,
+                max_depth=5,
+                max_iter=150,
+                min_samples_leaf=15,
+                random_state=42,
+            ),
+            lags=48,
+            calendar_features=CalendarFeatures(
+                features=[
+                    "minute",
+                    "hour",
+                    "month",
+                    "day_of_week",
+                    "weekend",
+                ],
+                encoding="cyclical",
+            ),
+        )
+
+    def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        forecast_columns = ["p10", "p50", "p90"]
+
+        df = df.copy()
+
+        df["time"] = pd.to_datetime(df["time"])
+        df["target_time"] = pd.to_datetime(df["target_time"])
+
+        result = []
+
+        for forecast_time, group in df.groupby("time"):
+            group = group.set_index("target_time").sort_index()
+
+            group = group[forecast_columns].resample("15min").ffill()
+
+            group["time"] = forecast_time
+
+            result.append(group.reset_index())
+
+        return pd.concat(result, ignore_index=True)
+
+    def arguments(self, df: pd.DataFrame):
+        return {
+            "y": df[self.target_column],
+            "exog": df[self.exog_columns],
+        }
+
+    def predict_arguments(
+        self,
+        last_window: pd.DataFrame,
+        df: pd.DataFrame | None = None,
+    ):
+        return {
+            "last_window": last_window,
+            "exog": df[self.exog_columns] if df is not None else None,
+        }
+
+    def search_space(self, trial: Trial) -> dict[str, Any]:
+        return {
+            "lags": trial.suggest_categorical(
+                "lags",
+                [
+                    16,
+                    32,
+                    48,
+                    96,
+                ],
+            ),
+            "learning_rate": trial.suggest_float(
+                "learning_rate",
+                0.03,
+                0.08,
+            ),
+            "max_depth": trial.suggest_int(
+                "max_depth",
+                2,
+                5,
+            ),
+            "max_iter": trial.suggest_int(
+                "max_iter",
+                50,
+                250,
+                step=50,
+            ),
+            "min_samples_leaf": trial.suggest_int(
+                "min_samples_leaf",
+                10,
+                40,
+            ),
+        }
+
+    def dataset(self, config: Config) -> DatasetDefinition:
+        return (
+            DatasetBuilder()
+            .timeseries(
+                "production",
+                config.solar.production,
+                interval="15m",
+                aggregation="first",
+                fill="none",
+            )
+            .attribute_timeseries(
+                "p10",
+                config.solar.forecast.p10,
+            )
+            .attribute_timeseries(
+                "p50",
+                config.solar.forecast.p50,
+            )
+            .attribute_timeseries(
+                "p90",
+                config.solar.forecast.p90,
+            )
+            .build()
+        )
 
 
 @dataclass
@@ -33,7 +206,9 @@ class SolarFeatureGenerator:
         df[self.time_column] = pd.to_datetime(df[self.time_column])
         df[self.target_column] = pd.to_datetime(df[self.target_column])
 
-        df = df.sort_values([self.target_column, self.time_column]).reset_index(drop=True)
+        df = df.sort_values([self.target_column, self.time_column]).reset_index(
+            drop=True
+        )
 
         if self.include_spread:
             df["spread"] = df["p90"] - df["p10"]

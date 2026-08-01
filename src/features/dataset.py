@@ -22,7 +22,9 @@ class DatasetLoader:
     def __init__(self, loaders: list):
         self.loaders = loaders
 
-    def load(self, dataset: DatasetDefinition, start: datetime, end: datetime) -> pd.DataFrame:
+    def load(
+        self, dataset: DatasetDefinition, start: datetime, end: datetime
+    ) -> pd.DataFrame:
         frames: list[pd.DataFrame] = []
 
         for definition in dataset.definitions:
@@ -131,6 +133,20 @@ class TimeSeriesLoader(DataLoader):
     def load(
         self, definition: TimeSeriesDefinition, start: datetime, end: datetime
     ) -> pd.DataFrame:
+        """
+        Load a regular time series.
+
+        Each row represents a value at a specific point in time. The `time`
+        column represents the timestamp at which the value applies.
+
+        Example:
+            time   | value
+            -------|------
+            10:00  | 300
+            10:15  | 400
+            10:30  | 500
+        """
+
         sensor = self.resolver.resolve(definition.sensor)
 
         points = self.influx.find_series(
@@ -166,7 +182,25 @@ class AttributeTimeSeriesLoader(DataLoader):
     def supports(self, definition):
         return isinstance(definition, AttributeTimeSeriesDefinition)
 
-    def load(self, definition: AttributeTimeSeriesDefinition, start, end) -> pd.DataFrame:
+    def load(
+        self, definition: AttributeTimeSeriesDefinition, start, end
+    ) -> pd.DataFrame:
+        """
+        Load a time series of attribute snapshots.
+
+        Each row represents a forecast or snapshot created at `time` for a
+        specific `target_time`. The `time` column indicates when the snapshot
+        was created, while `target_time` indicates when the value applies.
+
+        Example:
+            time  | target_time | p50
+            ------|--------------|----
+            10:00 | 10:00        | 300
+            10:00 | 10:30        | 400
+            10:00 | 11:00        | 500
+            10:30 | 10:30        | 320
+            10:30 | 11:00        | 450
+        """
         sensor = self.resolver.resolve(definition.sensor)
 
         points = self.influx.find_series(
@@ -185,10 +219,13 @@ class AttributeTimeSeriesLoader(DataLoader):
         for point in points:
             values = ast.literal_eval(point["value"])
 
+            time = parse_datetime(point["time"])
+
             for target_time, value in values.items():
                 rows.append(
                     {
-                        "time": parse_datetime(target_time),
+                        "time": time,
+                        "target_time": parse_datetime(target_time),
                         definition.name: float(value),
                     }
                 )
@@ -205,6 +242,20 @@ class AttributeSeriesLoader(DataLoader):
         return isinstance(definition, AttributeSeriesDefinition)
 
     def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
+        """
+        Load a single attribute series.
+
+        Each row represents a value at a specific point in time. The `time`
+        column represents the timestamp at which the value applies.
+
+        Example:
+            time   | p50
+            -------|----
+            10:00  | 300
+            10:30  | 400
+            11:00  | 500
+        """
+
         sensor = self.resolver.resolve(definition.sensor)
 
         point = self.influx.find(
