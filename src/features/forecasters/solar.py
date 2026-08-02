@@ -3,14 +3,12 @@ from typing import Any
 
 import pandas as pd
 from optuna import Trial
-from skforecast.preprocessing import CalendarFeatures
-from skforecast.recursive import ForecasterRecursive
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DatasetDefinition
 from features.dataset import DatasetBuilder
-from features.forecaster import BaseForecaster
+from features.forecaster import SkforecastForecaster
 
 
 @dataclass
@@ -37,15 +35,8 @@ class SolarFeatureGenerator:
         if self.n_revisions < 1:
             raise ValueError("n_revisions must be >= 1")
 
-        df["time"] = pd.to_datetime(
-            df["time"],
-            utc=True,
-        )
-
-        df["target_time"] = pd.to_datetime(
-            df["target_time"],
-            utc=True,
-        )
+        df["time"] = pd.to_datetime(df["time"], utc=True)
+        df["target_time"] = pd.to_datetime(df["target_time"], utc=True)
 
         df = df.sort_values(["target_time", "time"]).reset_index(drop=True)
 
@@ -54,13 +45,9 @@ class SolarFeatureGenerator:
         ).dt.total_seconds() / 3600
 
         df["spread"] = df["p90"] - df["p10"]
-
         df["spread_relative"] = (df["p90"] - df["p10"]) / (df["p50"] + self.epsilon)
 
-        group = df.groupby(
-            "target_time",
-            sort=False,
-        )
+        group = df.groupby("target_time", sort=False)
 
         for n in range(1, self.n_revisions + 1):
             suffix = f"_previous_{n}"
@@ -86,7 +73,6 @@ class SolarFeatureGenerator:
             ] / previous.where(previous.abs() > self.epsilon)
 
             df[f"p10_delta{suffix}"] = df["p10"] - df[f"p10{suffix}"]
-
             df[f"p90_delta{suffix}"] = df["p90"] - df[f"p90{suffix}"]
 
             df[f"spread_delta{suffix}"] = df["spread"] - (
@@ -136,7 +122,7 @@ class SolarFeatureGenerator:
         return df
 
 
-class SolarForecaster(BaseForecaster):
+class SolarForecaster(SkforecastForecaster):
     feature_generator = SolarFeatureGenerator()
 
     @property
@@ -153,7 +139,7 @@ class SolarForecaster(BaseForecaster):
 
     @property
     def target_column(self) -> str:
-        return "P_solar"
+        return "error"
 
     @property
     def exog_columns(self) -> list[str]:

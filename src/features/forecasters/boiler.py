@@ -9,10 +9,10 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DatasetDefinition
 from features.dataset import DatasetBuilder
-from features.forecaster import BaseForecaster
+from features.forecaster import SkforecastForecaster
 
 
-class BoilerForecaster(BaseForecaster):
+class BoilerForecaster(SkforecastForecaster):
     @property
     def name(self) -> ForecasterType:
         return "boiler"

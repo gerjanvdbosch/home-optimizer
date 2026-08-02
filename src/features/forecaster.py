@@ -16,7 +16,7 @@ from domain.models.interface import Forecaster
 from domain.models.state import BacktestResult
 
 
-class BaseForecaster(Forecaster):
+class SkforecastForecaster(Forecaster):
     def __init__(self):
         self.forecaster = self.create()
 
