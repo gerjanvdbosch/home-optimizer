@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -15,109 +15,98 @@ from features.forecaster import BaseForecaster
 
 @dataclass
 class SolarFeatureGenerator:
-    forecast_columns: list[str] = field(default_factory=lambda: ["p10", "p50", "p90"])
-
-    forecast_ages: list[str] = field(
-        default_factory=lambda: [
-            "2h",
-            "4h",
-            "8h",
-            "12h",
-            "24h",
-        ]
-    )
-
-    epsilon: float = 10.0
-
-    include_spread: bool = True
-    include_lags: bool = True
-    include_delta: bool = True
-    include_time: bool = True
-
-    time_column: str = "time"
-    target_column: str = "target_time"
+    n_revisions: int = 4
+    epsilon: float = 1e-6
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
-        df[self.time_column] = pd.to_datetime(df[self.time_column])
-        df[self.target_column] = pd.to_datetime(df[self.target_column])
+        required_columns = {
+            "time",
+            "target_time",
+            "p10",
+            "p50",
+            "p90",
+        }
 
-        df = df.sort_values([self.target_column, self.time_column]).reset_index(
-            drop=True
+        missing = required_columns - set(df.columns)
+
+        if missing:
+            raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+        if self.n_revisions < 1:
+            raise ValueError("n_revisions must be >= 1")
+
+        df["time"] = pd.to_datetime(
+            df["time"],
+            utc=True,
         )
 
-        if self.include_spread:
-            df["spread"] = df["p90"] - df["p10"]
-            df["spread_relative"] = (df["p90"] - df["p10"]) / (df["p50"] + self.epsilon)
+        df["target_time"] = pd.to_datetime(
+            df["target_time"],
+            utc=True,
+        )
 
-        if self.include_time:
-            df["lead_time"] = (
-                df[self.target_column] - df[self.time_column]
-            ).dt.total_seconds() / 60
+        df = df.sort_values(["target_time", "time"]).reset_index(drop=True)
 
-        lag_columns = list(self.forecast_columns)
+        df["lead_time_hours"] = (
+            df["target_time"] - df["time"]
+        ).dt.total_seconds() / 3600
 
-        if self.include_spread:
-            lag_columns.append("spread")
+        df["spread"] = df["p90"] - df["p10"]
 
-        if self.include_lags:
-            lookup = (
-                df[[self.target_column, self.time_column, *lag_columns]]
-                .sort_values(self.time_column)
-                .reset_index(drop=True)
-                .rename(columns={self.time_column: "_matched_time"})
+        group = df.groupby(
+            "target_time",
+            sort=False,
+        )
+
+        for n in range(1, self.n_revisions + 1):
+            suffix = f"_previous_{n}"
+
+            df[f"p10{suffix}"] = group["p10"].shift(n)
+            df[f"p50{suffix}"] = group["p50"].shift(n)
+            df[f"p90{suffix}"] = group["p90"].shift(n)
+
+            previous_time = group["time"].shift(n)
+
+            df[f"time{suffix}"] = previous_time
+
+            df[f"age_hours{suffix}"] = (
+                df["time"] - previous_time
+            ).dt.total_seconds() / 3600
+
+            df[f"revision_change_{n}"] = df["p50"] - df[f"p50{suffix}"]
+
+            previous = df[f"p50{suffix}"]
+
+            df[f"revision_change_relative_{n}"] = df[
+                f"revision_change_{n}"
+            ] / previous.where(previous.abs() > self.epsilon)
+
+            df[f"p10_delta{suffix}"] = df["p10"] - df[f"p10{suffix}"]
+
+            df[f"p90_delta{suffix}"] = df["p90"] - df[f"p90{suffix}"]
+
+            df[f"spread_delta{suffix}"] = df["spread"] - (
+                df[f"p90{suffix}"] - df[f"p10{suffix}"]
             )
-
-            for age in self.forecast_ages:
-                key = age
-                delta = pd.to_timedelta(age)
-
-                query = df[[self.target_column, self.time_column]].reset_index()
-                query["_query_time"] = pd.to_datetime(query[self.time_column]) - delta
-                query = query.sort_values("_query_time")
-
-                merged = (
-                    pd.merge_asof(
-                        query,
-                        lookup,
-                        left_on="_query_time",
-                        right_on="_matched_time",
-                        by=self.target_column,
-                        direction="backward",
-                    )
-                    .set_index("index")
-                    .sort_index()
-                )
-
-                for col in lag_columns:
-                    df[f"{col}_asof_{key}"] = merged[col]
-
-                df[f"age_actual_{key}"] = (
-                    df[self.time_column] - merged["_matched_time"]
-                ).dt.total_seconds() / 60
-
-        if self.include_delta and self.include_lags:
-            for age in self.forecast_ages:
-                key = age
-
-                df[f"p50_delta_{key}"] = df["p50"] - df[f"p50_asof_{key}"]
-                df[f"p50_delta_relative_{key}"] = df[f"p50_delta_{key}"] / (
-                    df[f"p50_asof_{key}"] + self.epsilon
-                )
-
-                if self.include_spread:
-                    df[f"spread_delta_{key}"] = df["spread"] - df[f"spread_asof_{key}"]
 
         print(
             df[
                 [
-                    "target_time",
                     "time",
+                    "target_time",
                     "p50",
-                    "p50_asof_2h",
-                    "p50_asof_4h",
-                    "p50_asof_8h",
+                    "p50_previous_1",
+                    "p50_previous_2",
+                    "p50_previous_3",
+                    "age_hours_previous_1",
+                    "age_hours_previous_2",
+                    "age_hours_previous_3",
+                    "revision_change_1",
+                    "revision_change_2",
+                    "revision_change_3",
+                    "revision_change_relative_1",
                 ]
             ].head(20)
         )
@@ -125,11 +114,19 @@ class SolarFeatureGenerator:
         print(
             df[df["target_time"] == "2026-07-21 12:00:00+00:00"][
                 [
-                    "target_time",
                     "time",
+                    "target_time",
                     "p50",
-                    "p50_asof_2h",
-                    "p50_asof_4h",
+                    "p50_previous_1",
+                    "p50_previous_2",
+                    "p50_previous_3",
+                    "age_hours_previous_1",
+                    "age_hours_previous_2",
+                    "age_hours_previous_3",
+                    "revision_change_1",
+                    "revision_change_2",
+                    "revision_change_3",
+                    "revision_change_relative_1",
                 ]
             ]
         )
@@ -164,45 +161,15 @@ class SolarForecaster(BaseForecaster):
             "p90",
             "spread",
             "spread_relative",
-            "lead_time",
-            "p50_asof_2h",
-            "p50_asof_4h",
-            "p50_asof_8h",
-            "p50_asof_12h",
-            "p50_asof_24h",
-            "p50_delta_2h",
-            "p50_delta_4h",
-            "p50_delta_8h",
-            "p50_delta_12h",
-            "p50_delta_24h",
-            "p50_delta_relative_2h",
-            "p50_delta_relative_4h",
-            "p50_delta_relative_8h",
-            "p50_delta_relative_12h",
-            "p50_delta_relative_24h",
         ]
 
     def create(self):
-        return ForecasterRecursive(
-            forecaster_id=self.name,
-            estimator=HistGradientBoostingRegressor(
-                learning_rate=0.05,
-                max_depth=5,
-                max_iter=150,
-                min_samples_leaf=15,
-                random_state=42,
-            ),
-            lags=48,
-            calendar_features=CalendarFeatures(
-                features=[
-                    "minute",
-                    "hour",
-                    "month",
-                    "day_of_week",
-                    "weekend",
-                ],
-                encoding="cyclical",
-            ),
+        return HistGradientBoostingRegressor(
+            learning_rate=0.05,
+            max_depth=5,
+            max_iter=150,
+            min_samples_leaf=15,
+            random_state=42,
         )
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -211,9 +178,30 @@ class SolarForecaster(BaseForecaster):
 
         df = df.dropna(subset=[self.target_column])
 
-        print(df)
+        df = self.feature_generator.transform(df)
 
-        return self.feature_generator.transform(df)
+        df["error"] = df["P_solar"] - df["p50"]
+        df["error_relative"] = (df["P_solar"] - df["p50"]) / (
+            df["p50"] + self.feature_generator.epsilon
+        )
+
+        print(
+            df[df["target_time"] == "2026-07-21 12:00:00+00:00"][
+                [
+                    "time",
+                    "target_time",
+                    "lead_time_hours",
+                    "p50",
+                    "p10",
+                    "p90",
+                    "P_solar",
+                    "error",
+                    "error_relative",
+                ]
+            ]
+        )
+
+        return df
 
     def arguments(self, df: pd.DataFrame):
         return {
@@ -277,21 +265,21 @@ class SolarForecaster(BaseForecaster):
             .attribute_timeseries(
                 "p10",
                 config.solar.forecast.p10,
-                interval="1m",
+                interval="15m",
                 aggregation="last",
                 target_interval="15min",
             )
             .attribute_timeseries(
                 "p50",
                 config.solar.forecast.p50,
-                interval="1m",
+                interval="15m",
                 aggregation="last",
                 target_interval="15min",
             )
             .attribute_timeseries(
                 "p90",
                 config.solar.forecast.p90,
-                interval="1m",
+                interval="15m",
                 aggregation="last",
                 target_interval="15min",
             )
