@@ -55,6 +55,8 @@ class SolarFeatureGenerator:
 
         df["spread"] = df["p90"] - df["p10"]
 
+        df["spread_relative"] = (df["p90"] - df["p10"]) / (df["p50"] + self.epsilon)
+
         group = df.groupby(
             "target_time",
             sort=False,
@@ -155,12 +157,25 @@ class SolarForecaster(BaseForecaster):
 
     @property
     def exog_columns(self) -> list[str]:
+        revision_features = []
+
+        for n in range(1, self.feature_generator.n_revisions + 1):
+            revision_features.extend(
+                [
+                    f"revision_change_{n}",
+                    f"revision_change_relative_{n}",
+                    f"age_hours_previous_{n}",
+                ]
+            )
+
         return [
             "p10",
             "p50",
             "p90",
             "spread",
             "spread_relative",
+            "lead_time_hours",
+            *revision_features,
         ]
 
     def create(self):
