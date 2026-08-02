@@ -180,7 +180,7 @@ class SolarForecaster(SklearnForecaster):
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
-        df = df[df["target_time"] >= df["time"]]
+        df = df[df["target_time"] > df["time"]]
 
         df = self.feature_generator.transform(df)
 

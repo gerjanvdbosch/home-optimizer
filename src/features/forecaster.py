@@ -245,14 +245,14 @@ class SklearnForecaster(Forecaster):
 
         predictions = []
 
-        min_train_duration = pd.Timedelta(days=7)
-        first_issue_time = df["time"].min() + min_train_duration
-
         for issue_time in sorted(df["time"].unique()):
-            if issue_time < first_issue_time:
+            train = df[df["target_time"] < issue_time]
+
+            if train.empty:
                 continue
 
-            train = df[df["target_time"] < issue_time]
+            if issue_time - train["target_time"].min() < pd.Timedelta(days=7):
+                continue
 
             test = df[
                 (df["time"] == issue_time) & (df["target_time"] >= issue_time)
@@ -314,6 +314,7 @@ class SklearnForecaster(Forecaster):
                     "time": str(row["target_time"]),
                     "actual": float(row[self.evaluation_column]),
                     "pred": float(row["pred"]),
+                    "p50": float(row["p50"]),
                 }
                 for _, row in result.iterrows()
             ],
