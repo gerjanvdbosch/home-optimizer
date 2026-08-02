@@ -8,7 +8,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DatasetDefinition
 from features.dataset import DatasetBuilder
-from features.forecaster import SkforecastForecaster
+from features.forecaster import SklearnForecaster
 
 
 @dataclass
@@ -45,7 +45,7 @@ class SolarFeatureGenerator:
         ).dt.total_seconds() / 3600
 
         df["spread"] = df["p90"] - df["p10"]
-        df["spread_relative"] = (df["p90"] - df["p10"]) / (df["p50"] + self.epsilon)
+        df["spread_relative"] = df["spread"] / (df["p50"] + self.epsilon)
 
         group = df.groupby("target_time", sort=False)
 
@@ -122,7 +122,7 @@ class SolarFeatureGenerator:
         return df
 
 
-class SolarForecaster(SkforecastForecaster):
+class SolarForecaster(SklearnForecaster):
     feature_generator = SolarFeatureGenerator()
 
     @property
@@ -140,6 +140,10 @@ class SolarForecaster(SkforecastForecaster):
     @property
     def target_column(self) -> str:
         return "error"
+
+    @property
+    def evaluation_column(self) -> str:
+        return "P_solar"
 
     @property
     def exog_columns(self) -> list[str]:
@@ -175,15 +179,22 @@ class SolarForecaster(SkforecastForecaster):
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df = df[df["target_time"] >= df["time"]]
 
-        df = df.dropna(subset=[self.target_column])
+        df = df[df["target_time"] >= df["time"]]
 
         df = self.feature_generator.transform(df)
 
         df["error"] = df["P_solar"] - df["p50"]
-        df["error_relative"] = (df["P_solar"] - df["p50"]) / (
+        df["error_relative"] = df["error"] / (
             df["p50"] + self.feature_generator.epsilon
+        )
+
+        df = df.dropna(
+            subset=[
+                "P_solar",
+                "p50",
+                "error",
+            ]
         )
 
         print(
@@ -204,21 +215,21 @@ class SolarForecaster(SkforecastForecaster):
 
         return df
 
-    def arguments(self, df: pd.DataFrame):
-        return {
-            "y": df[self.target_column],
-            "exog": df[self.exog_columns],
-        }
-
-    def predict_arguments(
+    def predict_result(
         self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
-    ):
-        return {
-            "last_window": last_window,
-            "exog": df[self.exog_columns] if df is not None else None,
-        }
+        prediction: pd.Series,
+        df: pd.DataFrame,
+    ) -> pd.Series:
+        result = df["p50"] + prediction
+        result.name = "P_solar_corrected"
+
+        baseline_mae = (result["P_solar"] - result["p50"]).abs().mean()
+        model_mae = (result["P_solar"] - result["pred"]).abs().mean()
+
+        print(baseline_mae)
+        print(model_mae)
+
+        return result
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {

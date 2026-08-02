@@ -1,8 +1,7 @@
 from typing import Any
 
-import pandas as pd
 from optuna import Trial
-from skforecast.preprocessing import CalendarFeatures, RollingFeatures
+from skforecast.preprocessing import CalendarFeatures
 from skforecast.recursive import ForecasterRecursive
 from sklearn.ensemble import HistGradientBoostingRegressor
 
@@ -63,19 +62,6 @@ class BoilerForecaster(SkforecastForecaster):
                 encoding="cyclical",
             ),
         )
-
-    def arguments(self, df: pd.DataFrame):
-        return {
-            "y": df[self.target_column],
-            "exog": df[self.exog_columns],
-        }
-
-    def predict_arguments(
-        self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
-    ):
-        return {"last_window": last_window[self.exog_columns]}
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {
