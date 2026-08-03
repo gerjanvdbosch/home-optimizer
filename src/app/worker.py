@@ -4,6 +4,7 @@ from multiprocessing import Process, Queue
 
 from joblib import parallel_backend
 
+from app.forecasting import Forecasting
 from domain.models.worker import Job, JobType
 
 
@@ -106,7 +107,11 @@ class Worker:
         match job.type:
             case JobType.FIT:
                 container.forecasting.fit(config, job.params)
+            case JobType.PREDICT:
+                container.forecasting.predict(config, job.params)
             case JobType.TUNE:
                 container.forecasting.tune(config, job.params)
             case JobType.BACKTEST:
                 container.forecasting.backtest(config, job.params)
+            case _:
+                raise NotImplementedError(f"Unknown job type={job.type}")

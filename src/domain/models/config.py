@@ -109,9 +109,15 @@ class FitParams(BaseModel):
     days: int = Field(default=90)
 
 
+class PredictParams(BaseModel):
+    forecaster: ForecasterType
+    steps: int = Field(default=24)
+
+
 class BacktestParams(BaseModel):
     forecaster: ForecasterType
     days: int = Field(default=90)
+    steps: int = Field(default=24)
 
 
 class TuneParams(BacktestParams):

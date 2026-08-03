@@ -10,7 +10,13 @@ from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
 from app.worker import Worker
-from domain.models.config import BacktestParams, Config, FitParams, TuneParams
+from domain.models.config import (
+    BacktestParams,
+    Config,
+    FitParams,
+    PredictParams,
+    TuneParams,
+)
 from domain.models.worker import Job, JobType
 from web.chart import backtest_chart, solar_forecast_chart
 
@@ -105,9 +111,20 @@ async def fit(request: Request, params: FitParams):
     }
 
 
-# @app.post("/api/predict")
-# async def predict(request: Request, params: FitParams):
-#     return {"ok": True}
+@app.post("/api/predict")
+async def predict(request: Request, params: PredictParams):
+    job = Job(
+        id=uuid.uuid4().hex,
+        type=JobType.PREDICT,
+        params=params,
+    )
+
+    request.app.state.worker.submit(job)
+
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }
 
 
 @app.post("/api/backtest")

@@ -7,6 +7,7 @@ from domain.models.config import (
     Config,
     FitParams,
     ForecasterType,
+    PredictParams,
     TuneParams,
 )
 from domain.models.interface import Forecaster
@@ -27,9 +28,6 @@ class Forecasting:
         self.path = path
         self.forecasters = forecasters
 
-    def predict(self, config: Config):
-        pass
-
     def fit(self, config: Config, params: FitParams):
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=params.days)
@@ -46,9 +44,21 @@ class Forecasting:
 
             forecaster.fit(df)
 
-            # logging.info("Fit finished: ")
-
             forecaster.save(self.path)
+
+    def predict(self, config: Config, params: PredictParams):
+        forecaster = self._get_forecaster(params.forecaster)
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=1)
+
+        dataset = forecaster.dataset(config)
+
+        df = self.loader.load(dataset, start, end)
+
+        result = forecaster.predict(df)
+
+        print(result)
 
     def backtest(self, config: Config, params: BacktestParams):
         forecaster = self._get_forecaster(params.forecaster)
@@ -60,7 +70,7 @@ class Forecasting:
 
         df = self.loader.load(dataset, start, end)
 
-        result = forecaster.backtest(df)
+        result = forecaster.backtest(df, steps=params.steps)
 
         logging.info(
             "Backtest finished: mae=%.3f",

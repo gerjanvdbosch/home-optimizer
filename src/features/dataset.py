@@ -60,6 +60,13 @@ class DatasetLoader:
         if not frames:
             return pd.DataFrame()
 
+        for name, frame in frames.items():
+            if "time" not in frame.columns:
+                raise ValueError(
+                    f"Dataset '{name}' has no 'time' column. "
+                    f"Columns: {frame.columns.tolist()}"
+                )
+
         if not joins:
             frames_iter = iter(frames.values())
 
@@ -296,9 +303,7 @@ class TimeSeriesLoader(DataLoader):
             if point["value"] is not None
         ]
 
-        df = pd.DataFrame(rows)
-
-        return df
+        return pd.DataFrame(rows)
 
 
 class AttributeTimeSeriesLoader(DataLoader):

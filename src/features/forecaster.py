@@ -36,7 +36,10 @@ class SkforecastForecaster(Forecaster):
         last_window: pd.DataFrame,
         df: pd.DataFrame | None = None,
     ):
-        return {"last_window": last_window[self.exog_columns]}
+        return {
+            "last_window": last_window[self.target_column],
+            "exog": df[self.exog_columns] if df is not None else None,
+        }
 
     @abstractmethod
     def search_space(self, trial: Trial) -> dict[str, Any]: ...
@@ -62,8 +65,7 @@ class SkforecastForecaster(Forecaster):
 
         return self.forecaster.predict(
             steps=steps,
-            last_window=last_window,
-            **self.predict_arguments(df),
+            **self.predict_arguments(last_window, df),
         )
 
     def backtest(
