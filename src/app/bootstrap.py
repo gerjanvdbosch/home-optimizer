@@ -116,3 +116,4 @@ def configure_logger(level: str) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    logging.getLogger("urllib3").setLevel(logging.INFO)
