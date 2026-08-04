@@ -180,10 +180,6 @@ class SklearnForecaster(Forecaster):
     @abstractmethod
     def create(self) -> HistGradientBoostingRegressor: ...
 
-    @property
-    def evaluation_column(self) -> str:
-        return self.target_column
-
     def search_space(self, trial: Trial) -> dict[str, Any]:
         raise NotImplementedError()
 
