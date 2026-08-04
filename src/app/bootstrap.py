@@ -17,8 +17,7 @@ from features.dataset import (
     TimeSeriesLoader,
 )
 from features.forecasters.boiler import BoilerForecaster
-
-# from features.forecasters.solar import SolarForecaster
+from features.forecasters.solar import SolarForecaster
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.repository import (
     BacktestRepository,
@@ -78,7 +77,7 @@ def create_container() -> Container:
         path=settings.data_path / "models",
         forecasters=[
             BoilerForecaster(),
-            # SolarForecaster(),
+            SolarForecaster(),
         ],
     )
 

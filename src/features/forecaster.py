@@ -184,8 +184,8 @@ class SklearnForecaster(Forecaster):
     def evaluation_column(self) -> str:
         return self.target_column
 
-    @abstractmethod
-    def search_space(self, trial: Trial) -> dict[str, Any]: ...
+    def search_space(self, trial: Trial) -> dict[str, Any]:
+        raise NotImplementedError()
 
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
         return {
