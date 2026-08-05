@@ -17,7 +17,7 @@ class BoilerForecaster(SkforecastForecaster):
         return "boiler"
 
     @property
-    def y_axis(self) -> str:
+    def label(self) -> str:
         return "Temperature"
 
     @property

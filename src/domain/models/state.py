@@ -84,9 +84,14 @@ class OptimizerState(BaseModel):
     schedule: ScheduleState | None = None
 
 
+class BacktestPoint(BaseModel):
+    label: str
+    points: list[dict[str, object]]
+
+
 class BacktestResult(BaseModel):
     name: ForecasterType
-    y_axis: str
+    label: str
     unit: str
     mae: float
-    points: list[dict[str, object]]
+    points: list[BacktestPoint]

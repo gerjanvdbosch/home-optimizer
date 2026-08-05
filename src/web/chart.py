@@ -87,35 +87,25 @@ def backtest_chart(result: BacktestResult | None) -> str:
     if result is None:
         return ""
 
-    df = pd.DataFrame(result.points)
-
-    df["time"] = to_local_series(pd.to_datetime(df["time"]))
-
     fig = go.Figure()
 
-    if "actual" in df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df["time"],
-                y=df["actual"],
-                mode="lines",
-                name="Actual",
-                line=dict(width=3),
-                connectgaps=True,
-                hovertemplate=(
-                    f"%{{y:.1f}} {result.unit}<extra>%{{fullData.name}}</extra>"
-                ),
-            )
-        )
+    for i, bp in enumerate(result.points):
+        df = pd.DataFrame(bp.points)
+        df["x_time"] = to_local_series(pd.to_datetime(df["time"]))
 
-    if "pred" in df.columns:
+        color = None
+
+        if bp.label == "Actual":
+            color = "white"
+
         fig.add_trace(
             go.Scatter(
-                x=df["time"],
-                y=df["pred"],
+                x=df["x_time"],
+                y=df["value"],
                 mode="lines",
-                name="Prediction",
-                line=dict(width=3),
+                name=bp.label,
+                line=dict(width=3, color=color),
+                visible=True,
                 connectgaps=True,
                 hovertemplate=(
                     f"%{{y:.1f}} {result.unit}<extra>%{{fullData.name}}</extra>"
@@ -153,7 +143,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
             tickfont=dict(size=12),
         ),
         yaxis=dict(
-            title=f"{result.y_axis} ({result.unit})",
+            title=f"{result.label} ({result.unit})",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.08)",
             zeroline=False,
