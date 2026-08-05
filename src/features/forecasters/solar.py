@@ -37,12 +37,7 @@ class SolarForecaster(SklearnForecaster):
         return HistGradientBoostingRegressor()
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-
-        df = df[df["target_time"] > df["time"]]
-
-        df["time"] = pd.to_datetime(df["time"], utc=True)
-        df["target_time"] = pd.to_datetime(df["target_time"], utc=True)
+        df = df[df["target_time"] > df["time"]].copy()
 
         df["lead_time_hours"] = (
             df["target_time"] - df["time"]
@@ -54,24 +49,25 @@ class SolarForecaster(SklearnForecaster):
         df["error"] = df["P_solar"] - df["p50"]
         df["error_relative"] = df["error"] / df["p50"]
 
-        # remaining_estimate_kwh
-        # daily_estimate_kwh
-
         print(
-            df[df["target_time"] == "2026-07-21 12:00:00+00:00"][
+            df[
                 [
                     "time",
                     "target_time",
                     "lead_time_hours",
-                    "p50",
-                    "p10",
-                    "p90",
                     "P_solar",
+                    "p10",
+                    "p50",
+                    "p90",
+                    "spread",
+                    "spread_relative",
                     "error",
                     "error_relative",
                 ]
             ]
         )
+
+        df = df.sort_values(["time", "target_time"])
 
         return df
 
@@ -80,13 +76,29 @@ class SolarForecaster(SklearnForecaster):
         prediction: pd.Series,
         df: pd.DataFrame,
     ) -> pd.Series:
-        print(prediction)
-        print(df)
-
         return prediction
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
-        raise NotImplementedError()
+        df = self.prepare(df)
+
+        points: list[dict[str, object]] = [
+            {
+                "time": record["time"].isoformat(),
+                "target_time": record["target_time"].isoformat(),
+                "value": float(record["value"]),
+            }
+            for record in df[["time", "target_time", "p50"]]
+            .rename(columns={"p50": "value"})
+            .to_dict(orient="records")
+        ]
+
+        return BacktestResult(
+            name=self.name,
+            y_axis=self.y_axis,
+            unit=self.unit,
+            mae=0,
+            points=points,
+        )
 
     def backtest_result(self, result: pd.DataFrame) -> BacktestResult:
         raise NotImplementedError()
@@ -105,24 +117,24 @@ class SolarForecaster(SklearnForecaster):
                 config.solar.forecast.p10,
                 interval="15m",
                 aggregation="last",
-                target_interval="15min",
+                target_interval="30min",
             )
             .attribute_timeseries(
                 "p50",
                 config.solar.forecast.p50,
                 interval="15m",
                 aggregation="last",
-                target_interval="15min",
+                target_interval="30min",
             )
             .attribute_timeseries(
                 "p90",
                 config.solar.forecast.p90,
                 interval="15m",
                 aggregation="last",
-                target_interval="15min",
+                target_interval="30min",
             )
-            .join("p50", "p10", on=("time", "target_time"), how="inner")
-            .join("p50", "p90", on=("time", "target_time"), how="inner")
+            .join("p50", "p10", on=("time", "target_time"), how="outer")
+            .join("p50", "p90", on=("time", "target_time"), how="outer")
             .join(
                 "p50",
                 "P_solar",
