@@ -15,7 +15,7 @@ from skforecast.utils import load_forecaster, save_forecaster
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from domain.models.interface import Forecaster
-from domain.models.state import BacktestResult
+from domain.models.state import BacktestPoint, BacktestResult
 
 
 class SkforecastForecaster(Forecaster):
@@ -133,20 +133,30 @@ class SkforecastForecaster(Forecaster):
         result: pd.DataFrame,
     ) -> BacktestResult:
         result = result.copy()
-
         result["actual"] = df.loc[result.index, self.target_column]
+
+        def make_point(label: str, column: str) -> BacktestPoint:
+            points = (
+                result[[column]]
+                .rename(columns={column: "value"})
+                .rename_axis("time")
+                .reset_index()
+                .to_dict("records")
+            )
+
+            return BacktestPoint(
+                label=label,
+                points=cast(list[dict[str, object]], points),
+            )
 
         return BacktestResult(
             name=self.name,
-            y_axis=self.y_axis,
+            label=self.label,
             unit=self.unit,
             mae=float(metric["mean_absolute_error"].iloc[0]),
             points=[
-                {
-                    "time": str(index),
-                    **{str(key): float(value) for key, value in row.items()},
-                }
-                for index, row in result.iterrows()
+                make_point("Actual", "actual"),
+                make_point("Prediction", "pred"),
             ],
         )
 
