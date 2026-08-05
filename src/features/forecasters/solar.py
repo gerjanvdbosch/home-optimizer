@@ -54,6 +54,9 @@ class SolarForecaster(SklearnForecaster):
         df["error"] = df["P_solar"] - df["p50"]
         df["error_relative"] = df["error"] / df["p50"]
 
+        # remaining_estimate_kwh
+        # daily_estimate_kwh
+
         print(
             df[df["target_time"] == "2026-07-21 12:00:00+00:00"][
                 [
