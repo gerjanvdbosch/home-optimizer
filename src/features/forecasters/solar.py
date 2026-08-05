@@ -3,7 +3,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 
 from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DatasetDefinition
-from domain.models.state import BacktestResult
+from domain.models.state import BacktestPoint, BacktestResult
+from domain.time import to_local_time
 from features.dataset import DatasetBuilder
 from features.forecaster import SklearnForecaster
 
@@ -14,7 +15,7 @@ class SolarForecaster(SklearnForecaster):
         return "solar"
 
     @property
-    def y_axis(self) -> str:
+    def label(self) -> str:
         return "Power"
 
     @property
@@ -81,23 +82,46 @@ class SolarForecaster(SklearnForecaster):
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         df = self.prepare(df)
 
-        points: list[dict[str, object]] = [
-            {
-                "time": record["time"].isoformat(),
-                "target_time": record["target_time"].isoformat(),
-                "value": float(record["value"]),
-            }
-            for record in df[["time", "target_time", "p50"]]
-            .rename(columns={"p50": "value"})
-            .to_dict(orient="records")
+        def make_points(df: pd.DataFrame, value_col: str) -> list[dict]:
+            records = df[["target_time", value_col]].to_dict("records")
+
+            return [
+                {
+                    "time": pd.to_datetime(record["target_time"]).isoformat(),
+                    "value": float(record[value_col]),
+                }
+                for record in records
+            ]
+
+        backtest_points = [
+            BacktestPoint(
+                label="Actual",
+                points=make_points(
+                    df.drop_duplicates("target_time"),
+                    "P_solar",
+                ),
+            )
         ]
+
+        for update_time, update_df in df.sort_values("time").groupby("time"):
+            ts = pd.to_datetime(str(update_time))
+            label = to_local_time(ts.to_pydatetime()).strftime("%H:%M")
+            backtest_points.append(
+                BacktestPoint(
+                    label=f"Update {label}",
+                    points=make_points(
+                        update_df.sort_values("target_time"),
+                        "p50",
+                    ),
+                )
+            )
 
         return BacktestResult(
             name=self.name,
-            y_axis=self.y_axis,
+            label=self.label,
             unit=self.unit,
             mae=0,
-            points=points,
+            points=backtest_points,
         )
 
     def backtest_result(self, result: pd.DataFrame) -> BacktestResult:
@@ -109,9 +133,21 @@ class SolarForecaster(SklearnForecaster):
             .timeseries(
                 "P_solar",
                 config.solar.production,
-                interval="15m",
+                interval="30m",
                 aggregation="mean",
             )
+            # .timeseries(
+            #     "P_solar_min",
+            #     config.solar.production,
+            #     interval="30min",
+            #     aggregation="min",
+            # )
+            # .timeseries(
+            #     "P_solar_max",
+            #     config.solar.production,
+            #     interval="30min",
+            #     aggregation="max",
+            # )
             .attribute_timeseries(
                 "p10",
                 config.solar.forecast.p10,
@@ -140,7 +176,7 @@ class SolarForecaster(SklearnForecaster):
                 "P_solar",
                 left_on=("target_time",),
                 right_on=("time",),
-                how="left",
+                how="outer",
             )
             .build()
         )
