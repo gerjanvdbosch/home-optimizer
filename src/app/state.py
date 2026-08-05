@@ -32,13 +32,13 @@ class StateManager:
             microsecond=0,
         )
 
-        data = self.loader.load(
+        df = self.loader.load(
             self._dataset(config),
             start,
             now,
         )
 
-        state = self.mapper.map(data)
+        state = self.mapper.map(df)
 
         self.repository.save(state)
 
