@@ -47,9 +47,6 @@ class SolarForecaster(SklearnForecaster):
         df["spread"] = df["p90"] - df["p10"]
         df["spread_relative"] = df["spread"] / (df["p50"])
 
-        df["error"] = df["P_solar"] - df["p50"]
-        df["error_relative"] = df["error"] / df["p50"]
-
         print(
             df[
                 [
@@ -62,8 +59,6 @@ class SolarForecaster(SklearnForecaster):
                     "p90",
                     "spread",
                     "spread_relative",
-                    "error",
-                    "error_relative",
                 ]
             ]
         )
@@ -136,18 +131,6 @@ class SolarForecaster(SklearnForecaster):
                 interval="30m",
                 aggregation="mean",
             )
-            # .timeseries(
-            #     "P_solar_min",
-            #     config.solar.production,
-            #     interval="30min",
-            #     aggregation="min",
-            # )
-            # .timeseries(
-            #     "P_solar_max",
-            #     config.solar.production,
-            #     interval="30min",
-            #     aggregation="max",
-            # )
             .attribute_timeseries(
                 "p10",
                 config.solar.forecast.p10,
