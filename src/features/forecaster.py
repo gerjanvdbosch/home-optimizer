@@ -251,9 +251,6 @@ class SklearnForecaster(Forecaster):
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         raise NotImplementedError()
 
-    def backtest_result(self, result: pd.DataFrame) -> BacktestResult:
-        raise NotImplementedError()
-
     def tune(
         self,
         df: pd.DataFrame,

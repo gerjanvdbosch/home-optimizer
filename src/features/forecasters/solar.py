@@ -119,9 +119,6 @@ class SolarForecaster(SklearnForecaster):
             points=backtest_points,
         )
 
-    def backtest_result(self, result: pd.DataFrame) -> BacktestResult:
-        raise NotImplementedError()
-
     def dataset(self, config: Config) -> DatasetDefinition:
         return (
             DatasetBuilder()
