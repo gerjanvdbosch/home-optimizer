@@ -22,7 +22,7 @@ class JobType(str, Enum):
 class Job:
     id: str
     type: JobType
-    params: FitConfig | PredictConfig | TuneConfig | BacktestConfig | Config
+    config: FitConfig | PredictConfig | TuneConfig | BacktestConfig | Config
 
 
 class WorkerState(str, Enum):

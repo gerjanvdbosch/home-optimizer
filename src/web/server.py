@@ -89,7 +89,7 @@ async def update(request: Request, config: Config):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.UPDATE,
-        params=config,
+        config=config,
     )
 
     request.app.state.worker.submit(job)
@@ -105,7 +105,7 @@ async def fit(request: Request, config: FitConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.FIT,
-        params=config,
+        config=config,
     )
 
     request.app.state.worker.submit(job)
@@ -121,7 +121,7 @@ async def predict(request: Request, config: PredictConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.PREDICT,
-        params=config,
+        config=config,
     )
 
     request.app.state.worker.submit(job)
@@ -137,7 +137,7 @@ async def backtest(request: Request, config: BacktestConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.BACKTEST,
-        params=config,
+        config=config,
     )
 
     request.app.state.worker.submit(job)
@@ -153,7 +153,7 @@ async def tune(request: Request, config: TuneConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.TUNE,
-        params=config,
+        config=config,
     )
 
     request.app.state.worker.submit(job)

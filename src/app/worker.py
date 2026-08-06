@@ -104,14 +104,14 @@ class Worker:
     def _execute(self, container, job: Job):
         match job.type:
             case JobType.UPDATE:
-                container.forecasting.update(job.params)
+                container.forecasting.update(job.config)
             case JobType.FIT:
-                container.forecasting.fit(job.params)
+                container.forecasting.fit(job.config)
             case JobType.PREDICT:
-                container.forecasting.predict(job.params)
+                container.forecasting.predict(job.config)
             case JobType.TUNE:
-                container.forecasting.tune(job.params)
+                container.forecasting.tune(job.config)
             case JobType.BACKTEST:
-                container.forecasting.backtest(job.params)
+                container.forecasting.backtest(job.config)
             case _:
                 raise NotImplementedError(f"Unknown job type={job.type}")
