@@ -81,7 +81,7 @@ class SolarForecaster(SklearnForecaster):
         return df
 
     def predict_result(self, prediction: pd.Series, df: pd.DataFrame) -> pd.Series:
-        return df["p50"] + prediction
+        return (df["p50"] + prediction).rename("error")
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         df = self.prepare(df)

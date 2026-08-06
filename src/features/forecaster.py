@@ -238,7 +238,6 @@ class SklearnForecaster(Forecaster):
         prediction = pd.Series(
             self.forecaster.predict(exog),
             index=exog.index,
-            name="error",
         )
 
         return self.predict_result(
