@@ -100,7 +100,7 @@ class SolarForecaster(SklearnForecaster):
 
         for update_time, update_df in df.sort_values("time").groupby("time"):
             ts = pd.to_datetime(str(update_time))
-            label = to_local_time(ts.to_pydatetime()).strftime("%H:%M")
+            label = to_local_time(ts.to_pydatetime()).strftime("%d-%m %H:%M")
             backtest_points.append(
                 BacktestPoint(
                     label=f"Update {label}",
