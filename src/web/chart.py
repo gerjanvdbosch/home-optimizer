@@ -17,7 +17,7 @@ def add_series(
             y=[p.value for p in points],
             mode="lines",
             name=name,
-            line=dict(width=3),
+            line=dict(width=5),
             connectgaps=True,
             hovertemplate="%{y:.0f} W<extra>%{fullData.name}</extra>",
         )
@@ -104,7 +104,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
                 y=df["value"],
                 mode="lines",
                 name=bp.label,
-                line=dict(width=3, color=color),
+                line=dict(width=5, color=color),
                 visible=True,
                 connectgaps=True,
                 hovertemplate=(

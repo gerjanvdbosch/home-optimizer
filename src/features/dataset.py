@@ -294,6 +294,15 @@ class TimeSeriesLoader(DataLoader):
             fill=definition.fill,
         )
 
+        if not points and definition.fill == "previous":
+            last_point = self.influx.find(
+                measurement=sensor.measurement,
+                entity_id=sensor.entity_id,
+                field=sensor.field,
+            )
+            if last_point and parse_datetime(last_point["time"]) < start:
+                points = [{"time": start.isoformat(), "value": last_point["value"]}]
+
         rows = [
             {
                 "time": parse_datetime(point["time"]),
