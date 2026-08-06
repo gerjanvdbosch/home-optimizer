@@ -60,6 +60,8 @@ class SolarForecaster(SklearnForecaster):
         df["spread"] = df["p90"] - df["p10"]
         df["spread_relative"] = df["spread"] / (df["p50"] + 1e-6)
 
+        df = df.dropna(subset=[self.target_column, *self.exog_columns])
+
         print(
             df[
                 [
