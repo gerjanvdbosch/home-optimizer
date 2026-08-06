@@ -73,7 +73,7 @@ class SolarForecaster(SklearnForecaster):
                     "spread",
                     "spread_relative",
                 ]
-            ]
+            ].to_string()
         )
 
         df = df.sort_values(["time", "target_time"])
