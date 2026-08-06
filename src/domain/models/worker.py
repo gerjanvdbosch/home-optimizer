@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 
 from domain.models.config import (
@@ -20,9 +21,9 @@ class JobType(str, Enum):
 
 @dataclass
 class Job:
-    id: str
     type: JobType
     config: FitConfig | PredictConfig | TuneConfig | BacktestConfig | Config
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 class WorkerState(str, Enum):

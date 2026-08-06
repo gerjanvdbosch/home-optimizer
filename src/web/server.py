@@ -1,4 +1,3 @@
-import uuid
 from contextlib import asynccontextmanager
 from multiprocessing import Manager
 from pathlib import Path
@@ -86,11 +85,7 @@ async def state(request: Request):
 
 @app.post("/api/update")
 async def update(request: Request, config: Config):
-    job = Job(
-        id=uuid.uuid4().hex,
-        type=JobType.UPDATE,
-        config=config,
-    )
+    job = Job(type=JobType.UPDATE, config=config)
 
     request.app.state.worker.submit(job)
 
@@ -102,11 +97,7 @@ async def update(request: Request, config: Config):
 
 @app.post("/api/fit")
 async def fit(request: Request, config: FitConfig):
-    job = Job(
-        id=uuid.uuid4().hex,
-        type=JobType.FIT,
-        config=config,
-    )
+    job = Job(type=JobType.FIT, config=config)
 
     request.app.state.worker.submit(job)
 
@@ -118,11 +109,7 @@ async def fit(request: Request, config: FitConfig):
 
 @app.post("/api/predict")
 async def predict(request: Request, config: PredictConfig):
-    job = Job(
-        id=uuid.uuid4().hex,
-        type=JobType.PREDICT,
-        config=config,
-    )
+    job = Job(type=JobType.PREDICT, config=config)
 
     request.app.state.worker.submit(job)
 
@@ -134,11 +121,7 @@ async def predict(request: Request, config: PredictConfig):
 
 @app.post("/api/backtest")
 async def backtest(request: Request, config: BacktestConfig):
-    job = Job(
-        id=uuid.uuid4().hex,
-        type=JobType.BACKTEST,
-        config=config,
-    )
+    job = Job(type=JobType.BACKTEST, config=config)
 
     request.app.state.worker.submit(job)
 
@@ -150,11 +133,7 @@ async def backtest(request: Request, config: BacktestConfig):
 
 @app.post("/api/tune")
 async def tune(request: Request, config: TuneConfig):
-    job = Job(
-        id=uuid.uuid4().hex,
-        type=JobType.TUNE,
-        config=config,
-    )
+    job = Job(type=JobType.TUNE, config=config)
 
     request.app.state.worker.submit(job)
 
