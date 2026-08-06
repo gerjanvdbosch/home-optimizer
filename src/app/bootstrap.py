@@ -73,7 +73,9 @@ def create_container() -> Container:
 
     forecasting = Forecasting(
         loader=dataset_loader,
-        repository=backtest_repository,
+        backtest_repository=backtest_repository,
+        config_repository=config_repository,
+        state_manager=state_manager,
         path=settings.data_path / "models",
         forecasters=[
             BoilerForecaster(),

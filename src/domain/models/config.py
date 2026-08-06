@@ -104,21 +104,21 @@ class Config(BaseModel):
     heat_pump: HeatPumpConfig = Field()
 
 
-class FitParams(BaseModel):
+class FitConfig(BaseModel):
     forecaster: ForecasterType | None = Field(default=None)
     days: int = Field(default=90)
 
 
-class PredictParams(BaseModel):
+class PredictConfig(BaseModel):
     forecaster: ForecasterType
     steps: int = Field(default=24)
 
 
-class BacktestParams(BaseModel):
+class BacktestConfig(BaseModel):
     forecaster: ForecasterType
     days: int = Field(default=90)
     steps: int = Field(default=24)
 
 
-class TuneParams(BacktestParams):
+class TuneConfig(BacktestConfig):
     trails: int = Field(default=3)

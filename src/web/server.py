@@ -11,11 +11,11 @@ from fastapi.templating import Jinja2Templates
 from app.bootstrap import create_container
 from app.worker import Worker
 from domain.models.config import (
-    BacktestParams,
+    BacktestConfig,
     Config,
-    FitParams,
-    PredictParams,
-    TuneParams,
+    FitConfig,
+    PredictConfig,
+    TuneConfig,
 )
 from domain.models.worker import Job, JobType
 from web.chart import backtest_chart, solar_forecast_chart
@@ -85,22 +85,27 @@ async def state(request: Request):
 
 
 @app.post("/api/update")
-async def update(config: Config, request: Request):
-    container = request.app.state.container
+async def update(request: Request, config: Config):
+    job = Job(
+        id=uuid.uuid4().hex,
+        type=JobType.UPDATE,
+        params=config,
+    )
 
-    container.config_repository.save(config)
-    container.state_manager.update(config)
-    container.backtest_repository.clear()
+    request.app.state.worker.submit(job)
 
-    return {"ok": True}
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }
 
 
 @app.post("/api/fit")
-async def fit(request: Request, params: FitParams):
+async def fit(request: Request, config: FitConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.FIT,
-        params=params,
+        params=config,
     )
 
     request.app.state.worker.submit(job)
@@ -112,11 +117,11 @@ async def fit(request: Request, params: FitParams):
 
 
 @app.post("/api/predict")
-async def predict(request: Request, params: PredictParams):
+async def predict(request: Request, config: PredictConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.PREDICT,
-        params=params,
+        params=config,
     )
 
     request.app.state.worker.submit(job)
@@ -128,11 +133,11 @@ async def predict(request: Request, params: PredictParams):
 
 
 @app.post("/api/backtest")
-async def backtest(request: Request, params: BacktestParams):
+async def backtest(request: Request, config: BacktestConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.BACKTEST,
-        params=params,
+        params=config,
     )
 
     request.app.state.worker.submit(job)
@@ -144,11 +149,11 @@ async def backtest(request: Request, params: BacktestParams):
 
 
 @app.post("/api/tune")
-async def tune(request: Request, params: TuneParams):
+async def tune(request: Request, config: TuneConfig):
     job = Job(
         id=uuid.uuid4().hex,
         type=JobType.TUNE,
-        params=params,
+        params=config,
     )
 
     request.app.state.worker.submit(job)

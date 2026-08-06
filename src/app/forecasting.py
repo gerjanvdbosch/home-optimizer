@@ -1,97 +1,79 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from domain.models.config import (
-    BacktestParams,
+    BacktestConfig,
     Config,
-    FitParams,
+    FitConfig,
     ForecasterType,
-    PredictParams,
-    TuneParams,
+    PredictConfig,
+    TuneConfig,
 )
 from domain.models.interface import Forecaster
 from features.dataset import DatasetLoader
-from infrastructure.repository import BacktestRepository
+from infrastructure.repository import BacktestRepository, ConfigRepository
 
 
 class Forecasting:
     def __init__(
         self,
         loader: DatasetLoader,
-        repository: BacktestRepository,
+        backtest_repository: BacktestRepository,
+        config_repository: ConfigRepository,
+        state_manager: Any,
         path: Path,
         forecasters: list[Forecaster],
     ):
         self.loader = loader
-        self.repository = repository
+        self.backtest_repository = backtest_repository
+        self.config_repository = config_repository
+        self.state_manager = state_manager
         self.path = path
         self.forecasters = forecasters
 
-    def fit(self, config: Config, params: FitParams):
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=params.days)
+    def update(self, config: Config):
+        self.config_repository.save(config)
+        self.state_manager.update(config)
+        self.backtest_repository.clear()
 
+    def fit(self, config: FitConfig):
         for forecaster in self.forecasters:
-            if params.forecaster and forecaster.name != params.forecaster:
+            if config.forecaster and forecaster.name != config.forecaster:
                 continue
 
-            forecaster.load(self.path)
-
-            dataset = forecaster.dataset(config)
-
-            df = self.loader.load(dataset, start, end)
+            forecaster, df = self._prepare(forecaster, config.days)
 
             forecaster.fit(df)
 
             forecaster.save(self.path)
 
-    def predict(self, config: Config, params: PredictParams):
-        forecaster = self._get_forecaster(params.forecaster)
-
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=1)
-
-        dataset = forecaster.dataset(config)
-
-        df = self.loader.load(dataset, start, end)
+    def predict(self, config: PredictConfig):
+        forecaster, df = self._prepare(config.forecaster, 1)
 
         result = forecaster.predict(df)
 
         print(result)
 
-    def backtest(self, config: Config, params: BacktestParams):
-        forecaster = self._get_forecaster(params.forecaster)
+    def backtest(self, config: BacktestConfig):
+        forecaster, df = self._prepare(config.forecaster, config.days)
 
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=params.days)
-
-        dataset = forecaster.dataset(config)
-
-        df = self.loader.load(dataset, start, end)
-
-        result = forecaster.backtest(df, steps=params.steps)
+        result = forecaster.backtest(df, steps=config.steps)
 
         logging.info(
             "Backtest finished: mae=%.3f",
             result.mae,
         )
 
-        self.repository.save(result)
+        self.backtest_repository.save(result)
 
-    def tune(self, config: Config, params: TuneParams):
-        forecaster = self._get_forecaster(params.forecaster)
-
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=params.days)
-
-        dataset = forecaster.dataset(config)
-
-        df = self.loader.load(dataset, start, end)
+    def tune(self, config: TuneConfig):
+        forecaster, df = self._prepare(config.forecaster, config.days)
 
         results, study = forecaster.tune(
             df,
-            n_trials=params.trails,
+            n_trials=config.trails,
             study_storage=f"sqlite:///{self.path / 'optuna.db'}",
         )
 
@@ -103,10 +85,30 @@ class Forecasting:
 
         forecaster.save(self.path)
 
+    def _prepare(
+        self,
+        forecaster: ForecasterType | Forecaster,
+        days: int,
+    ) -> tuple[Forecaster, Any]:
+        if isinstance(forecaster, str):
+            forecaster = self._get_forecaster(forecaster)
+
+        forecaster.load(self.path)
+
+        config = self.config_repository.load()
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=days)
+
+        dataset = forecaster.dataset(config)
+
+        df = self.loader.load(dataset, start, end)
+
+        return forecaster, df
+
     def _get_forecaster(self, name: ForecasterType) -> Forecaster:
         for forecaster in self.forecasters:
             if forecaster.name == name:
-                forecaster.load(self.path)
                 return forecaster
 
         raise ValueError(f"Unknown forecaster: {name}")
