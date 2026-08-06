@@ -203,10 +203,10 @@ class SklearnForecaster(Forecaster):
         self,
         last_window: pd.DataFrame,
         df: pd.DataFrame | None = None,
+        steps: int = 24,
     ):
         return {
-            "last_window": last_window,
-            "exog": df[self.exog_columns] if df is not None else None,
+            "X": df[self.exog_columns].iloc[:steps] if df is not None else None,
         }
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -215,12 +215,7 @@ class SklearnForecaster(Forecaster):
     def fit(self, df: pd.DataFrame):
         df = self.prepare(df)
 
-        args = self.arguments(df)
-
-        self.forecaster.fit(
-            args["X"],
-            args["y"],
-        )
+        self.forecaster.fit(**self.arguments(df))
 
     def predict(
         self,
@@ -233,15 +228,16 @@ class SklearnForecaster(Forecaster):
 
         df = self.prepare(df)
 
-        exog = df[self.exog_columns].iloc[:steps]
-
-        prediction = pd.Series(
-            self.forecaster.predict(exog),
-            index=exog.index,
+        args = self.predict_arguments(
+            last_window=last_window,
+            df=df,
+            steps=steps,
         )
 
+        prediction = self.forecaster.predict(**args)
+
         return self.predict_result(
-            prediction,
+            pd.Series(prediction),
             df.iloc[:steps],
         )
 

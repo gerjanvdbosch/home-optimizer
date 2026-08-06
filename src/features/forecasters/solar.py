@@ -43,6 +43,8 @@ class SolarForecaster(SklearnForecaster):
         return HistGradientBoostingRegressor()
 
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
+        df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
+
         df["error"] = df["P_solar"] - df["p50"]
 
         return {
@@ -59,8 +61,6 @@ class SolarForecaster(SklearnForecaster):
 
         df["spread"] = df["p90"] - df["p10"]
         df["spread_relative"] = df["spread"] / (df["p50"] + 1e-6)
-
-        df = df.dropna(subset=[self.target_column, *self.exog_columns])
 
         print(
             df[
