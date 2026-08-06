@@ -35,13 +35,13 @@ class DataDefinition(BaseModel):
 class TimeSeriesDefinition(DataDefinition):
     aggregation: Aggregation | None = None
     interval: str = "1min"
-    fill: FillMethod = "none"
+    fill: FillMethod | int | float = "none"
 
 
 class AttributeTimeSeriesDefinition(DataDefinition):
     aggregation: Aggregation | None = None
     interval: str = "1min"
-    fill: FillMethod = "none"
+    fill: FillMethod | int | float = "none"
     target_interval: str | None = None
 
 

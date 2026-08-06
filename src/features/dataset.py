@@ -132,7 +132,7 @@ class DatasetBuilder:
         sensor: SensorReference,
         aggregation: Aggregation | None = None,
         interval: str = "1m",
-        fill: FillMethod = "none",
+        fill: FillMethod | int | float = "none",
     ) -> "DatasetBuilder":
         """
         Load a regular time series.
@@ -166,7 +166,7 @@ class DatasetBuilder:
         sensor: SensorReference,
         aggregation: Aggregation | None = None,
         interval: str = "1m",
-        fill: FillMethod = "none",
+        fill: FillMethod | int | float = "none",
         target_interval: str | None = None,
     ) -> "DatasetBuilder":
         """

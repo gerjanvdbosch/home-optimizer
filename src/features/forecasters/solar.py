@@ -136,6 +136,7 @@ class SolarForecaster(SklearnForecaster):
                 config.solar.production,
                 interval="30m",
                 aggregation="mean",
+                fill=0,
             )
             .attribute_timeseries(
                 "p10",

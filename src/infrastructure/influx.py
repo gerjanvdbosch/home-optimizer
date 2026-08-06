@@ -52,7 +52,7 @@ class InfluxDatabase:
         end: datetime,
         interval: str | None = None,
         aggregation: Aggregation | None = None,
-        fill: FillMethod = "none",
+        fill: FillMethod | int | float = "none",
     ) -> list[dict[str, Any]]:
         if interval and aggregation:
             select = f'{aggregation}("{field}")'
