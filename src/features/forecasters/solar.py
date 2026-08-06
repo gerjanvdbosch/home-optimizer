@@ -1,3 +1,5 @@
+from typing import Any
+
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
@@ -24,7 +26,7 @@ class SolarForecaster(SklearnForecaster):
 
     @property
     def target_column(self) -> str:
-        return "error"
+        return "P_solar"
 
     @property
     def exog_columns(self) -> list[str]:
@@ -32,10 +34,21 @@ class SolarForecaster(SklearnForecaster):
             "p10",
             "p50",
             "p90",
+            "lead_time_hours",
+            "spread",
+            "spread_relative",
         ]
 
-    def create(self):
+    def create(self) -> HistGradientBoostingRegressor:
         return HistGradientBoostingRegressor()
+
+    def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
+        df["error"] = df["P_solar"] - df["p50"]
+
+        return {
+            "X": df[self.exog_columns],
+            "y": df["error"],
+        }
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df[df["target_time"] > df["time"]].copy()
@@ -45,7 +58,7 @@ class SolarForecaster(SklearnForecaster):
         ).dt.total_seconds() / 3600
 
         df["spread"] = df["p90"] - df["p10"]
-        df["spread_relative"] = df["spread"] / (df["p50"])
+        df["spread_relative"] = df["spread"] / (df["p50"] + 1e-6)
 
         print(
             df[
@@ -67,12 +80,8 @@ class SolarForecaster(SklearnForecaster):
 
         return df
 
-    def predict_result(
-        self,
-        prediction: pd.Series,
-        df: pd.DataFrame,
-    ) -> pd.Series:
-        return prediction
+    def predict_result(self, prediction: pd.Series, df: pd.DataFrame) -> pd.Series:
+        return df["p50"] + prediction
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         df = self.prepare(df)

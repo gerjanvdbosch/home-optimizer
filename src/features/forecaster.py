@@ -246,7 +246,8 @@ class SklearnForecaster(Forecaster):
             df.iloc[:steps],
         )
 
-    def predict_result(self, prediction: pd.Series, df: pd.DataFrame) -> pd.Series: ...
+    def predict_result(self, prediction: pd.Series, df: pd.DataFrame) -> pd.Series:
+        return prediction
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         raise NotImplementedError()
