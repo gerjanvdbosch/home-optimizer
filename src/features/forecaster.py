@@ -2,6 +2,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 from joblib import dump, load
 from optuna import Study, Trial
@@ -236,13 +237,10 @@ class SklearnForecaster(Forecaster):
 
         prediction = self.forecaster.predict(**args)
 
-        return self.predict_result(
-            pd.Series(prediction),
-            df.iloc[:steps],
-        )
+        return self.predict_result(prediction, df.iloc[:steps])
 
-    def predict_result(self, prediction: pd.Series, df: pd.DataFrame) -> pd.Series:
-        return prediction
+    def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
+        return pd.Series(prediction, index=df.index)
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         raise NotImplementedError()

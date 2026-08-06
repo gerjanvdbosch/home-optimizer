@@ -1,5 +1,6 @@
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
@@ -45,7 +46,7 @@ class SolarForecaster(SklearnForecaster):
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
         df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
 
-        df["error"] = df["P_solar"] - df["p50"]
+        df["error"] = df[self.target_column] - df["p50"]
 
         return {
             "X": df[self.exog_columns],
@@ -82,8 +83,12 @@ class SolarForecaster(SklearnForecaster):
 
         return df
 
-    def predict_result(self, prediction: pd.Series, df: pd.DataFrame) -> pd.Series:
-        return (df["p50"] + prediction).rename("error")
+    def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
+        return pd.Series(
+            df["p50"].to_numpy() + prediction,
+            index=df["target_time"],
+            name="pred",
+        )
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         df = self.prepare(df)
