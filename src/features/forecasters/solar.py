@@ -34,16 +34,22 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
-            "p10",
             "p50",
-            "p90",
             "lead_time_hours",
             "spread",
             "spread_relative",
+            # "hour_sin",
+            # "hour_cos",
         ]
 
     def create(self) -> HistGradientBoostingRegressor:
-        return HistGradientBoostingRegressor()
+        return HistGradientBoostingRegressor(
+            max_iter=200,
+            learning_rate=0.05,
+            max_leaf_nodes=15,
+            l2_regularization=10.0,
+            random_state=42,
+        )
 
     # def predict_arguments(
     #     self, df: pd.DataFrame, steps: int = 24
@@ -83,6 +89,18 @@ class SolarForecaster(SklearnForecaster):
 
         df["spread"] = df["p90"] - df["p10"]
         df["spread_relative"] = df["spread"] / (df["p50"] + 1e-6)
+
+        df = df.sort_values(["target_time", "time"]).copy()
+
+        hour = df["target_time"].dt.hour + df["target_time"].dt.minute / 60
+
+        df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
+        df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
+
+        day = df["target_time"].dt.dayofyear
+
+        df["day_of_year_sin"] = np.sin(2 * np.pi * day / 365.25)
+        df["day_of_year_cos"] = np.cos(2 * np.pi * day / 365.25)
 
         # print(
         #     df[
