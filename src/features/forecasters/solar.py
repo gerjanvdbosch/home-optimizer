@@ -43,6 +43,25 @@ class SolarForecaster(SklearnForecaster):
     def create(self) -> HistGradientBoostingRegressor:
         return HistGradientBoostingRegressor()
 
+    # def predict_arguments(
+    #     self, df: pd.DataFrame, steps: int = 24
+    # ):
+    # now = datetime.now(timezone.utc)
+    #
+    # last_window = df[
+    #     (df["target_time"] <= now) & df["P_solar"].notna()
+    # ].sort_values("target_time")
+    #
+    # future = (
+    #     df[(df["target_time"] > now) & (df["time"] <= now)]
+    #     .sort_values(["target_time", "time"])
+    #     .drop_duplicates("target_time", keep="last")
+    #     .sort_values("target_time")
+    # )
+    #
+    # print(last_window)
+    # print(future)
+
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
         df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
 

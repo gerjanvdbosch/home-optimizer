@@ -41,12 +41,7 @@ class Forecaster(Protocol):
 
     def fit(self, df: pd.DataFrame): ...
 
-    def predict(
-        self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
-        steps: int = 24,
-    ) -> pd.Series: ...
+    def predict(self, df: pd.DataFrame, steps: int = 24) -> pd.Series: ...
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult: ...
 

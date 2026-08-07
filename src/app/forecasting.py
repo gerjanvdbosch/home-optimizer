@@ -53,27 +53,7 @@ class Forecasting:
     def predict(self, config: PredictConfig):
         forecaster, df = self._prepare(config.forecaster, 1)
 
-        now = datetime.now(timezone.utc)
-
-        last_window = df[
-            (df["target_time"] <= now) & df["P_solar"].notna()
-        ].sort_values("target_time")
-
-        future = (
-            df[(df["target_time"] > now) & (df["time"] <= now)]
-            .sort_values(["target_time", "time"])
-            .drop_duplicates("target_time", keep="last")
-            .sort_values("target_time")
-        )
-
-        print(last_window)
-        print(future)
-
-        result = forecaster.predict(
-            last_window=last_window,
-            df=future,
-            steps=config.steps,
-        )
+        result = forecaster.predict(df=df, steps=config.steps)
 
         print(result)
 

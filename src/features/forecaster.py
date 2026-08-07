@@ -32,13 +32,9 @@ class SkforecastForecaster(Forecaster):
             "exog": df[self.exog_columns],
         }
 
-    def predict_arguments(
-        self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
-    ):
+    def predict_arguments(self, df: pd.DataFrame):
         return {
-            "last_window": last_window[self.target_column],
+            # "last_window": last_window[self.target_column],
             "exog": df[self.exog_columns] if df is not None else None,
         }
 
@@ -55,18 +51,14 @@ class SkforecastForecaster(Forecaster):
 
     def predict(
         self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
+        df: pd.DataFrame,
         steps: int = 24,
     ) -> pd.Series:
-        if df is None:
-            df = pd.DataFrame()
-
         df = self.prepare(df)
 
         return self.forecaster.predict(
             steps=steps,
-            **self.predict_arguments(last_window, df),
+            **self.predict_arguments(df),
         )
 
     def backtest(
@@ -200,12 +192,7 @@ class SklearnForecaster(Forecaster):
             "y": df[self.target_column],
         }
 
-    def predict_arguments(
-        self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
-        steps: int = 24,
-    ):
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 24):
         return {
             "X": df[self.exog_columns].iloc[:steps] if df is not None else None,
         }
@@ -218,22 +205,10 @@ class SklearnForecaster(Forecaster):
 
         self.forecaster.fit(**self.arguments(df))
 
-    def predict(
-        self,
-        last_window: pd.DataFrame,
-        df: pd.DataFrame | None = None,
-        steps: int = 24,
-    ) -> pd.Series:
-        if df is None:
-            df = pd.DataFrame()
-
+    def predict(self, df: pd.DataFrame, steps: int = 24) -> pd.Series:
         df = self.prepare(df)
 
-        args = self.predict_arguments(
-            last_window=last_window,
-            df=df,
-            steps=steps,
-        )
+        args = self.predict_arguments(df=df, steps=steps)
 
         prediction = self.forecaster.predict(**args)
 
