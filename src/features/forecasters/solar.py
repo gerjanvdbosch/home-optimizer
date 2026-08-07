@@ -63,21 +63,21 @@ class SolarForecaster(SklearnForecaster):
         df["spread"] = df["p90"] - df["p10"]
         df["spread_relative"] = df["spread"] / (df["p50"] + 1e-6)
 
-        print(
-            df[
-                [
-                    "time",
-                    "target_time",
-                    "lead_time_hours",
-                    "P_solar",
-                    "p10",
-                    "p50",
-                    "p90",
-                    "spread",
-                    "spread_relative",
-                ]
-            ].to_string()
-        )
+        # print(
+        #     df[
+        #         [
+        #             "time",
+        #             "target_time",
+        #             "lead_time_hours",
+        #             "P_solar",
+        #             "p10",
+        #             "p50",
+        #             "p90",
+        #             "spread",
+        #             "spread_relative",
+        #         ]
+        #     ].to_string()
+        # )
 
         df = df.sort_values(["time", "target_time"])
 
@@ -126,6 +126,19 @@ class SolarForecaster(SklearnForecaster):
                     ),
                 )
             )
+
+        # baseline = result["p50"]
+        # ml_prediction = result["pred"]
+        # actual = result["actual"]
+        #
+        # baseline_mae = mean_absolute_error(actual, baseline)
+        # ml_mae = mean_absolute_error(actual, ml_prediction)
+        #
+        # logging.info(
+        #     "Solar MAE: baseline=%.2f W, ML=%.2f W",
+        #     baseline_mae,
+        #     ml_mae,
+        # )
 
         return BacktestResult(
             name=self.name,

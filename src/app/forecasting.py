@@ -12,6 +12,7 @@ from domain.models.config import (
     TuneConfig,
 )
 from domain.models.interface import Forecaster
+from domain.models.state import SeriesPoint
 from features.dataset import DatasetLoader
 from infrastructure.repository import BacktestRepository, ConfigRepository
 
@@ -52,9 +53,41 @@ class Forecasting:
     def predict(self, config: PredictConfig):
         forecaster, df = self._prepare(config.forecaster, 1)
 
-        result = forecaster.predict(df)
+        now = datetime.now(timezone.utc)
+
+        last_window = df[
+            (df["target_time"] <= now) & df["P_solar"].notna()
+        ].sort_values("target_time")
+
+        future = (
+            df[(df["target_time"] > now) & (df["time"] <= now)]
+            .sort_values(["target_time", "time"])
+            .drop_duplicates("target_time", keep="last")
+            .sort_values("target_time")
+        )
+
+        print(last_window)
+        print(future)
+
+        result = forecaster.predict(
+            last_window=last_window,
+            df=future,
+            steps=config.steps,
+        )
 
         print(result)
+
+        # state = self.state_manager.load()
+        #
+        # points = [
+        #     SeriesPoint(time=pd.to_datetime(str(time)), value=float(value))
+        #     for time, value in result.items()
+        # ]
+        #
+        # if forecaster.name == "solar":
+        #     state.forecast.solar.predicted = points
+
+        # self.state_manager.save(state)
 
     def backtest(self, config: BacktestConfig):
         forecaster, df = self._prepare(config.forecaster, config.days)
