@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
+from tqdm import tqdm
 
 from domain.models.config import Config, ForecasterType
 from domain.models.dataset import DatasetDefinition
@@ -143,7 +144,15 @@ class SolarForecaster(SklearnForecaster):
         baseline_errors: list[float] = []
         ml_errors: list[float] = []
 
-        for update_time, update_df in df.sort_values("time").groupby("time"):
+        groups = df.sort_values("time").groupby("time")
+
+        progress = tqdm(
+            groups,
+            total=groups.ngroups,
+            desc="Solar backtest",
+        )
+
+        for update_time, update_df in progress:
             forecast = (
                 update_df[update_df["target_time"] > update_time]
                 .sort_values("target_time")
