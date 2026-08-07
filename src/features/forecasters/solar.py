@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import numpy as np
@@ -123,22 +124,88 @@ class SolarForecaster(SklearnForecaster):
                 for record in records
             ]
 
+        actual = (
+            df[["target_time", "P_solar"]]
+            .dropna(subset=["P_solar"])
+            .drop_duplicates("target_time")
+            .sort_values("target_time")
+        )
+
         backtest_points = [
             BacktestPoint(
                 label="Actual",
-                points=make_points(
-                    df.drop_duplicates("target_time"),
-                    "P_solar",
-                ),
+                group="Actual",
+                color="white",
+                points=make_points(actual, "P_solar"),
             )
         ]
 
+        baseline_errors: list[float] = []
+        ml_errors: list[float] = []
+
         for update_time, update_df in df.sort_values("time").groupby("time"):
+            forecast = (
+                update_df[update_df["target_time"] > update_time]
+                .sort_values("target_time")
+                .drop_duplicates("target_time", keep="last")
+            )
+
+            test = forecast[forecast["P_solar"].notna()].iloc[:steps].copy()
+
+            if test.empty:
+                continue
+
+            train = df[
+                (df["time"] < update_time)
+                & (df["target_time"] < update_time)
+                & (df["target_time"] > df["time"])
+                & df["P_solar"].notna()
+            ].copy()
+
+            train = train.dropna(
+                subset=[
+                    self.target_column,
+                    *self.exog_columns,
+                ]
+            )
+
+            if train.empty:
+                continue
+
+            train["error"] = train["P_solar"] - train["p50"]
+
+            model = self.create()
+
+            model.fit(
+                train[self.exog_columns],
+                train["error"],
+            )
+
+            error_prediction = model.predict(
+                test[self.exog_columns],
+            )
+
+            test["pred"] = test["p50"] + error_prediction
+
+            baseline_errors.extend((test["P_solar"] - test["p50"]).abs().tolist())
+
+            ml_errors.extend((test["P_solar"] - test["pred"]).abs().tolist())
+
             ts = pd.to_datetime(str(update_time))
             label = to_local_time(ts.to_pydatetime()).strftime("%d-%m %H:%M")
+
+            backtest_points.append(
+                BacktestPoint(
+                    label=f"ML {label}",
+                    group="ML",
+                    points=make_points(test, "pred"),
+                )
+            )
+
             backtest_points.append(
                 BacktestPoint(
                     label=f"Update {label}",
+                    group="Solcast",
                     points=make_points(
                         update_df.sort_values("target_time"),
                         "p50",
@@ -146,24 +213,26 @@ class SolarForecaster(SklearnForecaster):
                 )
             )
 
-        # baseline = result["p50"]
-        # ml_prediction = result["pred"]
-        # actual = result["actual"]
-        #
-        # baseline_mae = mean_absolute_error(actual, baseline)
-        # ml_mae = mean_absolute_error(actual, ml_prediction)
-        #
-        # logging.info(
-        #     "Solar MAE: baseline=%.2f W, ML=%.2f W",
-        #     baseline_mae,
-        #     ml_mae,
-        # )
+        baseline_mae = float(np.mean(baseline_errors)) if baseline_errors else 0.0
+
+        ml_mae = float(np.mean(ml_errors)) if ml_errors else 0.0
+
+        improvement = (
+            100 * (baseline_mae - ml_mae) / baseline_mae if baseline_mae else 0.0
+        )
+
+        logging.info(
+            "Solar MAE: baseline=%.2f W, ML=%.2f W, improvement=%.1f%%",
+            baseline_mae,
+            ml_mae,
+            improvement,
+        )
 
         return BacktestResult(
             name=self.name,
             label=self.label,
             unit=self.unit,
-            mae=0,
+            mae=ml_mae,
             points=backtest_points,
         )
 

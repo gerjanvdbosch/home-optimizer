@@ -93,18 +93,15 @@ def backtest_chart(result: BacktestResult | None) -> str:
         df = pd.DataFrame(bp.points)
         df["x_time"] = to_local_series(pd.to_datetime(df["time"]))
 
-        color = None
-
-        if bp.label == "Actual":
-            color = "white"
-
         fig.add_trace(
             go.Scatter(
                 x=df["x_time"],
                 y=df["value"],
                 mode="lines",
                 name=bp.label,
-                line=dict(width=3, color=color),
+                legendgroup=bp.group,
+                showlegend=False,
+                line=dict(width=3, color=bp.color),
                 visible=True,
                 connectgaps=True,
                 hovertemplate=(
@@ -112,6 +109,24 @@ def backtest_chart(result: BacktestResult | None) -> str:
                 ),
             )
         )
+
+    groups: set[str] = set()
+
+    for bp in result.points:
+        if bp.group not in groups and bp.group:
+            groups.add(bp.group)
+
+            fig.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="lines",
+                    name=bp.group,
+                    legendgroup=bp.group,
+                    showlegend=True,
+                    line=dict(width=3, color=bp.color),
+                )
+            )
 
     fig.update_layout(
         title=dict(
@@ -154,6 +169,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
             x=0.5,
             xanchor="center",
             font=dict(size=14),
+            groupclick="togglegroup",
         ),
         hovermode="x unified",
     )

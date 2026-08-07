@@ -87,6 +87,8 @@ class OptimizerState(BaseModel):
 class BacktestPoint(BaseModel):
     label: str
     points: list[dict[str, object]]
+    color: str | None = None
+    group: str | None = None
 
 
 class BacktestResult(BaseModel):
