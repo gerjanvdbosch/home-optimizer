@@ -47,30 +47,67 @@ class SolarForecaster(SklearnForecaster):
             "spread_log",
             "hour_sin",
             "hour_cos",
+            "solar_lag1",
+            "solar_lag2",
+            "solar_lag3",
+            "solar_lag4",
+            # "error_lag1",
+            # "error_lag2",
+            # "error_lag3",
+            # "error_lag4",
             # "day_of_year_sin",
             # "day_of_year_cos",
-            "spread_upper",
-            "spread_lower",
+            # "spread_upper",
+            # "spread_lower",
             # "spread_upper_log",
             # "spread_lower_log",
             "spread_x_lead",
             "p50_x_lead",
         ]
 
+    def features_from_params(self, params: dict[str, Any]) -> list[str]:
+        features = ["lead_time_hours"]
+        if params.get("use_lags"):
+            features.extend(["solar_lag1", "solar_lag2", "solar_lag3", "solar_lag4"])
+        if params.get("use_error_lags"):
+            features.extend(["error_lag1", "error_lag2", "error_lag3", "error_lag4"])
+        if params.get("use_p50"):
+            features.append("p50")
+        if params.get("use_time_features"):
+            features.extend(
+                ["hour_sin", "hour_cos", "day_of_year_sin", "day_of_year_cos"]
+            )
+        if params.get("use_lead_sq"):
+            features.append("lead_time_hours_sq")
+        if params.get("use_spread"):
+            features.extend(["spread", "spread_log", "spread_x_lead"])
+        if params.get("use_asym_spread"):
+            features.extend(
+                ["spread_upper", "spread_lower", "spread_upper_log", "spread_lower_log"]
+            )
+        if params.get("use_quantiles"):
+            features.extend(["p10", "p90", "p50_x_lead"])
+        return features
+
+    def model_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in params.items() if not k.startswith("use_")}
+
+    @property
+    def features(self) -> list[str]:
+        return self._tuned_features or self.exog_columns
+
     def create(self, **overrides: Any) -> HistGradientBoostingRegressor:
         params: dict[str, Any] = dict(
-            # loss="quantile",
-            # quantile=0.5,
             max_iter=100,
             learning_rate=0.06,
-            max_leaf_nodes=63,
-            min_samples_leaf=15,
+            max_leaf_nodes=31,
+            min_samples_leaf=31,
             l2_regularization=1.0,
             max_depth=None,
             random_state=42,
             early_stopping=True,
             validation_fraction=0.15,
-            n_iter_no_change=20,
+            n_iter_no_change=10,
         )
         params.update(overrides)
 
@@ -94,20 +131,56 @@ class SolarForecaster(SklearnForecaster):
         print(future)
 
         return {
-            "X": future[self.exog_columns].iloc[:steps],
+            "X": future[self.features].iloc[:steps],
         }
 
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
-        df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
+        df = df.dropna(subset=[self.target_column, *self.features]).copy()
 
         df["error"] = df[self.target_column] - df["p50"]
 
         return {
-            "X": df[self.exog_columns],
+            "X": df[self.features],
             "y": df["error"],
         }
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+
+        df["baseline_error"] = df["P_solar"] - df["p50"]
+
+        actual_series = (
+            df[["target_time", "time", "P_solar", "baseline_error"]]
+            .dropna(subset=["target_time", "P_solar", "baseline_error"])
+            .sort_values(["target_time", "time"])
+            .drop_duplicates("target_time", keep="last")
+            .rename(
+                columns={
+                    "target_time": "obs_time",
+                    "P_solar": "actual_value",
+                    "baseline_error": "error_value",
+                }
+            )
+        )
+
+        for i in range(4):
+            actual_series[f"solar_lag{i + 1}"] = actual_series["actual_value"].shift(i)
+            actual_series[f"error_lag{i + 1}"] = actual_series["error_value"].shift(i)
+
+        lag_cols = [f"solar_lag{i}" for i in range(1, 5)] + [
+            f"error_lag{i}" for i in range(1, 5)
+        ]
+
+        df = df.dropna(subset=["time"]).sort_values("time")
+
+        df = pd.merge_asof(
+            df,
+            actual_series[["obs_time", *lag_cols]],
+            left_on="time",
+            right_on="obs_time",
+            direction="backward",
+        ).drop(columns=["obs_time"])
+
         df = df[df["target_time"] > df["time"]].copy()
 
         df["lead_time_hours"] = (
@@ -137,6 +210,25 @@ class SolarForecaster(SklearnForecaster):
         df["day_of_year_cos"] = np.cos(2 * np.pi * day / 365.25)
 
         df = df.sort_values(["time", "target_time"])
+        #
+        # print(
+        #     df[
+        #         [
+        #             "time",
+        #             "target_time",
+        #             "P_solar",
+        #             "p50",
+        #             "solar_lag1",
+        #             "solar_lag2",
+        #             "solar_lag3",
+        #             "solar_lag4",
+        #             "error_lag1",
+        #             "error_lag2",
+        #             "error_lag3",
+        #             "error_lag4",
+        #         ]
+        #     ].to_string()
+        # )
 
         return df
 
@@ -147,12 +239,71 @@ class SolarForecaster(SklearnForecaster):
             name="pred",
         )
 
+    def generate_walk_forward_folds(
+        self,
+        df: pd.DataFrame,
+        steps: int,
+        retrain_every_hours: int = 6,
+        max_train_days: int = 30,
+    ) -> Iterator[tuple[pd.Timestamp, pd.DataFrame, pd.DataFrame, bool]]:
+
+        df_sorted = df.sort_values(["time", "target_time"]).reset_index(drop=True)
+
+        # DatetimeIndex i.p.v. numpy-array: behoudt tz-info correct bij vergelijken
+        time_index = pd.DatetimeIndex(df_sorted["time"])
+        update_times = df_sorted["time"].unique()
+
+        starts = time_index.searchsorted(update_times, side="left")
+        ends = time_index.searchsorted(update_times, side="right")
+
+        retrain_every = pd.Timedelta(hours=retrain_every_hours)
+        max_train_window = pd.Timedelta(days=max_train_days)
+
+        last_trained_time = None
+        train_df = pd.DataFrame()
+
+        for update_time, start, end in zip(update_times, starts, ends):
+            update_time = pd.Timestamp(update_time)
+            group = df_sorted.iloc[start:end]
+
+            forecast = group[group["target_time"] > update_time].drop_duplicates(
+                "target_time", keep="last"
+            )
+            test_df = forecast[forecast[self.target_column].notna()].iloc[:steps].copy()
+            if test_df.empty:
+                continue
+
+            need_retrain = (
+                last_trained_time is None
+                or (update_time - last_trained_time) >= retrain_every
+            )
+
+            if need_retrain:
+                window_start = update_time - max_train_window
+
+                # Geen .to_datetime64() meer nodig — pandas regelt tz-vergelijking zelf
+                train_start_idx = time_index.searchsorted(window_start, side="left")
+
+                train_slice = df_sorted.iloc[train_start_idx:start]
+                train_mask = (
+                    (train_slice["target_time"] < update_time)
+                    & (train_slice["target_time"] > train_slice["time"])
+                    & train_slice[self.target_column].notna()
+                )
+                candidate_train = train_slice[train_mask]
+                if not candidate_train.empty:
+                    train_df = candidate_train
+                    last_trained_time = update_time
+
+            yield update_time, train_df, test_df, need_retrain
+
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
-        df = self.prepare(df)
+        df = self.prepare(df).dropna(subset=[self.target_column, "p50"])
+        df["error_target"] = df[self.target_column] - df["p50"]
+        df_sorted = df.sort_values(["time", "target_time"]).reset_index(drop=True)
 
         def make_points(df: pd.DataFrame, value_col: str) -> list[dict]:
             records = df[["target_time", value_col]].to_dict("records")
-
             return [
                 {
                     "time": pd.to_datetime(record["target_time"]).isoformat(),
@@ -162,7 +313,7 @@ class SolarForecaster(SklearnForecaster):
             ]
 
         actual = (
-            df[["target_time", "P_solar"]]
+            df_sorted[["target_time", "P_solar"]]
             .dropna(subset=["P_solar"])
             .drop_duplicates("target_time")
             .sort_values("target_time")
@@ -179,65 +330,40 @@ class SolarForecaster(SklearnForecaster):
 
         baseline_errors: list[float] = []
         ml_errors: list[float] = []
+        model = None
 
-        groups = df.sort_values("time").groupby("time")
-
-        progress = tqdm(
-            groups,
-            total=groups.ngroups,
-            desc="Solar backtest",
+        folds = self.generate_walk_forward_folds(
+            df_sorted,
+            steps=steps,
         )
 
-        retrain_every = pd.Timedelta(hours=6)
-        max_train_days = 30
+        total_updates = df_sorted["time"].nunique()
 
-        last_model = None
-        last_trained: pd.Timestamp | None = None
+        progress = tqdm(folds, total=total_updates, desc="Solar backtest")
 
-        for update_time, update_df in progress:
-            forecast = (
-                update_df[update_df["target_time"] > update_time]
-                .sort_values(["target_time", "time"])
-                .drop_duplicates("target_time", keep="last")
-            )
+        for update_time, train_df, test_df, need_retrain in progress:
+            if need_retrain and not train_df.empty:
+                train_clean = train_df.dropna(subset=self.features)
+                if not train_clean.empty:
+                    model = self.create(**self._tuned_params)
+                    model.fit(train_clean[self.features], train_clean["error_target"])
 
-            test = forecast[forecast["P_solar"].notna()].iloc[:steps].copy()
-
-            if test.empty:
+            if model is None:
                 continue
 
-            need_retrain = (
-                last_model is None
-                or last_trained is None
-                or (update_time - last_trained) >= retrain_every
-            )
-
-            if need_retrain:
-                window_start = update_time - pd.Timedelta(days=max_train_days)
-
-                train = df[
-                    (df["time"] >= window_start)
-                    & (df["time"] < update_time)
-                    & (df["target_time"] < update_time)
-                    & (df["target_time"] > df["time"])
-                    & df["P_solar"].notna()
-                ].dropna(subset=[self.target_column, *self.exog_columns])
-
-                if not train.empty:
-                    error = train["P_solar"] - train["p50"]
-                    last_model = self.create()
-                    last_model.fit(train[self.exog_columns], error)
-                    last_trained = update_time
-
-            if last_model is None:
+            test_clean = test_df.dropna(subset=self.features)
+            if test_clean.empty:
                 continue
 
-            error_prediction = last_model.predict(test[self.exog_columns])
-            test["pred"] = test["p50"] + error_prediction
+            error_pred = model.predict(test_clean[self.features])
+            test_clean["pred"] = (test_clean["p50"] + error_pred).clip(lower=0)
 
-            baseline_errors.extend((test["P_solar"] - test["p50"]).abs().tolist())
-
-            ml_errors.extend((test["P_solar"] - test["pred"]).abs().tolist())
+            baseline_errors.extend(
+                (test_clean["P_solar"] - test_clean["p50"]).abs().tolist()
+            )
+            ml_errors.extend(
+                (test_clean["P_solar"] - test_clean["pred"]).abs().tolist()
+            )
 
             ts = pd.to_datetime(str(update_time))
             label = to_local_time(ts.to_pydatetime()).strftime("%d-%m %H:%M")
@@ -246,25 +372,19 @@ class SolarForecaster(SklearnForecaster):
                 BacktestPoint(
                     label=f"ML {label}",
                     group="ML",
-                    points=make_points(test, "pred"),
+                    points=make_points(test_clean, "pred"),
                 )
             )
-
             backtest_points.append(
                 BacktestPoint(
                     label=f"Update {label}",
                     group="Solcast",
-                    points=make_points(
-                        update_df.sort_values("target_time"),
-                        "p50",
-                    ),
+                    points=make_points(test_clean.sort_values("target_time"), "p50"),
                 )
             )
 
         baseline_mae = float(np.mean(baseline_errors)) if baseline_errors else 0.0
-
         ml_mae = float(np.mean(ml_errors)) if ml_errors else 0.0
-
         improvement = (
             100 * (baseline_mae - ml_mae) / baseline_mae if baseline_mae else 0.0
         )
@@ -286,16 +406,25 @@ class SolarForecaster(SklearnForecaster):
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         params = {
+            "loss": trial.suggest_categorical(
+                "loss", ["squared_error", "absolute_error"]
+            ),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
             "max_leaf_nodes": trial.suggest_int("max_leaf_nodes", 15, 127),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 10, 50),
             "l2_regularization": trial.suggest_float(
                 "l2_regularization", 0.1, 10.0, log=True
             ),
-            "max_iter": trial.suggest_int("max_iter", 100, 400),
+            "max_iter": trial.suggest_int("max_iter", 10, 200),
         }
 
         features = ["lead_time_hours"]
+
+        if trial.suggest_categorical("use_lags", [True, False]):
+            features.extend(["solar_lag1", "solar_lag2", "solar_lag3", "solar_lag4"])
+
+        if trial.suggest_categorical("use_error_lags", [True, False]):
+            features.extend(["error_lag1", "error_lag2", "error_lag3", "error_lag4"])
 
         if trial.suggest_categorical("use_p50", [True, False]):
             features.append("p50")
@@ -328,69 +457,57 @@ class SolarForecaster(SklearnForecaster):
         steps: int = 12,
         n_trials: int = 30,
         study_storage: str | Path | None = None,
+        tune_retrain_every_hours: int = 6 * 7,
     ) -> tuple[pd.DataFrame, Study]:
-        df = self.prepare(df)
+        df = self.prepare(df).dropna(subset=[self.target_column, "p50"])
+        df["error_target"] = df[self.target_column] - df["p50"]
+        df_sorted = df.sort_values(["time", "target_time"]).reset_index(drop=True)
+
+        # Eén keer materialiseren — hergebruikt over alle Optuna-trials
+        folds = list(
+            self.generate_walk_forward_folds(
+                df_sorted,
+                steps=steps,
+                retrain_every_hours=tune_retrain_every_hours,
+                max_train_days=30,
+            )
+        )
+
+        logging.info(
+            "Tune folds: %d totaal, %d retrain-momenten (retrain_every=%dh)",
+            len(folds),
+            sum(1 for _, _, _, need_retrain in folds if need_retrain),
+            tune_retrain_every_hours,
+        )
 
         def objective(trial: Trial) -> float:
             params = self.search_space(trial)
             features = params.pop("_features")
-            model_params = params
-
-            retrain_every = pd.Timedelta(hours=6)
-            max_train_days = 30
 
             ml_errors: list[float] = []
-            last_model = None
-            last_trained = None
+            model = None
 
-            groups = df.sort_values("time").groupby("time")
+            for update_time, train_df, test_df, need_retrain in folds:
+                if need_retrain and not train_df.empty:
+                    train_clean = train_df.dropna(subset=features)
+                    if not train_clean.empty:
+                        model = self.create(**params)
+                        model.fit(train_clean[features], train_clean["error_target"])
 
-            for update_time, update_df in groups:
-                forecast = (
-                    update_df[update_df["target_time"] > update_time]
-                    .sort_values(["target_time", "time"])
-                    .drop_duplicates("target_time", keep="last")
-                )
-                test = forecast[forecast["P_solar"].notna()].iloc[:steps].copy()
-                if test.empty:
+                if model is None:
                     continue
 
-                need_retrain = (
-                    last_model is None
-                    or last_trained is None
-                    or (update_time - last_trained) >= retrain_every
-                )
-
-                if need_retrain:
-                    window_start = update_time - pd.Timedelta(days=max_train_days)
-                    train = df[
-                        (df["time"] >= window_start)
-                        & (df["time"] < update_time)
-                        & (df["target_time"] < update_time)
-                        & (df["target_time"] > df["time"])
-                        & df["P_solar"].notna()
-                    ].dropna(subset=[self.target_column, *features])
-
-                    if not train.empty:
-                        error = train["P_solar"] - train["p50"]
-                        model = self.create(**model_params)
-                        model.fit(train[features], error)
-                        last_model = model
-                        last_trained = update_time
-
-                if last_model is None:
+                test_clean = test_df.dropna(subset=features)
+                if test_clean.empty:
                     continue
 
-                error_pred = last_model.predict(test[features])
-                pred = (test["p50"] + error_pred).clip(lower=0)
-                ml_errors.extend((test["P_solar"] - pred).abs().tolist())
+                error_pred = model.predict(test_clean[features])
+                pred = (test_clean["p50"] + error_pred).clip(lower=0)
+                ml_errors.extend((test_clean["P_solar"] - pred).abs().tolist())
 
-            if not ml_errors:
-                return 9999.0
-            return float(np.mean(ml_errors))
+            return float(np.mean(ml_errors)) if ml_errors else 9999.0
 
         storage = str(study_storage) if study_storage else None
-
         study = create_study(
             study_name=self.name,
             direction="minimize",
@@ -398,46 +515,20 @@ class SolarForecaster(SklearnForecaster):
             storage=storage,
             load_if_exists=True,
         )
-
         study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
         best_params = study.best_params
-
-        best_features = ["lead_time_hours"]
-
-        if best_params.get("use_p50"):
-            best_features.append("p50")
-
-        if best_params.get("use_time_features"):
-            best_features.extend(
-                ["hour_sin", "hour_cos", "day_of_year_sin", "day_of_year_cos"]
-            )
-
-        if best_params.get("use_lead_sq"):
-            best_features.append("lead_time_hours_sq")
-
-        if best_params.get("use_spread"):
-            best_features.extend(["spread", "spread_log", "spread_x_lead"])
-
-        if best_params.get("use_asym_spread"):
-            best_features.extend(
-                ["spread_upper", "spread_lower", "spread_upper_log", "spread_lower_log"]
-            )
-
-        if best_params.get("use_quantiles"):
-            best_features.extend(["p10", "p90", "p50_x_lead"])
-
-        best_params = {k: v for k, v in best_params.items() if not k.startswith("use_")}
-
-        self.forecaster = self.create(**best_params)
+        self._tuned_features = self.features_from_params(best_params)
+        self._tuned_params = self.model_params(best_params)
+        self.forecaster = self.create(**self._tuned_params)
 
         trials_df = study.trials_dataframe()
 
         logging.info(
             "Tune finished - best MAE: %.2f | params: %s | features: %s",
             study.best_value,
-            best_params,
-            best_features,
+            self._tuned_params,
+            self._tuned_features,
         )
 
         return trials_df, study

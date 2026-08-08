@@ -1,3 +1,4 @@
+import logging
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, cast
@@ -5,7 +6,7 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from joblib import dump, load
-from optuna import Study, Trial
+from optuna import Study, Trial, create_study
 from skforecast.base import ForecasterBase
 from skforecast.model_selection import (
     TimeSeriesFold,
@@ -179,6 +180,8 @@ class SkforecastForecaster(Forecaster):
 class SklearnForecaster(Forecaster):
     def __init__(self):
         self.forecaster = self.create()
+        self._tuned_params: dict[str, Any] = {}
+        self._tuned_features: list[str] | None = None
 
     @abstractmethod
     def create(self) -> HistGradientBoostingRegressor: ...
@@ -229,6 +232,33 @@ class SklearnForecaster(Forecaster):
     ) -> tuple[pd.DataFrame, Study]:
         raise NotImplementedError()
 
+    def _load_tuned(self, storage: str) -> bool:
+        if not Path(storage.removeprefix("sqlite:///")).exists():
+            return False
+
+        study = create_study(
+            study_name=self.name,
+            direction="minimize",
+            storage=storage,
+            load_if_exists=True,
+        )
+
+        if not study.trials or study.best_trial is None:
+            return False
+
+        best_params = study.best_params
+
+        self._tuned_features = self.features_from_params(best_params)
+        self._tuned_params = self.model_params(best_params)
+
+        logging.info(
+            "Tuned params geladen uit %s: %s | features: %s",
+            storage,
+            self._tuned_params,
+            self._tuned_features,
+        )
+        return True
+
     def save(self, path: Path) -> None:
         path.mkdir(
             parents=True,
@@ -237,10 +267,12 @@ class SklearnForecaster(Forecaster):
 
         dump(self.forecaster, path / f"{self.name}.joblib")
 
-    def load(self, path: Path) -> None:
+    def load(self, path: Path, study_storage: str) -> None:
         file_name = path / f"{self.name}.joblib"
 
         if not file_name.exists():
             return
 
         self.forecaster = load(file_name)
+
+        self._load_tuned(storage=study_storage)

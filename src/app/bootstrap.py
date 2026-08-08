@@ -71,12 +71,15 @@ def create_container() -> Container:
         mapper=StateMapper(),
     )
 
+    models_path = settings.data_path / "models"
+
     forecasting = Forecasting(
         loader=dataset_loader,
         backtest_repository=backtest_repository,
         config_repository=config_repository,
         state_manager=state_manager,
-        path=settings.data_path / "models",
+        path=models_path,
+        study_storage=f"sqlite:///{models_path / 'optuna.db'}",
         forecasters=[
             BoilerForecaster(),
             SolarForecaster(),

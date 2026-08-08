@@ -25,6 +25,7 @@ class Forecasting:
         config_repository: ConfigRepository,
         state_manager: Any,
         path: Path,
+        study_storage: str,
         forecasters: list[Forecaster],
     ):
         self.loader = loader
@@ -32,6 +33,7 @@ class Forecasting:
         self.config_repository = config_repository
         self.state_manager = state_manager
         self.path = path
+        self.study_storage = study_storage
         self.forecasters = forecasters
 
     def update(self, config: Config):
@@ -87,7 +89,7 @@ class Forecasting:
         results, study = forecaster.tune(
             df,
             n_trials=config.trails,
-            study_storage=f"sqlite:///{self.path / 'optuna.db'}",
+            study_storage=self.study_storage,
         )
 
         logging.info(
@@ -106,7 +108,7 @@ class Forecasting:
         if isinstance(forecaster, str):
             forecaster = self._get_forecaster(forecaster)
 
-        forecaster.load(self.path)
+        forecaster.load(self.path, self.study_storage)
 
         config = self.config_repository.load()
 
