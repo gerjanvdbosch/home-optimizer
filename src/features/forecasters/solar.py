@@ -35,24 +35,39 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
-            # "p10",
-            "p50",
-            # "p90",
+            "p10",
+            # "p50",
+            "p90",
             "lead_time_hours",
+            "lead_time_hours_sq",
             "spread",
-            "spread_relative",
-            # "hour_sin",
-            # "hour_cos",
+            "spread_log",
+            "hour_sin",
+            "hour_cos",
+            # "day_of_year_sin",
+            # "day_of_year_cos",
+            "spread_x_lead",
+            "p50_x_lead",
         ]
 
-    def create(self) -> HistGradientBoostingRegressor:
-        return HistGradientBoostingRegressor(
-            max_iter=200,
-            learning_rate=0.05,
-            max_leaf_nodes=15,
-            l2_regularization=10.0,
+    def create(self, **overrides: Any) -> HistGradientBoostingRegressor:
+        params: dict[str, Any] = dict(
+            # loss="quantile",
+            # quantile=0.5,
+            max_iter=100,
+            learning_rate=0.06,
+            max_leaf_nodes=63,
+            min_samples_leaf=15,
+            l2_regularization=1.0,
+            max_depth=None,
             random_state=42,
+            early_stopping=True,
+            validation_fraction=0.15,
+            n_iter_no_change=20,
         )
+        params.update(overrides)
+
+        return HistGradientBoostingRegressor(**params)
 
     def predict_arguments(self, df: pd.DataFrame, steps: int = 24):
         now = datetime.now(UTC)
@@ -91,11 +106,13 @@ class SolarForecaster(SklearnForecaster):
         df["lead_time_hours"] = (
             df["target_time"] - df["time"]
         ).dt.total_seconds() / 3600
+        df["lead_time_hours_sq"] = df["lead_time_hours"] ** 2
 
         df["spread"] = df["p90"] - df["p10"]
-        df["spread_relative"] = df["spread"] / (df["p50"] + 1e-6)
+        df["spread_log"] = np.log1p(df["spread"])
 
-        df = df.sort_values(["target_time", "time"]).copy()
+        df["spread_x_lead"] = df["spread"] * df["lead_time_hours"]
+        df["p50_x_lead"] = df["p50"] * df["lead_time_hours"]
 
         hour = df["target_time"].dt.hour + df["target_time"].dt.minute / 60
 
