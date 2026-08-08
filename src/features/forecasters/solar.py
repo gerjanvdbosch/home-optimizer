@@ -276,23 +276,20 @@ class SolarForecaster(SklearnForecaster):
             .attribute_timeseries(
                 "p10",
                 config.solar.forecast.p10,
-                interval="15m",
+                interval="30m",
                 aggregation="last",
-                target_interval="30min",
             )
             .attribute_timeseries(
                 "p50",
                 config.solar.forecast.p50,
-                interval="15m",
+                interval="30m",
                 aggregation="last",
-                target_interval="30min",
             )
             .attribute_timeseries(
                 "p90",
                 config.solar.forecast.p90,
-                interval="15m",
+                interval="30m",
                 aggregation="last",
-                target_interval="30min",
             )
             .join("p50", "p10", on=("time", "target_time"), how="outer")
             .join("p50", "p90", on=("time", "target_time"), how="outer")
