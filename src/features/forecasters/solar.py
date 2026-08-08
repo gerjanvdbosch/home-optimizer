@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -34,7 +35,9 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
+            # "p10",
             "p50",
+            # "p90",
             "lead_time_hours",
             "spread",
             "spread_relative",
@@ -51,24 +54,26 @@ class SolarForecaster(SklearnForecaster):
             random_state=42,
         )
 
-    # def predict_arguments(
-    #     self, df: pd.DataFrame, steps: int = 24
-    # ):
-    # now = datetime.now(timezone.utc)
-    #
-    # last_window = df[
-    #     (df["target_time"] <= now) & df["P_solar"].notna()
-    # ].sort_values("target_time")
-    #
-    # future = (
-    #     df[(df["target_time"] > now) & (df["time"] <= now)]
-    #     .sort_values(["target_time", "time"])
-    #     .drop_duplicates("target_time", keep="last")
-    #     .sort_values("target_time")
-    # )
-    #
-    # print(last_window)
-    # print(future)
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 24):
+        now = datetime.now(UTC)
+
+        last_window = df[
+            (df["target_time"] <= now) & df["P_solar"].notna()
+        ].sort_values("target_time")
+
+        future = (
+            df[(df["target_time"] > now) & (df["time"] <= now)]
+            .sort_values(["target_time", "time"])
+            .drop_duplicates("target_time", keep="last")
+            .sort_values("target_time")
+        )
+
+        print(last_window)
+        print(future)
+
+        return {
+            "X": future[self.exog_columns].iloc[:steps],
+        }
 
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
         df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
