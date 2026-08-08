@@ -99,9 +99,19 @@ class HeatPumpConfig(BaseModel):
     boiler: BoilerConfig = Field()
 
 
+class WeatherConfig(BaseModel):
+    temperature: SensorReference = Field()
+    solar_irradiance: SensorReference = Field()
+    condition: SensorReference = Field()
+    wind_bearing: SensorReference = Field()
+    wind_speed: SensorReference = Field()
+    precipitation: SensorReference = Field()
+
+
 class Config(BaseModel):
     solar: SolarConfig = Field()
     heat_pump: HeatPumpConfig = Field()
+    weather: WeatherConfig = Field()
 
 
 class FitConfig(BaseModel):

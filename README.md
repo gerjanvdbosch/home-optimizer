@@ -33,7 +33,7 @@ actions:
                 "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
                 "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
                 "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
-              },
+              }
           },
           "heat_pump": {
             "state": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
@@ -43,9 +43,17 @@ actions:
             "boiler": {
               "setpoint": "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde",
               "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
-              "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
-            },
+              "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+            }
           },
+          "weather": {
+            "temperature": ["sensor.knmi_forecast", "temperature"],
+            "solar_irradiance": ["sensor.knmi_forecast", "solar_irradiance"],
+            "condition": ["sensor.knmi_forecast", "condition"],
+            "wind_bearing": ["sensor.knmi_forecast", "wind_bearing"],
+            "wind_speed": ["sensor.knmi_forecast", "wind_speed"],
+            "precipitation": ["sensor.knmi_forecast", "precipitation"]
+          }
           "presence": [
             "device_tracker.iphone_gerjan",
             "device_tracker.phone_partner"
