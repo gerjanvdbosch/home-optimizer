@@ -342,6 +342,9 @@ class AttributeTimeSeriesLoader(DataLoader):
         rows = []
 
         for point in points:
+            if not point.get("value"):
+                continue
+
             values = ast.literal_eval(point["value"])
 
             time = parse_datetime(point["time"])
@@ -410,7 +413,7 @@ class AttributeSeriesLoader(DataLoader):
             field=sensor.field,
         )
 
-        if point is None:
+        if point is None or not point.get("value"):
             return pd.DataFrame()
 
         rows = []
