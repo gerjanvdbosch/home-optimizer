@@ -46,14 +46,17 @@ actions:
               "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
             }
           },
-          "weather": {
-            "temperature": ["sensor.knmi_forecast", "temperature"],
-            "solar_irradiance": ["sensor.knmi_forecast", "solar_irradiance"],
-            "condition": ["sensor.knmi_forecast", "condition"],
-            "wind_bearing": ["sensor.knmi_forecast", "wind_bearing"],
-            "wind_speed": ["sensor.knmi_forecast", "wind_speed"],
-            "precipitation": ["sensor.knmi_forecast", "precipitation"]
-          }
+          "weather": [
+            "sensor.open_meteo_forecast",
+            {
+              "temperature": "temperature_2m",
+              "solar_irradiance": "global_tilted_irradiance",
+              "condition": "weather_code",
+              "wind_bearing": "wind_direction_10m",
+              "wind_speed": "wind_speed_10m",
+              "precipitation": "precipitation"
+            }
+          ]
           "presence": [
             "device_tracker.iphone_gerjan",
             "device_tracker.phone_partner"

@@ -165,7 +165,7 @@ class SkforecastForecaster(Forecaster):
             str(path / f"{self.name}.joblib"),
         )
 
-    def load(self, path: Path) -> None:
+    def load(self, path: Path, study_storage: str) -> None:
         file_name = path / f"{self.name}.joblib"
 
         if not file_name.exists():
@@ -195,7 +195,7 @@ class SklearnForecaster(Forecaster):
             "y": df[self.target_column],
         }
 
-    def predict_arguments(self, df: pd.DataFrame, steps: int = 24):
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> dict[str, Any]:
         return {
             "X": df[self.exog_columns].iloc[:steps] if df is not None else None,
         }
@@ -221,6 +221,12 @@ class SklearnForecaster(Forecaster):
         return pd.Series(prediction, index=df.index)
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
+        raise NotImplementedError()
+
+    def features_from_params(self, params: dict[str, Any]) -> list[str]:
+        raise NotImplementedError()
+
+    def model_params(self, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError()
 
     def tune(

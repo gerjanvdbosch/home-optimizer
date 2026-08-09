@@ -117,6 +117,10 @@ class SolarForecaster(SklearnForecaster):
             "spread",
         ]
 
+        # features = [
+        #     "lead_time_hours",
+        # ]
+
         # if trial.suggest_categorical("use_lags", [True, False]):
         #     features.extend(["solar_lag1", "solar_lag2", "solar_lag3", "solar_lag4"])
         #
@@ -165,7 +169,7 @@ class SolarForecaster(SklearnForecaster):
 
         return HistGradientBoostingRegressor(**params)
 
-    def predict_arguments(self, df: pd.DataFrame, steps: int = 24):
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> dict[str, Any]:
         now = datetime.now(UTC)
 
         # last_window = df[
