@@ -28,12 +28,7 @@ actions:
       payload: |
         {{ {
           "solar": {
-            "production": "sensor.pv_output",
-            "forecast": {
-                "p10": ["sensor.solcast_pv_forecast", "pv_estimate10"],
-                "p50": ["sensor.solcast_pv_forecast", "pv_estimate"],
-                "p90": ["sensor.solcast_pv_forecast", "pv_estimate90"]
-              }
+            "production": "sensor.pv_output"
           },
           "heat_pump": {
             "state": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
@@ -46,17 +41,27 @@ actions:
               "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
             }
           },
-          "weather": [
-            "sensor.open_meteo_forecast",
-            {
-              "temperature": "temperature_2m",
-              "solar_irradiance": "global_tilted_irradiance",
-              "condition": "weather_code",
-              "wind_bearing": "wind_direction_10m",
-              "wind_speed": "wind_speed_10m",
-              "precipitation": "precipitation"
-            }
-          ]
+          "forecast": {
+            "solcast": [
+              "sensor.solcast_pv_forecast",
+              {
+                "p10": "pv_estimate10",
+                "p50": "pv_estimate",
+                "p90": "pv_estimate90"
+              }
+            ],
+            "open_meteo": [
+              "sensor.open_meteo_forecast",
+              {
+                "temperature": "temperature_2m",
+                "irradiance": "global_tilted_irradiance",
+                "cloud_cover": "cloud_cover",
+                "wind_direction": "wind_direction_10m",
+                "wind_speed": "wind_speed_10m",
+                "precipitation": "precipitation"
+              }
+            ]
+          },
           "presence": [
             "device_tracker.iphone_gerjan",
             "device_tracker.phone_partner"
