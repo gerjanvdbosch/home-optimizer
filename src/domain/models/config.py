@@ -3,6 +3,8 @@ from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 
+from domain.models.interface import AttributeDefinition
+
 HeatPumpMode = Literal[
     "heat",
     "cool",
@@ -74,7 +76,7 @@ class SensorReference(BaseModel):
         return value
 
 
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar("T", bound=AttributeDefinition)
 
 
 class SensorAttributesReference(BaseModel, Generic[T]):
@@ -116,6 +118,13 @@ class SolcastAttributes(BaseModel):
     p50: str = Field(description="50e percentile")
     p90: str = Field(description="90e percentile")
 
+    def items(self):
+        return (
+            ("p10", self.p10),
+            ("p50", self.p50),
+            ("p90", self.p90),
+        )
+
 
 class SolcastConfig(SensorAttributesReference[SolcastAttributes]): ...
 
@@ -127,6 +136,16 @@ class OpenMeteoAttributes(BaseModel):
     wind_direction: str = Field()
     wind_speed: str = Field()
     precipitation: str = Field()
+
+    def items(self):
+        return (
+            ("temperature", self.temperature),
+            ("gti", self.gti),
+            ("cloud_cover", self.cloud_cover),
+            ("wind_direction", self.wind_direction),
+            ("wind_speed", self.wind_speed),
+            ("precipitation", self.precipitation),
+        )
 
 
 class OpenMeteoConfig(SensorAttributesReference[OpenMeteoAttributes]): ...

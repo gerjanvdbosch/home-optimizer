@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Iterable, Protocol, TypeVar
 
 import pandas as pd
 from optuna import Study
@@ -19,6 +19,10 @@ class DataLoader(Protocol[T]):
     def supports(self, definition: DataDefinition) -> bool: ...
 
     def load(self, definition: T, start: datetime, end: datetime) -> pd.DataFrame: ...
+
+
+class AttributeDefinition(Protocol):
+    def items(self) -> Iterable[tuple[str, str]]: ...
 
 
 class Forecaster(Protocol):

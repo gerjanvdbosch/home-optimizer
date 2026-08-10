@@ -61,6 +61,16 @@ class OpenMeteoForecast(BaseModel):
     wind_speed: list[SeriesPoint[float]] = Field(default_factory=list)
     precipitation: list[SeriesPoint[float]] = Field(default_factory=list)
 
+    def items(self):
+        return (
+            ("temperature", self.temperature),
+            ("irradiance", self.irradiance),
+            ("cloud_cover", self.cloud_cover),
+            ("wind_direction", self.wind_direction),
+            ("wind_speed", self.wind_speed),
+            ("precipitation", self.precipitation),
+        )
+
 
 class Forecast(BaseModel):
     solcast: SolcastForecast = Field(default_factory=SolcastForecast)

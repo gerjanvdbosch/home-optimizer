@@ -4,7 +4,13 @@ from typing import Any, cast
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from domain.models.config import InfluxSensor, SensorReference, Settings
+from domain.models.config import (
+    InfluxSensor,
+    SensorAttributesReference,
+    SensorReference,
+    Settings,
+    T,
+)
 from domain.models.dataset import Aggregation, FillMethod
 
 
@@ -108,14 +114,33 @@ class InfluxSensorResolver:
 
         self.schema_loaded = True
 
-    def resolve(
+    def resolve(self, sensor: SensorReference) -> InfluxSensor:
+        return self._resolve(
+            entity_id=sensor.entity_id,
+            attribute=sensor.attribute,
+        )
+
+    def resolve_attributes(
         self,
-        sensor: SensorReference,
+        sensor: SensorAttributesReference[T],
+    ) -> dict[str, InfluxSensor]:
+        return {
+            name: self._resolve(
+                entity_id=sensor.entity_id,
+                attribute=attribute,
+            )
+            for name, attribute in sensor.attributes.items()
+        }
+
+    def _resolve(
+        self,
+        entity_id: str,
+        attribute: str | None,
     ) -> InfluxSensor:
         self.load_schema()
 
-        entity_id = sensor.entity_id.removeprefix("sensor.")
-        cache_key = f"{entity_id}.{sensor.attribute}"
+        entity_id = entity_id.removeprefix("sensor.")
+        cache_key = f"{entity_id}.{attribute}"
 
         if cache_key in self.cache:
             return self.cache[cache_key]
@@ -123,7 +148,7 @@ class InfluxSensorResolver:
         for influx_sensor in self.schema:
             field_name = influx_sensor.field
 
-            if field_name not in self._candidate_fields(sensor):
+            if field_name not in self._candidate_fields(attribute):
                 continue
 
             query = f"""
@@ -145,10 +170,10 @@ class InfluxSensorResolver:
 
                 return resolved
 
-        raise ValueError(f"Sensor not found: {sensor.entity_id}.{sensor.attribute}")
+        raise ValueError(f"Sensor not found: {entity_id}.{attribute}")
 
-    def _candidate_fields(self, sensor: SensorReference) -> list[str]:
-        if sensor.attribute is None:
+    def _candidate_fields(self, attribute: str | None) -> list[str]:
+        if attribute is None:
             return ["value", "state"]
 
-        return [sensor.attribute, f"{sensor.attribute}_str"]
+        return [f"{attribute}_str", attribute]
