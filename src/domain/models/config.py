@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -74,15 +74,27 @@ class SensorReference(BaseModel):
         return value
 
 
-class SolarForecastConfig(BaseModel):
-    p10: SensorReference = Field(description="10e percentile")
-    p50: SensorReference = Field(description="50e percentile")
-    p90: SensorReference = Field(description="90e percentile")
+T = TypeVar("T", bound=BaseModel)
+
+
+class SensorAttributesReference(BaseModel, Generic[T]):
+    entity_id: str = Field()
+    attributes: T
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve(cls, value):
+        if isinstance(value, (list, tuple)):
+            return {
+                "entity_id": value[0],
+                "attributes": value[1],
+            }
+
+        return value
 
 
 class SolarConfig(BaseModel):
     production: SensorReference = Field()
-    forecast: SolarForecastConfig = Field()
 
 
 class BoilerConfig(BaseModel):
@@ -99,19 +111,36 @@ class HeatPumpConfig(BaseModel):
     boiler: BoilerConfig = Field()
 
 
-class WeatherConfig(BaseModel):
-    temperature: SensorReference = Field()
-    solar_irradiance: SensorReference = Field()
-    condition: SensorReference = Field()
-    wind_bearing: SensorReference = Field()
-    wind_speed: SensorReference = Field()
-    precipitation: SensorReference = Field()
+class SolcastAttributes(BaseModel):
+    p10: str = Field(description="10e percentile")
+    p50: str = Field(description="50e percentile")
+    p90: str = Field(description="90e percentile")
+
+
+class SolcastConfig(SensorAttributesReference[SolcastAttributes]): ...
+
+
+class OpenMeteoAttributes(BaseModel):
+    temperature: str = Field()
+    gti: str = Field()
+    cloud_cover: str = Field()
+    wind_direction: str = Field()
+    wind_speed: str = Field()
+    precipitation: str = Field()
+
+
+class OpenMeteoConfig(SensorAttributesReference[OpenMeteoAttributes]): ...
+
+
+class ForecastConfig(BaseModel):
+    solcast: SolcastConfig = Field()
+    open_meteo: OpenMeteoConfig = Field()
 
 
 class Config(BaseModel):
     solar: SolarConfig = Field()
     heat_pump: HeatPumpConfig = Field()
-    weather: WeatherConfig = Field()
+    forecast: ForecastConfig = Field()
 
 
 class FitConfig(BaseModel):
@@ -131,4 +160,4 @@ class BacktestConfig(BaseModel):
 
 
 class TuneConfig(BacktestConfig):
-    trails: int = Field(default=3)
+    trails: int = Field(default=10)

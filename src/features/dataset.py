@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 from pandas._typing import MergeHow
 
-from domain.models.config import SensorReference
+from domain.models.config import SensorAttributesReference, SensorReference
 from domain.models.dataset import (
     Aggregation,
     AttributeSeriesDefinition,
@@ -17,6 +17,7 @@ from domain.models.dataset import (
 )
 from domain.models.interface import DataLoader
 from domain.time import parse_datetime
+from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 
 
 class DatasetLoader:
@@ -160,46 +161,12 @@ class DatasetBuilder:
 
         return self
 
-    def attribute_timeseries(
+    def attribute_series(
         self,
         name: str,
-        sensor: SensorReference,
-        aggregation: Aggregation | None = None,
-        interval: str = "1m",
-        fill: FillMethod | int | float = "none",
-        target_interval: str | None = None,
-    ) -> "DatasetBuilder":
-        """
-        Load a time series of attribute snapshots.
-
-        Each row represents a forecast or snapshot created at `time` for a
-        specific `target_time`. The `time` column indicates when the snapshot
-        was created, while `target_time` indicates when the value applies.
-
-        Example:
-            time  | target_time  | p50
-            ------|--------------|----
-            10:00 | 10:00        | 300
-            10:00 | 10:30        | 400
-            10:00 | 11:00        | 500
-            10:30 | 10:30        | 320
-            10:30 | 11:00        | 450
-        """
-
-        self._definitions.append(
-            AttributeTimeSeriesDefinition(
-                name=name,
-                sensor=sensor,
-                aggregation=aggregation,
-                interval=interval,
-                fill=fill,
-                target_interval=target_interval,
-            )
-        )
-
-        return self
-
-    def attribute_series(self, name: str, sensor: SensorReference):
+        sensor: SensorAttributesReference,
+        attributes: list,
+    ):
         """
         Load a single attribute series.
 
@@ -218,8 +185,50 @@ class DatasetBuilder:
             AttributeSeriesDefinition(
                 name=name,
                 sensor=sensor,
+                attributes=attributes,
             )
         )
+        return self
+
+    def attribute_timeseries(
+        self,
+        name: str,
+        sensor: SensorAttributesReference,
+        attributes: list,
+        aggregation: Aggregation | None = None,
+        interval: str = "1m",
+        fill: FillMethod | int | float = "none",
+        target_interval: str | None = None,
+    ) -> "DatasetBuilder":
+        """
+        Load a time series of attribute snapshots.
+
+        Each row represents a forecast or snapshot created at `time` for a
+        specific `target_time`. The `time` column indicates when the snapshot
+        was created, while `target_time` indicates when the value applies.
+
+        Example:
+            time  | target_time  | p50 | p90
+            ------|--------------|-----|----
+            09:30 | 10:00        | 300 | 350
+            10:00 | 10:30        | 400 | 460
+            10:00 | 11:00        | 500 | 580
+            10:00 | 11:30        | 320 | 400
+            10:30 | 11:00        | 450 | 490
+        """
+
+        self._definitions.append(
+            AttributeTimeSeriesDefinition(
+                name=name,
+                sensor=sensor,
+                attributes=attributes,
+                aggregation=aggregation,
+                interval=interval,
+                fill=fill,
+                target_interval=target_interval,
+            )
+        )
+
         return self
 
     def join(
@@ -271,7 +280,7 @@ class DatasetBuilder:
 
 
 class TimeSeriesLoader(DataLoader):
-    def __init__(self, influx, resolver):
+    def __init__(self, influx: InfluxDatabase, resolver: InfluxSensorResolver):
         self.influx = influx
         self.resolver = resolver
 
@@ -315,8 +324,43 @@ class TimeSeriesLoader(DataLoader):
         return pd.DataFrame(rows)
 
 
+class AttributeSeriesLoader(DataLoader):
+    def __init__(self, influx: InfluxDatabase, resolver: InfluxSensorResolver):
+        self.influx = influx
+        self.resolver = resolver
+
+    def supports(self, definition):
+        return isinstance(definition, AttributeSeriesDefinition)
+
+    def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
+        sensor = self.resolver.resolve(definition.sensor)
+
+        point = self.influx.find(
+            measurement=sensor.measurement,
+            entity_id=sensor.entity_id,
+            field=sensor.field,
+        )
+
+        if point is None or not point.get("value"):
+            return pd.DataFrame()
+
+        rows = []
+
+        values = ast.literal_eval(point["value"])
+
+        for target_time, value in values.items():
+            rows.append(
+                {
+                    "time": parse_datetime(target_time),
+                    definition.name: float(value),
+                }
+            )
+
+        return pd.DataFrame(rows)
+
+
 class AttributeTimeSeriesLoader(DataLoader):
-    def __init__(self, influx, resolver):
+    def __init__(self, influx: InfluxDatabase, resolver: InfluxSensorResolver):
         self.influx = influx
         self.resolver = resolver
 
@@ -363,26 +407,14 @@ class AttributeTimeSeriesLoader(DataLoader):
         if df.empty or definition.target_interval is None:
             return df
 
-        return self._resample_target_time(
-            df,
-            value_column=definition.name,
-            interval=definition.target_interval,
-        )
-
-    def _resample_target_time(
-        self,
-        df: pd.DataFrame,
-        value_column: str,
-        interval: str,
-    ) -> pd.DataFrame:
         frames = []
 
         for forecast_time, group in df.groupby("time", sort=False):
             group = group.sort_values("target_time").copy()
 
             group = (
-                group.set_index("target_time")[[value_column]]
-                .resample(interval)
+                group.set_index("target_time")[[definition.name]]
+                .resample(definition.target_interval)
                 .ffill()
                 .reset_index()
             )
@@ -392,40 +424,5 @@ class AttributeTimeSeriesLoader(DataLoader):
             frames.append(group)
 
         return pd.concat(frames, ignore_index=True)[
-            ["time", "target_time", value_column]
+            ["time", "target_time", definition.name]
         ]
-
-
-class AttributeSeriesLoader(DataLoader):
-    def __init__(self, influx, resolver):
-        self.influx = influx
-        self.resolver = resolver
-
-    def supports(self, definition):
-        return isinstance(definition, AttributeSeriesDefinition)
-
-    def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
-        sensor = self.resolver.resolve(definition.sensor)
-
-        point = self.influx.find(
-            measurement=sensor.measurement,
-            entity_id=sensor.entity_id,
-            field=sensor.field,
-        )
-
-        if point is None or not point.get("value"):
-            return pd.DataFrame()
-
-        rows = []
-
-        values = ast.literal_eval(point["value"])
-
-        for target_time, value in values.items():
-            rows.append(
-                {
-                    "time": parse_datetime(target_time),
-                    definition.name: float(value),
-                }
-            )
-
-        return pd.DataFrame(rows)

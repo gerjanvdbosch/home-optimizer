@@ -13,30 +13,34 @@ class SeriesPoint(BaseModel, Generic[T]):
     value: T
 
 
-class SolarMeasurements(BaseModel):
+class SolarMeasurement(BaseModel):
     production: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
-class BoilerMeasurements(BaseModel):
+class BoilerMeasurement(BaseModel):
     top_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     bottom_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
-class HeatPumpMeasurements(BaseModel):
+class HeatPumpMeasurement(BaseModel):
     mode: HeatPumpMode = "heat"
     state: list[SeriesPoint[str]] = Field(default_factory=list)
     supply_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     return_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     compressor_frequency: list[SeriesPoint[float]] = Field(default_factory=list)
-    boiler: BoilerMeasurements = Field(default_factory=BoilerMeasurements)
+    boiler: BoilerMeasurement = Field(default_factory=BoilerMeasurement)
 
 
-class MeasurementState(BaseModel):
-    solar: SolarMeasurements = Field(default_factory=SolarMeasurements)
-    heat_pump: HeatPumpMeasurements = Field(default_factory=HeatPumpMeasurements)
+class Measurements(BaseModel):
+    solar: SolarMeasurement = Field(default_factory=SolarMeasurement)
+    heat_pump: HeatPumpMeasurement = Field(default_factory=HeatPumpMeasurement)
 
 
-class SolarForecast(BaseModel):
+class ElectricityPriceForecast(BaseModel):
+    price: list[SeriesPoint[float]] = Field(default_factory=list)
+
+
+class SolcastForecast(BaseModel):
     p10: list[SeriesPoint[float]] = Field(default_factory=list)
     p50: list[SeriesPoint[float]] = Field(default_factory=list)
     p90: list[SeriesPoint[float]] = Field(default_factory=list)
@@ -49,20 +53,21 @@ class SolarForecast(BaseModel):
         )
 
 
-class ElectricityPriceForecast(BaseModel):
-    price: list[SeriesPoint[float]] = Field(default_factory=list)
-
-
-class WeatherForecast(BaseModel):
+class OpenMeteoForecast(BaseModel):
     temperature: list[SeriesPoint[float]] = Field(default_factory=list)
+    irradiance: list[SeriesPoint[float]] = Field(default_factory=list)
+    cloud_cover: list[SeriesPoint[float]] = Field(default_factory=list)
+    wind_direction: list[SeriesPoint[float]] = Field(default_factory=list)
+    wind_speed: list[SeriesPoint[float]] = Field(default_factory=list)
+    precipitation: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
-class ForecastState(BaseModel):
-    solar: SolarForecast = Field(default_factory=SolarForecast)
+class Forecast(BaseModel):
+    solcast: SolcastForecast = Field(default_factory=SolcastForecast)
+    open_meteo: OpenMeteoForecast = Field(default_factory=OpenMeteoForecast)
     electricity_price: ElectricityPriceForecast = Field(
         default_factory=ElectricityPriceForecast
     )
-    weather: WeatherForecast = Field(default_factory=WeatherForecast)
 
 
 class HeatPumpSchedule(BaseModel):
@@ -73,15 +78,15 @@ class BoilerSchedule(BaseModel):
     target_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
-class ScheduleState(BaseModel):
+class Schedule(BaseModel):
     boiler: BoilerSchedule = Field(default_factory=BoilerSchedule)
 
 
 class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    measurements: MeasurementState = Field(default_factory=MeasurementState)
-    forecast: ForecastState = Field(default_factory=ForecastState)
-    schedule: ScheduleState | None = None
+    measurements: Measurements = Field(default_factory=Measurements)
+    forecast: Forecast = Field(default_factory=Forecast)
+    schedule: Schedule | None = None
 
 
 class BacktestPoint(BaseModel):

@@ -3,14 +3,14 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from domain.models.state import (
-    BoilerMeasurements,
-    ForecastState,
-    HeatPumpMeasurements,
-    MeasurementState,
+    BoilerMeasurement,
+    Forecast,
+    HeatPumpMeasurement,
+    Measurements,
     OptimizerState,
     SeriesPoint,
-    SolarForecast,
-    SolarMeasurements,
+    SolarMeasurement,
+    SolcastForecast,
 )
 
 
@@ -18,18 +18,24 @@ class StateMapper:
     def map(self, df: pd.DataFrame) -> OptimizerState:
         return OptimizerState(
             updated=datetime.now(timezone.utc),
-            measurements=MeasurementState(
-                solar=SolarMeasurements(production=self._parse_series(df, "pv_production")),
-                heat_pump=HeatPumpMeasurements(
+            measurements=Measurements(
+                solar=SolarMeasurement(
+                    production=self._parse_series(df, "pv_production")
+                ),
+                heat_pump=HeatPumpMeasurement(
                     state=self._parse_series(df, "heat_pump_state"),
-                    boiler=BoilerMeasurements(
-                        top_temperature=self._parse_series(df, "boiler_top_temperature"),
-                        bottom_temperature=self._parse_series(df, "boiler_bottom_temperature"),
+                    boiler=BoilerMeasurement(
+                        top_temperature=self._parse_series(
+                            df, "boiler_top_temperature"
+                        ),
+                        bottom_temperature=self._parse_series(
+                            df, "boiler_bottom_temperature"
+                        ),
                     ),
                 ),
             ),
-            forecast=ForecastState(
-                solar=SolarForecast(
+            forecast=Forecast(
+                solcast=SolcastForecast(
                     p10=self._parse_series(df, "solar_p10"),
                     p50=self._parse_series(df, "solar_p50"),
                     p90=self._parse_series(df, "solar_p90"),

@@ -46,8 +46,8 @@ def create_container() -> Container:
     dataset_loader = DatasetLoader(
         loaders=[
             TimeSeriesLoader(influx, resolver),
-            AttributeTimeSeriesLoader(influx, resolver),
             AttributeSeriesLoader(influx, resolver),
+            AttributeTimeSeriesLoader(influx, resolver),
         ],
     )
 

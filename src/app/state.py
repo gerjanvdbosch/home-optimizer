@@ -38,24 +38,24 @@ class StateManager:
             now,
         )
 
-        state = self.mapper.map(df)
+        print(df.head())
 
-        self.repository.save(state)
+        # state = self.mapper.map(df)
+        #
+        # self.repository.save(state)
 
     def _dataset(self, config: Config) -> DatasetDefinition:
         return (
             DatasetBuilder()
             .attribute_series(
-                "solar_p10",
-                config.solar.forecast.p10,
+                "solcast",
+                config.forecast.solcast,
+                attributes=["p10", "p50", "p90"],
             )
             .attribute_series(
-                "solar_p50",
-                config.solar.forecast.p50,
-            )
-            .attribute_series(
-                "solar_p90",
-                config.solar.forecast.p90,
+                "open_meteo",
+                config.forecast.open_meteo,
+                attributes=["gti"],
             )
             .timeseries(
                 "heat_pump_state",

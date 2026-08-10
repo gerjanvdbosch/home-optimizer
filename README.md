@@ -54,7 +54,7 @@ actions:
               "sensor.open_meteo_forecast",
               {
                 "temperature": "temperature_2m",
-                "irradiance": "global_tilted_irradiance",
+                "gti": "global_tilted_irradiance",
                 "cloud_cover": "cloud_cover",
                 "wind_direction": "wind_direction_10m",
                 "wind_speed": "wind_speed_10m",
