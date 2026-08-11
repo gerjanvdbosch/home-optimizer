@@ -23,11 +23,27 @@ def add_series(
     )
 
 
-def solar_forecast_chart(state: OptimizerState) -> str:
+def solar_forecast_chart(
+    state: OptimizerState,
+    capacity: float,
+    efficiency: float,
+) -> str:
     fig = go.Figure()
 
     for name, points in state.forecast.solcast.items():
-        add_series(fig, name, points)
+        add_series(fig, "Solcast " + name, points)
+
+    fig.add_trace(
+        go.Scatter(
+            x=[to_local_time(p.time) for p in state.forecast.open_meteo.gti],
+            y=[p.value * capacity * efficiency for p in state.forecast.open_meteo.gti],
+            mode="lines",
+            name="Open-Meteo",
+            line=dict(width=3),
+            connectgaps=True,
+            hovertemplate="%{y:.0f} W<extra>%{fullData.name}</extra>",
+        )
+    )
 
     add_series(fig, "PV production", state.measurements.solar.production)
 

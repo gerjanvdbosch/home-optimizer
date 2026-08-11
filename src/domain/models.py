@@ -143,6 +143,8 @@ class SensorAttributesReference(BaseModel, Generic[T]):
 
 class SolarConfig(BaseModel):
     production: SensorReference = Field()
+    capacity: float = Field(description="PV capacity in kW")
+    efficiency: float = Field(default=0.9)
 
 
 class BoilerConfig(BaseModel):
@@ -244,6 +246,10 @@ class AttributeSeriesDefinition(DataDefinition):
     attributes: list[str]
     time_attribute: str = "time"
     target_interval: str | None = None
+    target_closed: Literal["right", "left"] | None = None
+    target_label: Literal["right", "left"] | None = None
+    target_resample: str | None = None
+    target_shift: bool = False
 
 
 class AttributeTimeSeriesDefinition(AttributeSeriesDefinition): ...
@@ -313,7 +319,7 @@ class SolcastForecast(BaseModel):
 
 class OpenMeteoForecast(BaseModel):
     temperature: list[SeriesPoint[float]] = Field(default_factory=list)
-    irradiance: list[SeriesPoint[float]] = Field(default_factory=list)
+    gti: list[SeriesPoint[float]] = Field(default_factory=list)
     cloud_cover: list[SeriesPoint[float]] = Field(default_factory=list)
     wind_direction: list[SeriesPoint[float]] = Field(default_factory=list)
     wind_speed: list[SeriesPoint[float]] = Field(default_factory=list)
@@ -322,7 +328,7 @@ class OpenMeteoForecast(BaseModel):
     def items(self):
         return (
             ("temperature", self.temperature),
-            ("irradiance", self.irradiance),
+            ("gti", self.gti),
             ("cloud_cover", self.cloud_cover),
             ("wind_direction", self.wind_direction),
             ("wind_speed", self.wind_speed),

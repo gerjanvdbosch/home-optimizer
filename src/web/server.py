@@ -61,6 +61,7 @@ templates = Jinja2Templates(
 async def dashboard(request: Request):
     container = request.app.state.container
 
+    config = container.config_repository.load()
     state = container.state_manager.load()
     backtest = container.backtest_repository.load()
 
@@ -68,7 +69,11 @@ async def dashboard(request: Request):
         request=request,
         name="dashboard.html",
         context={
-            "solar_chart": solar_forecast_chart(state),
+            "solar_chart": solar_forecast_chart(
+                state,
+                capacity=config.solar.capacity,
+                efficiency=config.solar.efficiency,
+            ),
             "backtest_chart": backtest_chart(backtest),
         },
     )

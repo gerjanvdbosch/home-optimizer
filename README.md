@@ -28,7 +28,8 @@ actions:
       payload: |
         {{ {
           "solar": {
-            "production": "sensor.pv_output"
+            "production": "sensor.pv_output",
+            "capacity": 2
           },
           "heat_pump": {
             "state": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",

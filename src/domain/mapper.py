@@ -7,6 +7,7 @@ from domain.models import (
     Forecast,
     HeatPumpMeasurement,
     Measurements,
+    OpenMeteoForecast,
     OptimizerState,
     SeriesPoint,
     SolarMeasurement,
@@ -36,10 +37,13 @@ class StateMapper:
             ),
             forecast=Forecast(
                 solcast=SolcastForecast(
-                    p10=self._parse_series(df, "solar_p10"),
-                    p50=self._parse_series(df, "solar_p50"),
-                    p90=self._parse_series(df, "solar_p90"),
-                )
+                    p10=self._parse_series(df, "p10"),
+                    p50=self._parse_series(df, "p50"),
+                    p90=self._parse_series(df, "p90"),
+                ),
+                open_meteo=OpenMeteoForecast(
+                    gti=self._parse_series(df, "gti"),
+                ),
             ),
         )
 

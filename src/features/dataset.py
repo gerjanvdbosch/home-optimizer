@@ -1,7 +1,7 @@
 import ast
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from pandas._typing import MergeHow
@@ -169,6 +169,14 @@ class DatasetBuilder:
         name: str,
         sensor: SensorAttributesReference,
         attributes: list,
+        aggregation: Aggregation | None = None,
+        interval: str = "1m",
+        fill: FillMethod | int | float = "none",
+        target_interval: str | None = None,
+        target_closed: Literal["right", "left"] | None = None,
+        target_label: Literal["right", "left"] | None = None,
+        target_resample: str | None = None,
+        target_shift: bool = False,
     ):
         """
         Load a single attribute series.
@@ -189,6 +197,14 @@ class DatasetBuilder:
                 name=name,
                 sensor=sensor,
                 attributes=attributes,
+                aggregation=aggregation,
+                interval=interval,
+                fill=fill,
+                target_interval=target_interval,
+                target_closed=target_closed,
+                target_label=target_label,
+                target_resample=target_resample,
+                target_shift=target_shift,
             )
         )
         return self
@@ -202,6 +218,10 @@ class DatasetBuilder:
         interval: str = "1m",
         fill: FillMethod | int | float = "none",
         target_interval: str | None = None,
+        target_closed: Literal["right", "left"] | None = None,
+        target_label: Literal["right", "left"] | None = None,
+        target_resample: str | None = None,
+        target_shift: bool = False,
     ) -> "DatasetBuilder":
         """
         Load a time series of attribute snapshots.
@@ -229,6 +249,10 @@ class DatasetBuilder:
                 interval=interval,
                 fill=fill,
                 target_interval=target_interval,
+                target_closed=target_closed,
+                target_label=target_label,
+                target_resample=target_resample,
+                target_shift=target_shift,
             )
         )
 
@@ -287,7 +311,7 @@ class TimeSeriesLoader(DataLoader):
         self.influx = influx
         self.resolver = resolver
 
-    def supports(self, definition):
+    def supports(self, definition) -> bool:
         return type(definition) is TimeSeriesDefinition
 
     def load(
@@ -399,6 +423,23 @@ class AttributeSeriesLoader(DataLoader):
             frame[name] = [
                 float(value) if value is not None else None for value in values
             ]
+
+        if definition.target_interval is not None and not frame.empty:
+            frame = frame.set_index("time")
+
+            resampler = frame.resample(
+                definition.target_interval,
+                label=definition.target_label,
+                closed=definition.target_closed,
+            )
+
+            method = definition.target_resample or "mean"
+            frame = getattr(resampler, method)()
+
+            if definition.target_shift:
+                frame.index = frame.index - pd.to_timedelta(definition.target_interval)
+
+            frame = frame.reset_index()
 
         return frame
 
@@ -544,15 +585,21 @@ class AttributeTimeSeriesLoader(DataLoader):
         ):
             group = group.sort_values("target_time")
 
-            resampled = (
-                group.set_index("target_time")[available_attributes]
-                .resample(definition.target_interval)
-                .ffill()
-                .reset_index()
+            resampler = group.set_index("target_time")[available_attributes].resample(
+                definition.target_interval,
+                label=definition.target_label,
+                closed=definition.target_closed,
             )
 
-            resampled.insert(0, "time", snapshot_time)
+            method = definition.target_resample or "mean"
+            resampled = getattr(resampler, method)().reset_index()
 
+            if definition.target_shift is not None:
+                resampled["target_time"] = resampled["target_time"] - pd.to_timedelta(
+                    definition.target_interval
+                )
+
+            resampled.insert(0, "time", snapshot_time)
             resampled_frames.append(resampled)
 
         return pd.concat(resampled_frames, ignore_index=True)

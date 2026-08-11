@@ -36,11 +36,9 @@ class StateManager:
             now,
         )
 
-        print(df.to_string())
+        state = self.mapper.map(df)
 
-        # state = self.mapper.map(df)
-        #
-        # self.repository.save(state)
+        self.repository.save(state)
 
     def _dataset(self, config: Config) -> DatasetDefinition:
         return (
@@ -54,6 +52,11 @@ class StateManager:
                 "open_meteo",
                 config.forecast.open_meteo,
                 attributes=["gti"],
+                target_resample="mean",
+                target_interval="30min",
+                target_label="right",
+                target_closed="right",
+                target_shift=True,
             )
             .timeseries(
                 "heat_pump_state",
