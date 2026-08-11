@@ -286,7 +286,7 @@ class TimeSeriesLoader(DataLoader):
         self.resolver = resolver
 
     def supports(self, definition):
-        return isinstance(definition, TimeSeriesDefinition)
+        return type(definition) is TimeSeriesDefinition
 
     def load(
         self, definition: TimeSeriesDefinition, start: datetime, end: datetime
@@ -331,7 +331,7 @@ class AttributeSeriesLoader(DataLoader):
         self.resolver = resolver
 
     def supports(self, definition):
-        return isinstance(definition, AttributeSeriesDefinition)
+        return type(definition) is AttributeSeriesDefinition
 
     def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
         sensors = self.resolver.resolve_attributes(definition.sensor)
@@ -387,7 +387,7 @@ class AttributeTimeSeriesLoader(DataLoader):
         self.resolver = resolver
 
     def supports(self, definition):
-        return isinstance(definition, AttributeTimeSeriesDefinition)
+        return type(definition) is AttributeTimeSeriesDefinition
 
     def load(
         self, definition: AttributeTimeSeriesDefinition, start, end

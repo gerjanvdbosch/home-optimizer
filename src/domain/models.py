@@ -242,11 +242,11 @@ class TimeSeriesDefinition(DataDefinition):
 class AttributeSeriesDefinition(DataDefinition):
     sensor: SensorAttributesReference
     attributes: list[str]
+    time_attribute: str = "time"
     target_interval: str | None = None
 
 
-class AttributeTimeSeriesDefinition(AttributeSeriesDefinition):
-    time_column: str = "time"
+class AttributeTimeSeriesDefinition(AttributeSeriesDefinition): ...
 
 
 @dataclass(frozen=True)
