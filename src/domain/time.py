@@ -17,4 +17,6 @@ def to_local_time(dt: datetime) -> datetime:
 
 
 def to_local_series(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, utc=True).dt.tz_convert(datetime.now().astimezone().tzinfo)
+    return pd.to_datetime(series, utc=True).dt.tz_convert(
+        datetime.now().astimezone().tzinfo
+    )
