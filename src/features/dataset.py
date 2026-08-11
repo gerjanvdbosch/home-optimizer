@@ -1,5 +1,7 @@
 import ast
+from collections import defaultdict
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 from pandas._typing import MergeHow
@@ -326,20 +328,55 @@ class TimeSeriesLoader(DataLoader):
 
 
 class AttributeSeriesLoader(DataLoader):
-    def __init__(self, influx: InfluxDatabase, resolver: InfluxSensorResolver):
+    def __init__(
+        self,
+        influx: InfluxDatabase,
+        resolver: InfluxSensorResolver,
+    ):
         self.influx = influx
         self.resolver = resolver
 
-    def supports(self, definition):
+    def supports(self, definition: Any) -> bool:
         return type(definition) is AttributeSeriesDefinition
 
-    def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
+    def load(
+        self,
+        definition: AttributeSeriesDefinition,
+        start: datetime,
+        end: datetime,
+    ) -> pd.DataFrame:
         sensors = self.resolver.resolve_attributes(definition.sensor)
 
-        frames = {}
+        time_sensor = self.resolver.resolve(
+            SensorReference(
+                entity_id=definition.sensor.entity_id,
+                attribute=definition.time_attribute,
+            )
+        )
 
-        for attr_name, sensor in sensors.items():
-            if attr_name not in definition.attributes:
+        time_point = self.influx.find(
+            measurement=time_sensor.measurement,
+            entity_id=time_sensor.entity_id,
+            field=time_sensor.field,
+        )
+
+        if time_point is None or not time_point.get("value"):
+            return pd.DataFrame(
+                columns=["time", *definition.attributes],
+            )
+
+        times = ast.literal_eval(str(time_point["value"]))
+
+        frame = pd.DataFrame(
+            {
+                "time": [parse_datetime(str(value)) for value in times],
+            }
+        )
+
+        for name in definition.attributes:
+            sensor = sensors.get(name)
+
+            if sensor is None:
                 continue
 
             point = self.influx.find(
@@ -349,57 +386,75 @@ class AttributeSeriesLoader(DataLoader):
             )
 
             if point is None or not point.get("value"):
-                frames[attr_name] = pd.DataFrame(columns=["time", attr_name])
                 continue
 
-            rows = []
-            values = ast.literal_eval(point["value"])
+            values = ast.literal_eval(str(point["value"]))
 
-            for target_time, value in values.items():
-                rows.append(
-                    {
-                        "time": parse_datetime(target_time),
-                        attr_name: float(value),
-                    }
+            if len(values) != len(times):
+                raise ValueError(
+                    f"Attribute '{name}' has {len(values)} values, "
+                    f"expected {len(times)}"
                 )
 
-            frames[attr_name] = pd.DataFrame(rows)
+            frame[name] = [
+                float(value) if value is not None else None for value in values
+            ]
 
-        if not frames:
-            return pd.DataFrame()
-
-        frames_iter = iter(frames.values())
-        result = next(frames_iter).copy()
-
-        for frame in frames_iter:
-            result = result.merge(
-                frame,
-                on="time",
-                how="outer",
-            )
-
-        return result.reset_index(drop=True)
+        return frame
 
 
 class AttributeTimeSeriesLoader(DataLoader):
-    def __init__(self, influx: InfluxDatabase, resolver: InfluxSensorResolver):
+    def __init__(
+        self,
+        influx: InfluxDatabase,
+        resolver: InfluxSensorResolver,
+    ):
         self.influx = influx
         self.resolver = resolver
 
-    def supports(self, definition):
+    def supports(self, definition: Any) -> bool:
         return type(definition) is AttributeTimeSeriesDefinition
 
     def load(
-        self, definition: AttributeTimeSeriesDefinition, start, end
+        self,
+        definition: AttributeTimeSeriesDefinition,
+        start: datetime,
+        end: datetime,
     ) -> pd.DataFrame:
         sensors = self.resolver.resolve_attributes(definition.sensor)
 
-        frames = {}
+        time_sensor = self.resolver.resolve(
+            SensorReference(
+                entity_id=definition.sensor.entity_id,
+                attribute=definition.time_attribute,
+            )
+        )
 
-        for attr_name, sensor in sensors.items():
-            if attr_name not in definition.attributes:
+        points = self.influx.find_series(
+            measurement=time_sensor.measurement,
+            entity_id=time_sensor.entity_id,
+            field=time_sensor.field,
+            start=start,
+            end=end,
+            aggregation=definition.aggregation,
+            interval=definition.interval,
+            fill=definition.fill,
+        )
+
+        snapshots: dict[datetime, dict[str, list]] = defaultdict(dict)
+
+        for point in points:
+            value = point.get("value")
+
+            if not value:
                 continue
 
+            snapshot_time = parse_datetime(point["time"])
+            values = ast.literal_eval(str(value))
+
+            snapshots[snapshot_time][definition.time_attribute] = values
+
+        for name, sensor in sensors.items():
             points = self.influx.find_series(
                 measurement=sensor.measurement,
                 entity_id=sensor.entity_id,
@@ -411,64 +466,96 @@ class AttributeTimeSeriesLoader(DataLoader):
                 fill=definition.fill,
             )
 
-            rows = []
             for point in points:
-                if not point.get("value"):
+                value = point.get("value")
+
+                if not value:
                     continue
 
-                values = ast.literal_eval(point["value"])
-                time = parse_datetime(point["time"])
+                snapshot_time = parse_datetime(point["time"])
+                values = ast.literal_eval(str(value))
 
-                for target_time, value in values.items():
-                    rows.append(
-                        {
-                            "time": time,
-                            "target_time": parse_datetime(target_time),
-                            attr_name: float(value),
-                        }
-                    )
+                snapshots[snapshot_time][name] = values
 
-            df = pd.DataFrame(rows)
+        frames: list[pd.DataFrame] = []
 
-            if df.empty:
-                frames[attr_name] = pd.DataFrame(
-                    columns=["time", "target_time", attr_name]
-                )
+        for snapshot_time, values in snapshots.items():
+            target_times = values.get(definition.time_attribute)
+
+            if target_times is None:
                 continue
 
-            if definition.target_interval is not None:
-                resampled_frames = []
-
-                for forecast_time, group in df.groupby("time", sort=False):
-                    group = group.sort_values("target_time").copy()
-
-                    group = (
-                        group.set_index("target_time")[[attr_name]]
-                        .resample(definition.target_interval)
-                        .ffill()
-                        .reset_index()
-                    )
-
-                    group["time"] = forecast_time
-                    resampled_frames.append(group)
-
-                df = pd.concat(resampled_frames, ignore_index=True)[
-                    ["time", "target_time", attr_name]
-                ]
-
-            frames[attr_name] = df
-
-        if not frames:
-            return pd.DataFrame()
-
-        frames_iter = iter(frames.values())
-        result = next(frames_iter).copy()
-
-        for frame in frames_iter:
-            result = result.merge(
-                frame,
-                on=["time", "target_time"],
-                how="outer",
+            frame = pd.DataFrame(
+                {
+                    "time": snapshot_time,
+                    "target_time": [
+                        parse_datetime(str(value)) for value in target_times
+                    ],
+                }
             )
 
-        return result.reset_index(drop=True)
+            for name in definition.attributes:
+                attribute_values = values.get(name)
+
+                if attribute_values is None:
+                    continue
+
+                if len(attribute_values) != len(target_times):
+                    raise ValueError(
+                        f"Attribute '{name}' has "
+                        f"{len(attribute_values)} values, expected "
+                        f"{len(target_times)} for forecast "
+                        f"{snapshot_time}"
+                    )
+
+                frame[name] = [
+                    float(value) if value is not None else None
+                    for value in attribute_values
+                ]
+
+            frames.append(frame)
+
+        if not frames:
+            return pd.DataFrame(
+                columns=[
+                    "time",
+                    "target_time",
+                    *definition.attributes,
+                ]
+            )
+
+        df = pd.concat(frames, ignore_index=True)
+
+        if definition.target_interval is None:
+            return df
+
+        available_attributes = [
+            name for name in definition.attributes if name in df.columns
+        ]
+
+        if not available_attributes:
+            return df[["time", "target_time"]]
+
+        resampled_frames: list[pd.DataFrame] = []
+
+        for snapshot_time, group in df.groupby(
+            "time",
+            sort=False,
+        ):
+            group = group.sort_values("target_time")
+
+            resampled = (
+                group.set_index("target_time")[available_attributes]
+                .resample(definition.target_interval)
+                .ffill()
+                .reset_index()
+            )
+
+            resampled.insert(0, "time", snapshot_time)
+
+            resampled_frames.append(resampled)
+
+        return pd.concat(
+            resampled_frames,
+            ignore_index=True,
+        )

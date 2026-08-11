@@ -36,7 +36,7 @@ class StateManager:
             now,
         )
 
-        print(df.head())
+        print(df.to_string())
 
         # state = self.mapper.map(df)
         #
