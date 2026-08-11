@@ -6,12 +6,12 @@ from influxdb.resultset import ResultSet
 
 from domain.models import (
     Aggregation,
+    AttributeDefinition,
     FillMethod,
     InfluxSensor,
     SensorAttributesReference,
     SensorReference,
     Settings,
-    T,
 )
 
 
@@ -123,7 +123,7 @@ class InfluxSensorResolver:
 
     def resolve_attributes(
         self,
-        sensor: SensorAttributesReference[T],
+        sensor: SensorAttributesReference[AttributeDefinition],
     ) -> dict[str, InfluxSensor]:
         return {
             name: self._resolve(
