@@ -146,30 +146,31 @@ class InfluxSensorResolver:
         if cache_key in self.cache:
             return self.cache[cache_key]
 
-        for influx_sensor in self.schema:
-            field_name = influx_sensor.field
+        candidates = self._candidate_fields(attribute)
 
-            if field_name not in self._candidate_fields(attribute):
-                continue
+        for field_name in candidates:
+            for influx_sensor in self.schema:
+                if influx_sensor.field != field_name:
+                    continue
 
-            query = f"""
-            SELECT "{field_name}"
-            FROM "{influx_sensor.measurement}"
-            WHERE "entity_id" = '{entity_id}'
-            LIMIT 1
-            """
+                query = f"""
+                SELECT "{field_name}"
+                FROM "{influx_sensor.measurement}"
+                WHERE "entity_id" = '{entity_id}'
+                LIMIT 1
+                """
 
-            if list(self.db.query(query).get_points()):
-                resolved = InfluxSensor(
-                    measurement=influx_sensor.measurement,
-                    entity_id=entity_id,
-                    field=field_name,
-                    value_type=influx_sensor.value_type,
-                )
+                if list(self.db.query(query).get_points()):
+                    resolved = InfluxSensor(
+                        measurement=influx_sensor.measurement,
+                        entity_id=entity_id,
+                        field=field_name,
+                        value_type=influx_sensor.value_type,
+                    )
 
-                self.cache[cache_key] = resolved
+                    self.cache[cache_key] = resolved
 
-                return resolved
+                    return resolved
 
         raise ValueError(f"Sensor not found: {entity_id}.{attribute}")
 
