@@ -123,7 +123,7 @@ class InfluxSensorResolver:
 
     def resolve_attributes(
         self,
-        sensor: SensorAttributesReference[AttributeDefinition],
+        sensor: "SensorAttributesReference[AttributeDefinition]",
     ) -> dict[str, InfluxSensor]:
         return {
             name: self._resolve(
