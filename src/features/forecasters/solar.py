@@ -10,9 +10,13 @@ from optuna.samplers import TPESampler
 from sklearn.ensemble import HistGradientBoostingRegressor
 from tqdm import tqdm
 
-from domain.models.config import Config, ForecasterType
-from domain.models.dataset import DatasetDefinition
-from domain.models.state import BacktestPoint, BacktestResult
+from domain.models import (
+    BacktestPoint,
+    BacktestResult,
+    Config,
+    DatasetDefinition,
+    ForecasterType,
+)
 from domain.time import to_local_time
 from features.dataset import DatasetBuilder
 from features.forecaster import SklearnForecaster
@@ -605,39 +609,39 @@ class SolarForecaster(SklearnForecaster):
     def dataset(self, config: Config) -> DatasetDefinition:
         return (
             DatasetBuilder()
-            .timeseries(
-                "P_solar",
-                config.solar.production,
-                interval="30m",
-                aggregation="mean",
-                fill=0,
-            )
-            .attribute_timeseries(
-                "p10",
-                config.solar.forecast.p10,
-                interval="30m",
-                aggregation="last",
-            )
-            .attribute_timeseries(
-                "p50",
-                config.solar.forecast.p50,
-                interval="30m",
-                aggregation="last",
-            )
-            .attribute_timeseries(
-                "p90",
-                config.solar.forecast.p90,
-                interval="30m",
-                aggregation="last",
-            )
-            .join("p50", "p10", on=("time", "target_time"), how="outer")
-            .join("p50", "p90", on=("time", "target_time"), how="outer")
-            .join(
-                "p50",
-                "P_solar",
-                left_on=("target_time",),
-                right_on=("time",),
-                how="outer",
-            )
+            # .timeseries(
+            #     "P_solar",
+            #     config.solar.production,
+            #     interval="30m",
+            #     aggregation="mean",
+            #     fill=0,
+            # )
+            # .attribute_timeseries(
+            #     "p10",
+            #     config.solar.forecast.p10,
+            #     interval="30m",
+            #     aggregation="last",
+            # )
+            # .attribute_timeseries(
+            #     "p50",
+            #     config.solar.forecast.p50,
+            #     interval="30m",
+            #     aggregation="last",
+            # )
+            # .attribute_timeseries(
+            #     "p90",
+            #     config.solar.forecast.p90,
+            #     interval="30m",
+            #     aggregation="last",
+            # )
+            # .join("p50", "p10", on=("time", "target_time"), how="outer")
+            # .join("p50", "p90", on=("time", "target_time"), how="outer")
+            # .join(
+            #     "p50",
+            #     "P_solar",
+            #     left_on=("target_time",),
+            #     right_on=("time",),
+            #     how="outer",
+            # )
             .build()
         )

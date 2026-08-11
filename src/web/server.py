@@ -9,14 +9,15 @@ from fastapi.templating import Jinja2Templates
 
 from app.bootstrap import create_container
 from app.worker import Worker
-from domain.models.config import (
+from domain.models import (
     BacktestConfig,
     Config,
     FitConfig,
+    Job,
+    JobType,
     PredictConfig,
     TuneConfig,
 )
-from domain.models.worker import Job, JobType
 from web.chart import backtest_chart, solar_forecast_chart
 
 BASE_DIR = Path(__file__).resolve().parent

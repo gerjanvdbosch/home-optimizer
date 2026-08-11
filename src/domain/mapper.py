@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from domain.models.state import (
+from domain.models import (
     BoilerMeasurement,
     Forecast,
     HeatPumpMeasurement,

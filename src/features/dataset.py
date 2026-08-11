@@ -4,18 +4,19 @@ from datetime import datetime
 import pandas as pd
 from pandas._typing import MergeHow
 
-from domain.models.config import SensorAttributesReference, SensorReference
-from domain.models.dataset import (
+from domain.models import (
     Aggregation,
     AttributeSeriesDefinition,
     AttributeTimeSeriesDefinition,
     DataDefinition,
+    DataLoader,
     DatasetDefinition,
     FillMethod,
     JoinDefinition,
+    SensorAttributesReference,
+    SensorReference,
     TimeSeriesDefinition,
 )
-from domain.models.interface import DataLoader
 from domain.time import parse_datetime
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 
@@ -333,30 +334,51 @@ class AttributeSeriesLoader(DataLoader):
         return isinstance(definition, AttributeSeriesDefinition)
 
     def load(self, definition: AttributeSeriesDefinition, start, end) -> pd.DataFrame:
-        sensor = self.resolver.resolve(definition.sensor)
+        sensors = self.resolver.resolve_attributes(definition.sensor)
 
-        point = self.influx.find(
-            measurement=sensor.measurement,
-            entity_id=sensor.entity_id,
-            field=sensor.field,
-        )
+        frames = {}
 
-        if point is None or not point.get("value"):
-            return pd.DataFrame()
+        for attr_name, sensor in sensors.items():
+            if attr_name not in definition.attributes:
+                continue
 
-        rows = []
-
-        values = ast.literal_eval(point["value"])
-
-        for target_time, value in values.items():
-            rows.append(
-                {
-                    "time": parse_datetime(target_time),
-                    definition.name: float(value),
-                }
+            point = self.influx.find(
+                measurement=sensor.measurement,
+                entity_id=sensor.entity_id,
+                field=sensor.field,
             )
 
-        return pd.DataFrame(rows)
+            if point is None or not point.get("value"):
+                frames[attr_name] = pd.DataFrame(columns=["time", attr_name])
+                continue
+
+            rows = []
+            values = ast.literal_eval(point["value"])
+
+            for target_time, value in values.items():
+                rows.append(
+                    {
+                        "time": parse_datetime(target_time),
+                        attr_name: float(value),
+                    }
+                )
+
+            frames[attr_name] = pd.DataFrame(rows)
+
+        if not frames:
+            return pd.DataFrame()
+
+        frames_iter = iter(frames.values())
+        result = next(frames_iter).copy()
+
+        for frame in frames_iter:
+            result = result.merge(
+                frame,
+                on="time",
+                how="outer",
+            )
+
+        return result.reset_index(drop=True)
 
 
 class AttributeTimeSeriesLoader(DataLoader):
@@ -370,59 +392,83 @@ class AttributeTimeSeriesLoader(DataLoader):
     def load(
         self, definition: AttributeTimeSeriesDefinition, start, end
     ) -> pd.DataFrame:
-        sensor = self.resolver.resolve(definition.sensor)
+        sensors = self.resolver.resolve_attributes(definition.sensor)
 
-        points = self.influx.find_series(
-            measurement=sensor.measurement,
-            entity_id=sensor.entity_id,
-            field=sensor.field,
-            start=start,
-            end=end,
-            aggregation=definition.aggregation,
-            interval=definition.interval,
-            fill=definition.fill,
-        )
+        frames = {}
 
-        rows = []
-
-        for point in points:
-            if not point.get("value"):
+        for attr_name, sensor in sensors.items():
+            if attr_name not in definition.attributes:
                 continue
 
-            values = ast.literal_eval(point["value"])
-
-            time = parse_datetime(point["time"])
-
-            for target_time, value in values.items():
-                rows.append(
-                    {
-                        "time": time,
-                        "target_time": parse_datetime(target_time),
-                        definition.name: float(value),
-                    }
-                )
-
-        df = pd.DataFrame(rows)
-
-        if df.empty or definition.target_interval is None:
-            return df
-
-        frames = []
-
-        for forecast_time, group in df.groupby("time", sort=False):
-            group = group.sort_values("target_time").copy()
-
-            group = (
-                group.set_index("target_time")[[definition.name]]
-                .resample(definition.target_interval)
-                .ffill()
-                .reset_index()
+            points = self.influx.find_series(
+                measurement=sensor.measurement,
+                entity_id=sensor.entity_id,
+                field=sensor.field,
+                start=start,
+                end=end,
+                aggregation=definition.aggregation,
+                interval=definition.interval,
+                fill=definition.fill,
             )
 
-            group["time"] = forecast_time
+            rows = []
+            for point in points:
+                if not point.get("value"):
+                    continue
 
-            frames.append(group)
+                values = ast.literal_eval(point["value"])
+                time = parse_datetime(point["time"])
 
-        return pd.concat(frames, ignore_index=True)[
-            ["time", "target_time", definition.name]
-        ]
+                for target_time, value in values.items():
+                    rows.append(
+                        {
+                            "time": time,
+                            "target_time": parse_datetime(target_time),
+                            attr_name: float(value),
+                        }
+                    )
+
+            df = pd.DataFrame(rows)
+
+            if df.empty:
+                frames[attr_name] = pd.DataFrame(
+                    columns=["time", "target_time", attr_name]
+                )
+                continue
+
+            if definition.target_interval is not None:
+                resampled_frames = []
+
+                for forecast_time, group in df.groupby("time", sort=False):
+                    group = group.sort_values("target_time").copy()
+
+                    group = (
+                        group.set_index("target_time")[[attr_name]]
+                        .resample(definition.target_interval)
+                        .ffill()
+                        .reset_index()
+                    )
+
+                    group["time"] = forecast_time
+                    resampled_frames.append(group)
+
+                df = pd.concat(resampled_frames, ignore_index=True)[
+                    ["time", "target_time", attr_name]
+                ]
+
+            frames[attr_name] = df
+
+        if not frames:
+            return pd.DataFrame()
+
+        frames_iter = iter(frames.values())
+        result = next(frames_iter).copy()
+
+        for frame in frames_iter:
+            result = result.merge(
+                frame,
+                on=["time", "target_time"],
+                how="outer",
+            )
+
+        return result.reset_index(drop=True)

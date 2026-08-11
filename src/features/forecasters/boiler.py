@@ -5,8 +5,7 @@ from skforecast.preprocessing import CalendarFeatures
 from skforecast.recursive import ForecasterRecursive
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from domain.models.config import Config, ForecasterType
-from domain.models.dataset import DatasetDefinition
+from domain.models import Config, DatasetDefinition, ForecasterType
 from features.dataset import DatasetBuilder
 from features.forecaster import SkforecastForecaster
 

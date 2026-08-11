@@ -4,8 +4,7 @@ from multiprocessing import Process, Queue
 
 from joblib import parallel_backend
 
-from app.forecasting import Forecasting
-from domain.models.worker import Job, JobType
+from domain.models import Job, JobType
 
 
 class Worker:

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from app.forecasting import Forecasting
 from app.state import StateManager
 from domain.mapper import StateMapper
-from domain.models.config import Settings
+from domain.models import Settings
 from features.dataset import (
     AttributeSeriesLoader,
     AttributeTimeSeriesLoader,

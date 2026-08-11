@@ -4,14 +4,15 @@ from typing import Any, cast
 from influxdb import InfluxDBClient
 from influxdb.resultset import ResultSet
 
-from domain.models.config import (
+from domain.models import (
+    Aggregation,
+    FillMethod,
     InfluxSensor,
     SensorAttributesReference,
     SensorReference,
     Settings,
     T,
 )
-from domain.models.dataset import Aggregation, FillMethod
 
 
 class InfluxDatabase:

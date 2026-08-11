@@ -2,8 +2,7 @@ import logging
 
 from pydantic import ValidationError
 
-from domain.models.config import Config
-from domain.models.state import BacktestResult, OptimizerState
+from domain.models import BacktestResult, Config, OptimizerState
 from infrastructure.storage import JsonStorage
 
 

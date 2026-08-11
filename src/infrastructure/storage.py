@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 from pydantic import BaseModel
 
-from domain.models.interface import JsonType
+from domain.models import JsonType
 
 
 class JsonStorage:

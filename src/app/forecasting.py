@@ -3,16 +3,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from domain.models.config import (
+from domain.models import (
     BacktestConfig,
     Config,
     FitConfig,
+    Forecaster,
     ForecasterType,
     PredictConfig,
     TuneConfig,
 )
-from domain.models.interface import Forecaster
-from domain.models.state import SeriesPoint
 from features.dataset import DatasetLoader
 from infrastructure.repository import BacktestRepository, ConfigRepository
 

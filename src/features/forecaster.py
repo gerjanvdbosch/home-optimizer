@@ -16,8 +16,7 @@ from skforecast.model_selection import (
 from skforecast.utils import load_forecaster, save_forecaster
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from domain.models.interface import Forecaster
-from domain.models.state import BacktestPoint, BacktestResult
+from domain.models import BacktestPoint, BacktestResult, Forecaster
 
 
 class SkforecastForecaster(Forecaster):

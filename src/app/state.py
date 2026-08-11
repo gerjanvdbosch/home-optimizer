@@ -1,9 +1,7 @@
 from datetime import datetime, timezone
 
 from domain.mapper import StateMapper
-from domain.models.config import Config
-from domain.models.dataset import DatasetDefinition
-from domain.models.state import OptimizerState
+from domain.models import Config, DatasetDefinition, OptimizerState
 from features.dataset import DatasetBuilder, DatasetLoader
 from infrastructure.repository import StateRepository
 
