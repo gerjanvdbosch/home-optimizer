@@ -360,7 +360,7 @@ class AttributeSeriesLoader(DataLoader):
             field=time_sensor.field,
         )
 
-        if time_point is None or not time_point.get("value"):
+        if time_point is None or time_point.get("value") is None:
             return pd.DataFrame(
                 columns=["time", *definition.attributes],
             )
@@ -385,7 +385,7 @@ class AttributeSeriesLoader(DataLoader):
                 field=sensor.field,
             )
 
-            if point is None or not point.get("value"):
+            if point is None or point.get("value") is None:
                 continue
 
             values = ast.literal_eval(str(point["value"]))
@@ -446,7 +446,7 @@ class AttributeTimeSeriesLoader(DataLoader):
         for point in points:
             value = point.get("value")
 
-            if not value:
+            if value is None:
                 continue
 
             snapshot_time = parse_datetime(point["time"])
@@ -469,7 +469,7 @@ class AttributeTimeSeriesLoader(DataLoader):
             for point in points:
                 value = point.get("value")
 
-                if not value:
+                if value is None:
                     continue
 
                 snapshot_time = parse_datetime(point["time"])
@@ -555,7 +555,4 @@ class AttributeTimeSeriesLoader(DataLoader):
 
             resampled_frames.append(resampled)
 
-        return pd.concat(
-            resampled_frames,
-            ignore_index=True,
-        )
+        return pd.concat(resampled_frames, ignore_index=True)
