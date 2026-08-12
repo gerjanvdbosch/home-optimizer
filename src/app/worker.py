@@ -4,6 +4,7 @@ from multiprocessing import Process, Queue
 
 from joblib import parallel_backend
 
+from app.optimisation import Optimizer
 from domain.models import Job, JobType
 
 
@@ -112,5 +113,8 @@ class Worker:
                 container.forecasting.tune(job.config)
             case JobType.BACKTEST:
                 container.forecasting.backtest(job.config)
+            case JobType.OPTIMIZE:
+                optimizer = Optimizer()
+                optimizer.optimize()
             case _:
                 raise NotImplementedError(f"Unknown job type={job.type}")

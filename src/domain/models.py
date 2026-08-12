@@ -47,6 +47,7 @@ class JobType(str, Enum):
     PREDICT = "predict"
     TUNE = "tune"
     BACKTEST = "backtest"
+    OPTIMIZE = "optimize"
 
 
 class WorkerState(str, Enum):
@@ -230,6 +231,9 @@ class TuneConfig(BacktestConfig):
     trails: int = Field(default=10)
 
 
+class OptimizeConfig(BaseModel): ...
+
+
 class DataDefinition(BaseModel):
     name: str
     aggregation: Aggregation | None = None
@@ -381,7 +385,14 @@ class BacktestResult(BaseModel):
 @dataclass
 class Job:
     type: JobType
-    config: FitConfig | PredictConfig | TuneConfig | BacktestConfig | Config
+    config: (
+        Config
+        | FitConfig
+        | PredictConfig
+        | TuneConfig
+        | BacktestConfig
+        | OptimizeConfig
+    )
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 

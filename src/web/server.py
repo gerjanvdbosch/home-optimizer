@@ -15,6 +15,7 @@ from domain.models import (
     FitConfig,
     Job,
     JobType,
+    OptimizeConfig,
     PredictConfig,
     TuneConfig,
 )
@@ -140,6 +141,18 @@ async def backtest(request: Request, config: BacktestConfig):
 @app.post("/api/tune")
 async def tune(request: Request, config: TuneConfig):
     job = Job(type=JobType.TUNE, config=config)
+
+    request.app.state.worker.submit(job)
+
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }
+
+
+@app.post("/api/optimize")
+async def optimize(request: Request, config: OptimizeConfig):
+    job = Job(type=JobType.OPTIMIZE, config=config)
 
     request.app.state.worker.submit(job)
 
