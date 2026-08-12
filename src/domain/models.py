@@ -236,13 +236,13 @@ class OptimizeConfig(BaseModel): ...
 
 class DataDefinition(BaseModel):
     name: str
-    aggregation: Aggregation | None = None
-    interval: str = "1min"
-    fill: FillMethod | int | float = "none"
 
 
 class TimeSeriesDefinition(DataDefinition):
     sensor: SensorReference
+    aggregation: Aggregation | None = None
+    interval: str = "1min"
+    fill: FillMethod | int | float = "none"
 
 
 class AttributeSeriesDefinition(DataDefinition):
@@ -256,7 +256,10 @@ class AttributeSeriesDefinition(DataDefinition):
     target_shift: bool = False
 
 
-class AttributeTimeSeriesDefinition(AttributeSeriesDefinition): ...
+class AttributeTimeSeriesDefinition(AttributeSeriesDefinition):
+    aggregation: Aggregation | None = None
+    interval: str = "1min"
+    fill: FillMethod | int | float = "none"
 
 
 @dataclass(frozen=True)

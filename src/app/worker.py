@@ -4,7 +4,7 @@ from multiprocessing import Process, Queue
 
 from joblib import parallel_backend
 
-from app.optimisation import Optimizer
+from app.optimization import Optimizer
 from domain.models import Job, JobType
 
 
