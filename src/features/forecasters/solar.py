@@ -42,65 +42,35 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
-            "p10",
+            # "p10",
             "p50",
-            "p90",
+            # "p90",
             "gti",
+            "gti_delta",
+            "temperature",
             "lead_time_hours",
-            "lead_time_hours_sq",
+            # "lead_time_hours_sq",
             "spread",
-            "spread_log",
+            # "spread_log",
+            # "is_day",
             "hour_sin",
             "hour_cos",
+            # "day_of_year_sin",
+            # "day_of_year_cos",
             "solar_lag1",
-            "solar_lag2",
-            "solar_lag3",
-            "solar_lag4",
+            # "solar_lag2",
+            # "solar_lag3",
+            # "solar_lag4",
             "error_lag1",
-            "error_lag2",
-            "error_lag3",
-            "error_lag4",
-            "spread_x_lead",
-            "p50_x_lead",
-        ]
-
-    def features_from_params(self, params: dict[str, Any]) -> list[str]:
-        # features = ["lead_time_hours"]
-        # if params.get("use_lags"):
-        #     features.extend(["solar_lag1", "solar_lag2", "solar_lag3", "solar_lag4"])
-        # if params.get("use_error_lags"):
-        #     features.extend(["error_lag1", "error_lag2", "error_lag3", "error_lag4"])
-        # if params.get("use_p50"):
-        #     features.append("p50")
-        # if params.get("use_time_features"):
-        #     features.extend(
-        #         ["hour_sin", "hour_cos", "day_of_year_sin", "day_of_year_cos"]
-        #     )
-        # if params.get("use_lead_sq"):
-        #     features.append("lead_time_hours_sq")
-        # if params.get("use_spread"):
-        #     features.extend(["spread", "spread_log", "spread_x_lead"])
-        # if params.get("use_asym_spread"):
-        #     features.extend(
-        #         ["spread_upper", "spread_lower", "spread_upper_log", "spread_lower_log"]
-        #     )
-        # if params.get("use_quantiles"):
-        #     features.extend(["p10", "p90", "p50_x_lead"])
-        # return features
-
-        return [
-            "lead_time_hours",
-            "p50",
-            "gti",
-            "hour_sin",
-            "hour_cos",
-            "solar_lag1",
-            "error_lag1",
-            "spread",
+            # "error_lag2",
+            # "error_lag3",
+            # "error_lag4",
+            # "spread_x_lead",
+            # "p50_x_lead",
         ]
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
-        params = {
+        return {
             "loss": trial.suggest_categorical(
                 "loss", ["squared_error", "absolute_error"]
             ),
@@ -112,51 +82,6 @@ class SolarForecaster(SklearnForecaster):
             ),
             "max_iter": trial.suggest_int("max_iter", 30, 100),
         }
-
-        features = [
-            "lead_time_hours",
-            "p50",
-            "gti",
-            "hour_sin",
-            "hour_cos",
-            "solar_lag1",
-            "error_lag1",
-            "spread",
-        ]
-
-        # features = [
-        #     "lead_time_hours",
-        # ]
-
-        # if trial.suggest_categorical("use_lags", [True, False]):
-        #     features.extend(["solar_lag1", "solar_lag2", "solar_lag3", "solar_lag4"])
-        #
-        # if trial.suggest_categorical("use_error_lags", [True, False]):
-        #     features.extend(["error_lag1", "error_lag2", "error_lag3", "error_lag4"])
-        #
-        # if trial.suggest_categorical("use_lead_sq", [True, False]):
-        #     features.append("lead_time_hours_sq")
-        #
-        # if trial.suggest_categorical("use_spread", [True, False]):
-        #     features.extend(["spread", "spread_log", "spread_x_lead"])
-        #
-        # if trial.suggest_categorical("use_asym_spread", [True, False]):
-        #     features.extend(
-        #         ["spread_upper", "spread_lower", "spread_upper_log", "spread_lower_log"]
-        #     )
-        #
-        # if trial.suggest_categorical("use_quantiles", [True, False]):
-        #     features.extend(["p10", "p90", "p50_x_lead"])
-
-        params["_features"] = features
-        return params
-
-    def model_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in params.items() if not k.startswith("use_")}
-
-    @property
-    def features(self) -> list[str]:
-        return self._tuned_features or self.exog_columns
 
     def create(self, **overrides: Any) -> HistGradientBoostingRegressor:
         params: dict[str, Any] = dict(
@@ -191,17 +116,17 @@ class SolarForecaster(SklearnForecaster):
         )
 
         return {
-            "X": future[self.features].iloc[:steps],
+            "X": future[self.exog_columns].iloc[:steps],
         }
 
     def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
-        df = df.dropna(subset=[self.target_column, *self.features]).copy()
+        df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
         df = df[(df["lead_time_hours"] >= 0.5) & (df["lead_time_hours"] <= 4.0)].copy()
 
         df["error"] = df[self.target_column] - df["p50"]
 
         return {
-            "X": df[self.features],
+            "X": df[self.exog_columns],
             "y": df["error"],
         }
 
@@ -223,6 +148,9 @@ class SolarForecaster(SklearnForecaster):
                 }
             )
         )
+
+        df["gti_lag1"] = df.groupby("time")["gti"].shift(1)
+        df["gti_delta"] = (df["gti"] - df["gti_lag1"]).fillna(0)
 
         for i in range(4):
             actual_series[f"solar_lag{i + 1}"] = actual_series["actual_value"].shift(i)
@@ -397,15 +325,17 @@ class SolarForecaster(SklearnForecaster):
             )
 
             if need_retrain and not train_day.empty:
-                train_clean = train_day.dropna(subset=self.features)
+                train_clean = train_day.dropna(subset=self.exog_columns)
                 if not train_clean.empty:
-                    model = self.create(**self._tuned_params)
-                    model.fit(train_clean[self.features], train_clean["error_target"])
+                    model = self.create(**self.best_params)
+                    model.fit(
+                        train_clean[self.exog_columns], train_clean["error_target"]
+                    )
 
             if model is None:
                 continue
 
-            test_clean = test_df.dropna(subset=self.features).copy()
+            test_clean = test_df.dropna(subset=self.exog_columns).copy()
             if test_clean.empty:
                 continue
 
@@ -413,7 +343,7 @@ class SolarForecaster(SklearnForecaster):
             test_clean["pred"] = test_clean["p50"].copy()
 
             if day_mask.any() and model is not None:
-                day_features = test_clean.loc[day_mask, self.features]
+                day_features = test_clean.loc[day_mask, self.exog_columns]
                 error_pred = model.predict(day_features)
                 test_clean.loc[day_mask, "pred"] = (
                     test_clean.loc[day_mask, "p50"] + error_pred
@@ -542,7 +472,7 @@ class SolarForecaster(SklearnForecaster):
 
         def objective(trial: Trial) -> float:
             params = self.search_space(trial)
-            features = params.pop("_features")
+            features = self.exog_columns
 
             ml_errors: list[float] = []
             model = None
@@ -593,18 +523,14 @@ class SolarForecaster(SklearnForecaster):
         )
         study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-        best_params = study.best_params
-        self._tuned_features = self.features_from_params(best_params)
-        self._tuned_params = self.model_params(best_params)
-        self.forecaster = self.create(**self._tuned_params)
+        self.forecaster = self.create(**study.best_params)
 
         trials_df = study.trials_dataframe()
 
         logging.info(
-            "Tune finished - best MAE: %.2f | params: %s | features: %s",
+            "Tune finished - best MAE: %.2f | params: %s",
             study.best_value,
-            self._tuned_params,
-            self._tuned_features,
+            study.best_params,
         )
 
         return trials_df, study
@@ -629,7 +555,7 @@ class SolarForecaster(SklearnForecaster):
             .attribute_timeseries(
                 "open_meteo",
                 config.forecast.open_meteo,
-                attributes=["gti"],
+                attributes=["gti", "temperature", "is_day"],
                 interval="30m",
                 aggregation="last",
             )

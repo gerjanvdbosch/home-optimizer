@@ -37,7 +37,7 @@ class BoilerForecaster(SkforecastForecaster):
             "T_supply",
         ]
 
-    def create(self):
+    def create(self, **overrides: Any):
         return ForecasterRecursive(
             forecaster_id=self.name,
             estimator=HistGradientBoostingRegressor(

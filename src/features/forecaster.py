@@ -24,7 +24,7 @@ class SkforecastForecaster(Forecaster):
         self.forecaster = self.create()
 
     @abstractmethod
-    def create(self) -> ForecasterBase: ...
+    def create(self, **overrides: Any) -> ForecasterBase: ...
 
     def arguments(self, df: pd.DataFrame):
         return {
@@ -179,11 +179,10 @@ class SkforecastForecaster(Forecaster):
 class SklearnForecaster(Forecaster):
     def __init__(self):
         self.forecaster = self.create()
-        self._tuned_params: dict[str, Any] = {}
-        self._tuned_features: list[str] | None = None
+        self.best_params: dict[str, Any] = {}
 
     @abstractmethod
-    def create(self) -> HistGradientBoostingRegressor: ...
+    def create(self, **overrides: Any) -> HistGradientBoostingRegressor: ...
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         raise NotImplementedError()
@@ -205,6 +204,7 @@ class SklearnForecaster(Forecaster):
     def fit(self, df: pd.DataFrame):
         df = self.prepare(df)
 
+        self.forecaster = self.create(**self.best_params)
         self.forecaster.fit(**self.arguments(df))
 
     def predict(self, df: pd.DataFrame, steps: int = 24) -> pd.Series:
@@ -222,12 +222,6 @@ class SklearnForecaster(Forecaster):
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
         raise NotImplementedError()
 
-    def features_from_params(self, params: dict[str, Any]) -> list[str]:
-        raise NotImplementedError()
-
-    def model_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError()
-
     def tune(
         self,
         df: pd.DataFrame,
@@ -237,7 +231,7 @@ class SklearnForecaster(Forecaster):
     ) -> tuple[pd.DataFrame, Study]:
         raise NotImplementedError()
 
-    def _load_tuned(self, storage: str) -> bool:
+    def _load_best_params(self, storage: str) -> bool:
         if not Path(storage.removeprefix("sqlite:///")).exists():
             return False
 
@@ -251,24 +245,14 @@ class SklearnForecaster(Forecaster):
         if not study.trials or study.best_trial is None:
             return False
 
-        best_params = study.best_params
+        self.best_params = study.best_params
 
-        self._tuned_features = self.features_from_params(best_params)
-        self._tuned_params = self.model_params(best_params)
+        logging.info("Load best params %s", study.best_params)
 
-        logging.info(
-            "Tuned params geladen uit %s: %s | features: %s",
-            storage,
-            self._tuned_params,
-            self._tuned_features,
-        )
         return True
 
     def save(self, path: Path) -> None:
-        path.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        path.mkdir(parents=True, exist_ok=True)
 
         dump(self.forecaster, path / f"{self.name}.joblib")
 
@@ -280,4 +264,4 @@ class SklearnForecaster(Forecaster):
 
         self.forecaster = load(file_name)
 
-        self._load_tuned(storage=study_storage)
+        self._load_best_params(storage=study_storage)
