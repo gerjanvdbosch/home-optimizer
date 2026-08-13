@@ -18,6 +18,7 @@ HeatPumpMode = Literal[
 ForecasterType = Literal[
     "solar",
     "boiler",
+    "baseload",
 ]
 
 Aggregation = Literal[

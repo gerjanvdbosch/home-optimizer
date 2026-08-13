@@ -16,6 +16,7 @@ from features.dataset import (
     DatasetLoader,
     TimeSeriesLoader,
 )
+from features.forecasters.baseload import BaseloadForecaster
 from features.forecasters.boiler import BoilerForecaster
 from features.forecasters.solar import SolarForecaster
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
@@ -83,6 +84,7 @@ def create_container() -> Container:
         forecasters=[
             BoilerForecaster(),
             SolarForecaster(),
+            BaseloadForecaster(),
         ],
     )
 

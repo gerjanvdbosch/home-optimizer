@@ -115,7 +115,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
                 mode="lines",
                 name=bp.label,
                 legendgroup=bp.group,
-                showlegend=False,
+                showlegend=not bp.group,
                 line=dict(width=3, color=bp.color),
                 visible=True,
                 connectgaps=True,

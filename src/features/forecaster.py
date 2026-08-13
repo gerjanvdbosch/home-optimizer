@@ -115,7 +115,7 @@ class SkforecastForecaster(Forecaster):
         return TimeSeriesFold(
             steps=steps,
             initial_train_size=int(len(df) * 0.7),
-            refit=True,
+            refit=96,
             fixed_train_size=False,
         )
 

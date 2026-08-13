@@ -80,7 +80,7 @@ class SolarForecaster(SklearnForecaster):
             "l2_regularization": trial.suggest_float(
                 "l2_regularization", 3.0, 100.0, log=True
             ),
-            "max_iter": trial.suggest_int("max_iter", 30, 100),
+            "max_iter": trial.suggest_int("max_iter", 25, 100),
         }
 
     def create(self, **overrides: Any) -> HistGradientBoostingRegressor:
@@ -103,10 +103,6 @@ class SolarForecaster(SklearnForecaster):
 
     def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> dict[str, Any]:
         now = datetime.now(UTC)
-
-        # last_window = df[
-        #     (df["target_time"] <= now) & df["P_solar"].notna()
-        # ].sort_values("target_time")
 
         future = (
             df[(df["target_time"] > now) & (df["time"] <= now)]

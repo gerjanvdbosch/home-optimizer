@@ -85,6 +85,8 @@ class Forecasting:
     def tune(self, config: TuneConfig):
         forecaster, df = self._prepare(config.forecaster, config.days)
 
+        self.path.mkdir(parents=True, exist_ok=True)
+
         results, study = forecaster.tune(
             df,
             n_trials=config.trails,
