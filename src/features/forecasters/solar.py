@@ -45,6 +45,7 @@ class SolarForecaster(SklearnForecaster):
             "p10",
             "p50",
             "p90",
+            "gti",
             "lead_time_hours",
             "lead_time_hours_sq",
             "spread",
@@ -90,6 +91,7 @@ class SolarForecaster(SklearnForecaster):
         return [
             "lead_time_hours",
             "p50",
+            "gti",
             "hour_sin",
             "hour_cos",
             "solar_lag1",
@@ -114,6 +116,7 @@ class SolarForecaster(SklearnForecaster):
         features = [
             "lead_time_hours",
             "p50",
+            "gti",
             "hour_sin",
             "hour_cos",
             "solar_lag1",
