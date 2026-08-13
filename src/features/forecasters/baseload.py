@@ -59,8 +59,8 @@ class BaseloadForecaster(SkforecastForecaster):
             window_features=overrides.pop(
                 "window_features",
                 RollingFeatures(
-                    stats=["mean", "mean", "std", "std", "min", "min"],
-                    window_sizes=[16, 96, 16, 96, 16, 96],
+                    stats=["mean", "mean", "min", "min"],
+                    window_sizes=[16, 96, 16, 96],
                 ),
             ),
             transformer_y=FunctionTransformer(func=np.sqrt, inverse_func=np.square),
