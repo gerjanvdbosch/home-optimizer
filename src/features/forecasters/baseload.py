@@ -41,10 +41,10 @@ class BaseloadForecaster(SkforecastForecaster):
                 HistGradientBoostingRegressor(
                     loss="squared_error",
                     learning_rate=0.03,
-                    max_depth=8,
-                    max_iter=100,
+                    max_depth=7,
+                    max_iter=120,
                     min_samples_leaf=5,
-                    l2_regularization=10.0,
+                    l2_regularization=5.0,
                     random_state=42,
                 ),
             ),
@@ -63,30 +63,32 @@ class BaseloadForecaster(SkforecastForecaster):
                     window_sizes=[16, 96, 16, 96, 16, 96],
                 ),
             ),
-            # transformer_y=FunctionTransformer(func=np.sqrt, inverse_func=np.square),
-            transformer_y=FunctionTransformer(func=np.log1p, inverse_func=np.expm1),
+            transformer_y=FunctionTransformer(func=np.sqrt, inverse_func=np.square),
             **overrides,
         )
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {
             "learning_rate": trial.suggest_float(
-                "learning_rate", 0.025, 0.06, log=True
+                "learning_rate",
+                0.02,
+                0.06,
+                log=True,
             ),
-            "max_depth": trial.suggest_int("max_depth", 5, 8),
+            "max_depth": trial.suggest_int("max_depth", 5, 9),
             "max_iter": trial.suggest_int(
                 "max_iter",
-                20,
-                180,
+                80,
+                160,
                 step=40,
             ),
             "min_samples_leaf": trial.suggest_int(
                 "min_samples_leaf",
-                5,
-                20,
+                3,
+                12,
             ),
             "l2_regularization": trial.suggest_float(
-                "l2_regularization", 1.0, 20.0, log=True
+                "l2_regularization", 1.0, 15.0, log=True
             ),
         }
 
