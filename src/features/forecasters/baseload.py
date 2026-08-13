@@ -42,7 +42,7 @@ class BaseloadForecaster(SkforecastForecaster):
                     loss="squared_error",
                     learning_rate=0.03,
                     max_depth=8,
-                    max_iter=40,
+                    max_iter=100,
                     min_samples_leaf=5,
                     l2_regularization=10.0,
                     random_state=42,
@@ -63,6 +63,7 @@ class BaseloadForecaster(SkforecastForecaster):
                     window_sizes=[16, 96, 16, 96, 16, 96],
                 ),
             ),
+            # transformer_y=FunctionTransformer(func=np.sqrt, inverse_func=np.square),
             transformer_y=FunctionTransformer(func=np.log1p, inverse_func=np.expm1),
             **overrides,
         )
@@ -73,7 +74,12 @@ class BaseloadForecaster(SkforecastForecaster):
                 "learning_rate", 0.025, 0.06, log=True
             ),
             "max_depth": trial.suggest_int("max_depth", 5, 8),
-            "max_iter": trial.suggest_int("max_iter", 20, 200),
+            "max_iter": trial.suggest_int(
+                "max_iter",
+                20,
+                180,
+                step=40,
+            ),
             "min_samples_leaf": trial.suggest_int(
                 "min_samples_leaf",
                 5,

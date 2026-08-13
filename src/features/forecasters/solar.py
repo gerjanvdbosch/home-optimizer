@@ -80,7 +80,7 @@ class SolarForecaster(SklearnForecaster):
             "l2_regularization": trial.suggest_float(
                 "l2_regularization", 3.0, 100.0, log=True
             ),
-            "max_iter": trial.suggest_int("max_iter", 25, 100),
+            "max_iter": trial.suggest_int("max_iter", 25, 100, step=25),
         }
 
     def create(self, **overrides: Any) -> HistGradientBoostingRegressor:
@@ -444,7 +444,7 @@ class SolarForecaster(SklearnForecaster):
         steps: int = 12,
         n_trials: int = 30,
         study_storage: str | Path | None = None,
-        refit_hours: int = 24 * 7,
+        refit_hours: int = 9999,
     ) -> tuple[pd.DataFrame, Study]:
         df = self.prepare(df).dropna(subset=[self.target_column, "p50"])
         df["error_target"] = df[self.target_column] - df["p50"]

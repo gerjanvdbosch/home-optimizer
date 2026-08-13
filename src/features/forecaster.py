@@ -72,7 +72,7 @@ class SkforecastForecaster(Forecaster):
             n_jobs=1,
             metric="mean_absolute_error",
             forecaster=self.forecaster,
-            cv=self.create_cv(df, steps),
+            cv=self.create_cv(df, steps, 96),
             **self.arguments(df),
         )
 
@@ -95,7 +95,7 @@ class SkforecastForecaster(Forecaster):
             n_jobs=1,
             metric="mean_absolute_error",
             forecaster=self.forecaster,
-            cv=self.create_cv(df, steps),
+            cv=self.create_cv(df, steps, False),
             search_space=self.search_space,
             n_trials=n_trials,
             random_state=42,
@@ -111,11 +111,16 @@ class SkforecastForecaster(Forecaster):
 
         return result, cast(Study, study)
 
-    def create_cv(self, df: pd.DataFrame, steps: int) -> TimeSeriesFold:
+    def create_cv(
+        self,
+        df: pd.DataFrame,
+        steps: int,
+        refit: bool | int = False,
+    ) -> TimeSeriesFold:
         return TimeSeriesFold(
             steps=steps,
             initial_train_size=int(len(df) * 0.7),
-            refit=96,
+            refit=refit,
             fixed_train_size=False,
         )
 
