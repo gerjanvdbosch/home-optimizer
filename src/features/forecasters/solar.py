@@ -609,39 +609,39 @@ class SolarForecaster(SklearnForecaster):
     def dataset(self, config: Config) -> DatasetDefinition:
         return (
             DatasetBuilder()
-            # .timeseries(
-            #     "P_solar",
-            #     config.solar.production,
-            #     interval="30m",
-            #     aggregation="mean",
-            #     fill=0,
-            # )
-            # .attribute_timeseries(
-            #     "p10",
-            #     config.solar.forecast.p10,
-            #     interval="30m",
-            #     aggregation="last",
-            # )
-            # .attribute_timeseries(
-            #     "p50",
-            #     config.solar.forecast.p50,
-            #     interval="30m",
-            #     aggregation="last",
-            # )
-            # .attribute_timeseries(
-            #     "p90",
-            #     config.solar.forecast.p90,
-            #     interval="30m",
-            #     aggregation="last",
-            # )
-            # .join("p50", "p10", on=("time", "target_time"), how="outer")
-            # .join("p50", "p90", on=("time", "target_time"), how="outer")
-            # .join(
-            #     "p50",
-            #     "P_solar",
-            #     left_on=("target_time",),
-            #     right_on=("time",),
-            #     how="outer",
-            # )
+            .timeseries(
+                "P_solar",
+                config.solar.production,
+                interval="30m",
+                aggregation="mean",
+                fill=0,
+            )
+            .attribute_timeseries(
+                "solcast",
+                config.forecast.solcast,
+                attributes=["p10", "p50", "p90"],
+                interval="30m",
+                aggregation="last",
+            )
+            .attribute_timeseries(
+                "open_meteo",
+                config.forecast.open_meteo,
+                attributes=["gti"],
+                interval="30m",
+                aggregation="last",
+            )
+            .join(
+                left="solcast",
+                right="P_solar",
+                left_on=("target_time",),
+                right_on=("time",),
+                how="left",
+            )
+            .join(
+                left="solcast",
+                right="open_meteo",
+                on=("time", "target_time"),
+                how="left",
+            )
             .build()
         )

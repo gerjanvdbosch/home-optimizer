@@ -38,11 +38,16 @@ class DatasetLoader:
         for definition in dataset.definitions:
             loader = self._find(definition)
 
-            frames[definition.name] = loader.load(
+            df = loader.load(
                 definition=definition,
                 start=start,
                 end=end,
             )
+
+            for col in df.select_dtypes(include=["datetime", "datetimetz"]).columns:
+                df[col] = df[col].dt.as_unit("ns")
+
+            frames[definition.name] = df
 
         return self._merge(
             frames=frames,
