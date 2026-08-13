@@ -207,7 +207,7 @@ class SolarForecaster(SklearnForecaster):
         self,
         df: pd.DataFrame,
         steps: int,
-        retrain_every_hours: int = 6,
+        refit_hours: int = 24,
         max_train_days: int = 30,
     ) -> Iterator[tuple[pd.Timestamp, pd.DataFrame, pd.DataFrame, bool]]:
 
@@ -219,7 +219,7 @@ class SolarForecaster(SklearnForecaster):
         starts = time_index.searchsorted(update_times, side="left")
         ends = time_index.searchsorted(update_times, side="right")
 
-        retrain_every = pd.Timedelta(hours=retrain_every_hours)
+        retrain_every = pd.Timedelta(hours=refit_hours)
         max_train_window = pd.Timedelta(days=max_train_days)
 
         last_trained_time = None
@@ -444,7 +444,7 @@ class SolarForecaster(SklearnForecaster):
         steps: int = 12,
         n_trials: int = 30,
         study_storage: str | Path | None = None,
-        tune_retrain_every_hours: int = 6 * 7,
+        refit_hours: int = 24 * 7,
     ) -> tuple[pd.DataFrame, Study]:
         df = self.prepare(df).dropna(subset=[self.target_column, "p50"])
         df["error_target"] = df[self.target_column] - df["p50"]
@@ -454,7 +454,7 @@ class SolarForecaster(SklearnForecaster):
             self.generate_walk_forward_folds(
                 df_sorted,
                 steps=steps,
-                retrain_every_hours=tune_retrain_every_hours,
+                refit_hours=refit_hours,
                 max_train_days=30,
             )
         )
@@ -463,7 +463,7 @@ class SolarForecaster(SklearnForecaster):
             "Tune folds: %d totaal, %d retrain-momenten (retrain_every=%dh)",
             len(folds),
             sum(1 for _, _, _, need_retrain in folds if need_retrain),
-            tune_retrain_every_hours,
+            refit_hours,
         )
 
         def objective(trial: Trial) -> float:
