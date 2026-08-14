@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from domain.mapper import StateMapper
-from domain.models import Config, DatasetDefinition, OptimizerState
+from domain.models import Config, DatasetDefinition, OptimizerState, SeriesPoint
 from features.dataset import DatasetBuilder, DatasetLoader
 from infrastructure.repository import StateRepository
 
@@ -36,7 +38,22 @@ class StateManager:
             now,
         )
 
-        state = self.mapper.map(df)
+        state = self.mapper.map(df, self.load())
+
+        self.repository.save(state)
+
+    def update_prediction(self, name: str, series: pd.Series) -> None:
+        state = self.load()
+
+        points = [
+            SeriesPoint(time=pd.to_datetime(str(time)), value=float(value))
+            for time, value in series.items()
+        ]
+
+        if hasattr(state.predictions, name):
+            setattr(state.predictions, name, points)
+        else:
+            raise ValueError(f"Unknown prediction: '{name}'")
 
         self.repository.save(state)
 

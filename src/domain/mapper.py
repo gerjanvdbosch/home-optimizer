@@ -9,6 +9,7 @@ from domain.models import (
     Measurements,
     OpenMeteoForecast,
     OptimizerState,
+    Predictions,
     SeriesPoint,
     SolarMeasurement,
     SolcastForecast,
@@ -16,7 +17,11 @@ from domain.models import (
 
 
 class StateMapper:
-    def map(self, df: pd.DataFrame) -> OptimizerState:
+    def map(
+        self,
+        df: pd.DataFrame,
+        existing: OptimizerState | None = None,
+    ) -> OptimizerState:
         return OptimizerState(
             updated=datetime.now(timezone.utc),
             measurements=Measurements(
@@ -45,6 +50,8 @@ class StateMapper:
                     gti=self._parse_series(df, "gti"),
                 ),
             ),
+            predictions=existing.predictions if existing else Predictions(),
+            schedule=existing.schedule if existing else None,
         )
 
     def _parse_series(self, df: pd.DataFrame, column: str) -> list[SeriesPoint]:

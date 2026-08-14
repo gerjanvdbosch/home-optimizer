@@ -62,7 +62,11 @@ templates = Jinja2Templates(
 async def dashboard(request: Request):
     container = request.app.state.container
 
-    config = container.config_repository.load()
+    try:
+        config = container.config_repository.load()
+    except Exception:
+        return templates.TemplateResponse(request=request, name="setup.html")
+
     state = container.state_manager.load()
     backtest = container.backtest_repository.load()
 

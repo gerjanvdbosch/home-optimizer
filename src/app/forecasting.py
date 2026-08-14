@@ -56,19 +56,7 @@ class Forecasting:
 
         result = forecaster.predict(df=df, steps=config.steps)
 
-        print(result)
-
-        # state = self.state_manager.load()
-        #
-        # points = [
-        #     SeriesPoint(time=pd.to_datetime(str(time)), value=float(value))
-        #     for time, value in result.items()
-        # ]
-        #
-        # if forecaster.name == "solar":
-        #     state.forecast.solar.predicted = points
-
-        # self.state_manager.save(state)
+        self.state_manager.update_prediction(forecaster.name, result)
 
     def backtest(self, config: BacktestConfig):
         forecaster, df = self._prepare(config.forecaster, config.days)

@@ -352,6 +352,12 @@ class Forecast(BaseModel):
     )
 
 
+class Predictions(BaseModel):
+    solar: list[SeriesPoint[float]] = Field(default_factory=list)
+    baseload: list[SeriesPoint[float]] = Field(default_factory=list)
+    boiler: list[SeriesPoint[float]] = Field(default_factory=list)
+
+
 class HeatPumpSchedule(BaseModel):
     power: list[SeriesPoint[float]] = Field(default_factory=list)
 
@@ -368,6 +374,7 @@ class OptimizerState(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     measurements: Measurements = Field(default_factory=Measurements)
     forecast: Forecast = Field(default_factory=Forecast)
+    predictions: Predictions = Field(default_factory=Predictions)
     schedule: Schedule | None = None
 
 
