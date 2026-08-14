@@ -197,8 +197,15 @@ class SolarForecaster(SklearnForecaster):
         return df
 
     def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
+        p50 = df["p50"].to_numpy()
+
+        day_mask = p50 > 1
+
+        final_prediction = p50.copy()
+        final_prediction[day_mask] += prediction[day_mask]
+
         return pd.Series(
-            df["p50"].to_numpy() + prediction,
+            final_prediction,
             index=df["target_time"],
             name="pred",
         )
@@ -225,7 +232,12 @@ class SolarForecaster(SklearnForecaster):
         last_trained_time = None
         train_df = pd.DataFrame()
 
-        for update_time, start, end in zip(update_times, starts, ends):
+        for update_time, start, end in zip(
+            update_times,
+            starts,
+            ends,
+            strict=True,
+        ):
             update_time = pd.Timestamp(update_time)
             group = df_sorted.iloc[start:end]
 
