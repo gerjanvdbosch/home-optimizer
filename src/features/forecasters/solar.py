@@ -52,7 +52,7 @@ class SolarForecaster(SklearnForecaster):
             # "lead_time_hours_sq",
             "spread",
             # "spread_log",
-            # "is_day",
+            "is_day",
             "hour_sin",
             "hour_cos",
             # "day_of_year_sin",

@@ -181,8 +181,11 @@ class SolcastConfig(SensorAttributesReference[SolcastAttributes]): ...
 
 class OpenMeteoAttributes(BaseModel):
     temperature: str = Field()
+    is_day: str = Field()
     gti: str = Field()
-    cloud_cover: str = Field()
+    cloud_cover_low: str = Field()
+    cloud_cover_mid: str = Field()
+    cloud_cover_high: str = Field()
     wind_direction: str = Field()
     wind_speed: str = Field()
     precipitation: str = Field()
@@ -190,8 +193,11 @@ class OpenMeteoAttributes(BaseModel):
     def items(self):
         return (
             ("temperature", self.temperature),
+            ("is_day", self.is_day),
             ("gti", self.gti),
-            ("cloud_cover", self.cloud_cover),
+            ("cloud_cover_low", self.cloud_cover_low),
+            ("cloud_cover_mid", self.cloud_cover_mid),
+            ("cloud_cover_high", self.cloud_cover_high),
             ("wind_direction", self.wind_direction),
             ("wind_speed", self.wind_speed),
             ("precipitation", self.precipitation),
