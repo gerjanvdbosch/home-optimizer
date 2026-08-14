@@ -60,7 +60,7 @@ class BaseloadForecaster(SkforecastForecaster):
                 "window_features",
                 RollingFeatures(
                     stats=["mean", "mean", "min", "min"],
-                    window_sizes=[16, 96, 16, 96],
+                    window_sizes=[4, 96, 4, 96],
                 ),
             ),
             transformer_y=FunctionTransformer(func=np.sqrt, inverse_func=np.square),
