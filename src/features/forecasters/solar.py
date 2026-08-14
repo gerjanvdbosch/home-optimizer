@@ -207,7 +207,7 @@ class SolarForecaster(SklearnForecaster):
         self,
         df: pd.DataFrame,
         steps: int,
-        refit_hours: int = 24,
+        refit_hours: int = 6,
         max_train_days: int = 30,
     ) -> Iterator[tuple[pd.Timestamp, pd.DataFrame, pd.DataFrame, bool]]:
 
@@ -444,7 +444,7 @@ class SolarForecaster(SklearnForecaster):
         steps: int = 12,
         n_trials: int = 30,
         study_storage: str | Path | None = None,
-        refit_hours: int = 9999,
+        refit_hours: int = 24,
     ) -> tuple[pd.DataFrame, Study]:
         df = self.prepare(df).dropna(subset=[self.target_column, "p50"])
         df["error_target"] = df[self.target_column] - df["p50"]
