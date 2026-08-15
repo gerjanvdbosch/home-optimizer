@@ -48,11 +48,14 @@ class SolarForecaster(SklearnForecaster):
             "gti",
             "gti_delta",
             "temperature",
+            # "cloud_cover_low",
+            # "cloud_cover_mid",
+            # "cloud_cover_high",
             "lead_time_hours",
             # "lead_time_hours_sq",
             "spread",
             # "spread_log",
-            # "is_day",
+            "is_day",
             "hour_sin",
             "hour_cos",
             # "day_of_year_sin",
@@ -198,8 +201,7 @@ class SolarForecaster(SklearnForecaster):
 
     def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
         p50 = df["p50"].to_numpy()
-
-        day_mask = p50 > 1
+        day_mask = (df["is_day"] == 1).to_numpy()
 
         final_prediction = p50.copy()
         final_prediction[day_mask] += prediction[day_mask]
@@ -208,7 +210,7 @@ class SolarForecaster(SklearnForecaster):
             final_prediction,
             index=df["target_time"],
             name="pred",
-        )
+        ).clip(lower=0)
 
     def generate_walk_forward_folds(
         self,
@@ -329,7 +331,9 @@ class SolarForecaster(SklearnForecaster):
 
         for update_time, train_df, test_df, need_retrain in progress:
             train_day = (
-                train_df[train_df["p50"] > 1] if not train_df.empty else pd.DataFrame()
+                train_df[train_df["is_day"] == 1]
+                if not train_df.empty
+                else pd.DataFrame()
             )
 
             if need_retrain and not train_day.empty:
@@ -347,17 +351,9 @@ class SolarForecaster(SklearnForecaster):
             if test_clean.empty:
                 continue
 
-            day_mask = test_clean["p50"] > 1
-            test_clean["pred"] = test_clean["p50"].copy()
-
-            if day_mask.any() and model is not None:
-                day_features = test_clean.loc[day_mask, self.exog_columns]
-                error_pred = model.predict(day_features)
-                test_clean.loc[day_mask, "pred"] = (
-                    test_clean.loc[day_mask, "p50"] + error_pred
-                ).clip(lower=0)
-            else:
-                test_clean["pred"] = test_clean["pred"].clip(lower=0)
+            error_pred = model.predict(test_clean[self.exog_columns])
+            test_clean["pred"] = (test_clean["p50"] + error_pred).clip(lower=0)
+            test_clean.loc[test_clean["is_day"] == 0, "pred"] = 0
 
             baseline_errors.extend(
                 (test_clean["P_solar"] - test_clean["p50"]).abs().tolist()
@@ -487,7 +483,7 @@ class SolarForecaster(SklearnForecaster):
 
             for update_time, train_df, test_df, need_retrain in folds:
                 train_day = (
-                    train_df[train_df["p50"] > 1]
+                    train_df[train_df["is_day"] == 1]
                     if not train_df.empty
                     else pd.DataFrame()
                 )
@@ -505,17 +501,9 @@ class SolarForecaster(SklearnForecaster):
                 if test_clean.empty:
                     continue
 
-                day_mask = test_clean["p50"] > 1
-                pred = test_clean["p50"].copy()
-
-                if day_mask.any() and model is not None:
-                    day_features = test_clean.loc[day_mask, features]
-                    error_pred = model.predict(day_features)
-                    pred.loc[day_mask] = (
-                        test_clean.loc[day_mask, "p50"] + error_pred
-                    ).clip(lower=0)
-                else:
-                    pred = pred.clip(lower=0)
+                error_pred = model.predict(test_clean[features])
+                pred = (test_clean["p50"] + error_pred).clip(lower=0)
+                pred[test_clean["is_day"] == 0] = 0
 
                 ml_errors.extend((test_clean["P_solar"] - pred).abs().tolist())
 
@@ -563,7 +551,14 @@ class SolarForecaster(SklearnForecaster):
             .attribute_timeseries(
                 "open_meteo",
                 config.forecast.open_meteo,
-                attributes=["gti", "temperature", "is_day"],
+                attributes=[
+                    "gti",
+                    "temperature",
+                    "is_day",
+                    # "cloud_cover_low",
+                    # "cloud_cover_mid",
+                    # "cloud_cover_high",
+                ],
                 interval="30m",
                 aggregation="last",
             )
