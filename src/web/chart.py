@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-from domain.models import BacktestResult, JsonType, OptimizerState
+from domain.models import BacktestResult, JsonType, State
 from domain.time import to_local_series, to_local_time
 
 
@@ -24,7 +24,7 @@ def add_series(
 
 
 def solar_forecast_chart(
-    state: OptimizerState,
+    state: State,
     capacity: float,
     efficiency: float,
 ) -> str:

@@ -2,7 +2,7 @@ import logging
 
 from pydantic import ValidationError
 
-from domain.models import BacktestResult, Config, OptimizerState
+from domain.models import BacktestResult, Config, State
 from infrastructure.storage import JsonStorage
 
 
@@ -26,16 +26,16 @@ class StateRepository:
     def __init__(self, storage: JsonStorage):
         self.storage = storage
 
-    def save(self, state: OptimizerState) -> None:
+    def save(self, state: State) -> None:
         self.storage.save(state)
 
-    def load(self) -> OptimizerState:
+    def load(self) -> State:
         data = self.storage.load()
 
         if not data:
-            return OptimizerState()
+            return State()
 
-        return OptimizerState.model_validate(data)
+        return State.model_validate(data)
 
 
 class BacktestRepository:

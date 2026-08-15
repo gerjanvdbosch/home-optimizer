@@ -8,7 +8,7 @@ from domain.models import (
     HeatPumpMeasurement,
     Measurements,
     OpenMeteoForecast,
-    OptimizerState,
+    State,
     Predictions,
     SeriesPoint,
     SolarMeasurement,
@@ -20,9 +20,9 @@ class StateMapper:
     def map(
         self,
         df: pd.DataFrame,
-        existing: OptimizerState | None = None,
-    ) -> OptimizerState:
-        return OptimizerState(
+        existing: State | None = None,
+    ) -> State:
+        return State(
             updated=datetime.now(timezone.utc),
             measurements=Measurements(
                 solar=SolarMeasurement(

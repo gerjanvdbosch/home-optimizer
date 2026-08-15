@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from domain.mapper import StateMapper
-from domain.models import Config, DatasetDefinition, OptimizerState, SeriesPoint
+from domain.models import Config, DatasetDefinition, State, SeriesPoint
 from features.dataset import DatasetBuilder, DatasetLoader
 from infrastructure.repository import StateRepository
 
@@ -19,7 +19,7 @@ class StateManager:
         self.repository = repository
         self.mapper = mapper
 
-    def load(self) -> OptimizerState:
+    def load(self) -> State:
         return self.repository.load()
 
     def update(self, config: Config) -> None:

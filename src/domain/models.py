@@ -382,7 +382,7 @@ class Schedule(BaseModel):
     boiler: BoilerSchedule = Field(default_factory=BoilerSchedule)
 
 
-class OptimizerState(BaseModel):
+class State(BaseModel):
     updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     measurements: Measurements = Field(default_factory=Measurements)
     forecast: Forecast = Field(default_factory=Forecast)
