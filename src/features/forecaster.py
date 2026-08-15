@@ -26,17 +26,14 @@ class SkforecastForecaster(Forecaster):
     @abstractmethod
     def create(self, **overrides: Any) -> ForecasterBase: ...
 
-    def arguments(self, df: pd.DataFrame):
-        return {
-            "y": df[self.target_column],
-            "exog": df[self.exog_columns],
-        }
+    def arguments(self, df: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+        y = df[self.target_column]
+        exog = df[self.exog_columns]
 
-    def predict_arguments(self, df: pd.DataFrame):
-        return {
-            # "last_window": last_window[self.target_column],
-            "exog": df[self.exog_columns] if df is not None else None,
-        }
+        return y, exog
+
+    def predict_arguments(self, df: pd.DataFrame) -> pd.DataFrame | None:
+        return df[self.exog_columns] if self.exog_columns else None
 
     @abstractmethod
     def search_space(self, trial: Trial) -> dict[str, Any]: ...
@@ -47,7 +44,9 @@ class SkforecastForecaster(Forecaster):
     def fit(self, df: pd.DataFrame):
         df = self.prepare(df)
 
-        self.forecaster.fit(**self.arguments(df))
+        y, exog = self.arguments(df)
+
+        self.forecaster.fit(y=y, exog=exog)
 
     def predict(
         self,
@@ -56,10 +55,9 @@ class SkforecastForecaster(Forecaster):
     ) -> pd.Series:
         df = self.prepare(df)
 
-        return self.forecaster.predict(
-            steps=steps,
-            **self.predict_arguments(df),
-        )
+        exog = self.predict_arguments(df)
+
+        return self.forecaster.predict(steps=steps, exog=exog)
 
     def backtest(
         self,
@@ -68,12 +66,15 @@ class SkforecastForecaster(Forecaster):
     ) -> BacktestResult:
         df = self.prepare(df)
 
+        y, exog = self.arguments(df)
+
         metric, result = backtesting_forecaster(
             n_jobs=1,
             metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps, 96),
-            **self.arguments(df),
+            y=y,
+            exog=exog,
         )
 
         return self.backtest_result(
@@ -91,11 +92,15 @@ class SkforecastForecaster(Forecaster):
     ) -> tuple[pd.DataFrame, Study]:
         df = self.prepare(df)
 
+        y, exog = self.arguments(df)
+
         result, study = bayesian_search_forecaster(
             n_jobs=1,
             metric="mean_absolute_error",
             forecaster=self.forecaster,
             cv=self.create_cv(df, steps, False),
+            y=y,
+            exog=exog,
             search_space=self.search_space,
             n_trials=n_trials,
             random_state=42,
@@ -106,7 +111,6 @@ class SkforecastForecaster(Forecaster):
                 "load_if_exists": True,
                 "direction": "minimize",
             },
-            **self.arguments(df),
         )
 
         return result, cast(Study, study)
