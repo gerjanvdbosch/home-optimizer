@@ -134,6 +134,12 @@ class SensorAttributesReference(BaseModel, Generic[T]):
     @model_validator(mode="before")
     @classmethod
     def resolve(cls, value):
+        if isinstance(value, str):
+            return {
+                "entity_id": value,
+                "attributes": {},
+            }
+
         if isinstance(value, (list, tuple)):
             return {
                 "entity_id": value[0],
@@ -164,9 +170,9 @@ class HeatPumpConfig(BaseModel):
 
 
 class SolcastAttributes(BaseModel):
-    p10: str = Field(description="10e percentile")
-    p50: str = Field(description="50e percentile")
-    p90: str = Field(description="90e percentile")
+    p10: str = Field(default="pv_estimate10", description="10e percentile")
+    p50: str = Field(default="pv_estimate", description="50e percentile")
+    p90: str = Field(default="pv_estimate90", description="90e percentile")
 
     def items(self):
         return (
@@ -180,15 +186,15 @@ class SolcastConfig(SensorAttributesReference[SolcastAttributes]): ...
 
 
 class OpenMeteoAttributes(BaseModel):
-    temperature: str = Field()
-    is_day: str = Field()
-    gti: str = Field()
-    cloud_cover_low: str = Field()
-    cloud_cover_mid: str = Field()
-    cloud_cover_high: str = Field()
-    wind_direction: str = Field()
-    wind_speed: str = Field()
-    precipitation: str = Field()
+    temperature: str = Field(default="temperature_2m")
+    is_day: str = Field(default="is_day")
+    gti: str = Field(default="global_tilted_irradiance")
+    cloud_cover_low: str = Field(default="cloud_cover_low")
+    cloud_cover_mid: str = Field(default="cloud_cover_mid")
+    cloud_cover_high: str = Field(default="cloud_cover_high")
+    wind_direction: str = Field(default="wind_direction_10m")
+    wind_speed: str = Field(default="wind_speed_10m")
+    precipitation: str = Field(default="precipitation")
 
     def items(self):
         return (

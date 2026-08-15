@@ -43,28 +43,8 @@ actions:
             }
           },
           "forecast": {
-            "solcast": [
-              "sensor.solcast_pv_forecast",
-              {
-                "p10": "pv_estimate10",
-                "p50": "pv_estimate",
-                "p90": "pv_estimate90"
-              }
-            ],
-            "open_meteo": [
-              "sensor.open_meteo_forecast",
-              {
-                "temperature": "temperature_2m",
-                "is_day": "temperature_2m",
-                "gti": "global_tilted_irradiance",
-                "cloud_cover_low": "cloud_cover_low",
-                "cloud_cover_mid": "cloud_cover_mid",
-                "cloud_cover_high": "cloud_cover_high",
-                "wind_direction": "wind_direction_10m",
-                "wind_speed": "wind_speed_10m",
-                "precipitation": "precipitation"
-              }
-            ]
+            "solcast": "sensor.solcast_pv_forecast",
+            "open_meteo": "sensor.open_meteo_forecast"
           },
           "presence": [
             "device_tracker.iphone_gerjan",
