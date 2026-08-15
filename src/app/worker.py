@@ -36,7 +36,7 @@ class Worker:
 
         logging.info(
             "Job queued: id=%s type=%s",
-            job.id[:5],
+            job.id[:6],
             job.type.value,
         )
 
@@ -73,7 +73,7 @@ class Worker:
 
                 logging.info(
                     "Job started: id=%s type=%s",
-                    job.id[:5],
+                    job.id[:6],
                     job.type.value,
                 )
 
@@ -82,14 +82,14 @@ class Worker:
 
                     logging.info(
                         "Job completed: id=%s type=%s",
-                        job.id[:5],
+                        job.id[:6],
                         job.type.value,
                     )
 
                 except Exception:
                     logging.exception(
                         "Job failed: id=%s type=%s",
-                        job.id[:5],
+                        job.id[:6],
                         job.type.value,
                     )
 
