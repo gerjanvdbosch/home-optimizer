@@ -48,6 +48,7 @@ class SolarForecaster(SklearnForecaster):
             "gti",
             "gti_delta",
             "temperature",
+            "precipitation",
             # "cloud_cover_low",
             # "cloud_cover_mid",
             # "cloud_cover_high",
@@ -207,10 +208,10 @@ class SolarForecaster(SklearnForecaster):
         final_prediction[day_mask] += prediction[day_mask]
 
         return pd.Series(
-            final_prediction,
+            np.maximum(final_prediction, 0),
             index=df["target_time"],
             name="pred",
-        ).clip(lower=0)
+        )
 
     def generate_walk_forward_folds(
         self,
@@ -555,6 +556,7 @@ class SolarForecaster(SklearnForecaster):
                     "gti",
                     "temperature",
                     "is_day",
+                    "precipitation",
                     # "cloud_cover_low",
                     # "cloud_cover_mid",
                     # "cloud_cover_high",

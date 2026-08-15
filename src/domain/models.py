@@ -340,7 +340,9 @@ class SolcastForecast(BaseModel):
 class OpenMeteoForecast(BaseModel):
     temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     gti: list[SeriesPoint[float]] = Field(default_factory=list)
-    cloud_cover: list[SeriesPoint[float]] = Field(default_factory=list)
+    cloud_cover_low: list[SeriesPoint[float]] = Field(default_factory=list)
+    cloud_cover_mid: list[SeriesPoint[float]] = Field(default_factory=list)
+    cloud_cover_high: list[SeriesPoint[float]] = Field(default_factory=list)
     wind_direction: list[SeriesPoint[float]] = Field(default_factory=list)
     wind_speed: list[SeriesPoint[float]] = Field(default_factory=list)
     precipitation: list[SeriesPoint[float]] = Field(default_factory=list)
@@ -349,7 +351,9 @@ class OpenMeteoForecast(BaseModel):
         return (
             ("temperature", self.temperature),
             ("gti", self.gti),
-            ("cloud_cover", self.cloud_cover),
+            ("cloud_cover_low", self.cloud_cover_low),
+            ("cloud_cover_mid", self.cloud_cover_mid),
+            ("cloud_cover_high", self.cloud_cover_high),
             ("wind_direction", self.wind_direction),
             ("wind_speed", self.wind_speed),
             ("precipitation", self.precipitation),

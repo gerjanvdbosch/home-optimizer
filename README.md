@@ -110,6 +110,22 @@ actions:
         } | to_json }}
 ```
 
+## Optimize API
+
+The `/api/optimize` endpoint is called from a Home Assistant automation using a
+`rest_command`.
+
+Example automation action:
+
+```yaml
+actions:
+  - action: rest_command.home_optimizer_api
+    data:
+      endpoint: optimize
+      payload: |
+        {{ {} | to_json }}
+```
+
 ## Home Assistant Setup
 
 Add the following configurations to your Home Assistant `configuration.yaml` to enable

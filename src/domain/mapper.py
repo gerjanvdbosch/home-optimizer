@@ -8,11 +8,11 @@ from domain.models import (
     HeatPumpMeasurement,
     Measurements,
     OpenMeteoForecast,
-    State,
     Predictions,
     SeriesPoint,
     SolarMeasurement,
     SolcastForecast,
+    State,
 )
 
 
@@ -47,7 +47,14 @@ class StateMapper:
                     p90=self._parse_series(df, "p90"),
                 ),
                 open_meteo=OpenMeteoForecast(
+                    temperature=self._parse_series(df, "temperature"),
                     gti=self._parse_series(df, "gti"),
+                    cloud_cover_low=self._parse_series(df, "cloud_cover_low"),
+                    cloud_cover_mid=self._parse_series(df, "cloud_cover_mid"),
+                    cloud_cover_high=self._parse_series(df, "cloud_cover_high"),
+                    wind_direction=self._parse_series(df, "wind_direction"),
+                    wind_speed=self._parse_series(df, "wind_speed"),
+                    precipitation=self._parse_series(df, "precipitation"),
                 ),
             ),
             predictions=existing.predictions if existing else Predictions(),

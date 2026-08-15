@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from domain.mapper import StateMapper
-from domain.models import Config, DatasetDefinition, State, SeriesPoint
+from domain.models import Config, DatasetDefinition, SeriesPoint, State
 from features.dataset import DatasetBuilder, DatasetLoader
 from infrastructure.repository import StateRepository
 
@@ -68,7 +68,12 @@ class StateManager:
             .attribute_series(
                 "open_meteo",
                 config.forecast.open_meteo,
-                attributes=["gti"],
+                attributes=[
+                    "gti",
+                    "cloud_cover_low",
+                    "cloud_cover_mid",
+                    "cloud_cover_high",
+                ],
                 target_resample="mean",
                 target_interval="30min",
                 target_label="right",

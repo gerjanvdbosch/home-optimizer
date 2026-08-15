@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-from domain.models import BacktestResult, JsonType, State
+from domain.models import BacktestResult, State
 from domain.time import to_local_series, to_local_time
 
 
@@ -16,7 +16,7 @@ def add_series(
             y=[p.value for p in points],
             mode="lines",
             name=name,
-            line=dict(width=3),
+            line=dict(width=2),
             connectgaps=True,
             hovertemplate="%{y:.0f} W<extra>%{fullData.name}</extra>",
         )
@@ -30,8 +30,44 @@ def solar_forecast_chart(
 ) -> str:
     fig = go.Figure()
 
-    for name, points in state.forecast.solcast.items():
-        add_series(fig, "Solcast " + name, points)
+    fig.add_trace(
+        go.Scatter(
+            x=[to_local_time(p.time) for p in state.forecast.solcast.p50],
+            y=[p.value for p in state.forecast.solcast.p50],
+            mode="lines",
+            name="Solcast",
+            line=dict(width=2),
+            connectgaps=True,
+            legendgroup="solcast",
+            hovertemplate="%{y:.0f} W<extra>%{fullData.name}</extra>",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=[to_local_time(p.time) for p in state.forecast.solcast.p10],
+            y=[p.value for p in state.forecast.solcast.p10],
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+            legendgroup="solcast",
+            hoverinfo="skip",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=[to_local_time(p.time) for p in state.forecast.solcast.p90],
+            y=[p.value for p in state.forecast.solcast.p90],
+            mode="lines",
+            line=dict(width=0),
+            fill="tonexty",
+            fillcolor="rgba(99, 110, 250, 0.15)",
+            showlegend=False,
+            legendgroup="solcast",
+            hoverinfo="skip",
+        )
+    )
 
     fig.add_trace(
         go.Scatter(
@@ -39,13 +75,34 @@ def solar_forecast_chart(
             y=[p.value * capacity * efficiency for p in state.forecast.open_meteo.gti],
             mode="lines",
             name="Open-Meteo",
-            line=dict(width=3),
+            line=dict(width=2),
             connectgaps=True,
             hovertemplate="%{y:.0f} W<extra>%{fullData.name}</extra>",
         )
     )
 
     add_series(fig, "PV production", state.measurements.solar.production)
+    add_series(fig, "PV prediction", state.predictions.solar)
+
+    cloud_layers = [
+        # ("Cloud cover low", state.forecast.open_meteo.cloud_cover_low),
+        # ("Cloud cover mid", state.forecast.open_meteo.cloud_cover_mid),
+        # ("Cloud cover high", state.forecast.open_meteo.cloud_cover_high),
+    ]
+
+    for label, points in cloud_layers:
+        fig.add_trace(
+            go.Scatter(
+                x=[to_local_time(p.time) for p in points],
+                y=[p.value for p in points],
+                mode="lines",
+                name=label,
+                line=dict(width=1),
+                connectgaps=True,
+                hovertemplate="%{y:.0f}%<extra>%{fullData.name}</extra>",
+                yaxis="y2",
+            )
+        )
 
     fig.update_layout(
         title=dict(
@@ -82,6 +139,15 @@ def solar_forecast_chart(
             gridcolor="rgba(255,255,255,0.08)",
             zeroline=False,
         ),
+        # yaxis2=dict(
+        #     title="Cloud cover (%)",
+        #     overlaying="y",
+        #     side="right",
+        #     range=[0, 100],
+        #     showgrid=False,
+        #     zeroline=False,
+        #     tickfont=dict(size=12),
+        # ),
         legend=dict(
             orientation="h",
             y=-0.15,
@@ -116,7 +182,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
                 name=bp.label,
                 legendgroup=bp.group,
                 showlegend=not bp.group,
-                line=dict(width=3, color=bp.color),
+                line=dict(width=2, color=bp.color),
                 visible=True,
                 connectgaps=True,
                 hovertemplate=(
@@ -139,7 +205,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
                     name=bp.group,
                     legendgroup=bp.group,
                     showlegend=True,
-                    line=dict(width=3, color=bp.color),
+                    line=dict(width=2, color=bp.color),
                 )
             )
 
