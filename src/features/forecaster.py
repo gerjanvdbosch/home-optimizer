@@ -192,16 +192,11 @@ class SklearnForecaster(Forecaster):
     def search_space(self, trial: Trial) -> dict[str, Any]:
         raise NotImplementedError()
 
-    def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
-        return {
-            "X": df[self.exog_columns],
-            "y": df[self.target_column],
-        }
+    def arguments(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+        return df[self.exog_columns], df[self.target_column]
 
-    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> dict[str, Any]:
-        return {
-            "X": df[self.exog_columns].iloc[:steps] if df is not None else None,
-        }
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> pd.DataFrame:
+        return df[self.exog_columns].iloc[:steps]
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
@@ -210,16 +205,19 @@ class SklearnForecaster(Forecaster):
         df = self.prepare(df)
 
         self.forecaster = self.create(**self.best_params)
-        self.forecaster.fit(**self.arguments(df))
+
+        X, y = self.arguments(df)
+
+        self.forecaster.fit(X, y)
 
     def predict(self, df: pd.DataFrame, steps: int = 24) -> pd.Series:
         df = self.prepare(df)
 
-        args = self.predict_arguments(df=df, steps=steps)
+        X = self.predict_arguments(df=df, steps=steps)
 
-        prediction = self.forecaster.predict(**args)
+        prediction = self.forecaster.predict(X)
 
-        return self.predict_result(prediction, df.iloc[:steps])
+        return self.predict_result(prediction, df.reindex(X.index))
 
     def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
         return pd.Series(prediction, index=df.index)

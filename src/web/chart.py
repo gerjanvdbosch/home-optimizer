@@ -82,7 +82,7 @@ def solar_forecast_chart(
     )
 
     add_series(fig, "PV production", state.measurements.solar.production)
-    add_series(fig, "PV prediction", state.predictions.solar)
+    add_series(fig, "ML prediction", state.predictions.solar)
 
     cloud_layers = [
         # ("Cloud cover low", state.forecast.open_meteo.cloud_cover_low),

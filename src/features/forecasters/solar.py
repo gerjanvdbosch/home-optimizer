@@ -105,7 +105,7 @@ class SolarForecaster(SklearnForecaster):
 
         return HistGradientBoostingRegressor(**params)
 
-    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> dict[str, Any]:
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> pd.DataFrame:
         now = datetime.now(UTC)
 
         future = (
@@ -113,22 +113,18 @@ class SolarForecaster(SklearnForecaster):
             .sort_values(["target_time", "time"])
             .drop_duplicates("target_time", keep="last")
             .sort_values("target_time")
+            .iloc[:steps]
         )
 
-        return {
-            "X": future[self.exog_columns].iloc[:steps],
-        }
+        return future[self.exog_columns]
 
-    def arguments(self, df: pd.DataFrame) -> dict[str, Any]:
+    def arguments(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
         df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
         df = df[(df["lead_time_hours"] >= 0.5) & (df["lead_time_hours"] <= 4.0)].copy()
 
         df["error"] = df[self.target_column] - df["p50"]
 
-        return {
-            "X": df[self.exog_columns],
-            "y": df["error"],
-        }
+        return df[self.exog_columns], df["error"]
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
