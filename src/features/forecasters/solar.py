@@ -42,20 +42,17 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
-            # "p10",
             "p50",
-            # "p90",
             "gti",
             "gti_delta",
             "temperature",
             "precipitation",
-            # "cloud_cover_low",
-            # "cloud_cover_mid",
-            # "cloud_cover_high",
+            "cloud_cover_low",
+            "cloud_cover_mid",
+            "cloud_cover_high",
             "lead_time_hours",
-            # "lead_time_hours_sq",
-            "spread",
-            # "spread_log",
+            "spread_upper",
+            "spread_lower",
             "is_day",
             "hour_sin",
             "hour_cos",
@@ -66,40 +63,35 @@ class SolarForecaster(SklearnForecaster):
             # "solar_lag3",
             # "solar_lag4",
             "error_lag1",
-            # "error_lag2",
+            "error_lag2",
             # "error_lag3",
             # "error_lag4",
-            # "spread_x_lead",
-            # "p50_x_lead",
+            "error_trend",
         ]
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {
-            "loss": trial.suggest_categorical(
-                "loss", ["squared_error", "absolute_error"]
-            ),
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.05, log=True),
-            "max_leaf_nodes": trial.suggest_int("max_leaf_nodes", 7, 15),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 50, 150),
+            "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.1, log=True),
+            "max_leaf_nodes": trial.suggest_int("max_leaf_nodes", 15, 45),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 20, 100),
             "l2_regularization": trial.suggest_float(
-                "l2_regularization", 3.0, 100.0, log=True
+                "l2_regularization", 0.1, 50.0, log=True
             ),
-            "max_iter": trial.suggest_int("max_iter", 25, 100, step=25),
         }
 
     def create(self, **overrides: Any) -> HistGradientBoostingRegressor:
         params: dict[str, Any] = dict(
             loss="absolute_error",
-            max_iter=48,
-            learning_rate=0.042,
-            max_leaf_nodes=13,
+            max_iter=150,
+            learning_rate=0.03,
+            max_leaf_nodes=15,
             min_samples_leaf=77,
             l2_regularization=86.4,
-            max_depth=None,
+            max_depth=4,
             random_state=42,
             early_stopping=True,
             validation_fraction=0.15,
-            n_iter_no_change=10,
+            n_iter_no_change=15,
         )
         params.update(overrides)
 
@@ -169,18 +161,11 @@ class SolarForecaster(SklearnForecaster):
         df["lead_time_hours"] = (
             df["target_time"] - df["time"]
         ).dt.total_seconds() / 3600
-        df["lead_time_hours_sq"] = df["lead_time_hours"] ** 2
 
-        df["spread"] = df["p90"] - df["p10"]
-        df["spread_log"] = np.log1p(df["spread"])
+        df["error_trend"] = df["error_lag1"] - df["error_lag2"]
 
         df["spread_upper"] = df["p90"] - df["p50"]
         df["spread_lower"] = df["p50"] - df["p10"]
-        df["spread_upper_log"] = np.log1p(df["spread_upper"])
-        df["spread_lower_log"] = np.log1p(df["spread_lower"])
-
-        df["spread_x_lead"] = df["spread"] * df["lead_time_hours"]
-        df["p50_x_lead"] = df["p50"] * df["lead_time_hours"]
 
         hour = df["target_time"].dt.hour + df["target_time"].dt.minute / 60
 
@@ -553,9 +538,9 @@ class SolarForecaster(SklearnForecaster):
                     "temperature",
                     "is_day",
                     "precipitation",
-                    # "cloud_cover_low",
-                    # "cloud_cover_mid",
-                    # "cloud_cover_high",
+                    "cloud_cover_low",
+                    "cloud_cover_mid",
+                    "cloud_cover_high",
                 ],
                 interval="30m",
                 aggregation="last",

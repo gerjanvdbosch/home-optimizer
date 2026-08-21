@@ -67,7 +67,27 @@ actions:
       endpoint: fit
       payload: |
         {{ {
-          "days": 90
+          "days": 90,
+          "forecaster": "solar"
+        } | to_json }}
+```
+
+## Predict API
+
+The `/api/predict` endpoint is called from a Home Assistant automation using a
+`rest_command`.
+
+Example automation action:
+
+```yaml
+actions:
+  - action: rest_command.home_optimizer_api
+    data:
+      endpoint: predict
+      payload: |
+        {{ {
+          "forecaster": "solar",
+          "step": 48
         } | to_json }}
 ```
 
@@ -86,7 +106,8 @@ actions:
       payload: |
         {{ {
           "days": 90,
-          "forecaster": "solar"
+          "forecaster": "solar",
+          "steps": 24
         } | to_json }}
 ```
 
