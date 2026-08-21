@@ -184,12 +184,6 @@ class SkforecastForecaster(Forecaster):
             load_forecaster(str(file_name)),
         )
 
-    def remove(self, path: Path) -> None:
-        file_name = path / f"{self.name}.joblib"
-
-        if file_name.exists():
-            file_name.unlink()
-
 
 class SklearnForecaster(Forecaster):
     def __init__(self):
@@ -278,9 +272,3 @@ class SklearnForecaster(Forecaster):
         self.forecaster = load(file_name)
 
         self._load_best_params(storage=study_storage)
-
-    def remove(self, path: Path) -> None:
-        file_name = path / f"{self.name}.joblib"
-
-        if file_name.exists():
-            file_name.unlink()

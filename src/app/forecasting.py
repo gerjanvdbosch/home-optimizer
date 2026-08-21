@@ -45,8 +45,6 @@ class Forecasting:
             if config.forecaster and forecaster.name != config.forecaster:
                 continue
 
-            forecaster.remove(self.path)
-
             forecaster, df = self._prepare(forecaster, config.days)
 
             forecaster.fit(df)
