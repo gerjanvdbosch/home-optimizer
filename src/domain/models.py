@@ -231,7 +231,7 @@ class FitConfig(BaseModel):
 
 class PredictConfig(BaseModel):
     forecaster: ForecasterType
-    steps: int = Field(default=24)
+    steps: int = Field(default=48)
 
 
 class BacktestConfig(BaseModel):
