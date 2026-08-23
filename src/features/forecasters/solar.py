@@ -22,7 +22,7 @@ from domain.time import to_local_time
 from features.dataset import DatasetBuilder
 from features.forecaster import SklearnForecaster
 
-MIN_SOLAR_IRRADIANCE = 10.0
+MIN_SOLAR_IRRADIANCE = 100
 RETRAIN_INTERVAL_HOURS = 6
 MAX_TRAIN_WINDOW_DAYS = 30
 
