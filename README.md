@@ -87,7 +87,7 @@ actions:
       payload: |
         {{ {
           "forecaster": "solar",
-          "step": 48
+          "steps": 48
         } | to_json }}
 ```
 
