@@ -47,7 +47,9 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
+            "p10",
             "p50",
+            "p90",
             "spread_upper",
             "spread_lower",
             "gti",
@@ -68,7 +70,7 @@ class SolarForecaster(SklearnForecaster):
             "max_leaf_nodes": trial.suggest_int("max_leaf_nodes", 10, 63),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 10, 100),
             "l2_regularization": trial.suggest_float(
-                "l2_regularization", 0.1, 50.0, log=True
+                "l2_regularization", 0.1, 100.0, log=True
             ),
             "max_depth": trial.suggest_int("max_depth", 3, 8),
         }
@@ -79,8 +81,8 @@ class SolarForecaster(SklearnForecaster):
             max_iter=150,
             learning_rate=0.03,
             max_leaf_nodes=15,
-            min_samples_leaf=77,
-            l2_regularization=86.4,
+            min_samples_leaf=80,
+            l2_regularization=90,
             max_depth=4,
             random_state=42,
             early_stopping=True,
@@ -108,10 +110,9 @@ class SolarForecaster(SklearnForecaster):
         df = df.dropna(subset=[self.target_column, *self.exog_columns]).copy()
 
         df = df[
-            (df["is_day"] == 1)
-            & (df["p50"] > MIN_SOLAR_IRRADIANCE)
+            (df["p50"] > MIN_SOLAR_IRRADIANCE)
             & (df["lead_time_hours"] >= 0.0)
-            & (df["lead_time_hours"] <= 6.0)
+            & (df["lead_time_hours"] <= 4.0)
         ].copy()
 
         y_target = df[self.target_column] - df["p50"]
@@ -138,11 +139,8 @@ class SolarForecaster(SklearnForecaster):
 
     def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
         p50 = df["p50"].to_numpy()
-        is_day = (df["is_day"] == 1).to_numpy()
 
-        final_prediction = p50 + prediction
-
-        final_prediction = np.where(~is_day, 0.0, final_prediction)
+        final_prediction = p50 + np.nan_to_num(prediction, nan=0.0)
         final_prediction = np.where(p50 < MIN_SOLAR_IRRADIANCE, p50, final_prediction)
         final_prediction = np.maximum(final_prediction, 0.0)
 
@@ -312,7 +310,7 @@ class SolarForecaster(SklearnForecaster):
                 BacktestPoint(
                     label=f"ML {label_ts}",
                     group="ML",
-                    points=make_points(test_clean, "pred"),
+                    points=make_points(test_clean.sort_values("target_time"), "pred"),
                 )
             )
             backtest_points.append(
@@ -469,7 +467,6 @@ class SolarForecaster(SklearnForecaster):
                 attributes=[
                     "gti",
                     "temperature",
-                    "is_day",
                     "precipitation",
                     "wind_speed",
                     "cloud_cover_low",
