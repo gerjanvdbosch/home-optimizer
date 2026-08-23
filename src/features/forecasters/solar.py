@@ -51,7 +51,6 @@ class SolarForecaster(SklearnForecaster):
             "spread_upper",
             "spread_lower",
             "gti",
-            "gti_delta",
             "temperature",
             "wind_speed",
             "precipitation",
@@ -128,9 +127,6 @@ class SolarForecaster(SklearnForecaster):
 
         df["spread_upper"] = (df["p90"] - df["p50"]).clip(lower=0)
         df["spread_lower"] = (df["p50"] - df["p10"]).clip(lower=0)
-
-        df["gti_lag1"] = df.groupby("time")["gti"].shift(1)
-        df["gti_delta"] = (df["gti"] - df["gti_lag1"]).fillna(0)
 
         df["hour"] = df["target_time"].dt.hour + df["target_time"].dt.minute / 60.0
 
