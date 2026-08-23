@@ -85,7 +85,7 @@ class SolarForecaster(SklearnForecaster):
             l2_regularization=90,
             max_depth=4,
             random_state=42,
-            early_stopping=True,
+            early_stopping=False,
             validation_fraction=0.15,
             n_iter_no_change=15,
         )
