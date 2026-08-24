@@ -62,14 +62,17 @@ class SolarForecaster(SklearnForecaster):
             "lead_time_hours",
             "hour",
             "season_phase",
+            "weather_discrepancy",
             "lag_30m_mean",
             "lag_30m_max",
             "lag_30m_std",
+            "lag_30m_error",
             "lag_30m_trend",
             "lag_1h_trend",
             "lag_2h_mean",
             "lag_2h_max",
             "lag_2h_std",
+            "lag_2h_error_mean",
             "lag_24h_mean",
         ]
 
@@ -144,8 +147,10 @@ class SolarForecaster(SklearnForecaster):
             2 * np.pi * (df["target_time"].dt.dayofyear - 172) / 365.25
         )
 
+        df["weather_discrepancy"] = df["p50"] - df["gti"]
+
         actuals = (
-            df[["target_time", "P_solar", "P_max", "P_std"]]
+            df[["target_time", "P_solar", "P_max", "P_std", "p50"]]
             .drop_duplicates("target_time")
             .set_index("target_time")
             .sort_index()
@@ -162,16 +167,23 @@ class SolarForecaster(SklearnForecaster):
             df["time"].map(lag_1["P_solar"] - lag_2["P_solar"]).fillna(0.0)
         )
 
+        solcast_error = actuals["P_solar"] - actuals["p50"]
+
+        df["lag_30m_error"] = df["time"].map(solcast_error.shift(1)).fillna(0.0)
+
         df["lag_1h_trend"] = (
             df["time"].map(lag_1["P_solar"] - lag_3["P_solar"]).fillna(0.0)
         )
 
         rolling_2h_solar = actuals["P_solar"].shift(1).rolling(window=4, min_periods=1)
         rolling_2h_max = actuals["P_max"].shift(1).rolling(window=4, min_periods=1)
+        rolling_2h_error = solcast_error.shift(1).rolling(window=4, min_periods=1)
 
         df["lag_2h_mean"] = df["time"].map(rolling_2h_solar.mean()).fillna(0.0)
         df["lag_2h_max"] = df["time"].map(rolling_2h_max.max()).fillna(0.0)
         df["lag_2h_std"] = df["time"].map(rolling_2h_solar.std()).fillna(0.0)
+
+        df["lag_2h_error_mean"] = df["time"].map(rolling_2h_error.mean()).fillna(0.0)
 
         df["lag_24h_mean"] = (
             df["target_time"].map(actuals["P_solar"].shift(48)).fillna(0.0)
