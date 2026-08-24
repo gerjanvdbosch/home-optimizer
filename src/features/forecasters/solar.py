@@ -154,6 +154,7 @@ class SolarForecaster(SklearnForecaster):
             .drop_duplicates("target_time")
             .set_index("target_time")
             .sort_index()
+            .asfreq("30min")
         )
 
         lag_1 = actuals.shift(1)
@@ -189,7 +190,7 @@ class SolarForecaster(SklearnForecaster):
             df["target_time"].map(actuals["P_solar"].shift(48)).fillna(0.0)
         )
 
-        df = df.drop(columns=["P_max", "P_std"])
+        df = df.drop(columns=["P_max", "P_std"], errors="ignore")
 
         return df.sort_values(["time", "target_time"])
 
