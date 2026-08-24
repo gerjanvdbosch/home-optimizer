@@ -182,7 +182,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
                 name=bp.label,
                 legendgroup=bp.group,
                 showlegend=not bp.group,
-                line=dict(width=2, color=bp.color),
+                line=dict(width=1, color=bp.color),
                 visible=True,
                 connectgaps=True,
                 hovertemplate=(
@@ -205,7 +205,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
                     name=bp.group,
                     legendgroup=bp.group,
                     showlegend=True,
-                    line=dict(width=2, color=bp.color),
+                    line=dict(width=1, color=bp.color),
                 )
             )
 
