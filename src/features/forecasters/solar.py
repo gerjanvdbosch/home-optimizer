@@ -66,6 +66,7 @@ class SolarForecaster(SklearnForecaster):
             "lag_30m_max",
             "lag_30m_std",
             "lag_30m_trend",
+            "lag_1h_trend",
             "lag_2h_mean",
             "lag_2h_max",
             "lag_2h_std",
@@ -152,12 +153,17 @@ class SolarForecaster(SklearnForecaster):
 
         lag_1 = actuals.shift(1)
         lag_2 = actuals.shift(2)
+        lag_3 = actuals.shift(3)
 
         df["lag_30m_mean"] = df["time"].map(lag_1["P_solar"]).fillna(0.0)
         df["lag_30m_max"] = df["time"].map(lag_1["P_max"]).fillna(0.0)
         df["lag_30m_std"] = df["time"].map(lag_1["P_std"]).fillna(0.0)
         df["lag_30m_trend"] = (
             df["time"].map(lag_1["P_solar"] - lag_2["P_solar"]).fillna(0.0)
+        )
+
+        df["lag_1h_trend"] = (
+            df["time"].map(lag_1["P_solar"] - lag_3["P_solar"]).fillna(0.0)
         )
 
         rolling_2h_solar = actuals["P_solar"].shift(1).rolling(window=4, min_periods=1)
