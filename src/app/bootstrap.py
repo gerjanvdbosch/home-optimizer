@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.forecasting import Forecasting
+from app.optimization import Optimization
 from app.state import StateManager
 from domain.mapper import StateMapper
 from domain.models import Settings
@@ -33,6 +34,7 @@ class Container:
     config_repository: ConfigRepository
     state_manager: StateManager
     forecasting: Forecasting
+    optimization: Optimization
     backtest_repository: BacktestRepository
 
 
@@ -88,12 +90,19 @@ def create_container() -> Container:
         ],
     )
 
-    return Container(
+    optimization = Optimization(
+        state_manager=state_manager,
+    )
+
+    container = Container(
         config_repository=config_repository,
         state_manager=state_manager,
         forecasting=forecasting,
+        optimization=optimization,
         backtest_repository=backtest_repository,
     )
+
+    return container
 
 
 def load_settings() -> Settings:
