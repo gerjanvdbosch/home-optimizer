@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Generic, Iterable, Literal, Protocol, Sequence, TypeVar, Union
+from typing import Any, Generic, Iterable, Literal, Protocol, Sequence, TypeVar
 
 import pandas as pd
 from optuna import Study
@@ -278,7 +278,7 @@ class DataDefinition(BaseModel):
 
 class TimeSeriesDefinition(DataDefinition):
     sensor: SensorReference
-    aggregation: Union[Aggregation, None] = None
+    aggregation: Aggregation | None = None
     interval: str = "1min"
     fill: FillMethod | int | float = "none"
 
@@ -295,7 +295,7 @@ class AttributeSeriesDefinition(DataDefinition):
 
 
 class AttributeTimeSeriesDefinition(AttributeSeriesDefinition):
-    aggregation: Union[Aggregation, None] = None
+    aggregation: Aggregation | None = None
     interval: str = "1min"
     fill: FillMethod | int | float = "none"
 
