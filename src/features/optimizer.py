@@ -1,60 +1,13 @@
-from __future__ import annotations
-
 import logging
-from dataclasses import dataclass
-from typing import Sequence
 
 import pyomo.environ as pyo
+
+from domain.models import MPCConfig, MPCInput, MPCResult
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class MPCConfig:
-    step_hours: float = 0.25
-    boiler_power_kw: float = 2.0
-    boiler_energy_kwh: float = 2.0
-    max_starts: int = 1
-
-    @property
-    def boiler_steps(self) -> int:
-        if self.step_hours <= 0:
-            raise ValueError("step_hours must be greater than zero.")
-        if self.boiler_power_kw <= 0:
-            raise ValueError("boiler_power_kw must be greater than zero.")
-        if self.boiler_energy_kwh <= 0:
-            raise ValueError("boiler_energy_kwh must be greater than zero.")
-
-        energy_per_step = self.boiler_power_kw * self.step_hours
-        steps = self.boiler_energy_kwh / energy_per_step
-
-        if not steps.is_integer():
-            raise ValueError(
-                "boiler_energy_kwh must be an exact multiple of "
-                "boiler_power_kw * step_hours."
-            )
-        return int(steps)
-
-
-@dataclass(frozen=True)
-class MPCInput:
-    solar_forecast_kw: Sequence[float]
-    boiler_on: bool = False
-
-
-@dataclass(frozen=True)
-class MPCResult:
-    schedule: tuple[int, ...]
-    objective_value: float
-    solver_status: str
-    termination_condition: str
-
-
 class MPCOptimizer:
-    """
-    Bouwt en lost het Pyomo-model voor de energie-optimalisatie op.
-    """
-
     def __init__(
         self,
         config: MPCConfig,

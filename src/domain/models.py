@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Generic, Iterable, Literal, Protocol, TypeVar
+from typing import Any, Generic, Iterable, Literal, Protocol, Sequence, TypeVar, Union
 
 import pandas as pd
 from optuna import Study
@@ -247,13 +247,38 @@ class TuneConfig(BacktestConfig):
 class OptimizeConfig(BaseModel): ...
 
 
+class MPCConfig(BaseModel):
+    step_hours: float = Field(default=0.25, gt=0)
+    boiler_power_kw: float = Field(default=2.0, gt=0)
+    boiler_duration_hours: float = Field(default=1.0, gt=0)
+    max_starts: int = 1
+
+    @property
+    def boiler_steps(self) -> int:
+        return int(self.boiler_duration_hours / self.step_hours)
+
+
+@dataclass(frozen=True)
+class MPCInput:
+    solar_forecast_kw: Sequence[float]
+    boiler_on: bool = False
+
+
+@dataclass(frozen=True)
+class MPCResult:
+    schedule: tuple[int, ...]
+    objective_value: float
+    solver_status: str
+    termination_condition: str
+
+
 class DataDefinition(BaseModel):
     name: str
 
 
 class TimeSeriesDefinition(DataDefinition):
     sensor: SensorReference
-    aggregation: Aggregation | None = None
+    aggregation: Union[Aggregation, None] = None
     interval: str = "1min"
     fill: FillMethod | int | float = "none"
 
@@ -270,7 +295,7 @@ class AttributeSeriesDefinition(DataDefinition):
 
 
 class AttributeTimeSeriesDefinition(AttributeSeriesDefinition):
-    aggregation: Aggregation | None = None
+    aggregation: Union[Aggregation, None] = None
     interval: str = "1min"
     fill: FillMethod | int | float = "none"
 

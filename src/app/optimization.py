@@ -1,12 +1,12 @@
 import logging
 
 from app.state import StateManager
-from features.optimizer import (
+from domain.models import (
     MPCConfig,
     MPCInput,
-    MPCOptimizer,
     MPCResult,
 )
+from features.optimizer import MPCOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class Optimization:
         mpc_config = MPCConfig(
             step_hours=0.25,
             boiler_power_kw=2000.0,
-            boiler_energy_kwh=2000.0,
+            boiler_duration_hours=1.0,
         )
 
         solar_forecast = [p.value for p in state.predictions.solar]
