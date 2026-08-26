@@ -158,7 +158,6 @@ class StateManager:
                 config.solar.production,
                 aggregation="mean",
                 interval="15m",
-                fill=0,
             )
             .timeseries(
                 "boiler_top_temperature",
