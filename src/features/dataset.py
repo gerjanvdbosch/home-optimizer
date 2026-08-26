@@ -347,6 +347,14 @@ class TimeSeriesLoader(DataLoader):
             if point["value"] is not None
         ]
 
+        if not rows:
+            return pd.DataFrame(
+                {
+                    "time": pd.to_datetime([], utc=True),
+                    definition.name: pd.Series(),
+                }
+            )
+
         return pd.DataFrame(rows)
 
 
