@@ -121,7 +121,7 @@ def solar_forecast_chart(
             l=70,
             r=20,
             t=60,
-            b=80,
+            b=10,
         ),
         height=400,
         font=dict(
@@ -226,7 +226,7 @@ def backtest_chart(result: BacktestResult | None) -> str:
             l=70,
             r=20,
             t=60,
-            b=80,
+            b=10,
         ),
         height=400,
         font=dict(
