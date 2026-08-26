@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from app.forecasting import Forecasting
 from app.optimization import Optimization
 from app.state import StateManager
-from domain.mapper import StateMapper
 from domain.models import Settings
 from features.dataset import (
     AttributeSeriesLoader,
@@ -71,7 +70,6 @@ def create_container() -> Container:
     state_manager = StateManager(
         loader=dataset_loader,
         repository=state_repository,
-        mapper=StateMapper(),
     )
 
     models_path = settings.data_path / "models"
