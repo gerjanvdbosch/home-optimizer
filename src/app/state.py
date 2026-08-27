@@ -1,19 +1,12 @@
 from datetime import datetime, timezone
+from typing import Sequence
 
 import pandas as pd
 
 from domain.models import (
-    BoilerMeasurement,
     Config,
     DatasetDefinition,
-    Forecast,
-    HeatPumpMeasurement,
-    Measurements,
-    OpenMeteoForecast,
-    Predictions,
     SeriesPoint,
-    SolarMeasurement,
-    SolcastForecast,
     State,
 )
 from features.dataset import DatasetBuilder, DatasetLoader
@@ -67,49 +60,48 @@ class StateManager:
 
         self.repository.save(state)
 
+    def update_schedule(
+        self,
+        schedule: Sequence[int],
+        power_kw: float,
+        times: list[datetime],
+    ) -> None:
+        boiler_power = [
+            SeriesPoint(time=t, value=float(val) * power_kw)
+            for t, val in zip(times, schedule, strict=False)
+        ]
+
+        state = self.load()
+        state.schedule.heat_pump.power = boiler_power
+
+        self.repository.save(state)
+
     def _map(
         self,
         df: pd.DataFrame,
         existing: State | None = None,
     ) -> State:
-        return State(
-            updated=datetime.now(timezone.utc),
-            measurements=Measurements(
-                solar=SolarMeasurement(
-                    production=self._parse_series(df, "pv_production")
-                ),
-                heat_pump=HeatPumpMeasurement(
-                    state=self._parse_series(df, "heat_pump_state"),
-                    boiler=BoilerMeasurement(
-                        top_temperature=self._parse_series(
-                            df, "boiler_top_temperature"
-                        ),
-                        bottom_temperature=self._parse_series(
-                            df, "boiler_bottom_temperature"
-                        ),
-                    ),
-                ),
-            ),
-            forecast=Forecast(
-                solcast=SolcastForecast(
-                    p10=self._parse_series(df, "p10"),
-                    p50=self._parse_series(df, "p50"),
-                    p90=self._parse_series(df, "p90"),
-                ),
-                open_meteo=OpenMeteoForecast(
-                    temperature=self._parse_series(df, "temperature"),
-                    gti=self._parse_series(df, "gti"),
-                    cloud_cover_low=self._parse_series(df, "cloud_cover_low"),
-                    cloud_cover_mid=self._parse_series(df, "cloud_cover_mid"),
-                    cloud_cover_high=self._parse_series(df, "cloud_cover_high"),
-                    wind_direction=self._parse_series(df, "wind_direction"),
-                    wind_speed=self._parse_series(df, "wind_speed"),
-                    precipitation=self._parse_series(df, "precipitation"),
-                ),
-            ),
-            predictions=existing.predictions if existing else Predictions(),
-            schedule=existing.schedule if existing else None,
+        state = State(updated=datetime.now(timezone.utc))
+
+        if existing is not None:
+            state.predictions = existing.predictions
+            state.schedule = existing.schedule
+
+        state.measurements.solar.production = self._parse_series(df, "pv_production")
+        state.measurements.heat_pump.state = self._parse_series(df, "heat_pump_state")
+        state.measurements.heat_pump.boiler.top_temperature = self._parse_series(
+            df, "boiler_top_temperature"
         )
+        state.measurements.heat_pump.boiler.bottom_temperature = self._parse_series(
+            df, "boiler_bottom_temperature"
+        )
+
+        for forecast_source in ["solcast", "open_meteo"]:
+            source_obj = getattr(state.forecast, forecast_source)
+            for attr, _ in source_obj.items():
+                setattr(source_obj, attr, self._parse_series(df, attr))
+
+        return state
 
     def _parse_series(self, df: pd.DataFrame, column: str) -> list[SeriesPoint]:
         if column not in df.columns:
@@ -136,6 +128,7 @@ class StateManager:
                 config.forecast.open_meteo,
                 attributes=[
                     "gti",
+                    "temperature",
                     "cloud_cover_low",
                     "cloud_cover_mid",
                     "cloud_cover_high",

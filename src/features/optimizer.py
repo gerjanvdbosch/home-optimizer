@@ -53,7 +53,7 @@ class MPCOptimizer:
         )
 
         solar_used_kwh = {
-            t: min(solar_values[t], self.config.boiler_power_kw)
+            t: min(solar_values[t], self.config.boiler_power)
             * self.config.step_hours
             for t in model.T
         }

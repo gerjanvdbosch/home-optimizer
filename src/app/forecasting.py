@@ -35,12 +35,12 @@ class Forecasting:
         self.study_storage = study_storage
         self.forecasters = forecasters
 
-    def update(self, config: Config):
+    def update(self, config: Config) -> None:
         self.config_repository.save(config)
         self.state_manager.update(config)
         self.backtest_repository.clear()
 
-    def fit(self, config: FitConfig):
+    def fit(self, config: FitConfig) -> None:
         for forecaster in self.forecasters:
             if config.forecaster and forecaster.name != config.forecaster:
                 continue
@@ -51,14 +51,14 @@ class Forecasting:
 
             forecaster.save(self.path)
 
-    def predict(self, config: PredictConfig):
+    def predict(self, config: PredictConfig) -> None:
         forecaster, df = self._prepare(config.forecaster, 1)
 
         result = forecaster.predict(df=df, steps=config.steps)
 
         self.state_manager.update_prediction(forecaster.name, result)
 
-    def backtest(self, config: BacktestConfig):
+    def backtest(self, config: BacktestConfig) -> None:
         forecaster, df = self._prepare(config.forecaster, config.days)
 
         result = forecaster.backtest(df, steps=config.steps)
@@ -70,7 +70,7 @@ class Forecasting:
 
         self.backtest_repository.save(result)
 
-    def tune(self, config: TuneConfig):
+    def tune(self, config: TuneConfig) -> None:
         forecaster, df = self._prepare(config.forecaster, config.days)
 
         self.path.mkdir(parents=True, exist_ok=True)

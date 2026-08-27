@@ -249,7 +249,7 @@ class OptimizeConfig(BaseModel): ...
 
 class MPCConfig(BaseModel):
     step_hours: float = Field(default=0.25, gt=0)
-    boiler_power_kw: float = Field(default=2.0, gt=0)
+    boiler_power: float = Field(default=2.0, gt=0)
     boiler_duration_hours: float = Field(default=1.0, gt=0)
     max_starts: int = 1
 
@@ -408,6 +408,7 @@ class BoilerSchedule(BaseModel):
 
 
 class Schedule(BaseModel):
+    heat_pump: HeatPumpSchedule = Field(default_factory=HeatPumpSchedule)
     boiler: BoilerSchedule = Field(default_factory=BoilerSchedule)
 
 
@@ -416,7 +417,7 @@ class State(BaseModel):
     measurements: Measurements = Field(default_factory=Measurements)
     forecast: Forecast = Field(default_factory=Forecast)
     predictions: Predictions = Field(default_factory=Predictions)
-    schedule: Schedule | None = None
+    schedule: Schedule = Field(default_factory=Schedule)
 
 
 class BacktestPoint(BaseModel):
