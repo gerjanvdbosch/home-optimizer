@@ -123,7 +123,7 @@ class SolarForecaster(SklearnForecaster):
 
         df = df[
             (df["p50"] > MIN_SOLAR_IRRADIANCE)
-            & (df["lead_time_hours"] >= 0.0)
+            & (df["lead_time_hours"] >= 0.5)
             & (df["lead_time_hours"] <= 6.0)
         ].copy()
 
