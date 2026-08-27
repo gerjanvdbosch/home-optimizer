@@ -129,9 +129,6 @@ class StateManager:
                 attributes=[
                     "gti",
                     "temperature",
-                    "cloud_cover_low",
-                    "cloud_cover_mid",
-                    "cloud_cover_high",
                 ],
                 target_resample="mean",
                 target_interval="30min",

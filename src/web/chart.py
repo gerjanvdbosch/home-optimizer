@@ -84,26 +84,6 @@ def solar_forecast_chart(
     add_series(fig, "PV production", state.measurements.solar.production)
     add_series(fig, "ML prediction", state.predictions.solar)
 
-    cloud_layers = [
-        # ("Cloud cover low", state.forecast.open_meteo.cloud_cover_low),
-        # ("Cloud cover mid", state.forecast.open_meteo.cloud_cover_mid),
-        # ("Cloud cover high", state.forecast.open_meteo.cloud_cover_high),
-    ]
-
-    for label, points in cloud_layers:
-        fig.add_trace(
-            go.Scatter(
-                x=[to_local_time(p.time) for p in points],
-                y=[p.value for p in points],
-                mode="lines",
-                name=label,
-                line=dict(width=1),
-                connectgaps=True,
-                hovertemplate="%{y:.0f}%<extra>%{fullData.name}</extra>",
-                yaxis="y2",
-            )
-        )
-
     fig.update_layout(
         title=dict(
             text="Solar forecast",
@@ -139,15 +119,6 @@ def solar_forecast_chart(
             gridcolor="rgba(255,255,255,0.08)",
             zeroline=False,
         ),
-        # yaxis2=dict(
-        #     title="Cloud cover (%)",
-        #     overlaying="y",
-        #     side="right",
-        #     range=[0, 100],
-        #     showgrid=False,
-        #     zeroline=False,
-        #     tickfont=dict(size=12),
-        # ),
         legend=dict(
             orientation="h",
             y=-0.15,
