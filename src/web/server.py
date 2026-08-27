@@ -19,7 +19,7 @@ from domain.models import (
     PredictConfig,
     TuneConfig,
 )
-from web.chart import backtest_chart, solar_forecast_chart
+from web.chart import backtest_chart, dashboard_chart, solar_chart
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -74,7 +74,8 @@ async def dashboard(request: Request):
         request=request,
         name="dashboard.html",
         context={
-            "solar_chart": solar_forecast_chart(
+            "dashboard_chart": dashboard_chart(state),
+            "solar_chart": solar_chart(
                 state,
                 capacity=config.solar.capacity,
                 efficiency=config.solar.efficiency,
