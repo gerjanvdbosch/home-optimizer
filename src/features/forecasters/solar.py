@@ -149,13 +149,23 @@ class SolarForecaster(SklearnForecaster):
 
         df["weather_discrepancy"] = df["p50"] - df["gti"]
 
-        actuals = (
-            df[["target_time", "P_solar", "P_max", "P_std", "p50"]]
-            .drop_duplicates("target_time")
+        forecast_df = df[df["target_time"] > df["time"]].copy()
+
+        most_recent_forecasts = (
+            forecast_df.sort_values(["target_time", "time"])
+            .drop_duplicates("target_time", keep="last")
             .set_index("target_time")
             .sort_index()
-            .asfreq("30min")
         )
+
+        actuals = most_recent_forecasts[
+            [
+                "P_solar",
+                "P_max",
+                "P_std",
+                "p50",
+            ]
+        ].asfreq("30min")
 
         lag_1 = actuals.shift(1)
         lag_2 = actuals.shift(2)
