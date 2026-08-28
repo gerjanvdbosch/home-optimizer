@@ -556,6 +556,11 @@ class SolarForecaster(SklearnForecaster):
                 ],
                 interval="30m",
                 aggregation="last",
+                target_resample="mean",
+                target_interval="30min",
+                target_label="right",
+                target_closed="right",
+                target_shift=["gti", "precipitation"],
             )
             .join(
                 left="solcast",

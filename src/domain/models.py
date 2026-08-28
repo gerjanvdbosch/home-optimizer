@@ -289,7 +289,7 @@ class AttributeSeriesDefinition(DataDefinition):
     target_closed: Literal["right", "left"] | None = None
     target_label: Literal["right", "left"] | None = None
     target_resample: str | None = None
-    target_shift: bool = False
+    target_shift: bool | list[str] = False
 
 
 class AttributeTimeSeriesDefinition(AttributeSeriesDefinition):

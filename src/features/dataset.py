@@ -178,7 +178,7 @@ class DatasetBuilder:
         target_closed: Literal["right", "left"] | None = None,
         target_label: Literal["right", "left"] | None = None,
         target_resample: str | None = None,
-        target_shift: bool = False,
+        target_shift: bool | list[str] = False,
     ):
         """
         Load a single attribute series.
@@ -220,7 +220,7 @@ class DatasetBuilder:
         target_closed: Literal["right", "left"] | None = None,
         target_label: Literal["right", "left"] | None = None,
         target_resample: str | None = None,
-        target_shift: bool = False,
+        target_shift: bool | list[str] = False,
     ) -> "DatasetBuilder":
         """
         Load a time series of attribute snapshots.
@@ -443,8 +443,12 @@ class AttributeSeriesLoader(DataLoader):
             method = definition.target_resample or "mean"
             frame = getattr(resampler, method)()
 
-            if definition.target_shift:
+            if definition.target_shift is True:
                 frame.index = frame.index - pd.to_timedelta(definition.target_interval)
+            elif isinstance(definition.target_shift, (list, tuple, set)):
+                for shift_col in definition.target_shift:
+                    if shift_col in frame.columns:
+                        frame[shift_col] = frame[shift_col].shift(-1)
 
             frame = frame.reset_index()
 
@@ -601,10 +605,14 @@ class AttributeTimeSeriesLoader(DataLoader):
             method = definition.target_resample or "mean"
             resampled = getattr(resampler, method)().reset_index()
 
-            if definition.target_shift:
+            if definition.target_shift is True:
                 resampled["target_time"] = resampled["target_time"] - pd.to_timedelta(
                     definition.target_interval
                 )
+            elif isinstance(definition.target_shift, (list, tuple, set)):
+                for shift_col in definition.target_shift:
+                    if shift_col in resampled.columns:
+                        resampled[shift_col] = resampled[shift_col].shift(-1)
 
             resampled.insert(0, "time", snapshot_time)
             resampled_frames.append(resampled)

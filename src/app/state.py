@@ -127,11 +127,6 @@ class StateManager:
                 "open_meteo",
                 config.forecast.open_meteo,
                 attributes=["temperature"],
-                target_resample="mean",
-                target_interval="30min",
-                target_label="right",
-                target_closed="right",
-                target_shift=True,
             )
             .timeseries(
                 "heat_pump_state",

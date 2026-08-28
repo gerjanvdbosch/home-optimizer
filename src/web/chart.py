@@ -92,6 +92,19 @@ def dashboard_chart(state: State) -> str:
         col=1,
     )
 
+    # fig.add_trace(
+    #     go.Scatter(
+    #         x=[to_local_time(p.time) for p in state.forecast.open_meteo.gti],
+    #         y=[p.value * 0.9 * 2 for p in state.forecast.open_meteo.gti],
+    #         mode="lines",
+    #         name="GTI",
+    #         line=dict(width=1, color="blue"),
+    #         connectgaps=True,
+    #     ),
+    #     row=1,
+    #     col=1,
+    # )
+
     add_series(
         fig,
         "Solar",
