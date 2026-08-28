@@ -601,7 +601,7 @@ class AttributeTimeSeriesLoader(DataLoader):
             method = definition.target_resample or "mean"
             resampled = getattr(resampler, method)().reset_index()
 
-            if definition.target_shift is not None:
+            if definition.target_shift:
                 resampled["target_time"] = resampled["target_time"] - pd.to_timedelta(
                     definition.target_interval
                 )
