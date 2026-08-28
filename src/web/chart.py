@@ -207,13 +207,13 @@ def dashboard_chart(state: State) -> str:
             zeroline=False,
         ),
         yaxis2=dict(
-            title="Living (°C)",
+            title="Temp (°C)",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.08)",
             zeroline=False,
         ),
         yaxis3=dict(
-            title="Boiler (°C)",
+            title="Temp (°C)",
             showgrid=True,
             gridcolor="rgba(255,255,255,0.08)",
             zeroline=False,
