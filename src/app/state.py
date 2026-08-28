@@ -126,10 +126,7 @@ class StateManager:
             .attribute_series(
                 "open_meteo",
                 config.forecast.open_meteo,
-                attributes=[
-                    "gti",
-                    "temperature",
-                ],
+                attributes=["temperature"],
                 target_resample="mean",
                 target_interval="30min",
                 target_label="right",

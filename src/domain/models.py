@@ -151,8 +151,6 @@ class SensorAttributesReference(BaseModel, Generic[T]):
 
 class SolarConfig(BaseModel):
     production: SensorReference = Field()
-    capacity: float = Field(description="PV capacity in kW")
-    efficiency: float = Field(default=0.9)
 
 
 class BoilerConfig(BaseModel):
