@@ -111,7 +111,7 @@ def dashboard_chart(state: State) -> str:
             unit="W",
             row=1,
             col=1,
-            line=dict(width=2, shape="vh", color="#AB63FA"),
+            line=dict(width=2, shape="hv", color="#AB63FA"),
         )
 
     add_series(
