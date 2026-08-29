@@ -109,7 +109,7 @@ def dashboard_chart(state: State) -> str:
         fig,
         "Solar",
         state.measurements.solar.production,
-        line=dict(width=2, color="#FFA15A"),
+        line=dict(width=2, color="#FFA15A", shape="spline"),
         legendgroup="solar",
         showlegend=False,
         unit="W",
@@ -121,7 +121,7 @@ def dashboard_chart(state: State) -> str:
         fig,
         "Solar",
         state.predictions.solar,
-        line=dict(width=2, color="#FFA15A"),  # , shape="spline"
+        line=dict(width=2, color="#FFA15A", shape="spline"),
         legendgroup="solar",
         unit="W",
         row=1,
@@ -168,7 +168,7 @@ def dashboard_chart(state: State) -> str:
         state.measurements.heat_pump.boiler.bottom_temperature,
         row=3,
         col=1,
-        line=dict(width=2, color="#636EFA"),
+        line=dict(width=2, color="#636EFA", shape="spline"),
         unit="°C",
         decimal=1,
     )
@@ -179,7 +179,7 @@ def dashboard_chart(state: State) -> str:
         state.measurements.heat_pump.boiler.top_temperature,
         row=3,
         col=1,
-        line=dict(width=2, color="#19D3F3"),
+        line=dict(width=2, color="#19D3F3", shape="spline"),
         unit="°C",
         decimal=1,
     )
