@@ -128,16 +128,28 @@ def dashboard_chart(state: State) -> str:
         col=1,
     )
 
-    if state.schedule and state.schedule.heat_pump.power:
-        add_series(
-            fig,
-            "Heat pump",
-            state.schedule.heat_pump.power,
-            unit="W",
-            row=1,
-            col=1,
-            line=dict(width=2, shape="hv", color="#AB63FA"),
-        )
+    add_series(
+        fig,
+        "Heat pump",
+        state.schedule.heat_pump.power,
+        unit="W",
+        row=1,
+        col=1,
+        line=dict(width=2, shape="hv", color="#AB63FA"),
+        legendgroup="heat_pump",
+        showlegend=False,
+    )
+
+    add_series(
+        fig,
+        "Heat pump",
+        state.measurements.heat_pump.power,
+        unit="W",
+        row=1,
+        col=1,
+        line=dict(width=2, shape="hv", color="#AB63FA"),
+        legendgroup="heat_pump",
+    )
 
     add_series(
         fig,

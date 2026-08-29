@@ -17,7 +17,7 @@ class Optimization:
 
         mpc_config = MPCConfig(
             step_hours=0.25,
-            boiler_power=2000.0,
+            boiler_power=2500.0,
             boiler_duration_hours=1.0,
         )
 
@@ -30,7 +30,10 @@ class Optimization:
 
         print(actual_now)
 
-        disturbance_estimator = DisturbanceEstimator(alpha=0.7)
+        disturbance_estimator = DisturbanceEstimator(
+            alpha=0.7,
+            max=mpc_config.boiler_power,
+        )
         solar_trajectory = disturbance_estimator.estimate(
             forecast=solar_forecast,
             actual_now=actual_now,

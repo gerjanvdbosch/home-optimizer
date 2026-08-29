@@ -89,6 +89,7 @@ class StateManager:
 
         state.measurements.solar.production = self._parse_series(df, "pv_production")
         state.measurements.heat_pump.state = self._parse_series(df, "heat_pump_state")
+        state.measurements.heat_pump.power = self._parse_series(df, "heat_pump_power")
         state.measurements.heat_pump.boiler.top_temperature = self._parse_series(
             df, "boiler_top_temperature"
         )
@@ -134,6 +135,13 @@ class StateManager:
                 interval="15m",
                 aggregation="first",
                 fill="previous",
+            )
+            .timeseries(
+                "heat_pump_power",
+                config.heat_pump.power,
+                interval="15m",
+                aggregation="mean",
+                fill=0,
             )
             .timeseries(
                 "pv_production",

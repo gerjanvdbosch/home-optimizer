@@ -7,12 +7,12 @@ class DisturbanceEstimator:
     def __init__(
         self,
         alpha: float = 0.7,
-        max: float = 2000.0,
-        min: float = 50.0,
+        min: float = 0.0,
+        max: float | None = None,
     ) -> None:
         self.alpha = alpha
-        self.max = max
         self.min = min
+        self.max = max
 
     def estimate(
         self,
@@ -33,7 +33,9 @@ class DisturbanceEstimator:
         for k, base_val in enumerate(forecast):
             decay = self.alpha**k
             adjusted = base_val + (bias * decay)
-            clamped = max(0.0, min(self.max, adjusted))
+            clamped = max(
+                0.0, min(self.max, adjusted) if self.max is not None else adjusted
+            )
             trajectory.append(clamped)
 
         logger.debug(

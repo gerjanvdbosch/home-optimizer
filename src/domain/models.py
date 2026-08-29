@@ -161,6 +161,7 @@ class BoilerConfig(BaseModel):
 
 class HeatPumpConfig(BaseModel):
     state: SensorReference = Field()
+    power: SensorReference = Field()
     supply_temperature: SensorReference = Field()
     return_temperature: SensorReference = Field()
     compressor_frequency: SensorReference = Field()
@@ -332,6 +333,7 @@ class BoilerMeasurement(BaseModel):
 class HeatPumpMeasurement(BaseModel):
     mode: HeatPumpMode = "heat"
     state: list[SeriesPoint[str]] = Field(default_factory=list)
+    power: list[SeriesPoint[float]] = Field(default_factory=list)
     supply_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     return_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     compressor_frequency: list[SeriesPoint[float]] = Field(default_factory=list)

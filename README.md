@@ -32,6 +32,7 @@ actions:
           },
           "heat_pump": {
             "state": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
+            "power": "sensor.warmtepomp_geschat_vermogen",
             "supply_temperature": "sensor.ecodan_heatpump_ca09ec_aanvoer_temp",
             "return_temperature": "sensor.ecodan_heatpump_ca09ec_retour_temp",
             "compressor_frequency": "sensor.ecodan_heatpump_compressor_frequentie",
