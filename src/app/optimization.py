@@ -2,6 +2,7 @@ import logging
 
 from app.state import StateManager
 from domain.models import MPCConfig, MPCInput
+from features.estimator import DisturbanceEstimator
 from features.optimizer import MPCOptimizer
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,16 @@ class Optimization:
         )
 
         solar_forecast = [p.value for p in state.predictions.solar]
+        recent_actuals = [p.value for p in state.measurements.solar.production[-4:]]
+
+        disturbance_estimator = DisturbanceEstimator(alpha=0.7)
+        solar_trajectory = disturbance_estimator.estimate(
+            forecast=solar_forecast,
+            recent_actuals=recent_actuals,
+        )
 
         data = MPCInput(
-            solar_forecast_kw=solar_forecast,
+            solar_forecast_kw=solar_trajectory,
             boiler_on=False,
         )
 
