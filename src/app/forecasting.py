@@ -52,7 +52,7 @@ class Forecasting:
             forecaster.save(self.path)
 
     def predict(self, config: PredictConfig) -> None:
-        forecaster, df = self._prepare(config.forecaster, 1)
+        forecaster, df = self._prepare(config.forecaster, 7)
 
         result = forecaster.predict(df=df, steps=config.steps)
 

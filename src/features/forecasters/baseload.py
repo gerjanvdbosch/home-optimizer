@@ -52,8 +52,7 @@ class BaseloadForecaster(SkforecastForecaster):
             calendar_features=overrides.pop(
                 "calendar_features",
                 CalendarFeatures(
-                    features=["hour", "day_of_week", "weekend"],
-                    encoding="cyclical",
+                    features=["hour", "day_of_week", "weekend"], encoding="onehot"
                 ),
             ),
             window_features=overrides.pop(
@@ -97,7 +96,7 @@ class BaseloadForecaster(SkforecastForecaster):
             DatasetBuilder()
             .timeseries(
                 "P_baseload",
-                SensorReference(entity_id="sensor.stroomverbruik_base_load"),
+                config.baseload,
                 interval="15m",
                 aggregation="mean",
                 fill="previous",

@@ -17,7 +17,7 @@ HeatPumpMode = Literal[
 
 ForecasterType = Literal[
     "solar",
-    "boiler",
+    # "boiler",
     "baseload",
 ]
 
@@ -492,7 +492,7 @@ class Forecaster(Protocol):
 
     def fit(self, df: pd.DataFrame): ...
 
-    def predict(self, df: pd.DataFrame, steps: int = 24) -> pd.Series: ...
+    def predict(self, df: pd.DataFrame, steps: int = 48) -> pd.Series: ...
 
     def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult: ...
 

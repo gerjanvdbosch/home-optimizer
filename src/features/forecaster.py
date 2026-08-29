@@ -26,9 +26,9 @@ class SkforecastForecaster(Forecaster):
     @abstractmethod
     def create(self, **overrides: Any) -> ForecasterBase: ...
 
-    def arguments(self, df: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+    def arguments(self, df: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame | None]:
         y = df[self.target_column]
-        exog = df[self.exog_columns]
+        exog = df[self.exog_columns] if self.exog_columns else None
 
         return y, exog
 
@@ -51,13 +51,16 @@ class SkforecastForecaster(Forecaster):
     def predict(
         self,
         df: pd.DataFrame,
-        steps: int = 24,
+        steps: int = 48,
     ) -> pd.Series:
         df = self.prepare(df)
 
         exog = self.predict_arguments(df)
 
-        return self.forecaster.predict(steps=steps, exog=exog)
+        y = df[self.target_column].dropna()
+        last_window = y if not y.empty else None
+
+        return self.forecaster.predict(steps=steps, last_window=last_window, exog=exog)
 
     def backtest(
         self,
