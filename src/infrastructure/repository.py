@@ -37,8 +37,8 @@ class StateRepository:
 
         try:
             return State.model_validate(data)
-        except ValidationError:
-            logging.warning("Invalid state")
+        except ValidationError as e:
+            logging.warning("Invalid state: %s", e)
 
             return State()
 
@@ -54,11 +54,10 @@ class BacktestRepository:
         data = self.storage.load()
 
         if not data:
-            return
+            return None
 
         try:
             return BacktestResult.model_validate(data)
-
         except ValidationError as e:
             logging.warning("Invalid backtest result: %s", e)
 
