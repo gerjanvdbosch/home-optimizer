@@ -25,13 +25,20 @@ class DisturbanceEstimator:
             return forecast
 
         n = min(3, len(recent_actuals))
-        history_actuals = recent_actuals[-n:]
+        history_actual = recent_actuals[-n:]
 
         raw_weights = [0.10, 0.30, 0.60][-n:]
         total_w = sum(raw_weights)
         weights = [w / total_w for w in raw_weights]
 
-        filtered_actual = sum(a * w for a, w in zip(history_actuals, weights))
+        filtered_actual = sum(
+            a * w
+            for a, w in zip(
+                history_actual,
+                weights,
+                strict=False,
+            )
+        )
 
         bias = filtered_actual - forecast_now
 
