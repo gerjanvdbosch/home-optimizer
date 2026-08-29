@@ -140,7 +140,7 @@ class InfluxSensorResolver:
     ) -> InfluxSensor:
         self.load_schema()
 
-        entity_id = entity_id.removeprefix("sensor.")
+        entity_id = entity_id.split(".", 1)[-1]
         cache_key = f"{entity_id}.{attribute}"
 
         if cache_key in self.cache:

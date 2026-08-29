@@ -168,6 +168,11 @@ class HeatPumpConfig(BaseModel):
     boiler: BoilerConfig = Field()
 
 
+class ClimateConfig(BaseModel):
+    temperature: SensorReference = Field()
+    setpoint: SensorReference = Field()
+
+
 class SolcastAttributes(BaseModel):
     p10: str = Field(default="pv_estimate10", description="10e percentile")
     p50: str = Field(default="pv_estimate", description="50e percentile")
@@ -220,6 +225,7 @@ class ForecastConfig(BaseModel):
 class Config(BaseModel):
     solar: SolarConfig = Field()
     heat_pump: HeatPumpConfig = Field()
+    climate: ClimateConfig = Field()
     forecast: ForecastConfig = Field()
 
 
@@ -340,9 +346,15 @@ class HeatPumpMeasurement(BaseModel):
     boiler: BoilerMeasurement = Field(default_factory=BoilerMeasurement)
 
 
+class ClimateMeasurement(BaseModel):
+    temperature: list[SeriesPoint[float]] = Field(default_factory=list)
+    setpoint: list[SeriesPoint[float]] = Field(default_factory=list)
+
+
 class Measurements(BaseModel):
     solar: SolarMeasurement = Field(default_factory=SolarMeasurement)
     heat_pump: HeatPumpMeasurement = Field(default_factory=HeatPumpMeasurement)
+    climate: ClimateMeasurement = Field(default_factory=ClimateMeasurement)
 
 
 class ElectricityPriceForecast(BaseModel):

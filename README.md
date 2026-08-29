@@ -42,6 +42,10 @@ actions:
               "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
             }
           },
+          "climate": {
+            "temperature": "sensor.danfoss_15_temperature",
+            "setpoint": ["climate.danfoss_icon_woonkamer", "temperature"]
+          },
           "forecast": {
             "solcast": "sensor.solcast_pv_forecast",
             "open_meteo": "sensor.open_meteo_forecast"

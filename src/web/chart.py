@@ -46,7 +46,7 @@ def dashboard_chart(state: State) -> str:
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.06,
-        subplot_titles=("Power", "Living", "Boiler"),
+        subplot_titles=("Power", "Climate", "Boiler"),
         row_heights=[0.5, 0.25, 0.25],
     )
 
@@ -149,6 +149,28 @@ def dashboard_chart(state: State) -> str:
         col=1,
         line=dict(width=2, shape="hv", color="#AB63FA"),
         legendgroup="heat_pump",
+    )
+
+    add_series(
+        fig,
+        "Climate temp",
+        state.measurements.climate.temperature,
+        row=2,
+        col=1,
+        line=dict(width=2, color="#FECB52", shape="spline"),
+        unit="°C",
+        decimal=2,
+    )
+
+    add_series(
+        fig,
+        "Climate setpoint",
+        state.measurements.climate.setpoint,
+        row=2,
+        col=1,
+        line=dict(width=2, color="#FF6692", shape="hv", dash="dot"),
+        unit="°C",
+        decimal=1,
     )
 
     add_series(

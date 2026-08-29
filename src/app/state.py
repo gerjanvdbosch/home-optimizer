@@ -96,6 +96,10 @@ class StateManager:
         state.measurements.heat_pump.boiler.bottom_temperature = self._parse_series(
             df, "boiler_bottom_temperature"
         )
+        state.measurements.climate.temperature = self._parse_series(
+            df, "climate_temperature"
+        )
+        state.measurements.climate.setpoint = self._parse_series(df, "climate_setpoint")
 
         for forecast_source in ["solcast", "open_meteo"]:
             source_obj = getattr(state.forecast, forecast_source)
@@ -148,6 +152,20 @@ class StateManager:
                 config.solar.production,
                 aggregation="mean",
                 interval="15m",
+            )
+            .timeseries(
+                "climate_temperature",
+                config.climate.temperature,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
+            .timeseries(
+                "climate_setpoint",
+                config.climate.setpoint,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
             )
             .timeseries(
                 "boiler_top_temperature",
