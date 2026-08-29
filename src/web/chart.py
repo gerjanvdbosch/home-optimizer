@@ -71,7 +71,7 @@ def dashboard_chart(state: State) -> str:
             mode="lines",
             line=dict(width=0),
             fill="tonexty",
-            fillcolor="rgba(255, 161, 90, 0.08)",
+            fillcolor="rgba(255, 161, 90, 0.1)",
             showlegend=False,
             legendgroup="solar",
             hoverinfo="skip",
