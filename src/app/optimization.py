@@ -22,12 +22,18 @@ class Optimization:
         )
 
         solar_forecast = [p.value for p in state.predictions.solar]
-        recent_actuals = [p.value for p in state.measurements.solar.production[-4:]]
+        actual_now = (
+            state.measurements.solar.production[-1].value
+            if state.measurements.solar.production
+            else None
+        )
+
+        print(actual_now)
 
         disturbance_estimator = DisturbanceEstimator(alpha=0.7)
         solar_trajectory = disturbance_estimator.estimate(
             forecast=solar_forecast,
-            recent_actuals=recent_actuals,
+            actual_now=actual_now,
         )
 
         data = MPCInput(
