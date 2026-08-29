@@ -524,21 +524,21 @@ class SolarForecaster(SklearnForecaster):
             DatasetBuilder()
             .timeseries(
                 "P_solar",
-                config.solar.production,
+                config.solar,
                 interval="30m",
                 aggregation="mean",
                 fill=0,
             )
             .timeseries(
                 "P_max",
-                config.solar.production,
+                config.solar,
                 interval="30m",
                 aggregation="max",
                 fill=0,
             )
             .timeseries(
                 "P_std",
-                config.solar.production,
+                config.solar,
                 interval="30m",
                 aggregation="stddev",
                 fill=0,

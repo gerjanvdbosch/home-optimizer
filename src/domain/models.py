@@ -149,10 +149,6 @@ class SensorAttributesReference(BaseModel, Generic[T]):
         return value
 
 
-class SolarConfig(BaseModel):
-    production: SensorReference = Field()
-
-
 class BoilerConfig(BaseModel):
     setpoint: SensorReference = Field()
     top_temperature: SensorReference = Field()
@@ -223,7 +219,8 @@ class ForecastConfig(BaseModel):
 
 
 class Config(BaseModel):
-    solar: SolarConfig = Field()
+    solar: SensorReference = Field()
+    baseload: SensorReference = Field()
     heat_pump: HeatPumpConfig = Field()
     climate: ClimateConfig = Field()
     forecast: ForecastConfig = Field()
@@ -331,6 +328,10 @@ class SolarMeasurement(BaseModel):
     production: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
+class BaseloadMeasurement(BaseModel):
+    power: list[SeriesPoint[float]] = Field(default_factory=list)
+
+
 class BoilerMeasurement(BaseModel):
     top_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     bottom_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
@@ -353,6 +354,7 @@ class ClimateMeasurement(BaseModel):
 
 class Measurements(BaseModel):
     solar: SolarMeasurement = Field(default_factory=SolarMeasurement)
+    baseload: BaseloadMeasurement = Field(default_factory=BaseloadMeasurement)
     heat_pump: HeatPumpMeasurement = Field(default_factory=HeatPumpMeasurement)
     climate: ClimateMeasurement = Field(default_factory=ClimateMeasurement)
 

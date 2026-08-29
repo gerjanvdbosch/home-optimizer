@@ -130,12 +130,22 @@ def dashboard_chart(state: State) -> str:
 
     add_series(
         fig,
+        "Baseload",
+        state.measurements.baseload.power,
+        unit="W",
+        row=1,
+        col=1,
+        line=dict(width=1, color="#EF553B", shape="spline"),
+    )
+
+    add_series(
+        fig,
         "Heat pump",
         state.schedule.heat_pump.power,
         unit="W",
         row=1,
         col=1,
-        line=dict(width=2, shape="hv", color="#AB63FA"),
+        line=dict(width=2, color="#AB63FA", shape="hv"),
         legendgroup="heat_pump",
         showlegend=False,
     )
@@ -147,7 +157,7 @@ def dashboard_chart(state: State) -> str:
         unit="W",
         row=1,
         col=1,
-        line=dict(width=2, shape="hv", color="#AB63FA"),
+        line=dict(width=2, color="#AB63FA", shape="hv"),
         legendgroup="heat_pump",
     )
 

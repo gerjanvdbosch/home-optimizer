@@ -88,6 +88,7 @@ class StateManager:
             state.schedule = existing.schedule
 
         state.measurements.solar.production = self._parse_series(df, "pv_production")
+        state.measurements.baseload.power = self._parse_series(df, "baseload")
         state.measurements.heat_pump.state = self._parse_series(df, "heat_pump_state")
         state.measurements.heat_pump.power = self._parse_series(df, "heat_pump_power")
         state.measurements.heat_pump.boiler.top_temperature = self._parse_series(
@@ -134,6 +135,19 @@ class StateManager:
                 attributes=["temperature"],
             )
             .timeseries(
+                "pv_production",
+                config.solar,
+                aggregation="mean",
+                interval="15m",
+            )
+            .timeseries(
+                "baseload",
+                config.baseload,
+                aggregation="mean",
+                interval="15m",
+                fill=0,
+            )
+            .timeseries(
                 "heat_pump_state",
                 config.heat_pump.state,
                 interval="15m",
@@ -146,12 +160,6 @@ class StateManager:
                 interval="15m",
                 aggregation="mean",
                 fill=0,
-            )
-            .timeseries(
-                "pv_production",
-                config.solar.production,
-                aggregation="mean",
-                interval="15m",
             )
             .timeseries(
                 "climate_temperature",

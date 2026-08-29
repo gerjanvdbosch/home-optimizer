@@ -27,9 +27,8 @@ actions:
       endpoint: update
       payload: |
         {{ {
-          "solar": {
-            "production": "sensor.pv_output"
-          },
+          "solar": "sensor.pv_output",
+          "baseload": "sensor.stroomverbruik_base_load",
           "heat_pump": {
             "state": "sensor.ecodan_heatpump_ca09ec_status_bedrijf",
             "power": "sensor.warmtepomp_geschat_vermogen",
