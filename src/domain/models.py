@@ -224,6 +224,7 @@ class Config(BaseModel):
     heat_pump: HeatPumpConfig = Field()
     climate: ClimateConfig = Field()
     forecast: ForecastConfig = Field()
+    presence: list[SensorReference] = Field(default_factory=list)
 
 
 class FitConfig(BaseModel):
@@ -324,14 +325,6 @@ class SeriesPoint(BaseModel, Generic[P]):
     value: P
 
 
-class SolarMeasurement(BaseModel):
-    production: list[SeriesPoint[float]] = Field(default_factory=list)
-
-
-class BaseloadMeasurement(BaseModel):
-    power: list[SeriesPoint[float]] = Field(default_factory=list)
-
-
 class BoilerMeasurement(BaseModel):
     top_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     bottom_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
@@ -353,8 +346,8 @@ class ClimateMeasurement(BaseModel):
 
 
 class Measurements(BaseModel):
-    solar: SolarMeasurement = Field(default_factory=SolarMeasurement)
-    baseload: BaseloadMeasurement = Field(default_factory=BaseloadMeasurement)
+    solar: list[SeriesPoint[float]] = Field(default_factory=list)
+    baseload: list[SeriesPoint[float]] = Field(default_factory=list)
     heat_pump: HeatPumpMeasurement = Field(default_factory=HeatPumpMeasurement)
     climate: ClimateMeasurement = Field(default_factory=ClimateMeasurement)
 

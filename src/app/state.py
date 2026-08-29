@@ -87,8 +87,8 @@ class StateManager:
             state.predictions = existing.predictions
             state.schedule = existing.schedule
 
-        state.measurements.solar.production = self._parse_series(df, "pv_production")
-        state.measurements.baseload.power = self._parse_series(df, "baseload")
+        state.measurements.solar = self._parse_series(df, "pv_production")
+        state.measurements.baseload = self._parse_series(df, "baseload")
         state.measurements.heat_pump.state = self._parse_series(df, "heat_pump_state")
         state.measurements.heat_pump.power = self._parse_series(df, "heat_pump_power")
         state.measurements.heat_pump.boiler.top_temperature = self._parse_series(

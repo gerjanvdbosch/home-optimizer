@@ -32,8 +32,12 @@ class SkforecastForecaster(Forecaster):
 
         return y, exog
 
-    def predict_arguments(self, df: pd.DataFrame) -> pd.DataFrame | None:
-        return df[self.exog_columns] if self.exog_columns else None
+    def predict_arguments(
+        self,
+        df: pd.DataFrame,
+        steps: int = 48,
+    ) -> pd.DataFrame | None:
+        return df[self.exog_columns].iloc[:steps] if self.exog_columns else None
 
     @abstractmethod
     def search_space(self, trial: Trial) -> dict[str, Any]: ...
@@ -55,7 +59,7 @@ class SkforecastForecaster(Forecaster):
     ) -> pd.Series:
         df = self.prepare(df)
 
-        exog = self.predict_arguments(df)
+        exog = self.predict_arguments(df=df, steps=steps)
 
         y = df[self.target_column].dropna()
         last_window = y if not y.empty else None

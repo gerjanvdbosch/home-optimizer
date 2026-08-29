@@ -35,7 +35,12 @@ class StateRepository:
         if not data:
             return State()
 
-        return State.model_validate(data)
+        try:
+            return State.model_validate(data)
+        except ValidationError:
+            logging.warning("Invalid state")
+
+            return State()
 
 
 class BacktestRepository:

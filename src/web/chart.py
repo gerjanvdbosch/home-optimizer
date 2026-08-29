@@ -97,7 +97,7 @@ def dashboard_chart(state: State) -> str:
     add_series(
         fig,
         "Solar",
-        state.measurements.solar.production,
+        state.measurements.solar,
         line=dict(width=1.5, color="#FFA15A", shape="spline"),
         legendgroup="solar",
         showlegend=False,
@@ -120,7 +120,7 @@ def dashboard_chart(state: State) -> str:
     add_series(
         fig,
         "Baseload",
-        state.measurements.baseload.power,
+        state.measurements.baseload,
         unit="W",
         row=1,
         col=1,

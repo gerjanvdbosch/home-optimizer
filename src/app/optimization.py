@@ -23,9 +23,7 @@ class Optimization:
 
         solar_forecast = [p.value for p in state.predictions.solar]
         actual_now = (
-            state.measurements.solar.production[-1].value
-            if state.measurements.solar.production
-            else None
+            state.measurements.solar[-1].value if state.measurements.solar else None
         )
 
         print(actual_now)

@@ -7,7 +7,7 @@ from skforecast.recursive import ForecasterRecursive
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.preprocessing import FunctionTransformer
 
-from domain.models import Config, DatasetDefinition, ForecasterType, SensorReference
+from domain.models import Config, DatasetDefinition, ForecasterType
 from features.dataset import DatasetBuilder
 from features.forecaster import SkforecastForecaster
 
