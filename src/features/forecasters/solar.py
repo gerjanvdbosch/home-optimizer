@@ -204,6 +204,14 @@ class SolarForecaster(SklearnForecaster):
 
         return df.sort_values(["time", "target_time"])
 
+    def predict(self, df: pd.DataFrame, steps: int = 48) -> pd.Series:
+        result: pd.Series = super().predict(df, steps=steps)
+
+        if result.empty:
+            return result
+
+        return result.resample("15min").interpolate(method="time").clip(lower=0.0)
+
     def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
         p50 = df["p50"].to_numpy()
 

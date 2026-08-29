@@ -199,7 +199,7 @@ class SklearnForecaster(Forecaster):
     def arguments(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
         return df[self.exog_columns], df[self.target_column]
 
-    def predict_arguments(self, df: pd.DataFrame, steps: int = 24) -> pd.DataFrame:
+    def predict_arguments(self, df: pd.DataFrame, steps: int = 48) -> pd.DataFrame:
         return df[self.exog_columns].iloc[:steps]
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -214,7 +214,7 @@ class SklearnForecaster(Forecaster):
 
         self.forecaster.fit(X, y)
 
-    def predict(self, df: pd.DataFrame, steps: int = 24) -> pd.Series:
+    def predict(self, df: pd.DataFrame, steps: int = 48) -> pd.Series:
         df = self.prepare(df)
 
         X = self.predict_arguments(df=df, steps=steps)
