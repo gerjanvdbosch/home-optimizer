@@ -92,24 +92,11 @@ def dashboard_chart(state: State) -> str:
         col=1,
     )
 
-    # fig.add_trace(
-    #     go.Scatter(
-    #         x=[to_local_time(p.time) for p in state.forecast.open_meteo.gti],
-    #         y=[p.value * 0.9 * 2 for p in state.forecast.open_meteo.gti],
-    #         mode="lines",
-    #         name="GTI",
-    #         line=dict(width=1, color="blue"),
-    #         connectgaps=True,
-    #     ),
-    #     row=1,
-    #     col=1,
-    # )
-
     add_series(
         fig,
         "Solar",
         state.measurements.solar.production,
-        line=dict(width=2, color="#FFA15A", shape="spline"),
+        line=dict(width=1.5, color="#FFA15A", shape="spline"),
         legendgroup="solar",
         showlegend=False,
         unit="W",
@@ -121,7 +108,7 @@ def dashboard_chart(state: State) -> str:
         fig,
         "Solar",
         state.predictions.solar,
-        line=dict(width=2, color="#FFA15A", shape="spline"),
+        line=dict(width=1.5, color="#FFA15A", shape="spline"),
         legendgroup="solar",
         unit="W",
         row=1,
@@ -135,7 +122,18 @@ def dashboard_chart(state: State) -> str:
         unit="W",
         row=1,
         col=1,
-        line=dict(width=1, color="#EF553B", shape="spline"),
+        line=dict(width=1, color="rgba(239, 85, 59, 0.5)", shape="spline"),
+    )
+
+    add_series(
+        fig,
+        "Heat pump",
+        state.measurements.heat_pump.power,
+        unit="W",
+        row=1,
+        col=1,
+        line=dict(width=2, color="#AB63FA", shape="hv"),
+        legendgroup="heat_pump",
     )
 
     add_series(
@@ -148,17 +146,6 @@ def dashboard_chart(state: State) -> str:
         line=dict(width=2, color="#AB63FA", shape="hv"),
         legendgroup="heat_pump",
         showlegend=False,
-    )
-
-    add_series(
-        fig,
-        "Heat pump",
-        state.measurements.heat_pump.power,
-        unit="W",
-        row=1,
-        col=1,
-        line=dict(width=2, color="#AB63FA", shape="hv"),
-        legendgroup="heat_pump",
     )
 
     add_series(
@@ -178,7 +165,7 @@ def dashboard_chart(state: State) -> str:
         state.measurements.climate.setpoint,
         row=2,
         col=1,
-        line=dict(width=2, color="#FF6692", shape="hv", dash="dot"),
+        line=dict(width=1, color="#FF6692", shape="hv", dash="dot"),
         unit="°C",
         decimal=1,
     )
@@ -200,7 +187,7 @@ def dashboard_chart(state: State) -> str:
         state.measurements.heat_pump.boiler.bottom_temperature,
         row=3,
         col=1,
-        line=dict(width=2, color="#636EFA", shape="spline"),
+        line=dict(width=1, color="#636EFA", shape="spline"),
         unit="°C",
         decimal=1,
     )
