@@ -84,7 +84,7 @@ def dashboard_chart(state: State) -> str:
         fig,
         "Solcast",
         state.forecast.solcast.p50,
-        line=dict(width=1, color="rgba(255, 161, 90, 0.5)", dash="dot"),
+        line=dict(width=1, color="rgba(255, 161, 90, 0.5)", dash="dot", shape="spline"),
         legendgroup="solar",
         showlegend=False,
         unit="W",
@@ -121,7 +121,7 @@ def dashboard_chart(state: State) -> str:
         fig,
         "Solar",
         state.predictions.solar,
-        line=dict(width=2, color="#FFA15A"),
+        line=dict(width=2, color="#FFA15A"),  # , shape="spline"
         legendgroup="solar",
         unit="W",
         row=1,
