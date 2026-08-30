@@ -1,6 +1,6 @@
 import logging
 from datetime import UTC, datetime
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 
 from joblib import parallel_backend
 
@@ -9,7 +9,7 @@ from domain.models import Job, JobType
 
 class Worker:
     def __init__(self, container_factory, manager):
-        self.queue = manager.Queue()
+        self.queue: Queue = Queue()
         self.container_factory = container_factory
         self.process: Process | None = None
         self.jobs = manager.dict()
