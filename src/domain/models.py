@@ -10,8 +10,6 @@ from optuna import Study
 from pandas._typing import MergeHow
 from pydantic import BaseModel, Field, model_validator
 
-from domain.time import to_local_time
-
 HeatPumpMode = Literal[
     "heat",
     "cool",
@@ -237,7 +235,7 @@ class FitConfig(BaseModel):
 
 
 class PredictConfig(BaseModel):
-    forecaster: ForecasterType
+    forecaster: ForecasterType | None = Field(default=None)
     steps: int = Field(default=48)
 
 

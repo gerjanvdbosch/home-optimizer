@@ -52,11 +52,15 @@ class Forecasting:
             forecaster.save(self.path)
 
     def predict(self, config: PredictConfig) -> None:
-        forecaster, df = self._prepare(config.forecaster, 7)
+        for forecaster in self.forecasters:
+            if config.forecaster and forecaster.name != config.forecaster:
+                continue
 
-        result = forecaster.predict(df=df, steps=config.steps)
+            forecaster, df = self._prepare(forecaster, 7)
 
-        self.state_manager.update_prediction(forecaster.name, result)
+            result = forecaster.predict(df=df, steps=config.steps)
+
+            self.state_manager.update_prediction(forecaster.name, result)
 
     def backtest(self, config: BacktestConfig) -> None:
         forecaster, df = self._prepare(config.forecaster, config.days)
