@@ -148,6 +148,7 @@ def dashboard_chart(state: State) -> str:
         col=1,
         line=dict(width=2, color="#AB63FA", shape="hv"),
         legendgroup="heat_pump",
+        showlegend=False,
     )
 
     add_series(
@@ -159,7 +160,6 @@ def dashboard_chart(state: State) -> str:
         col=1,
         line=dict(width=2, color="#AB63FA", shape="hv"),
         legendgroup="heat_pump",
-        showlegend=False,
     )
 
     add_series(
