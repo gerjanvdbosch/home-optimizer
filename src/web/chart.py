@@ -190,7 +190,7 @@ def dashboard_chart(state: State) -> str:
         state.forecast.open_meteo.temperature,
         row=2,
         col=1,
-        line=dict(width=1.5, color="rgba(255, 255, 255, 0.4)"),
+        line=dict(width=1, color="rgba(255, 255, 255, 0.4)"),
         unit="°C",
         decimal=1,
     )
