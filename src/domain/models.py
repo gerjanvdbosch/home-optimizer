@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Generic, Iterable, Literal, Protocol, Sequence, TypeVar
@@ -9,6 +9,8 @@ import pandas as pd
 from optuna import Study
 from pandas._typing import MergeHow
 from pydantic import BaseModel, Field, model_validator
+
+from domain.time import to_local_time
 
 HeatPumpMode = Literal[
     "heat",
@@ -153,6 +155,7 @@ class BoilerConfig(BaseModel):
     setpoint: SensorReference = Field()
     top_temperature: SensorReference = Field()
     bottom_temperature: SensorReference = Field()
+    target_temperature: float | list[tuple[time, float]] = Field()
 
 
 class HeatPumpConfig(BaseModel):
@@ -167,6 +170,7 @@ class HeatPumpConfig(BaseModel):
 class ClimateConfig(BaseModel):
     temperature: SensorReference = Field()
     setpoint: SensorReference = Field()
+    target_temperature: float | list[tuple[time, float]] = Field()
 
 
 class SolcastAttributes(BaseModel):
@@ -406,17 +410,22 @@ class Predictions(BaseModel):
     boiler: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
+class BoilerSchedule(BaseModel):
+    target_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
+
+
 class HeatPumpSchedule(BaseModel):
     power: list[SeriesPoint[float]] = Field(default_factory=list)
+    boiler: BoilerSchedule = Field(default_factory=BoilerSchedule)
 
 
-class BoilerSchedule(BaseModel):
+class ClimateSchedule(BaseModel):
     target_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
 class Schedule(BaseModel):
     heat_pump: HeatPumpSchedule = Field(default_factory=HeatPumpSchedule)
-    boiler: BoilerSchedule = Field(default_factory=BoilerSchedule)
+    climate: ClimateSchedule = Field(default_factory=ClimateSchedule)
 
 
 class State(BaseModel):

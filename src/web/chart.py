@@ -134,6 +134,7 @@ def dashboard_chart(state: State) -> str:
         state.predictions.baseload,
         line=dict(width=1, color="rgba(239, 85, 59, 0.5)", shape="spline"),
         legendgroup="baseload",
+        showlegend=False,
         unit="W",
         row=1,
         col=1,
@@ -164,6 +165,17 @@ def dashboard_chart(state: State) -> str:
 
     add_series(
         fig,
+        "Climate target",
+        state.schedule.climate.target_temperature,
+        row=2,
+        col=1,
+        line=dict(width=1, color="#FECB52", shape="hv", dash="dot"),
+        unit="°C",
+        decimal=1,
+    )
+
+    add_series(
+        fig,
         "Climate temp",
         state.measurements.climate.temperature,
         row=2,
@@ -173,16 +185,16 @@ def dashboard_chart(state: State) -> str:
         decimal=2,
     )
 
-    add_series(
-        fig,
-        "Climate setpoint",
-        state.measurements.climate.setpoint,
-        row=2,
-        col=1,
-        line=dict(width=1, color="#FF6692", shape="hv", dash="dot"),
-        unit="°C",
-        decimal=1,
-    )
+    # add_series(
+    #     fig,
+    #     "Climate setpoint",
+    #     state.measurements.climate.setpoint,
+    #     row=2,
+    #     col=1,
+    #     line=dict(width=1, color="#FF6692", shape="hv", dash="dot"),
+    #     unit="°C",
+    #     decimal=1,
+    # )
 
     add_series(
         fig,
@@ -191,6 +203,17 @@ def dashboard_chart(state: State) -> str:
         row=2,
         col=1,
         line=dict(width=1, color="rgba(255, 255, 255, 0.4)"),
+        unit="°C",
+        decimal=1,
+    )
+
+    add_series(
+        fig,
+        "Boiler target",
+        state.schedule.heat_pump.boiler.target_temperature,
+        row=3,
+        col=1,
+        line=dict(width=1, color="#19D3F3", shape="hv", dash="dot"),
         unit="°C",
         decimal=1,
     )

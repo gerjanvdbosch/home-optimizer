@@ -38,12 +38,20 @@ actions:
             "boiler": {
               "setpoint": "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde",
               "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
-              "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+              "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
+              "target_temperature": [
+                ["18:00", 45.0],
+                ["19:00", 10.0]
+              ]
             }
           },
           "climate": {
             "temperature": "sensor.danfoss_15_temperature",
-            "setpoint": ["climate.danfoss_icon_woonkamer", "temperature"]
+            "setpoint": ["climate.danfoss_icon_woonkamer", "temperature"],
+            "target_temperature": [
+              ["18:00", 20.0],
+              ["22:00", 19.0]
+            ]
           },
           "forecast": {
             "solcast": "sensor.solcast_pv_forecast",

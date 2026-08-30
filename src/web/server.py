@@ -1,11 +1,14 @@
+import logging
 from contextlib import asynccontextmanager
 from multiprocessing import Manager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.responses import JSONResponse
 
 from app.bootstrap import create_container
 from app.worker import Worker
@@ -22,6 +25,8 @@ from domain.models import (
 from web.chart import backtest_chart, dashboard_chart
 
 BASE_DIR = Path(__file__).resolve().parent
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -56,6 +61,16 @@ app.mount(
 templates = Jinja2Templates(
     directory=BASE_DIR / "templates",
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, error: RequestValidationError):
+    logger.error("%s %s: %s", request.method, request.url.path, error)
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": error.errors()},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

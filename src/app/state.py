@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import Sequence
 
 import pandas as pd
@@ -9,6 +9,7 @@ from domain.models import (
     SeriesPoint,
     State,
 )
+from domain.time import to_local_time
 from features.dataset import DatasetBuilder, DatasetLoader
 from infrastructure.repository import StateRepository
 
@@ -41,7 +42,7 @@ class StateManager:
             now,
         )
 
-        state = self._map(df, self.load())
+        state = self._map(df, self.load(), config=config)
 
         self.repository.save(state)
 
@@ -80,6 +81,7 @@ class StateManager:
         self,
         df: pd.DataFrame,
         existing: State | None = None,
+        config: Config | None = None,
     ) -> State:
         state = State(updated=datetime.now(timezone.utc))
 
@@ -107,6 +109,19 @@ class StateManager:
             for attr, _ in source_obj.items():
                 setattr(source_obj, attr, self._parse_series(df, attr))
 
+        if config is not None:
+            times = sorted(df["time"].dropna().unique())
+
+            if times:
+                state.schedule.heat_pump.boiler.target_temperature = (
+                    self._resolve_schedule(
+                        config.heat_pump.boiler.target_temperature, times
+                    )
+                )
+                state.schedule.climate.target_temperature = self._resolve_schedule(
+                    config.climate.target_temperature, times
+                )
+
         return state
 
     def _parse_series(self, df: pd.DataFrame, column: str) -> list[SeriesPoint]:
@@ -119,6 +134,24 @@ class StateManager:
                 value=row[column],
             )
             for _, row in df[["time", column]].dropna().iterrows()
+        ]
+
+    def _resolve_schedule(
+        self,
+        target: float | list[tuple[time, float]],
+        times: list[datetime],
+    ) -> list[SeriesPoint]:
+        if isinstance(target, (float, int)):
+            return [SeriesPoint(time=t, value=float(target)) for t in times]
+
+        schedule = sorted(target)
+
+        def get_val(t: time) -> float:
+            past = [val for st, val in schedule if st <= t]
+            return past[-1] if past else schedule[-1][1]
+
+        return [
+            SeriesPoint(time=t, value=get_val(to_local_time(t).time())) for t in times
         ]
 
     def _dataset(self, config: Config) -> DatasetDefinition:
@@ -145,7 +178,7 @@ class StateManager:
                 config.baseload,
                 aggregation="mean",
                 interval="15m",
-                fill=0,
+                fill="previous",
             )
             .timeseries(
                 "heat_pump_state",
@@ -159,7 +192,7 @@ class StateManager:
                 config.heat_pump.power,
                 interval="15m",
                 aggregation="mean",
-                fill=0,
+                fill="previous",
             )
             .timeseries(
                 "climate_temperature",
