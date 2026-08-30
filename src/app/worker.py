@@ -62,6 +62,10 @@ class Worker:
                 try:
                     job = self.queue.get()
                 except (KeyboardInterrupt, SystemExit):
+                    logging.info("Worker interrupted by shutdown")
+                    break
+
+                if job is None:
                     logging.info("Worker stopped")
                     break
 
