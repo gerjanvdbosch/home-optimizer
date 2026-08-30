@@ -17,7 +17,7 @@ HeatPumpMode = Literal[
 
 ForecasterType = Literal[
     "solar",
-    # "boiler",
+    "boiler",
     "baseload",
 ]
 

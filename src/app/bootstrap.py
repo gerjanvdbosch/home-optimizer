@@ -82,7 +82,7 @@ def create_container() -> Container:
         path=models_path,
         study_storage=f"sqlite:///{models_path / 'optuna.db'}",
         forecasters=[
-            BoilerForecaster(),
+            # BoilerForecaster(),
             SolarForecaster(),
             BaseloadForecaster(),
         ],

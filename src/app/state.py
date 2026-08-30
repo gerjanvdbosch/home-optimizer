@@ -192,7 +192,7 @@ class StateManager:
                 config.heat_pump.power,
                 interval="15m",
                 aggregation="mean",
-                fill="previous",
+                fill=0,
             )
             .timeseries(
                 "climate_temperature",
