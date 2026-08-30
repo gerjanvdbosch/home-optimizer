@@ -63,7 +63,7 @@ async def dashboard(request: Request):
     container = request.app.state.container
 
     try:
-        config = container.config_repository.load()
+        container.config_repository.load()
     except Exception:
         return templates.TemplateResponse(request=request, name="setup.html")
 

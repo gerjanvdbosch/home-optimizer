@@ -1,6 +1,6 @@
 import logging
 from datetime import UTC, datetime
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 
 from joblib import parallel_backend
 
@@ -9,7 +9,7 @@ from domain.models import Job, JobType
 
 class Worker:
     def __init__(self, container_factory, manager):
-        self.queue: Queue = Queue()
+        self.queue = manager.Queue()
         self.container_factory = container_factory
         self.process: Process | None = None
         self.jobs = manager.dict()
@@ -59,9 +59,9 @@ class Worker:
             logging.info("Worker started")
 
             while True:
-                job = self.queue.get()
-
-                if job is None:
+                try:
+                    job = self.queue.get()
+                except (KeyboardInterrupt, SystemExit):
                     logging.info("Worker stopped")
                     break
 
