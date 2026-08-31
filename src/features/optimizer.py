@@ -32,7 +32,6 @@ class MPCOptimizer:
 
         schedule = tuple(int(round(pyo.value(model.boiler_on[t]))) for t in model.T)
 
-        # 1. Lees BEIDE temperatuurlagen uit (T_top en T_bottom)
         temperatures_top = tuple(
             round(float(pyo.value(model.T_top[t])), 2) for t in model.T
         )
@@ -56,7 +55,6 @@ class MPCOptimizer:
     def _build_model(self, data: MPCInput) -> pyo.ConcreteModel:
         model = pyo.ConcreteModel(name="home_energy_mpc")
 
-        # Time index
         horizon = len(data.solar_forecast_kw)
         model.T = pyo.RangeSet(0, horizon - 1)
 
@@ -77,7 +75,7 @@ class MPCOptimizer:
         # Variables
         model.boiler_on = pyo.Var(model.T, domain=pyo.Binary)
 
-        # Objective
+        # Objective: maximaliseer zonne-energie die in de boiler gaat
         model.objective = pyo.Objective(
             expr=sum(model.boiler_on[t] * model.solar_used_kwh[t] for t in model.T),
             sense=pyo.maximize,
@@ -119,7 +117,7 @@ class MPCOptimizer:
         model.T_top = pyo.Var(model.T, bounds=(20.0, 75.0))
         model.T_bottom = pyo.Var(model.T, bounds=(10.0, 75.0))
 
-        # Startcondities van de echte sensoren
+        # Startcondities
         model.init_top = pyo.Constraint(expr=model.T_top[0] == data.current_temp_top)
         model.init_bottom = pyo.Constraint(
             expr=model.T_bottom[0] == data.current_temp_bottom
@@ -127,34 +125,40 @@ class MPCOptimizer:
 
         thm = data.thermal_model
 
-        # 1. Dynamica voor Bovenkant (T_top)
+        # Bereken het constante verlies naar de omgeving per stap
+        t_amb = float(data.ambient_temperature)
+        amb_loss_top = (1.0 - thm.a_top_top - thm.a_top_bottom) * t_amb
+        amb_loss_bottom = (1.0 - thm.a_bottom_top - thm.a_bottom_bottom) * t_amb
+
+        # -----------------------------------------------------------------
+        # Dynamica
+        # -----------------------------------------------------------------
         def top_dynamics_rule(m, t):
             if t == len(m.T) - 1:
                 return pyo.Constraint.Skip
-            heat_input = m.boiler_on[t] * thm.dhw_freq
-            amb_loss = (1.0 - thm.a_top_top - thm.a_top_bottom) * thm.t_ambient
+
+            heat_input = m.boiler_on[t] * thm.typical_q_hp_kw
 
             return m.T_top[t + 1] == (
                 thm.a_top_top * m.T_top[t]
                 + thm.a_top_bottom * m.T_bottom[t]
-                + amb_loss
-                + (thm.c_top * heat_input)
+                + amb_loss_top
+                + thm.c_top * heat_input
             )
 
         model.top_dynamics = pyo.Constraint(model.T, rule=top_dynamics_rule)
 
-        # 2. Dynamica voor Onderkant (T_bottom)
         def bottom_dynamics_rule(m, t):
             if t == len(m.T) - 1:
                 return pyo.Constraint.Skip
-            heat_input = m.boiler_on[t] * thm.dhw_freq
-            amb_loss = (1.0 - thm.a_bottom_top - thm.a_bottom_bottom) * thm.t_ambient
+
+            heat_input = m.boiler_on[t] * thm.typical_q_hp_kw
 
             return m.T_bottom[t + 1] == (
                 thm.a_bottom_top * m.T_top[t]
                 + thm.a_bottom_bottom * m.T_bottom[t]
-                + amb_loss
-                + (thm.c_bottom * heat_input)
+                + amb_loss_bottom
+                + thm.c_bottom * heat_input
             )
 
         model.bottom_dynamics = pyo.Constraint(model.T, rule=bottom_dynamics_rule)
@@ -167,14 +171,21 @@ class MPCOptimizer:
             raise Exception("Solar forecast contains None values.")
 
         if data.current_temp_top is None:
-            raise Exception("Current boiler temperature is missing.")
+            raise Exception("Current boiler temperature (top) is missing.")
+
+        if data.current_temp_bottom is None:
+            raise Exception("Current boiler temperature (bottom) is missing.")
+
+        if data.thermal_model is None:
+            raise Exception("Thermal model is missing.")
 
         required_steps = self.config.boiler_steps
         horizon = len(data.solar_forecast_kw)
 
         if required_steps > horizon:
             raise Exception(
-                f"Boiler requires {required_steps} steps, but the horizon only has {horizon} steps."
+                f"Boiler requires {required_steps} steps, "
+                f"but the horizon only has {horizon} steps."
             )
 
     def _get_solver(self):

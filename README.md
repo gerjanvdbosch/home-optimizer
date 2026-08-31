@@ -34,11 +34,13 @@ actions:
             "power": "sensor.warmtepomp_geschat_vermogen",
             "supply_temperature": "sensor.ecodan_heatpump_ca09ec_aanvoer_temp",
             "return_temperature": "sensor.ecodan_heatpump_ca09ec_retour_temp",
+            "flow": "sensor.ecodan_heatpump_ca09ec_flow_waarde",
             "compressor_frequency": "sensor.ecodan_heatpump_compressor_frequentie",
             "boiler": {
               "setpoint": "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde",
               "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
               "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
+              "ambient_temperature": "sensor.xiaomi_sensor_3_temperatuur",
               "target_temperature": [
                 ["18:00", 45.0],
                 ["19:00", 10.0]

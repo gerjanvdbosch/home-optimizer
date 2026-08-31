@@ -153,6 +153,7 @@ class BoilerConfig(BaseModel):
     setpoint: SensorReference = Field()
     top_temperature: SensorReference = Field()
     bottom_temperature: SensorReference = Field()
+    ambient_temperature: SensorReference = Field()
     target_temperature: float | list[tuple[time, float]] = Field()
 
 
@@ -162,6 +163,7 @@ class HeatPumpConfig(BaseModel):
     supply_temperature: SensorReference = Field()
     return_temperature: SensorReference = Field()
     compressor_frequency: SensorReference = Field()
+    flow: SensorReference = Field()
     boiler: BoilerConfig = Field()
 
 
@@ -256,15 +258,15 @@ class BoilerThermalModel(BaseModel):
     # Dynamica Bovenkant (T_top)
     a_top_top: float  # Zelfbehoud top
     a_top_bottom: float  # Warmtestroming van onder naar boven
-    c_top: float  # Directe opwarming bovenkant per Hz
+    c_top: float  # Opwarming bovenkant per kW thermisch vermogen
 
     # Dynamica Onderkant (T_bottom)
     a_bottom_top: float  # Warmtestroming van boven naar onder
     a_bottom_bottom: float  # Zelfbehoud onderkant
-    c_bottom: float  # Directe opwarming onderkant per Hz
+    c_bottom: float  # Opwarming onderkant per kW thermisch vermogen
 
-    dhw_freq: float  # Typische frequentie in Hz
-    t_ambient: float = 20.0
+    # Thermisch vermogen van de warmtepomp tijdens SWW (bijv. 5.49 kW)
+    typical_q_hp_kw: float
 
 
 class MPCConfig(BaseModel):
@@ -278,12 +280,12 @@ class MPCConfig(BaseModel):
         return int(self.boiler_duration_hours / self.step_hours)
 
 
-@dataclass(frozen=True)
 class MPCInput(BaseModel):
     solar_forecast_kw: list[float]
     boiler_on: bool
-    current_temp_top: float  # Huidige sensorwaarde bovenkant
-    current_temp_bottom: float  # Huidige sensorwaarde onderkant
+    current_temp_top: float  # Huidige sensorwaarde bovenkant (°C)
+    current_temp_bottom: float  # Huidige sensorwaarde onderkant (°C)
+    ambient_temperature: float  # Huidige omgevingstemperatuur (°C)
     thermal_model: BoilerThermalModel
     target_temperature_top: list[float]
 
@@ -351,6 +353,7 @@ class SeriesPoint(BaseModel, Generic[P]):
 class BoilerMeasurement(BaseModel):
     top_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
     bottom_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
+    ambient_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
 class HeatPumpMeasurement(BaseModel):

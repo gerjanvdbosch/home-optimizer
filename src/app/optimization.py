@@ -52,16 +52,19 @@ class Optimization:
         data = MPCInput(
             solar_forecast_kw=solar_trajectory,
             boiler_on=False,
-            current_temp_top=state.measurements.heat_pump.boiler.top_temperature[
-                -1
-            ].value,
-            current_temp_bottom=state.measurements.heat_pump.boiler.bottom_temperature[
-                -1
-            ].value,
-            # current_temp_top=41,
-            # current_temp_bottom=29,
+            # current_temp_top=state.measurements.heat_pump.boiler.top_temperature[
+            #     -1
+            # ].value,
+            # current_temp_bottom=state.measurements.heat_pump.boiler.bottom_temperature[
+            #     -1
+            # ].value,
+            current_temp_top=40,
+            current_temp_bottom=25,
             thermal_model=thermal_model,
             target_temperature_top=target_temps,
+            ambient_temperature=state.measurements.heat_pump.boiler.ambient_temperature[
+                -1
+            ].value,
         )
 
         optimizer = MPCOptimizer(mpc_config)

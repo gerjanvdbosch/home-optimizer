@@ -113,6 +113,9 @@ class StateManager:
         state.measurements.heat_pump.boiler.bottom_temperature = self._parse_series(
             df, "boiler_bottom_temperature"
         )
+        state.measurements.heat_pump.boiler.ambient_temperature = self._parse_series(
+            df, "boiler_ambient_temperature"
+        )
         state.measurements.climate.temperature = self._parse_series(
             df, "climate_temperature"
         )
@@ -232,6 +235,13 @@ class StateManager:
             .timeseries(
                 "boiler_bottom_temperature",
                 config.heat_pump.boiler.bottom_temperature,
+                aggregation="mean",
+                interval="15m",
+                fill="previous",
+            )
+            .timeseries(
+                "boiler_ambient_temperature",
+                config.heat_pump.boiler.ambient_temperature,
                 aggregation="mean",
                 interval="15m",
                 fill="previous",
