@@ -6,12 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from joblib import dump, load
-from optuna import Trial
 from scipy.optimize import least_squares
-from skforecast.preprocessing import CalendarFeatures
-from skforecast.recursive import ForecasterRecursive
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.linear_model import HuberRegressor, Ridge
 
 from domain.models import (
     BoilerThermalModel,
@@ -21,34 +16,23 @@ from domain.models import (
     ForecasterType,
 )
 from features.dataset import DatasetBuilder
-from features.forecaster import SkforecastForecaster, SklearnForecaster
 
 logger = logging.getLogger(__name__)
 
 
 class GreyBoxForecaster(Forecaster):
-    """
-    Base class voor fysische / grey-box modellen (zoals boilers, RC-schillen van huizen).
-    Beheert het opslaan, inladen en valideren van geschatte fysische parameters.
-    """
-
     def __init__(self):
         self.params_: dict[str, float] = {}
         self.metadata_: dict[str, Any] = {}
 
     @property
     def is_fitted(self) -> bool:
-        """Geeft aan of het model al getraind of ingeladen is."""
         return bool(self.params_)
 
     def save(self, path: Path) -> None:
-        """Slaat de geschatte parameters en metadata atomair op naar disk."""
         path.mkdir(parents=True, exist_ok=True)
         dump(
-            {
-                "params": self.params_,
-                "metadata": self.metadata_,
-            },
+            {"params": self.params_, "metadata": self.metadata_},
             path / f"{self.name}.joblib",
         )
         logger.info(
@@ -56,66 +40,33 @@ class GreyBoxForecaster(Forecaster):
         )
 
     def load(self, path: Path, study_storage: str | None = None) -> None:
-        """Laadt de parameters en metadata in vanuit disk."""
         file_path = path / f"{self.name}.joblib"
         if not file_path.exists():
-            logger.warning(
-                "[%s] Geen opgeslagen model gevonden op %s", self.name, file_path
-            )
             return
-
         data = load(file_path)
         if isinstance(data, dict):
             self.params_ = data.get("params", {})
             self.metadata_ = data.get("metadata", {})
-            logger.info(
-                "[%s] Model succesvol ingeladen. Parameters: %s",
-                self.name,
-                self.params_,
-            )
-        else:
-            logger.error("[%s] Onverwacht formaat in %s", self.name, file_path)
 
     @abstractmethod
-    def fit(self, df: pd.DataFrame) -> None:
-        """Schat de fysische parameters (bijv. via least_squares of Kalman filtering)."""
-        ...
+    def fit(self, df: pd.DataFrame) -> None: ...
 
     @abstractmethod
-    def to_thermal_model(self) -> Any:
-        """Exporteert het getrainde model naar een state-space object voor MPC."""
-        ...
+    def to_thermal_model(self) -> Any: ...
 
 
 class BoilerForecaster(GreyBoxForecaster):
-    """
-    Fysisch 2-laags boiler model gebaseerd op de 1D energiebeschermingswet.
+    CP = 4.186  # kJ/kg·K
+    RHO = 1.0  # kg/L
+    DT_HOURS = 0.25  # 15 minuten
 
-    Vaste fysische constanten (200L tank):
-      - C_top = C_bottom = 0.1163 kWh/°C (100L water per laag)
-
-    Te schatten fysische parameters:
-      - UA_top, UA_bottom [kW/°C] : Wandisolatieverlies
-      - k_cross           [kW/°C] : Statische warmtegeleiding tussen lagen
-      - f_top             [-]     : Effectieve warmteverdeling van de spiraal
-    """
-
-    CP = 4.186  # kJ/kg·K (Soortelijke warmte water)
-    RHO = 1.0  # kg/L (Dichtheid water)
-    DT_HOURS = 0.25  # 15 minuten tijdstap
-
-    # Eerste-orde fysische eigenschappen (200L boiler)
-    VOLUME_TOTAL_L = 200.0
-    C_LAYER = (VOLUME_TOTAL_L / 2.0) * RHO * CP / 3600.0  # = 0.1163 kWh/°C
-
-    # Standaard fysische startwaarden (ErP Label B isolatie)
     DEFAULT_PARAMS = {
-        "C_top": C_LAYER,
-        "C_bottom": C_LAYER,
-        "UA_top": 0.0008,  # 0.8 W/K per zone (totaal 1.6 W/K = ~35W stilstandsverlies bij dT=40)
-        "UA_bottom": 0.0008,  # 0.8 W/K
-        "k_cross": 0.0005,  # 0.5 W/K geleiding door waterkolom
-        "f_top": 0.50,  # Convectieve opstijging verdeelt warmte gelijkmatig
+        "C_top": 0.1163,
+        "C_bottom": 0.1163,
+        "UA_top": 0.0014,
+        "UA_bottom": 0.0014,
+        "k_cross": 0.0005,
+        "f_top": 0.52,
     }
     DEFAULT_TYPICAL_Q_HP = 5.5
 
@@ -139,9 +90,6 @@ class BoilerForecaster(GreyBoxForecaster):
     def exog_columns(self) -> list[str]:
         return ["Q_hp", "T_ambient"]
 
-    # ------------------------------------------------------------------
-    # 1. Zuivere data preparatie
-    # ------------------------------------------------------------------
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         if "time" in df.columns:
@@ -161,139 +109,186 @@ class BoilerForecaster(GreyBoxForecaster):
         if missing:
             raise ValueError(f"Dataset mist vereiste kolom(men): {missing}")
 
-        # Thermisch vermogen: Q_hp = mass_flow * cp * delta_T (in kW)
         delta_t = (df["T_aanvoer"] - df["T_retour"]).clip(lower=0.0)
         mass_flow = (df["flow_lpm"].clip(lower=0.0) / 60.0) * self.RHO
         df["Q_hp"] = mass_flow * self.CP * delta_t
 
-        df["T_top_next"] = df["T_top"].shift(-1)
-        df["T_bottom_next"] = df["T_bottom"].shift(-1)
-
-        # Alleen rijen zonder ontbrekende sensorwaarden
-        clean = df.dropna(
-            subset=[
-                "T_top",
-                "T_bottom",
-                "T_top_next",
-                "T_bottom_next",
-                "Q_hp",
-                "T_ambient",
-            ]
-        ).copy()
-
+        clean = df.dropna(subset=["T_top", "T_bottom", "Q_hp", "T_ambient"]).copy()
         if clean.empty:
             raise ValueError("Geen geldige trainingsdata overgebleven.")
 
         return clean
 
-    # ------------------------------------------------------------------
-    # 2. Fysische 1D Energiebalans
-    # ------------------------------------------------------------------
-    def _residuals(
-        self, theta: np.ndarray, arrays: dict[str, np.ndarray]
+    @staticmethod
+    def _extract_episodes(df: pd.DataFrame) -> list[dict[str, np.ndarray]]:
+        """
+        Extraheert zuivere stilstandstrajecten (zonder tapwater-val) en actieve SWW opwarmruns.
+        """
+        is_sww = (df["state"].astype(str).str.upper() == "SWW") & (df["Q_hp"] > 1.0)
+        is_idle = (df["Q_hp"] < 0.1) & (~is_sww)
+
+        # Detecteer plotselinge tapwater-val tijdens stilstand (douchen)
+        dT_top = df["T_top"].diff()
+        dT_bot = df["T_bottom"].diff()
+        is_tapping = is_idle & ((dT_top < -0.4) | (dT_bot < -0.6))
+
+        # Een zuiver regime mag geen tapwater bevatten
+        regime = np.where(is_sww, 1, np.where(is_idle & (~is_tapping), 0, -1))
+        regime_changes = regime != np.roll(regime, 1)
+        regime_changes[0] = True
+        episode_ids = np.cumsum(regime_changes)
+
+        episodes = []
+        for _, group in df.groupby(episode_ids):
+            is_sww_group = is_sww.loc[group.index].all()
+            is_pure_idle = (
+                is_idle.loc[group.index].all() and not is_tapping.loc[group.index].any()
+            )
+
+            # Rustperiodes van minstens 2,5 uur (>=10 stappen) of SWW van minstens 30 min (>=2 stappen)
+            if (is_pure_idle and len(group) >= 10) or (
+                is_sww_group and len(group) >= 2
+            ):
+                episodes.append(
+                    {
+                        "t_top": group["T_top"].to_numpy(dtype=float),
+                        "t_bot": group["T_bottom"].to_numpy(dtype=float),
+                        "t_amb": group["T_ambient"].to_numpy(dtype=float),
+                        "q_hp": group["Q_hp"].to_numpy(dtype=float),
+                        "n_steps": len(group),
+                    }
+                )
+
+        return episodes
+
+    def _simulate_and_evaluate(
+        self, theta: np.ndarray, episodes: list[dict[str, np.ndarray]]
     ) -> np.ndarray:
-        ua_top, ua_bot, k_cross, f_top = theta
-        c_top = self.C_LAYER
-        c_bot = self.C_LAYER
+        # Fysische symmetrie: theta = [C_layer, UA_layer, k_cross, f_top]
+        c_layer, ua_layer, k_cross, f_top = theta
+        c_top = c_layer
+        c_bot = c_layer
+        ua_top = ua_layer
+        ua_bot = ua_layer
         dt = self.DT_HOURS
+        residuals = []
 
-        t_top = arrays["t_top"]
-        t_bot = arrays["t_bot"]
-        q_hp = arrays["q_hp"]
-        t_amb = arrays["t_amb"]
+        for ep in episodes:
+            n = ep["n_steps"]
+            sim_top = np.empty(n)
+            sim_bot = np.empty(n)
 
-        # Exacte 1D differentiaalvergelijkingen
-        dT_top = (
-            f_top * q_hp + ua_top * (t_amb - t_top) + k_cross * (t_bot - t_top)
-        ) / c_top
-        dT_bot = (
-            (1.0 - f_top) * q_hp + ua_bot * (t_amb - t_bot) - k_cross * (t_bot - t_top)
-        ) / c_bot
+            sim_top[0] = ep["t_top"][0]
+            sim_bot[0] = ep["t_bot"][0]
 
-        pred_top = t_top + dT_top * dt
-        pred_bot = t_bot + dT_bot * dt
+            t_amb = ep["t_amb"]
+            q_hp = ep["q_hp"]
 
-        # Residuen
-        res_top = pred_top - arrays["t_top_next"]
-        res_bot = pred_bot - arrays["t_bottom_next"]
+            for t in range(n - 1):
+                T_t = sim_top[t]
+                T_b = sim_bot[t]
 
-        return np.concatenate([res_top, res_bot])
+                dT_top = (
+                    f_top * q_hp[t] + ua_top * (t_amb[t] - T_t) + k_cross * (T_b - T_t)
+                ) / c_top
+                dT_bot = (
+                    (1.0 - f_top) * q_hp[t]
+                    + ua_bot * (t_amb[t] - T_b)
+                    - k_cross * (T_b - T_t)
+                ) / c_bot
 
-    # ------------------------------------------------------------------
-    # 3. Fitting via Robuuste M-Estimatie (Soft-L1)
-    # ------------------------------------------------------------------
+                sim_top[t + 1] = T_t + dT_top * dt
+                sim_bot[t + 1] = T_b + dT_bot * dt
+
+            residuals.append(sim_top - ep["t_top"])
+            residuals.append(sim_bot - ep["t_bot"])
+
+        return np.concatenate(residuals)
+
     def fit(self, df: pd.DataFrame) -> None:
         df_clean = self.prepare(df)
+        episodes = self._extract_episodes(df_clean)
 
-        arrays = {
-            "t_top": df_clean["T_top"].to_numpy(),
-            "t_bot": df_clean["T_bottom"].to_numpy(),
-            "t_amb": df_clean["T_ambient"].to_numpy(),
-            "q_hp": df_clean["Q_hp"].to_numpy(),
-            "t_top_next": df_clean["T_top_next"].to_numpy(),
-            "t_bottom_next": df_clean["T_bottom_next"].to_numpy(),
-        }
+        if not episodes:
+            raise ValueError(
+                "Onvoldoende zuivere episodes gevonden voor identificatie."
+            )
 
-        # Parameters om te schatten: [UA_top, UA_bot, k_cross, f_top]
-        x0 = np.array([0.0008, 0.0008, 0.0005, 0.50])
+        # Parameters om te schatten: [C_layer, UA_layer, k_cross, f_top]
+        # x0 = [0.1163 kWh/°C (100L), 0.0014 kW/°C (1.4 W/K), 0.0005 kW/°C, 0.52]
+        x0 = np.array([0.1163, 0.0014, 0.0005, 0.52])
         bounds = (
-            [
-                0.0002,
-                0.0002,
-                0.0001,
-                0.40,
-            ],  # lower (fysisch minimale isolatie en f_top)
-            [0.0030, 0.0030, 0.0050, 0.60],  # upper
+            [0.0800, 0.0005, 0.0001, 0.35],  # lower (80L per zone, min 0.5 W/K)
+            [0.1500, 0.0045, 0.0030, 0.60],  # upper (150L per zone, max 4.5 W/K)
         )
 
-        # Soft-L1 loss met f_scale=0.15 °C:
-        # Fouten < 0.15 °C (natuurlijke afkoeling/opwarming) worden kwadratisch geminimaliseerd.
-        # Grote uitschieters (douchen/tappen) worden lineair gedempt en vervuilen de fit niet!
         result = least_squares(
-            fun=self._residuals,
+            fun=self._simulate_and_evaluate,
             x0=x0,
-            args=(arrays,),
+            args=(episodes,),
             bounds=bounds,
             method="trf",
             loss="soft_l1",
-            f_scale=0.15,
-            max_nfev=500,
+            f_scale=0.2,
+            max_nfev=600,
         )
 
         if not result.success:
-            raise RuntimeError(f"Fitting mislukt: {result.message}")
+            raise RuntimeError(f"Systeemidentificatie mislukt: {result.message}")
+
+        c_fit, ua_fit, k_fit, f_fit = result.x
 
         self.params_ = {
-            "C_top": self.C_LAYER,
-            "C_bottom": self.C_LAYER,
-            "UA_top": float(result.x[0]),
-            "UA_bottom": float(result.x[1]),
-            "k_cross": float(result.x[2]),
-            "f_top": float(result.x[3]),
+            "C_top": float(c_fit),
+            "C_bottom": float(c_fit),
+            "UA_top": float(ua_fit),
+            "UA_bottom": float(ua_fit),
+            "k_cross": float(k_fit),
+            "f_top": float(f_fit),
         }
 
-        # Bepaal het werkelijke thermisch vermogen tijdens SWW
-        is_sww = df_clean["state"].astype(str).str.strip().str.upper() == "SWW"
-        sww = df_clean[is_sww & (df_clean["Q_hp"] > 1.0)]
-        typical_q_hp = (
-            float(sww["Q_hp"].median()) if not sww.empty else self.DEFAULT_TYPICAL_Q_HP
+        is_sww = (df_clean["state"].astype(str).str.upper() == "SWW") & (
+            df_clean["Q_hp"] > 1.0
         )
+        sww_data = df_clean[is_sww]
+        typical_q_hp = (
+            float(sww_data["Q_hp"].median())
+            if not sww_data.empty
+            else self.DEFAULT_TYPICAL_Q_HP
+        )
+
+        res = self._simulate_and_evaluate(result.x, episodes)
+        rmse = float(np.sqrt(np.mean(res**2)))
 
         self.metadata_ = {
             "typical_q_hp": typical_q_hp,
-            "rmse": float(np.sqrt(np.mean(self._residuals(result.x, arrays) ** 2))),
+            "rmse": rmse,
+            "episodes_count": len(episodes),
         }
 
-        print(f"[GreyBox] Fysische kalibratie voltooid.")
-        print(
-            f"[GreyBox] Vaste capaciteiten: C_top = C_bot = {self.C_LAYER:.4f} kWh/°C"
+        total_volume_l = (
+            (self.params_["C_top"] + self.params_["C_bottom"])
+            * 3600.0
+            / (self.RHO * self.CP)
         )
-        print(f"[GreyBox] Geschatte parameters: {self.params_}")
-        print(f"[GreyBox] Typisch vermogen warmtepomp: {typical_q_hp:.2f} kW")
+        ua_total_w_k = (self.params_["UA_top"] + self.params_["UA_bottom"]) * 1000.0
 
-    # ------------------------------------------------------------------
-    # 4. State-Space Generatie voor MPC
-    # ------------------------------------------------------------------
+        print("=== RESULTAAT ZUIVERE ZELF-LERENDE SYSTEEMIDENTIFICATIE ===")
+        print(
+            f"[GreyBox] Geanalyseerde episodes: {len(episodes)} (RMSE = {rmse:.3f} °C)"
+        )
+        print(
+            f"[GreyBox] Geleerd volume:        {total_volume_l:.1f} Liter (C_layer={c_fit:.4f} kWh/°C)"
+        )
+        print(
+            f"[GreyBox] Geleerd isolatieverlies: UA_totaal = {ua_total_w_k:.2f} W/K ({ua_fit * 1000:.2f} W/K per zone)"
+        )
+        print(f"[GreyBox] Geleerde geleiding:     k_cross = {k_fit * 1000:.2f} W/K")
+        print(
+            f"[GreyBox] Geleerde warmtestroom:  f_top = {f_fit * 100:.1f}% naar de top"
+        )
+        print(f"[GreyBox] Typisch vermogen:       Q_hp = {typical_q_hp:.2f} kW")
+
     def to_thermal_model(self) -> BoilerThermalModel:
         p = self.params_ if self.is_fitted else self.DEFAULT_PARAMS
         typical_q_hp = (
@@ -303,7 +298,6 @@ class BoilerForecaster(GreyBoxForecaster):
         )
         dt = self.DT_HOURS
 
-        # Discrete A, B matrices volgens de continu-naar-discreet Euler transformatie
         a_top_top = 1.0 - dt * (p["UA_top"] + p["k_cross"]) / p["C_top"]
         a_top_bottom = dt * p["k_cross"] / p["C_top"]
         c_top = dt * p["f_top"] / p["C_top"]
