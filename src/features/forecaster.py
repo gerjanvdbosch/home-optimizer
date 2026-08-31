@@ -180,7 +180,7 @@ class SkforecastForecaster(Forecaster):
             str(path / f"{self.name}.joblib"),
         )
 
-    def load(self, path: Path, study_storage: str) -> None:
+    def load(self, path: Path, study_storage: str | None = None) -> None:
         file_name = path / f"{self.name}.joblib"
 
         if not file_name.exists():
@@ -270,7 +270,7 @@ class SklearnForecaster(Forecaster):
 
         dump(self.forecaster, path / f"{self.name}.joblib")
 
-    def load(self, path: Path, study_storage: str) -> None:
+    def load(self, path: Path, study_storage: str | None = None) -> None:
         file_name = path / f"{self.name}.joblib"
 
         if not file_name.exists():
@@ -278,4 +278,5 @@ class SklearnForecaster(Forecaster):
 
         self.forecaster = load(file_name)
 
-        self._load_best_params(storage=study_storage)
+        if study_storage is not None:
+            self._load_best_params(storage=study_storage)

@@ -209,6 +209,28 @@ def dashboard_chart(state: State) -> str:
 
     add_series(
         fig,
+        "Boiler forecast bottom",
+        state.schedule.heat_pump.boiler.temperatures_bottom,
+        row=3,
+        col=1,
+        line=dict(width=1, color="#636EFA", shape="spline"),
+        unit="°C",
+        decimal=2,
+    )
+
+    add_series(
+        fig,
+        "Boiler forecast top",
+        state.schedule.heat_pump.boiler.temperatures_top,
+        row=3,
+        col=1,
+        line=dict(width=2, color="#19D3F3", shape="spline"),
+        unit="°C",
+        decimal=2,
+    )
+
+    add_series(
+        fig,
         "Boiler target",
         state.schedule.heat_pump.boiler.target_temperature,
         row=3,

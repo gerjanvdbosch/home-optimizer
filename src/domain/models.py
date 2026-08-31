@@ -252,6 +252,21 @@ class TuneConfig(BacktestConfig):
 class OptimizeConfig(BaseModel): ...
 
 
+class BoilerThermalModel(BaseModel):
+    # Dynamica Bovenkant (T_top)
+    a_top_top: float  # Zelfbehoud top
+    a_top_bottom: float  # Warmtestroming van onder naar boven
+    c_top: float  # Directe opwarming bovenkant per Hz
+
+    # Dynamica Onderkant (T_bottom)
+    a_bottom_top: float  # Warmtestroming van boven naar onder
+    a_bottom_bottom: float  # Zelfbehoud onderkant
+    c_bottom: float  # Directe opwarming onderkant per Hz
+
+    dhw_freq: float  # Typische frequentie in Hz
+    t_ambient: float = 20.0
+
+
 class MPCConfig(BaseModel):
     step_hours: float = Field(default=0.25, gt=0)
     boiler_power: float = Field(default=2.0, gt=0)
@@ -264,14 +279,20 @@ class MPCConfig(BaseModel):
 
 
 @dataclass(frozen=True)
-class MPCInput:
-    solar_forecast_kw: Sequence[float]
-    boiler_on: bool = False
+class MPCInput(BaseModel):
+    solar_forecast_kw: list[float]
+    boiler_on: bool
+    current_temp_top: float  # Huidige sensorwaarde bovenkant
+    current_temp_bottom: float  # Huidige sensorwaarde onderkant
+    thermal_model: BoilerThermalModel
+    target_temperature_top: list[float]
 
 
 @dataclass(frozen=True)
-class MPCResult:
+class MPCResult(BaseModel):
     schedule: tuple[int, ...]
+    temperatures_top: tuple[float, ...]  # Gepland verloop bovenkant (°C)
+    temperatures_bottom: tuple[float, ...]  # Gepland verloop onderkant (°C)
     objective_value: float
     solver_status: str
     termination_condition: str
@@ -410,6 +431,8 @@ class Predictions(BaseModel):
 
 class BoilerSchedule(BaseModel):
     target_temperature: list[SeriesPoint[float]] = Field(default_factory=list)
+    temperatures_top: list[SeriesPoint[float]] = Field(default_factory=list)
+    temperatures_bottom: list[SeriesPoint[float]] = Field(default_factory=list)
 
 
 class HeatPumpSchedule(BaseModel):
@@ -506,4 +529,4 @@ class Forecaster(Protocol):
 
     def save(self, path: Path) -> None: ...
 
-    def load(self, path: Path, study_storage: str) -> None: ...
+    def load(self, path: Path, study_storage: str | None = None) -> None: ...

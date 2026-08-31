@@ -64,6 +64,8 @@ class StateManager:
     def update_schedule(
         self,
         schedule: Sequence[int],
+        temperatures_top: Sequence[int],
+        temperatures_bottom: Sequence[int],
         power_kw: float,
         times: list[datetime],
     ) -> None:
@@ -72,8 +74,20 @@ class StateManager:
             for t, val in zip(times, schedule, strict=False)
         ]
 
+        temperatures_top = [
+            SeriesPoint(time=t, value=float(val))
+            for t, val in zip(times, temperatures_top, strict=False)
+        ]
+
+        temperatures_bottom = [
+            SeriesPoint(time=t, value=float(val))
+            for t, val in zip(times, temperatures_bottom, strict=False)
+        ]
+
         state = self.load()
         state.schedule.heat_pump.power = boiler_power
+        state.schedule.heat_pump.boiler.temperatures_top = temperatures_top
+        state.schedule.heat_pump.boiler.temperatures_bottom = temperatures_bottom
 
         self.repository.save(state)
 
