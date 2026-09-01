@@ -254,19 +254,16 @@ class TuneConfig(BacktestConfig):
 class OptimizeConfig(BaseModel): ...
 
 
-class BoilerThermalModel(BaseModel):
-    # Dynamica Bovenkant (T_top)
-    a_top_top: float  # Zelfbehoud top
-    a_top_bottom: float  # Warmtestroming van onder naar boven
-    c_top: float  # Opwarming bovenkant per kW thermisch vermogen
-
-    # Dynamica Onderkant (T_bottom)
-    a_bottom_top: float  # Warmtestroming van boven naar onder
-    a_bottom_bottom: float  # Zelfbehoud onderkant
-    c_bottom: float  # Opwarming onderkant per kW thermisch vermogen
-
-    # Thermisch vermogen van de warmtepomp tijdens SWW (bijv. 5.49 kW)
-    typical_q_hp_kw: float
+@dataclass(frozen=True)
+class BoilerThermalModel:
+    c_top: float  # Warmtecapaciteit top (kWh/K)
+    c_bottom: float  # Warmtecapaciteit bodem (kWh/K)
+    ua_top: float  # Isolatieverlies top (kW/K)
+    ua_bottom: float  # Isolatieverlies bodem (kW/K)
+    k_idle: float  # Geleiding in rust (kW/K)
+    k_mix: float  # Convectieve overdracht bij pompen (kW/K)
+    f_top: float  # Fractie warmte direct naar top (0-1)
+    typical_q_hp_kw: float  # Nominaal vermogen (kW)
 
 
 class MPCConfig(BaseModel):

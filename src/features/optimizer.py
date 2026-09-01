@@ -114,8 +114,19 @@ class MPCOptimizer:
     def _add_temperature_constraints(
         self, model: pyo.ConcreteModel, data: MPCInput
     ) -> None:
-        model.T_top = pyo.Var(model.T, bounds=(20.0, 75.0))
-        model.T_bottom = pyo.Var(model.T, bounds=(10.0, 75.0))
+        # 1. Definieer de fysieke grenzen en tijdstap
+        dt = self.config.step_hours
+        t_min = getattr(self.config, "min_boiler_temp", 10.0)
+        t_max = getattr(self.config, "max_boiler_temp", 75.0)
+
+        # 2. Toestandsvariabelen
+        model.T_top = pyo.Var(model.T, bounds=(t_min, t_max))
+        model.T_bottom = pyo.Var(model.T, bounds=(t_min, t_max))
+
+        # Dynamisch afgeleide grenzen voor McCormick envelop
+        diff_max = t_max - t_min  # bijv. 65.0
+        diff_min = t_min - t_max  # bijv. -65.0
+        model.delta_mix = pyo.Var(model.T, bounds=(diff_min, diff_max))
 
         # Startcondities
         model.init_top = pyo.Constraint(expr=model.T_top[0] == data.current_temp_top)
@@ -124,27 +135,52 @@ class MPCOptimizer:
         )
 
         thm = data.thermal_model
-
-        # Bereken het constante verlies naar de omgeving per stap
         t_amb = float(data.ambient_temperature)
-        amb_loss_top = (1.0 - thm.a_top_top - thm.a_top_bottom) * t_amb
-        amb_loss_bottom = (1.0 - thm.a_bottom_top - thm.a_bottom_bottom) * t_amb
 
-        # -----------------------------------------------------------------
-        # Dynamica
-        # -----------------------------------------------------------------
+        # 3. Lineaire menging: delta_mix[t] == boiler_on[t] * (T_bottom[t] - T_top[t])
+        # Wiskundig exacte, zuivere MILP McCormick-enveloppen:
+        model.mix_ub_on = pyo.Constraint(
+            model.T,
+            rule=lambda m, t: m.delta_mix[t] <= diff_max * m.boiler_on[t],
+        )
+        model.mix_lb_on = pyo.Constraint(
+            model.T,
+            rule=lambda m, t: m.delta_mix[t] >= diff_min * m.boiler_on[t],
+        )
+        model.mix_ub_diff = pyo.Constraint(
+            model.T,
+            rule=lambda m, t: (
+                m.delta_mix[t]
+                <= (m.T_bottom[t] - m.T_top[t]) + diff_max * (1 - m.boiler_on[t])
+            ),
+        )
+        model.mix_lb_diff = pyo.Constraint(
+            model.T,
+            rule=lambda m, t: (
+                m.delta_mix[t]
+                >= (m.T_bottom[t] - m.T_top[t]) + diff_min * (1 - m.boiler_on[t])
+            ),
+        )
+
+        # 4. Fysische Dynamica (Expliciete Euler Integratie)
         def top_dynamics_rule(m, t):
             if t == len(m.T) - 1:
                 return pyo.Constraint.Skip
 
-            heat_input = m.boiler_on[t] * thm.typical_q_hp_kw
+            T_t = m.T_top[t]
+            T_b = m.T_bottom[t]
+            q_hp = m.boiler_on[t] * thm.typical_q_hp_kw
 
-            return m.T_top[t + 1] == (
-                thm.a_top_top * m.T_top[t]
-                + thm.a_top_bottom * m.T_bottom[t]
-                + amb_loss_top
-                + thm.c_top * heat_input
-            )
+            # Warmtestromen in kW (Zuivere Fysica)
+            q_in = thm.f_top * q_hp
+            q_loss = thm.ua_top * (t_amb - T_t)
+            q_cond = thm.k_idle * (T_b - T_t)
+            q_mix = thm.k_mix * m.delta_mix[t]
+
+            # Energiebalans: Delta_T = (Som van Q) * dt / C
+            dT = (q_in + q_loss + q_cond + q_mix) * dt / thm.c_top
+
+            return m.T_top[t + 1] == T_t + dT
 
         model.top_dynamics = pyo.Constraint(model.T, rule=top_dynamics_rule)
 
@@ -152,14 +188,20 @@ class MPCOptimizer:
             if t == len(m.T) - 1:
                 return pyo.Constraint.Skip
 
-            heat_input = m.boiler_on[t] * thm.typical_q_hp_kw
+            T_t = m.T_top[t]
+            T_b = m.T_bottom[t]
+            q_hp = m.boiler_on[t] * thm.typical_q_hp_kw
 
-            return m.T_bottom[t + 1] == (
-                thm.a_bottom_top * m.T_top[t]
-                + thm.a_bottom_bottom * m.T_bottom[t]
-                + amb_loss_bottom
-                + thm.c_bottom * heat_input
-            )
+            # Warmtestromen in kW (Zuivere Fysica, complementair aan top)
+            q_in = (1.0 - thm.f_top) * q_hp
+            q_loss = thm.ua_bottom * (t_amb - T_b)
+            q_cond = -thm.k_idle * (T_b - T_t)
+            q_mix = -thm.k_mix * m.delta_mix[t]
+
+            # Energiebalans: Delta_T = (Som van Q) * dt / C
+            dT = (q_in + q_loss + q_cond + q_mix) * dt / thm.c_bottom
+
+            return m.T_bottom[t + 1] == T_b + dT
 
         model.bottom_dynamics = pyo.Constraint(model.T, rule=bottom_dynamics_rule)
 

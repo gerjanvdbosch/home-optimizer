@@ -74,7 +74,8 @@ class BoilerForecaster(GreyBoxForecaster):
         "C_bottom": 0.1163,
         "UA_top": 0.0014,
         "UA_bottom": 0.0014,
-        "k_cross": 0.0005,
+        "k_idle": 0.0003,
+        "k_mix": 0.0400,
         "f_top": 0.50,
     }
     DEFAULT_TYPICAL_Q_HP = 5.5
@@ -180,11 +181,7 @@ class BoilerForecaster(GreyBoxForecaster):
     def _simulate_and_evaluate(
         self, theta: np.ndarray, trajectories: list[dict[str, np.ndarray]]
     ) -> np.ndarray:
-        c_layer, ua_layer, k_cross, f_top = theta
-        c_top = c_layer
-        c_bot = c_layer
-        ua_top = ua_layer
-        ua_bot = ua_layer
+        c_layer, ua_layer, k_idle, k_mix, f_top = theta
         dt = self.DT_HOURS
         residuals = []
 
@@ -193,7 +190,6 @@ class BoilerForecaster(GreyBoxForecaster):
             sim_top = np.empty(n)
             sim_bot = np.empty(n)
 
-            # Startconditie = beginwaarde van dit sub-traject
             sim_top[0] = traj["t_top"][0]
             sim_bot[0] = traj["t_bot"][0]
 
@@ -204,14 +200,19 @@ class BoilerForecaster(GreyBoxForecaster):
                 T_t = sim_top[t]
                 T_b = sim_bot[t]
 
+                # Fysische menging: k_idle in rust, k_idle + k_mix bij opwarmen
+                is_active = 1.0 if q_hp[t] > 0.5 else 0.0
+                k_eff = k_idle + k_mix * is_active
+
                 dT_top = (
-                    f_top * q_hp[t] + ua_top * (t_amb[t] - T_t) + k_cross * (T_b - T_t)
-                ) / c_top
+                    f_top * q_hp[t] + ua_layer * (t_amb[t] - T_t) + k_eff * (T_b - T_t)
+                ) / c_layer
+
                 dT_bot = (
                     (1.0 - f_top) * q_hp[t]
-                    + ua_bot * (t_amb[t] - T_b)
-                    - k_cross * (T_b - T_t)
-                ) / c_bot
+                    + ua_layer * (t_amb[t] - T_b)
+                    - k_eff * (T_b - T_t)
+                ) / c_layer
 
                 sim_top[t + 1] = T_t + dT_top * dt
                 sim_bot[t + 1] = T_b + dT_bot * dt
@@ -230,19 +231,14 @@ class BoilerForecaster(GreyBoxForecaster):
                 "Onvoldoende data om dynamische trajecten uit te extraheren."
             )
 
-        # Startwaarden: [C_layer, UA_layer, k_cross, f_top]
-        x0 = np.array([0.1163, 0.0010, 0.0004, 0.50])
+        # Startwaarden: [C_layer, UA_layer, k_idle, k_mix, f_top]
+        x0 = np.array([0.1163, 0.0010, 0.0003, 0.0400, 0.50])
 
-        # Strikte fysische grenzen:
-        # - f_top tussen 0.48 en 0.55 (warmte stijgt op -> top >= bodem)
-        # - k_cross minimaal 0.2 W/K (waterkolom geleidt altijd warmte)
         bounds = (
-            [0.0900, 0.0005, 0.00020, 0.48],  # lower bounds
-            [0.1400, 0.0030, 0.00200, 0.55],  # upper bounds
+            [0.0800, 0.0005, 0.00010, 0.0050, 0.50],  # f_top >= 0.50 afgedwongen
+            [0.1500, 0.0030, 0.00150, 0.2000, 0.65],  # k_mix tot 0.200 W/K toegestaan
         )
 
-        # Cauchy Robuuste Loss met f_scale=0.15:
-        # Elimineert uitschieters (douchen) wiskundig veel agressiever dan Soft-L1
         result = least_squares(
             fun=self._simulate_and_evaluate,
             x0=x0,
@@ -251,20 +247,21 @@ class BoilerForecaster(GreyBoxForecaster):
             method="trf",
             loss="cauchy",
             f_scale=0.15,
-            max_nfev=600,
+            max_nfev=800,
         )
 
         if not result.success:
             raise RuntimeError(f"Systeemidentificatie mislukt: {result.message}")
 
-        c_fit, ua_fit, k_fit, f_fit = result.x
+        c_fit, ua_fit, k_idle_fit, k_mix_fit, f_fit = result.x
 
         self.params_ = {
             "C_top": float(c_fit),
             "C_bottom": float(c_fit),
             "UA_top": float(ua_fit),
             "UA_bottom": float(ua_fit),
-            "k_cross": float(k_fit),
+            "k_idle": float(k_idle_fit),
+            "k_mix": float(k_mix_fit),
             "f_top": float(f_fit),
         }
 
@@ -304,13 +301,14 @@ class BoilerForecaster(GreyBoxForecaster):
         print(
             f"[GreyBox] Geleerd isolatieverlies:   UA_totaal = {ua_total_w_k:.2f} W/K ({ua_fit * 1000:.2f} W/K per zone)"
         )
-        print(f"[GreyBox] Geleerde geleiding:       k_cross = {k_fit * 1000:.2f} W/K")
+        # print(f"[GreyBox] Geleerde geleiding:       k_cross = {k_fit * 1000:.2f} W/K")
         print(
             f"[GreyBox] Geleerde warmtestroom:    f_top = {f_fit * 100:.1f}% naar de top"
         )
         print(f"[GreyBox] Typisch vermogen:         Q_hp = {typical_q_hp:.2f} kW")
 
     def to_thermal_model(self) -> BoilerThermalModel:
+        """Exporteert de puur fysieke parameters naar de industriële dataclass."""
         p = self.params_ if self.is_fitted else self.DEFAULT_PARAMS
         typical_q_hp = (
             self.metadata_.get("typical_q_hp", self.DEFAULT_TYPICAL_Q_HP)
@@ -319,21 +317,27 @@ class BoilerForecaster(GreyBoxForecaster):
         )
         dt = self.DT_HOURS
 
-        a_top_top = 1.0 - dt * (p["UA_top"] + p["k_cross"]) / p["C_top"]
-        a_top_bottom = dt * p["k_cross"] / p["C_top"]
+        # Idle dynamica (puur geleiding + verlies)
+        a_top_top = 1.0 - dt * (p["UA_top"] + p["k_idle"]) / p["C_top"]
+        a_top_bottom = dt * p["k_idle"] / p["C_top"]
         c_top = dt * p["f_top"] / p["C_top"]
 
-        a_bottom_top = dt * p["k_cross"] / p["C_bottom"]
-        a_bottom_bottom = 1.0 - dt * (p["UA_bottom"] + p["k_cross"]) / p["C_bottom"]
+        a_bottom_top = dt * p["k_idle"] / p["C_bottom"]
+        a_bottom_bottom = 1.0 - dt * (p["UA_bottom"] + p["k_idle"]) / p["C_bottom"]
         c_bottom = dt * (1.0 - p["f_top"]) / p["C_bottom"]
 
+        # Mengoverdracht tijdens verwarmen (kWh/(°C · stap))
+        mix_rate_top = dt * p["k_mix"] / p["C_top"]
+        mix_rate_bottom = dt * p["k_mix"] / p["C_bottom"]
+
         return BoilerThermalModel(
-            a_top_top=float(a_top_top),
-            a_top_bottom=float(a_top_bottom),
-            c_top=float(c_top),
-            a_bottom_top=float(a_bottom_top),
-            a_bottom_bottom=float(a_bottom_bottom),
-            c_bottom=float(c_bottom),
+            c_top=float(p["C_top"]),
+            c_bottom=float(p["C_bottom"]),
+            ua_top=float(p["UA_top"]),
+            ua_bottom=float(p["UA_bottom"]),
+            k_idle=float(p["k_idle"]),
+            k_mix=float(p["k_mix"]),
+            f_top=float(p["f_top"]),
             typical_q_hp_kw=float(typical_q_hp),
         )
 
