@@ -315,20 +315,6 @@ class BoilerForecaster(GreyBoxForecaster):
             if self.is_fitted
             else self.DEFAULT_TYPICAL_Q_HP
         )
-        dt = self.DT_HOURS
-
-        # Idle dynamica (puur geleiding + verlies)
-        a_top_top = 1.0 - dt * (p["UA_top"] + p["k_idle"]) / p["C_top"]
-        a_top_bottom = dt * p["k_idle"] / p["C_top"]
-        c_top = dt * p["f_top"] / p["C_top"]
-
-        a_bottom_top = dt * p["k_idle"] / p["C_bottom"]
-        a_bottom_bottom = 1.0 - dt * (p["UA_bottom"] + p["k_idle"]) / p["C_bottom"]
-        c_bottom = dt * (1.0 - p["f_top"]) / p["C_bottom"]
-
-        # Mengoverdracht tijdens verwarmen (kWh/(°C · stap))
-        mix_rate_top = dt * p["k_mix"] / p["C_top"]
-        mix_rate_bottom = dt * p["k_mix"] / p["C_bottom"]
 
         return BoilerThermalModel(
             c_top=float(p["C_top"]),
