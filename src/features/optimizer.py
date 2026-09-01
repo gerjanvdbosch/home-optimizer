@@ -116,8 +116,9 @@ class MPCOptimizer:
     ) -> None:
         # 1. Definieer de fysieke grenzen en tijdstap
         dt = self.config.step_hours
-        t_min = getattr(self.config, "min_boiler_temp", 10.0)
-        t_max = getattr(self.config, "max_boiler_temp", 75.0)
+
+        t_min = 10.0
+        t_max = 75.0
 
         # 2. Toestandsvariabelen
         model.T_top = pyo.Var(model.T, bounds=(t_min, t_max))

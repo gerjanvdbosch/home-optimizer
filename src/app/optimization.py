@@ -58,7 +58,7 @@ class Optimization:
             # current_temp_bottom=state.measurements.heat_pump.boiler.bottom_temperature[
             #     -1
             # ].value,
-            current_temp_top=30,
+            current_temp_top=40,
             current_temp_bottom=22,
             thermal_model=thermal_model,
             target_temperature_top=target_temps,
