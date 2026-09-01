@@ -1,7 +1,7 @@
 import logging
 
 from app.state import StateManager
-from domain.models import MPCConfig, MPCInput
+from domain.boiler_model import BoilerThermalModel, MPCConfig, MPCInput
 from features.estimator import DisturbanceEstimator
 from features.forecasters.boiler import BoilerForecaster
 from features.optimizer import MPCOptimizer
@@ -20,7 +20,7 @@ class Optimization:
         mpc_config = MPCConfig(
             step_hours=0.25,
             boiler_power=2500.0,
-            boiler_duration_hours=1.0,
+            boiler_steps=4,
         )
 
         solar_forecast = [p.value for p in state.predictions.solar]
@@ -61,7 +61,7 @@ class Optimization:
             current_temp_top=40,
             current_temp_bottom=22,
             thermal_model=thermal_model,
-            target_temperature_top=target_temps,
+            # target_temperature_top=target_temps,
             ambient_temperature=state.measurements.heat_pump.boiler.ambient_temperature[
                 -1
             ].value,

@@ -10,6 +10,8 @@ from optuna import Study
 from pandas._typing import MergeHow
 from pydantic import BaseModel, Field, model_validator
 
+from domain.boiler_model import BoilerThermalModel
+
 HeatPumpMode = Literal[
     "heat",
     "cool",
@@ -252,49 +254,6 @@ class TuneConfig(BacktestConfig):
 
 
 class OptimizeConfig(BaseModel): ...
-
-
-@dataclass(frozen=True)
-class BoilerThermalModel:
-    c_top: float  # Warmtecapaciteit top (kWh/K)
-    c_bottom: float  # Warmtecapaciteit bodem (kWh/K)
-    ua_top: float  # Isolatieverlies top (kW/K)
-    ua_bottom: float  # Isolatieverlies bodem (kW/K)
-    k_idle: float  # Geleiding in rust (kW/K)
-    k_mix: float  # Convectieve overdracht bij pompen (kW/K)
-    f_top: float  # Fractie warmte direct naar top (0-1)
-    typical_q_hp_kw: float  # Nominaal vermogen (kW)
-
-
-class MPCConfig(BaseModel):
-    step_hours: float = Field(default=0.25, gt=0)
-    boiler_power: float = Field(default=2.0, gt=0)
-    boiler_duration_hours: float = Field(default=1.0, gt=0)
-    max_starts: int = 1
-
-    @property
-    def boiler_steps(self) -> int:
-        return int(self.boiler_duration_hours / self.step_hours)
-
-
-class MPCInput(BaseModel):
-    solar_forecast_kw: list[float]
-    boiler_on: bool
-    current_temp_top: float  # Huidige sensorwaarde bovenkant (°C)
-    current_temp_bottom: float  # Huidige sensorwaarde onderkant (°C)
-    ambient_temperature: float  # Huidige omgevingstemperatuur (°C)
-    thermal_model: BoilerThermalModel
-    target_temperature_top: list[float]
-
-
-@dataclass(frozen=True)
-class MPCResult(BaseModel):
-    schedule: tuple[int, ...]
-    temperatures_top: tuple[float, ...]  # Gepland verloop bovenkant (°C)
-    temperatures_bottom: tuple[float, ...]  # Gepland verloop onderkant (°C)
-    objective_value: float
-    solver_status: str
-    termination_condition: str
 
 
 class DataDefinition(BaseModel):

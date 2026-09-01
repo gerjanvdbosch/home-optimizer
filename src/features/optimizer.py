@@ -1,9 +1,8 @@
 import logging
-from typing import cast
 
 import pyomo.environ as pyo
 
-from domain.models import MPCConfig, MPCInput, MPCResult
+from domain.boiler_model import MPCConfig, MPCInput, MPCResult
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +20,12 @@ class MPCOptimizer:
         self._validate_input(data)
 
         model = self._build_model(data)
-        solver = self._get_solver()
+        solver = pyo.SolverFactory(self.solver_name)
 
         try:
             results = solver.solve(model, tee=False)
         except Exception as exc:
-            raise Exception(f"Optimization failed: {exc}") from exc
+            raise RuntimeError(f"Optimization failed: {exc}") from exc
 
         self._check_result(results)
 
@@ -58,12 +57,8 @@ class MPCOptimizer:
         horizon = len(data.solar_forecast_kw)
         model.T = pyo.RangeSet(0, horizon - 1)
 
-        # Parameters
+        # 1. Exogene Zonne-energie Parameters
         solar_values = {t: max(0.0, float(data.solar_forecast_kw[t])) for t in model.T}
-        model.solar_kw = pyo.Param(
-            model.T, initialize=solar_values, within=pyo.NonNegativeReals
-        )
-
         solar_used_kwh = {
             t: min(solar_values[t], self.config.boiler_power) * self.config.step_hours
             for t in model.T
@@ -72,25 +67,30 @@ class MPCOptimizer:
             model.T, initialize=solar_used_kwh, within=pyo.NonNegativeReals
         )
 
-        # Variables
+        # 2. Beslissingsvariabele
         model.boiler_on = pyo.Var(model.T, domain=pyo.Binary)
 
-        # Objective: maximaliseer zonne-energie die in de boiler gaat
+        # 3. Systeembeperkingen toevoegen
+        self._add_contiguous_run_constraint(model, data)
+
+        # DELEGEER DE THERMISCHE FYSIKA NAAR HET MODEL (DRY & MODULAIR)
+        data.thermal_model.apply_pyomo_constraints(model, data)
+
+        # 4. Doelfunctie: Maximaliseer zonne-energie MIN de inverter afknijp-boete
         model.objective = pyo.Objective(
-            expr=sum(model.boiler_on[t] * model.solar_used_kwh[t] for t in model.T),
+            expr=(
+                sum(model.boiler_on[t] * model.solar_used_kwh[t] for t in model.T)
+                - sum(0.001 * model.q_curtail[t] for t in model.T)
+            ),
             sense=pyo.maximize,
         )
-
-        # Constraints
-        self._add_contiguous_run_constraint(model, data)
-        self._add_temperature_constraints(model, data)
 
         return model
 
     def _add_contiguous_run_constraint(
         self, model: pyo.ConcreteModel, data: MPCInput
     ) -> None:
-        required_steps = self.config.boiler_steps
+        required_steps = int(round(self.config.boiler_steps))
         horizon = len(model.T)
 
         if data.boiler_on:
@@ -111,160 +111,25 @@ class MPCOptimizer:
 
         model.on_link = pyo.Constraint(model.T, rule=on_link_rule)
 
-    def _add_temperature_constraints(
-        self, model: pyo.ConcreteModel, data: MPCInput
-    ) -> None:
-        # 1. Definieer de fysieke grenzen en tijdstap
-        dt = self.config.step_hours
-
-        t_min = 10.0
-        t_max = 75.0
-
-        # 2. Toestandsvariabelen (Harde grens op t_max!)
-        model.T_top = pyo.Var(model.T, bounds=(t_min, t_max))
-        model.T_bottom = pyo.Var(model.T, bounds=(t_min, t_max))
-
-        # Dynamisch afgeleide grenzen voor McCormick envelop
-        diff_max = t_max - t_min
-        diff_min = t_min - t_max
-        model.delta_mix = pyo.Var(model.T, bounds=(diff_min, diff_max))
-
-        thm = data.thermal_model
-        t_amb = float(data.ambient_temperature)
-
-        # q_curtail is het vermogen dat de warmtepomp "inhoudt" (afknijpt)
-        model.q_curtail = pyo.Var(model.T, bounds=(0.0, thm.typical_q_hp_kw))
-
-        # Je kunt alleen vermogen inhouden als de pomp daadwerkelijk AAN staat
-        model.curtail_limit = pyo.Constraint(
-            model.T,
-            rule=lambda m, t: m.q_curtail[t] <= thm.typical_q_hp_kw * m.boiler_on[t],
-        )
-
-        # DE MAGIE: Voeg een hele kleine straf toe aan afknijpen.
-        # Hierdoor zal de optimizer ALTIJD 100% volgas verwarmen, BEHALVE als
-        # hij tegen de harde grens van 60.0 °C (t_max) botst. Dan moet hij wel
-        # q_curtail gebruiken om niet te exploderen, waardoor hij perfect plat afvlakt.
-        model.objective.expr -= sum(0.001 * model.q_curtail[t] for t in model.T)
-        # =====================================================================
-
-        # Startcondities
-        model.init_top = pyo.Constraint(expr=model.T_top[0] == data.current_temp_top)
-        model.init_bottom = pyo.Constraint(
-            expr=model.T_bottom[0] == data.current_temp_bottom
-        )
-
-        # 3. Lineaire menging (McCormick)
-        model.mix_ub_on = pyo.Constraint(
-            model.T, rule=lambda m, t: m.delta_mix[t] <= diff_max * m.boiler_on[t]
-        )
-        model.mix_lb_on = pyo.Constraint(
-            model.T, rule=lambda m, t: m.delta_mix[t] >= diff_min * m.boiler_on[t]
-        )
-        model.mix_ub_diff = pyo.Constraint(
-            model.T,
-            rule=lambda m, t: (
-                m.delta_mix[t]
-                <= (m.T_bottom[t] - m.T_top[t]) + diff_max * (1 - m.boiler_on[t])
-            ),
-        )
-        model.mix_lb_diff = pyo.Constraint(
-            model.T,
-            rule=lambda m, t: (
-                m.delta_mix[t]
-                >= (m.T_bottom[t] - m.T_top[t]) + diff_min * (1 - m.boiler_on[t])
-            ),
-        )
-
-        # 4. Fysische Dynamica
-        def top_dynamics_rule(m, t):
-            if t == len(m.T) - 1:
-                return pyo.Constraint.Skip
-
-            T_t = m.T_top[t]
-            T_b = m.T_bottom[t]
-
-            # Fysiek geleverd vermogen: Volgas (5.49 kW) MINUS wat de inverter afknijpt
-            q_hp = (thm.typical_q_hp_kw * m.boiler_on[t]) - m.q_curtail[t]
-
-            q_in = thm.f_top * q_hp
-            q_loss = thm.ua_top * (t_amb - T_t)
-            q_cond = thm.k_idle * (T_b - T_t)
-            q_mix = thm.k_mix * m.delta_mix[t]
-
-            # Energiebalans: Delta_T = (Som van Q) * dt / C
-            dT = (q_in + q_loss + q_cond + q_mix) * dt / thm.c_top
-
-            return m.T_top[t + 1] == T_t + dT
-
-        model.top_dynamics = pyo.Constraint(model.T, rule=top_dynamics_rule)
-
-        def bottom_dynamics_rule(m, t):
-            if t == len(m.T) - 1:
-                return pyo.Constraint.Skip
-
-            T_t = m.T_top[t]
-            T_b = m.T_bottom[t]
-
-            # Fysiek geleverd vermogen
-            q_hp = (thm.typical_q_hp_kw * m.boiler_on[t]) - m.q_curtail[t]
-
-            q_in = (1.0 - thm.f_top) * q_hp
-            q_loss = thm.ua_bottom * (t_amb - T_b)
-            q_cond = -thm.k_idle * (T_b - T_t)
-            q_mix = -thm.k_mix * m.delta_mix[t]
-
-            # Energiebalans: Delta_T = (Som van Q) * dt / C
-            dT = (q_in + q_loss + q_cond + q_mix) * dt / thm.c_bottom
-
-            return m.T_bottom[t + 1] == T_b + dT
-
-        model.bottom_dynamics = pyo.Constraint(model.T, rule=bottom_dynamics_rule)
-
     def _validate_input(self, data: MPCInput) -> None:
         if not data.solar_forecast_kw:
-            raise Exception("Solar forecast is empty.")
-
+            raise ValueError("Solar forecast is empty.")
         if any(value is None for value in data.solar_forecast_kw):
-            raise Exception("Solar forecast contains None values.")
-
+            raise ValueError("Solar forecast contains None values.")
         if data.current_temp_top is None:
-            raise Exception("Current boiler temperature (top) is missing.")
-
+            raise ValueError("Current boiler temperature (top) is missing.")
         if data.current_temp_bottom is None:
-            raise Exception("Current boiler temperature (bottom) is missing.")
-
+            raise ValueError("Current boiler temperature (bottom) is missing.")
         if data.thermal_model is None:
-            raise Exception("Thermal model is missing.")
+            raise ValueError("Thermal model is missing.")
 
         required_steps = self.config.boiler_steps
         horizon = len(data.solar_forecast_kw)
-
         if required_steps > horizon:
-            raise Exception(
+            raise ValueError(
                 f"Boiler requires {required_steps} steps, "
                 f"but the horizon only has {horizon} steps."
             )
-
-    def _get_solver(self):
-        candidates = [self.solver_name, "appsi_highs", "highspy", "cbc", "glpk"]
-        checked: set[str] = set()
-
-        for name in candidates:
-            if name in checked:
-                continue
-            checked.add(name)
-
-            try:
-                solver = pyo.SolverFactory(name)
-                if solver is not None and solver.available():
-                    return solver
-            except Exception as exc:
-                logger.debug("Solver '%s' unavailable: %s", name, exc)
-
-        raise Exception(
-            "No suitable MILP solver is available. Install HiGHS/highspy, CBC or GLPK."
-        )
 
     @staticmethod
     def _check_result(results) -> None:
@@ -273,10 +138,8 @@ class MPCOptimizer:
             pyo.TerminationCondition.optimal,
             pyo.TerminationCondition.feasible,
         }
-
         if termination not in valid_termination:
-            raise Exception(
-                "Optimization did not produce a usable solution. "
-                f"Status={results.solver.status}, "
+            raise RuntimeError(
+                f"Optimization did not produce a usable solution. Status={results.solver.status}, "
                 f"Termination={termination}"
             )

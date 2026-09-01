@@ -9,6 +9,8 @@ from joblib import dump, load
 from scipy.optimize import least_squares
 
 from domain.models import (
+    BacktestPoint,
+    BacktestResult,
     BoilerThermalModel,
     Config,
     DatasetDefinition,
@@ -29,6 +31,18 @@ class GreyBoxForecaster(Forecaster):
     def is_fitted(self) -> bool:
         return bool(self.params_)
 
+    @abstractmethod
+    def fit(self, df: pd.DataFrame) -> None: ...
+
+    @abstractmethod
+    def predict(self, df: pd.DataFrame, steps: int = 48) -> pd.DataFrame: ...
+
+    @abstractmethod
+    def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult: ...
+
+    @abstractmethod
+    def to_thermal_model(self) -> BoilerThermalModel: ...
+
     def save(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
         dump(
@@ -47,38 +61,29 @@ class GreyBoxForecaster(Forecaster):
         if isinstance(data, dict):
             self.params_ = data.get("params", {})
             self.metadata_ = data.get("metadata", {})
+            if self.params_:
+                self._update_model_from_params()
 
     @abstractmethod
-    def fit(self, df: pd.DataFrame) -> None: ...
-
-    @abstractmethod
-    def to_thermal_model(self) -> Any: ...
+    def _update_model_from_params(self) -> None: ...
 
 
 class BoilerForecaster(GreyBoxForecaster):
-    """
-    100% Zelflerend Fysisch Boiler Model (Multiple Shooting / Sub-Trajectory Identificatie).
-    Vrij van arbitraire tapwater-drempels of heuristieken.
+    """100% Zelflerend Fysisch Boiler Model (Multiple Shooting / Sub-Trajectory Identificatie).
+
+    Biedt volledige interoperabiliteit met predict() en backtest().
     """
 
-    CP = 4.186  # kJ/kg·K (Constante van water)
+    CP = 4.186  # kJ/kg·K (Constante water)
     RHO = 1.0  # kg/L
     DT_HOURS = 0.25  # 15 minuten
 
-    # Horizonten voor traject-integratie (Multiple Shooting)
-    IDLE_HORIZON_STEPS = 12  # 3 uur stilstand (voldoende om 1-stapsruis te elimineren)
-    SWW_HORIZON_STEPS = 4  # 1 uur SWW opwarming
+    IDLE_HORIZON_STEPS = 12  # 3 uur stilstand per sub-traject
+    SWW_HORIZON_STEPS = 4  # 1 uur opwarming
 
-    DEFAULT_PARAMS = {
-        "C_top": 0.1163,
-        "C_bottom": 0.1163,
-        "UA_top": 0.0014,
-        "UA_bottom": 0.0014,
-        "k_idle": 0.0003,
-        "k_mix": 0.0400,
-        "f_top": 0.50,
-    }
-    DEFAULT_TYPICAL_Q_HP = 5.5
+    def __init__(self) -> None:
+        super().__init__()
+        self._model = BoilerThermalModel(dt_hours=self.DT_HOURS)
 
     @property
     def name(self) -> ForecasterType:
@@ -86,19 +91,11 @@ class BoilerForecaster(GreyBoxForecaster):
 
     @property
     def label(self) -> str:
-        return "Temperature"
+        return "Boiler Temperature"
 
     @property
     def unit(self) -> str:
         return "°C"
-
-    @property
-    def target_column(self) -> str:
-        return "T_top"
-
-    @property
-    def exog_columns(self) -> list[str]:
-        return ["Q_hp", "T_ambient"]
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -130,10 +127,6 @@ class BoilerForecaster(GreyBoxForecaster):
         return clean
 
     def _extract_subtrajectories(self, df: pd.DataFrame) -> list[dict[str, np.ndarray]]:
-        """
-        Deelt de tijdreeks op in NIET-OVERLAPPENDE zuivere trajecten van 3 uur.
-        Hierdoor telt een douchebeurt slechts 1x mee en wordt hij door Cauchy loss verworpen.
-        """
         is_sww = (df["state"].astype(str).str.upper() == "SWW") & (df["Q_hp"] > 1.0)
         is_idle = (df["Q_hp"] < 0.1) & (~is_sww)
 
@@ -182,41 +175,25 @@ class BoilerForecaster(GreyBoxForecaster):
         self, theta: np.ndarray, trajectories: list[dict[str, np.ndarray]]
     ) -> np.ndarray:
         c_layer, ua_layer, k_idle, k_mix, f_top = theta
-        dt = self.DT_HOURS
+        temp_model = BoilerThermalModel(
+            c_top=c_layer,
+            c_bottom=c_layer,
+            ua_top=ua_layer,
+            ua_bottom=ua_layer,
+            k_idle=k_idle,
+            k_mix=k_mix,
+            f_top=f_top,
+            dt_hours=self.DT_HOURS,
+        )
+
         residuals = []
-
         for traj in trajectories:
-            n = traj["n_steps"]
-            sim_top = np.empty(n)
-            sim_bot = np.empty(n)
-
-            sim_top[0] = traj["t_top"][0]
-            sim_bot[0] = traj["t_bot"][0]
-
-            t_amb = traj["t_amb"]
-            q_hp = traj["q_hp"]
-
-            for t in range(n - 1):
-                T_t = sim_top[t]
-                T_b = sim_bot[t]
-
-                # Fysische menging: k_idle in rust, k_idle + k_mix bij opwarmen
-                is_active = 1.0 if q_hp[t] > 0.5 else 0.0
-                k_eff = k_idle + k_mix * is_active
-
-                dT_top = (
-                    f_top * q_hp[t] + ua_layer * (t_amb[t] - T_t) + k_eff * (T_b - T_t)
-                ) / c_layer
-
-                dT_bot = (
-                    (1.0 - f_top) * q_hp[t]
-                    + ua_layer * (t_amb[t] - T_b)
-                    - k_eff * (T_b - T_t)
-                ) / c_layer
-
-                sim_top[t + 1] = T_t + dT_top * dt
-                sim_bot[t + 1] = T_b + dT_bot * dt
-
+            sim_top, sim_bot = temp_model.simulate(
+                initial_top=traj["t_top"][0],
+                initial_bottom=traj["t_bot"][0],
+                ambient_temps=traj["t_amb"],
+                q_hp_profile=traj["q_hp"],
+            )
             residuals.append(sim_top - traj["t_top"])
             residuals.append(sim_bot - traj["t_bot"])
 
@@ -255,16 +232,6 @@ class BoilerForecaster(GreyBoxForecaster):
 
         c_fit, ua_fit, k_idle_fit, k_mix_fit, f_fit = result.x
 
-        self.params_ = {
-            "C_top": float(c_fit),
-            "C_bottom": float(c_fit),
-            "UA_top": float(ua_fit),
-            "UA_bottom": float(ua_fit),
-            "k_idle": float(k_idle_fit),
-            "k_mix": float(k_mix_fit),
-            "f_top": float(f_fit),
-        }
-
         is_sww = (df_clean["state"].astype(str).str.upper() == "SWW") & (
             df_clean["Q_hp"] > 1.0
         )
@@ -272,60 +239,119 @@ class BoilerForecaster(GreyBoxForecaster):
         typical_q_hp = (
             float(sww_data["Q_hp"].median())
             if not sww_data.empty
-            else self.DEFAULT_TYPICAL_Q_HP
+            else BoilerThermalModel.typical_q_hp_kw
         )
+
+        self.params_ = {
+            "c_top": float(c_fit),
+            "c_bottom": float(c_fit),
+            "ua_top": float(ua_fit),
+            "ua_bottom": float(ua_fit),
+            "k_idle": float(k_idle_fit),
+            "k_mix": float(k_mix_fit),
+            "f_top": float(f_fit),
+            "typical_q_hp_kw": float(typical_q_hp),
+        }
 
         res = self._simulate_and_evaluate(result.x, trajectories)
         rmse = float(np.sqrt(np.mean(res**2)))
 
+        # Berekening van afgeleide fysische grootheden
+        total_volume_l = (
+            (self.params_["c_top"] + self.params_["c_bottom"])
+            * 3600.0
+            / (self.RHO * self.CP)
+        )
+        ua_total_w_k = (self.params_["ua_top"] + self.params_["ua_bottom"]) * 1000.0
+        k_idle_w_k = self.params_["k_idle"] * 1000.0
+        k_mix_w_k = self.params_["k_mix"] * 1000.0
+
+        # Sla alle nuttige metadata op
         self.metadata_ = {
             "typical_q_hp": typical_q_hp,
             "rmse": rmse,
             "trajectories_count": len(trajectories),
+            "total_volume_liters": round(total_volume_l, 1),
+            "ua_total_w_k": round(ua_total_w_k, 2),
+            "k_idle_w_k": round(k_idle_w_k, 2),
+            "k_mix_w_k": round(k_mix_w_k, 2),
         }
 
-        total_volume_l = (
-            (self.params_["C_top"] + self.params_["C_bottom"])
-            * 3600.0
-            / (self.RHO * self.CP)
-        )
-        ua_total_w_k = (self.params_["UA_top"] + self.params_["UA_bottom"]) * 1000.0
+        # Model instance synchroniseren
+        self._update_model_from_params()
 
-        print("=== RESULTAAT ZUIVERE NAUWKEURIGE SYSTEEMIDENTIFICATIE ===")
-        print(
-            f"[GreyBox] Geanalyseerde trajecten: {len(trajectories)} (RMSE = {rmse:.3f} °C)"
+        # Print / Log samenvatting
+        summary = (
+            f"\n=== RESULTAAT ZUIVERE NAUWKEURIGE SYSTEEMIDENTIFICATIE ===\n"
+            f"[GreyBox] Geanalyseerde trajecten: {len(trajectories)} (RMSE = {rmse:.3f} °C)\n"
+            f"[GreyBox] Geleerd volume:          {total_volume_l:.1f} Liter (C_layer = {c_fit:.4f} kWh/°C)\n"
+            f"[GreyBox] Geleerd isolatieverlies:   UA_totaal = {ua_total_w_k:.2f} W/K ({ua_fit * 1000:.2f} W/K per zone)\n"
+            f"[GreyBox] Geleerde rustgeleiding:    k_idle = {k_idle_w_k:.2f} W/K\n"
+            f"[GreyBox] Geleerde actieve menging:  k_mix = {k_mix_w_k:.2f} W/K\n"
+            f"[GreyBox] Geleerde warmtestroom:     f_top = {f_fit * 100:.1f}% naar de top\n"
+            f"[GreyBox] Typisch vermogen:          Q_hp = {typical_q_hp:.2f} kW\n"
+            f"==========================================================="
         )
-        print(
-            f"[GreyBox] Geleerd volume:          {total_volume_l:.1f} Liter (C_layer={c_fit:.4f} kWh/°C)"
+        logger.info(summary)
+
+    def _update_model_from_params(self) -> None:
+        self._model = BoilerThermalModel(
+            c_top=self.params_["c_top"],
+            c_bottom=self.params_["c_bottom"],
+            ua_top=self.params_["ua_top"],
+            ua_bottom=self.params_["ua_bottom"],
+            k_idle=self.params_["k_idle"],
+            k_mix=self.params_["k_mix"],
+            f_top=self.params_["f_top"],
+            typical_q_hp_kw=self.params_.get("typical_q_hp_kw", 5.5),
+            dt_hours=self.DT_HOURS,
         )
-        print(
-            f"[GreyBox] Geleerd isolatieverlies:   UA_totaal = {ua_total_w_k:.2f} W/K ({ua_fit * 1000:.2f} W/K per zone)"
+
+    def predict(self, df: pd.DataFrame, steps: int = 48) -> pd.DataFrame:
+        """Voert een voorwaartse simulatie uit o.b.v. een gepland aanstuurprofiel in df."""
+        df_clean = self.prepare(df).iloc[:steps]
+
+        sim_top, sim_bot = self._model.simulate(
+            initial_top=float(df_clean["T_top"].iloc[0]),
+            initial_bottom=float(df_clean["T_bottom"].iloc[0]),
+            ambient_temps=df_clean["T_ambient"].to_numpy(dtype=float),
+            q_hp_profile=df_clean["Q_hp"].to_numpy(dtype=float),
         )
-        # print(f"[GreyBox] Geleerde geleiding:       k_cross = {k_fit * 1000:.2f} W/K")
-        print(
-            f"[GreyBox] Geleerde warmtestroom:    f_top = {f_fit * 100:.1f}% naar de top"
+
+        return pd.DataFrame(
+            {"pred_top": sim_top, "pred_bottom": sim_bot},
+            index=df_clean.index,
         )
-        print(f"[GreyBox] Typisch vermogen:         Q_hp = {typical_q_hp:.2f} kW")
+
+    def backtest(self, df: pd.DataFrame, steps: int = 24) -> BacktestResult:
+        """Valideert het geïdentificeerde model over een test dataset."""
+        df_clean = self.prepare(df)
+        preds = self.predict(df_clean, steps=len(df_clean))
+
+        mae = float(np.mean(np.abs(preds["pred_top"] - df_clean["T_top"])))
+
+        def make_points(label: str, series: pd.Series) -> BacktestPoint:
+            pts = (
+                series.rename("value")
+                .rename_axis("time")
+                .reset_index()
+                .to_dict("records")
+            )
+            return BacktestPoint(label=label, points=pts)
+
+        return BacktestResult(
+            name=self.name,
+            label=self.label,
+            unit=self.unit,
+            mae=mae,
+            points=[
+                make_points("Actual Top", df_clean["T_top"]),
+                make_points("Predicted Top", preds["pred_top"]),
+            ],
+        )
 
     def to_thermal_model(self) -> BoilerThermalModel:
-        """Exporteert de puur fysieke parameters naar de industriële dataclass."""
-        p = self.params_ if self.is_fitted else self.DEFAULT_PARAMS
-        typical_q_hp = (
-            self.metadata_.get("typical_q_hp", self.DEFAULT_TYPICAL_Q_HP)
-            if self.is_fitted
-            else self.DEFAULT_TYPICAL_Q_HP
-        )
-
-        return BoilerThermalModel(
-            c_top=float(p["C_top"]),
-            c_bottom=float(p["C_bottom"]),
-            ua_top=float(p["UA_top"]),
-            ua_bottom=float(p["UA_bottom"]),
-            k_idle=float(p["k_idle"]),
-            k_mix=float(p["k_mix"]),
-            f_top=float(p["f_top"]),
-            typical_q_hp_kw=float(typical_q_hp),
-        )
+        return self._model
 
     def dataset(self, config: Config) -> DatasetDefinition:
         return (
