@@ -56,9 +56,18 @@ class GreyBoxForecaster(Forecaster):
 
 
 class BoilerForecaster(GreyBoxForecaster):
-    CP = 4.186  # kJ/kg·K
+    """
+    100% Zelflerend Fysisch Boiler Model (Multiple Shooting / Sub-Trajectory Identificatie).
+    Vrij van arbitraire tapwater-drempels of heuristieken.
+    """
+
+    CP = 4.186  # kJ/kg·K (Constante van water)
     RHO = 1.0  # kg/L
     DT_HOURS = 0.25  # 15 minuten
+
+    # Horizonten voor traject-integratie (Multiple Shooting)
+    IDLE_HORIZON_STEPS = 12  # 3 uur stilstand (voldoende om 1-stapsruis te elimineren)
+    SWW_HORIZON_STEPS = 4  # 1 uur SWW opwarming
 
     DEFAULT_PARAMS = {
         "C_top": 0.1163,
@@ -66,7 +75,7 @@ class BoilerForecaster(GreyBoxForecaster):
         "UA_top": 0.0014,
         "UA_bottom": 0.0014,
         "k_cross": 0.0005,
-        "f_top": 0.52,
+        "f_top": 0.50,
     }
     DEFAULT_TYPICAL_Q_HP = 5.5
 
@@ -119,37 +128,44 @@ class BoilerForecaster(GreyBoxForecaster):
 
         return clean
 
-    @staticmethod
-    def _extract_episodes(df: pd.DataFrame) -> list[dict[str, np.ndarray]]:
+    def _extract_subtrajectories(self, df: pd.DataFrame) -> list[dict[str, np.ndarray]]:
         """
-        Extraheert zuivere stilstandstrajecten (zonder tapwater-val) en actieve SWW opwarmruns.
+        Deelt de tijdreeks op in NIET-OVERLAPPENDE zuivere trajecten van 3 uur.
+        Hierdoor telt een douchebeurt slechts 1x mee en wordt hij door Cauchy loss verworpen.
         """
         is_sww = (df["state"].astype(str).str.upper() == "SWW") & (df["Q_hp"] > 1.0)
         is_idle = (df["Q_hp"] < 0.1) & (~is_sww)
 
-        # Detecteer plotselinge tapwater-val tijdens stilstand (douchen)
-        dT_top = df["T_top"].diff()
-        dT_bot = df["T_bottom"].diff()
-        is_tapping = is_idle & ((dT_top < -0.4) | (dT_bot < -0.6))
-
-        # Een zuiver regime mag geen tapwater bevatten
-        regime = np.where(is_sww, 1, np.where(is_idle & (~is_tapping), 0, -1))
+        regime = np.where(is_sww, 1, np.where(is_idle, 0, -1))
         regime_changes = regime != np.roll(regime, 1)
         regime_changes[0] = True
-        episode_ids = np.cumsum(regime_changes)
+        block_ids = np.cumsum(regime_changes)
 
-        episodes = []
-        for _, group in df.groupby(episode_ids):
-            is_sww_group = is_sww.loc[group.index].all()
-            is_pure_idle = (
-                is_idle.loc[group.index].all() and not is_tapping.loc[group.index].any()
-            )
+        trajectories = []
+        for _, group in df.groupby(block_ids):
+            is_sww_block = is_sww.loc[group.index].all()
+            is_idle_block = is_idle.loc[group.index].all()
+            n = len(group)
 
-            # Rustperiodes van minstens 2,5 uur (>=10 stappen) of SWW van minstens 30 min (>=2 stappen)
-            if (is_pure_idle and len(group) >= 10) or (
-                is_sww_group and len(group) >= 2
-            ):
-                episodes.append(
+            if is_idle_block and n >= self.IDLE_HORIZON_STEPS:
+                # NIET-OVERLAPPEND: stap per 12 kwartieren (exact 3 uur per venster)
+                for start in range(
+                    0, n - self.IDLE_HORIZON_STEPS + 1, self.IDLE_HORIZON_STEPS
+                ):
+                    sub = group.iloc[start : start + self.IDLE_HORIZON_STEPS]
+                    trajectories.append(
+                        {
+                            "t_top": sub["T_top"].to_numpy(dtype=float),
+                            "t_bot": sub["T_bottom"].to_numpy(dtype=float),
+                            "t_amb": sub["T_ambient"].to_numpy(dtype=float),
+                            "q_hp": sub["Q_hp"].to_numpy(dtype=float),
+                            "n_steps": len(sub),
+                        }
+                    )
+
+            elif is_sww_block and n >= 2:
+                # SWW opwarmtraject (minstens 30 min)
+                trajectories.append(
                     {
                         "t_top": group["T_top"].to_numpy(dtype=float),
                         "t_bot": group["T_bottom"].to_numpy(dtype=float),
@@ -159,12 +175,11 @@ class BoilerForecaster(GreyBoxForecaster):
                     }
                 )
 
-        return episodes
+        return trajectories
 
     def _simulate_and_evaluate(
-        self, theta: np.ndarray, episodes: list[dict[str, np.ndarray]]
+        self, theta: np.ndarray, trajectories: list[dict[str, np.ndarray]]
     ) -> np.ndarray:
-        # Fysische symmetrie: theta = [C_layer, UA_layer, k_cross, f_top]
         c_layer, ua_layer, k_cross, f_top = theta
         c_top = c_layer
         c_bot = c_layer
@@ -173,16 +188,17 @@ class BoilerForecaster(GreyBoxForecaster):
         dt = self.DT_HOURS
         residuals = []
 
-        for ep in episodes:
-            n = ep["n_steps"]
+        for traj in trajectories:
+            n = traj["n_steps"]
             sim_top = np.empty(n)
             sim_bot = np.empty(n)
 
-            sim_top[0] = ep["t_top"][0]
-            sim_bot[0] = ep["t_bot"][0]
+            # Startconditie = beginwaarde van dit sub-traject
+            sim_top[0] = traj["t_top"][0]
+            sim_bot[0] = traj["t_bot"][0]
 
-            t_amb = ep["t_amb"]
-            q_hp = ep["q_hp"]
+            t_amb = traj["t_amb"]
+            q_hp = traj["q_hp"]
 
             for t in range(n - 1):
                 T_t = sim_top[t]
@@ -200,36 +216,41 @@ class BoilerForecaster(GreyBoxForecaster):
                 sim_top[t + 1] = T_t + dT_top * dt
                 sim_bot[t + 1] = T_b + dT_bot * dt
 
-            residuals.append(sim_top - ep["t_top"])
-            residuals.append(sim_bot - ep["t_bot"])
+            residuals.append(sim_top - traj["t_top"])
+            residuals.append(sim_bot - traj["t_bot"])
 
         return np.concatenate(residuals)
 
     def fit(self, df: pd.DataFrame) -> None:
         df_clean = self.prepare(df)
-        episodes = self._extract_episodes(df_clean)
+        trajectories = self._extract_subtrajectories(df_clean)
 
-        if not episodes:
+        if not trajectories:
             raise ValueError(
-                "Onvoldoende zuivere episodes gevonden voor identificatie."
+                "Onvoldoende data om dynamische trajecten uit te extraheren."
             )
 
-        # Parameters om te schatten: [C_layer, UA_layer, k_cross, f_top]
-        # x0 = [0.1163 kWh/°C (100L), 0.0014 kW/°C (1.4 W/K), 0.0005 kW/°C, 0.52]
-        x0 = np.array([0.1163, 0.0014, 0.0005, 0.52])
+        # Startwaarden: [C_layer, UA_layer, k_cross, f_top]
+        x0 = np.array([0.1163, 0.0010, 0.0004, 0.50])
+
+        # Strikte fysische grenzen:
+        # - f_top tussen 0.48 en 0.55 (warmte stijgt op -> top >= bodem)
+        # - k_cross minimaal 0.2 W/K (waterkolom geleidt altijd warmte)
         bounds = (
-            [0.0800, 0.0005, 0.0001, 0.35],  # lower (80L per zone, min 0.5 W/K)
-            [0.1500, 0.0045, 0.0030, 0.60],  # upper (150L per zone, max 4.5 W/K)
+            [0.0900, 0.0005, 0.00020, 0.48],  # lower bounds
+            [0.1400, 0.0030, 0.00200, 0.55],  # upper bounds
         )
 
+        # Cauchy Robuuste Loss met f_scale=0.15:
+        # Elimineert uitschieters (douchen) wiskundig veel agressiever dan Soft-L1
         result = least_squares(
             fun=self._simulate_and_evaluate,
             x0=x0,
-            args=(episodes,),
+            args=(trajectories,),
             bounds=bounds,
             method="trf",
-            loss="soft_l1",
-            f_scale=0.2,
+            loss="cauchy",
+            f_scale=0.15,
             max_nfev=600,
         )
 
@@ -257,13 +278,13 @@ class BoilerForecaster(GreyBoxForecaster):
             else self.DEFAULT_TYPICAL_Q_HP
         )
 
-        res = self._simulate_and_evaluate(result.x, episodes)
+        res = self._simulate_and_evaluate(result.x, trajectories)
         rmse = float(np.sqrt(np.mean(res**2)))
 
         self.metadata_ = {
             "typical_q_hp": typical_q_hp,
             "rmse": rmse,
-            "episodes_count": len(episodes),
+            "trajectories_count": len(trajectories),
         }
 
         total_volume_l = (
@@ -273,21 +294,21 @@ class BoilerForecaster(GreyBoxForecaster):
         )
         ua_total_w_k = (self.params_["UA_top"] + self.params_["UA_bottom"]) * 1000.0
 
-        print("=== RESULTAAT ZUIVERE ZELF-LERENDE SYSTEEMIDENTIFICATIE ===")
+        print("=== RESULTAAT ZUIVERE NAUWKEURIGE SYSTEEMIDENTIFICATIE ===")
         print(
-            f"[GreyBox] Geanalyseerde episodes: {len(episodes)} (RMSE = {rmse:.3f} °C)"
+            f"[GreyBox] Geanalyseerde trajecten: {len(trajectories)} (RMSE = {rmse:.3f} °C)"
         )
         print(
-            f"[GreyBox] Geleerd volume:        {total_volume_l:.1f} Liter (C_layer={c_fit:.4f} kWh/°C)"
+            f"[GreyBox] Geleerd volume:          {total_volume_l:.1f} Liter (C_layer={c_fit:.4f} kWh/°C)"
         )
         print(
-            f"[GreyBox] Geleerd isolatieverlies: UA_totaal = {ua_total_w_k:.2f} W/K ({ua_fit * 1000:.2f} W/K per zone)"
+            f"[GreyBox] Geleerd isolatieverlies:   UA_totaal = {ua_total_w_k:.2f} W/K ({ua_fit * 1000:.2f} W/K per zone)"
         )
-        print(f"[GreyBox] Geleerde geleiding:     k_cross = {k_fit * 1000:.2f} W/K")
+        print(f"[GreyBox] Geleerde geleiding:       k_cross = {k_fit * 1000:.2f} W/K")
         print(
-            f"[GreyBox] Geleerde warmtestroom:  f_top = {f_fit * 100:.1f}% naar de top"
+            f"[GreyBox] Geleerde warmtestroom:    f_top = {f_fit * 100:.1f}% naar de top"
         )
-        print(f"[GreyBox] Typisch vermogen:       Q_hp = {typical_q_hp:.2f} kW")
+        print(f"[GreyBox] Typisch vermogen:         Q_hp = {typical_q_hp:.2f} kW")
 
     def to_thermal_model(self) -> BoilerThermalModel:
         p = self.params_ if self.is_fitted else self.DEFAULT_PARAMS
