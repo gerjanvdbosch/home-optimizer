@@ -120,14 +120,33 @@ class MPCOptimizer:
         t_min = 10.0
         t_max = 75.0
 
-        # 2. Toestandsvariabelen
+        # 2. Toestandsvariabelen (Harde grens op t_max!)
         model.T_top = pyo.Var(model.T, bounds=(t_min, t_max))
         model.T_bottom = pyo.Var(model.T, bounds=(t_min, t_max))
 
         # Dynamisch afgeleide grenzen voor McCormick envelop
-        diff_max = t_max - t_min  # bijv. 65.0
-        diff_min = t_min - t_max  # bijv. -65.0
+        diff_max = t_max - t_min
+        diff_min = t_min - t_max
         model.delta_mix = pyo.Var(model.T, bounds=(diff_min, diff_max))
+
+        thm = data.thermal_model
+        t_amb = float(data.ambient_temperature)
+
+        # q_curtail is het vermogen dat de warmtepomp "inhoudt" (afknijpt)
+        model.q_curtail = pyo.Var(model.T, bounds=(0.0, thm.typical_q_hp_kw))
+
+        # Je kunt alleen vermogen inhouden als de pomp daadwerkelijk AAN staat
+        model.curtail_limit = pyo.Constraint(
+            model.T,
+            rule=lambda m, t: m.q_curtail[t] <= thm.typical_q_hp_kw * m.boiler_on[t],
+        )
+
+        # DE MAGIE: Voeg een hele kleine straf toe aan afknijpen.
+        # Hierdoor zal de optimizer ALTIJD 100% volgas verwarmen, BEHALVE als
+        # hij tegen de harde grens van 60.0 °C (t_max) botst. Dan moet hij wel
+        # q_curtail gebruiken om niet te exploderen, waardoor hij perfect plat afvlakt.
+        model.objective.expr -= sum(0.001 * model.q_curtail[t] for t in model.T)
+        # =====================================================================
 
         # Startcondities
         model.init_top = pyo.Constraint(expr=model.T_top[0] == data.current_temp_top)
@@ -135,18 +154,12 @@ class MPCOptimizer:
             expr=model.T_bottom[0] == data.current_temp_bottom
         )
 
-        thm = data.thermal_model
-        t_amb = float(data.ambient_temperature)
-
-        # 3. Lineaire menging: delta_mix[t] == boiler_on[t] * (T_bottom[t] - T_top[t])
-        # Wiskundig exacte, zuivere MILP McCormick-enveloppen:
+        # 3. Lineaire menging (McCormick)
         model.mix_ub_on = pyo.Constraint(
-            model.T,
-            rule=lambda m, t: m.delta_mix[t] <= diff_max * m.boiler_on[t],
+            model.T, rule=lambda m, t: m.delta_mix[t] <= diff_max * m.boiler_on[t]
         )
         model.mix_lb_on = pyo.Constraint(
-            model.T,
-            rule=lambda m, t: m.delta_mix[t] >= diff_min * m.boiler_on[t],
+            model.T, rule=lambda m, t: m.delta_mix[t] >= diff_min * m.boiler_on[t]
         )
         model.mix_ub_diff = pyo.Constraint(
             model.T,
@@ -163,16 +176,17 @@ class MPCOptimizer:
             ),
         )
 
-        # 4. Fysische Dynamica (Expliciete Euler Integratie)
+        # 4. Fysische Dynamica
         def top_dynamics_rule(m, t):
             if t == len(m.T) - 1:
                 return pyo.Constraint.Skip
 
             T_t = m.T_top[t]
             T_b = m.T_bottom[t]
-            q_hp = m.boiler_on[t] * thm.typical_q_hp_kw
 
-            # Warmtestromen in kW (Zuivere Fysica)
+            # Fysiek geleverd vermogen: Volgas (5.49 kW) MINUS wat de inverter afknijpt
+            q_hp = (thm.typical_q_hp_kw * m.boiler_on[t]) - m.q_curtail[t]
+
             q_in = thm.f_top * q_hp
             q_loss = thm.ua_top * (t_amb - T_t)
             q_cond = thm.k_idle * (T_b - T_t)
@@ -191,9 +205,10 @@ class MPCOptimizer:
 
             T_t = m.T_top[t]
             T_b = m.T_bottom[t]
-            q_hp = m.boiler_on[t] * thm.typical_q_hp_kw
 
-            # Warmtestromen in kW (Zuivere Fysica, complementair aan top)
+            # Fysiek geleverd vermogen
+            q_hp = (thm.typical_q_hp_kw * m.boiler_on[t]) - m.q_curtail[t]
+
             q_in = (1.0 - thm.f_top) * q_hp
             q_loss = thm.ua_bottom * (t_amb - T_b)
             q_cond = -thm.k_idle * (T_b - T_t)
