@@ -166,11 +166,11 @@ influxdb:
 
 ## Endpoints
 
-### Update API
+### Config API
 
-The `/api/update` endpoint is called from a Home Assistant automation using a
+The `/api/config` endpoint is called from a Home Assistant automation using a
 `rest_command`. It registers the Home Assistant sensor mappings for later use by the
-training and optimization endpoints and updates the current optimizer state.
+training and optimization endpoints.
 
 Example automation action:
 
@@ -178,7 +178,7 @@ Example automation action:
 actions:
   - action: rest_command.home_optimizer_api
     data:
-      endpoint: update
+      endpoint: config
       payload: |
         {{ {
           "solar": "sensor.pv_output",
@@ -195,6 +195,7 @@ actions:
               "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",
               "bottom_temperature": "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp",
               "ambient_temperature": "sensor.xiaomi_sensor_3_temperatuur",
+              "volume": 200,
               "target_temperature": [
                 ["18:00", 45.0],
                 ["19:00", 10.0]
@@ -218,6 +219,22 @@ actions:
             "device_tracker.phone_partner"
           ]
         } | to_json }}
+```
+
+### Update API
+
+The `/api/update` endpoint is called from a Home Assistant automation using a
+`rest_command`. It updates the current optimizer state.
+
+Example automation action:
+
+```yaml
+actions:
+  - action: rest_command.home_optimizer_api
+    data:
+      endpoint: update
+      payload: |
+        {{ {} | to_json }}
 ```
 
 ### Fit API

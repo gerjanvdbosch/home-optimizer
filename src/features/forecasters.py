@@ -15,6 +15,7 @@ from skforecast.model_selection import (
 )
 from skforecast.utils import load_forecaster, save_forecaster
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.metrics import mean_squared_error, r2_score
 
 from domain.types import BacktestPoint, BacktestResult, Config, ForecasterType
 from features.dataset import DatasetDefinition
@@ -201,6 +202,8 @@ class SkforecastForecaster(Forecaster):
             label=self.label,
             unit=self.unit,
             mae=float(metric["mean_absolute_error"].iloc[0]),
+            rmse=float(np.sqrt(mean_squared_error(result["actual"], result["pred"]))),
+            r2=float(r2_score(result["actual"], result["pred"])),
             points=[
                 make_point("Actual", "actual"),
                 make_point("Prediction", "pred"),

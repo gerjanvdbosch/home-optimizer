@@ -20,46 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
-    """
-    Minimal semi-physical heat-pump COP identifier.
-
-    Model:
-
-        COP = eta_carnot * COP_carnot
-
-        COP_carnot =
-            T_cond / (T_cond - T_evap)
-
-        T_cond = T_aanvoer + delta_t_cond
-        T_evap = T_ambient - delta_t_evap
-
-    Temperatures used in the Carnot equation are converted to Kelvin.
-
-    Measured thermal power:
-
-        Q_th [kW] =
-            0.06978 * flow_lpm * (T_aanvoer - T_retour)
-
-    Measured COP:
-
-        COP_measured = Q_th / P_el
-    """
-
-    # ------------------------------------------------------------------
-    # Configuration
-    # ------------------------------------------------------------------
-
     TRAIN_RATIO = 0.80
 
-    # Sanity limits for identification.
-    # These should eventually be made configurable for the installation.
     MIN_FLOW_LPM = 0.0
     MIN_ELECTRICAL_POWER_KW = 0.1
 
     MIN_COP = 1.0
     MAX_COP = 10.0
 
-    # Parameter bounds
     MIN_ETA = 0.05
     MAX_ETA = 0.90
 
@@ -69,14 +37,9 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
     MIN_DELTA_T_EVAP = 0.5
     MAX_DELTA_T_EVAP = 20.0
 
-    # Initial parameter values
     INITIAL_ETA = 0.45
     INITIAL_DELTA_T_COND = 5.0
     INITIAL_DELTA_T_EVAP = 5.0
-
-    # ------------------------------------------------------------------
-    # Identifier metadata
-    # ------------------------------------------------------------------
 
     @property
     def name(self) -> str:
@@ -84,42 +47,19 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
 
     @property
     def label(self) -> str:
-        return "Heat Pump COP"
-
-    # ------------------------------------------------------------------
-    # Data preparation
-    # ------------------------------------------------------------------
+        return "COP"
 
     def prepare(
         self,
         df: pd.DataFrame,
     ) -> pd.DataFrame:
-        """
-        Prepare raw heat-pump measurements for calibration.
-
-        Required input columns:
-
-            T_ambient   [°C]
-            T_aanvoer   [°C]
-            T_retour    [°C]
-            T_setpoint  [°C]
-            flow_lpm    [L/min]
-            P_el        [kW]
-            state       [-]
-
-        Adds:
-
-            delta_t_water
-            Q_th
-            COP_measured
-        """
 
         df = df.copy()
 
         required_columns = [
             "T_ambient",
-            "T_aanvoer",
-            "T_retour",
+            "T_supply",
+            "T_return",
             "T_setpoint",
             "flow_lpm",
             "P_el",
@@ -133,14 +73,10 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
         if missing_columns:
             raise ValueError(f"Missing required columns: {missing_columns}")
 
-        # --------------------------------------------------------------
-        # Ensure numeric measurement columns
-        # --------------------------------------------------------------
-
         numeric_columns = [
             "T_ambient",
-            "T_aanvoer",
-            "T_retour",
+            "T_supply",
+            "T_return",
             "T_setpoint",
             "flow_lpm",
             "P_el",
@@ -152,41 +88,13 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
                 errors="coerce",
             )
 
-        # --------------------------------------------------------------
-        # Remove rows without required numeric measurements
-        # --------------------------------------------------------------
-
         df = df.dropna(subset=numeric_columns).copy()
 
-        # --------------------------------------------------------------
-        # Water-side temperature difference
-        # --------------------------------------------------------------
-
-        df["delta_t_water"] = df["T_aanvoer"] - df["T_retour"]
-
-        # --------------------------------------------------------------
-        # Thermal power
-        #
-        # Flow is L/min:
-        #
-        # Q_th [kW] =
-        #     0.06978 * Flow[L/min] * DeltaT[K]
-        # --------------------------------------------------------------
+        df["delta_t_water"] = df["T_supply"] - df["T_return"]
 
         df["Q_th"] = 0.06978 * df["flow_lpm"] * df["delta_t_water"]
 
-        # --------------------------------------------------------------
-        # Measured COP
-        # --------------------------------------------------------------
-
         df["COP_measured"] = df["Q_th"] / df["P_el"]
-
-        # --------------------------------------------------------------
-        # Physical sanity checks
-        #
-        # We only identify the model using points where the heat pump
-        # appears to be delivering useful heat.
-        # --------------------------------------------------------------
 
         valid = (
             (df["flow_lpm"] > self.MIN_FLOW_LPM)
@@ -214,33 +122,19 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
 
         return df
 
-    # ------------------------------------------------------------------
-    # COP model
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _predict_cop(
         parameters: np.ndarray,
         T_ambient: np.ndarray,
-        T_aanvoer: np.ndarray,
+        T_supply: np.ndarray,
     ) -> np.ndarray:
-        """
-        Predict COP using the semi-physical Carnot model.
-
-        parameters:
-            eta_carnot
-            delta_t_cond [K]
-            delta_t_evap [K]
-        """
 
         eta_carnot, delta_t_cond, delta_t_evap = parameters
 
-        # Approximate refrigerant-side temperatures.
-        T_cond_C = T_aanvoer + delta_t_cond
+        T_cond_C = T_supply + delta_t_cond
 
         T_evap_C = T_ambient - delta_t_evap
 
-        # Celsius -> Kelvin
         T_cond_K = T_cond_C + 273.15
 
         T_evap_K = T_evap_C + 273.15
@@ -249,31 +143,13 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
 
         return eta_carnot * T_cond_K / temperature_lift
 
-    # ------------------------------------------------------------------
-    # Calibration
-    # ------------------------------------------------------------------
-
     def calibrate(
         self,
         df: pd.DataFrame,
     ) -> HeatPumpCOPModel:
-        """
-        Calibrate the semi-physical COP model.
-
-        The data is split chronologically:
-
-            first 80%  -> calibration
-            last 20%   -> validation
-
-        The validation data is never used during optimization.
-        """
 
         if len(df) < 10:
             raise ValueError("Not enough data points for calibration.")
-
-        # --------------------------------------------------------------
-        # Chronological train/test split
-        # --------------------------------------------------------------
 
         split_index = int(len(df) * self.TRAIN_RATIO)
 
@@ -288,19 +164,11 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             len(df) - len(train_df),
         )
 
-        # --------------------------------------------------------------
-        # Training data
-        # --------------------------------------------------------------
-
         T_ambient = train_df["T_ambient"].to_numpy(dtype=float)
 
-        T_aanvoer = train_df["T_aanvoer"].to_numpy(dtype=float)
+        T_supply = train_df["T_supply"].to_numpy(dtype=float)
 
         COP_measured = train_df["COP_measured"].to_numpy(dtype=float)
-
-        # --------------------------------------------------------------
-        # Optimization objective
-        # --------------------------------------------------------------
 
         def residuals(
             parameters: np.ndarray,
@@ -309,14 +177,10 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             COP_predicted = self._predict_cop(
                 parameters,
                 T_ambient,
-                T_aanvoer,
+                T_supply,
             )
 
             return COP_predicted - COP_measured
-
-        # --------------------------------------------------------------
-        # Initial values
-        # --------------------------------------------------------------
 
         x0 = np.array(
             [
@@ -325,10 +189,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
                 self.INITIAL_DELTA_T_EVAP,
             ]
         )
-
-        # --------------------------------------------------------------
-        # Parameter bounds
-        # --------------------------------------------------------------
 
         lower_bounds = np.array(
             [
@@ -345,10 +205,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
                 self.MAX_DELTA_T_EVAP,
             ]
         )
-
-        # --------------------------------------------------------------
-        # Fit
-        # --------------------------------------------------------------
 
         result = least_squares(
             residuals,
@@ -379,10 +235,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             delta_t_evap,
         )
 
-        # --------------------------------------------------------------
-        # Create model
-        # --------------------------------------------------------------
-
         self.model = HeatPumpCOPModel(
             eta_carnot=eta_carnot,
             delta_t_cond=delta_t_cond,
@@ -391,34 +243,16 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
 
         return self.model
 
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-
     def validate(
         self,
         df: pd.DataFrame,
     ) -> dict[str, float]:
-        """
-        Validate the calibrated model on data that was not used
-        during calibration.
-
-        Returns:
-
-            r2
-            mae
-            rmse
-        """
 
         if self.model is None:
             raise RuntimeError("Model must be calibrated before validation.")
 
         if len(df) < 2:
             raise ValueError("Not enough data points for validation.")
-
-        # --------------------------------------------------------------
-        # Same chronological split as calibrate()
-        # --------------------------------------------------------------
 
         split_index = int(len(df) * self.TRAIN_RATIO)
 
@@ -427,13 +261,9 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
         if test_df.empty:
             raise ValueError("No validation data available.")
 
-        # --------------------------------------------------------------
-        # Validation inputs
-        # --------------------------------------------------------------
-
         T_ambient = test_df["T_ambient"].to_numpy(dtype=float)
 
-        T_aanvoer = test_df["T_aanvoer"].to_numpy(dtype=float)
+        T_supply = test_df["T_supply"].to_numpy(dtype=float)
 
         COP_measured = test_df["COP_measured"].to_numpy(dtype=float)
 
@@ -445,19 +275,11 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             ]
         )
 
-        # --------------------------------------------------------------
-        # Prediction
-        # --------------------------------------------------------------
-
         COP_predicted = self._predict_cop(
             parameters,
             T_ambient,
-            T_aanvoer,
+            T_supply,
         )
-
-        # --------------------------------------------------------------
-        # Metrics
-        # --------------------------------------------------------------
 
         r2 = float(
             r2_score(
@@ -482,10 +304,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             )
         )
 
-        # --------------------------------------------------------------
-        # Logging
-        # --------------------------------------------------------------
-
         logger.info(
             "Heat pump COP validation: R2=%.4f, MAE=%.4f, RMSE=%.4f",
             r2,
@@ -493,7 +311,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             rmse,
         )
 
-        # Additional useful logging
         logger.info(
             "Heat pump COP validation: measured mean=%.3f, predicted mean=%.3f",
             float(np.mean(COP_measured)),
@@ -505,10 +322,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
             "mae": mae,
             "rmse": rmse,
         }
-
-    # ------------------------------------------------------------------
-    # Dataset definition
-    # ------------------------------------------------------------------
 
     def dataset(
         self,
@@ -525,14 +338,14 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
                 fill="previous",
             )
             .timeseries(
-                "T_aanvoer",
+                "T_supply",
                 config.heat_pump.supply_temperature,
                 interval="5m",
                 aggregation="mean",
                 fill="previous",
             )
             .timeseries(
-                "T_retour",
+                "T_return",
                 config.heat_pump.return_temperature,
                 interval="5m",
                 aggregation="mean",
@@ -552,13 +365,6 @@ class HeatPumpCOPIdentifier(SystemIdentifier[HeatPumpCOPModel]):
                 aggregation="mean",
                 fill="previous",
             )
-            # .timeseries(
-            #     "T_setpoint",
-            #     config.heat_pump.supply_setpoint,
-            #     interval="5m",
-            #     aggregation="mean",
-            #     fill="previous",
-            # )
             .timeseries(
                 "state",
                 config.heat_pump.state,

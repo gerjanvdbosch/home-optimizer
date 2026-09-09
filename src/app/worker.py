@@ -108,8 +108,11 @@ class Worker:
 
     def _execute(self, container, job: Job):
         match job.type:
+            case JobType.CONFIG:
+                container.config_repository.save(job.config)
             case JobType.UPDATE:
-                container.forecasting.update(job.config)
+                container.state_manager.update()
+                container.backtest_repository.clear()
             case JobType.FIT:
                 container.forecasting.fit(job.config)
             case JobType.PREDICT:

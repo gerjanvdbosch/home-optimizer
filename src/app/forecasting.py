@@ -35,11 +35,6 @@ class Forecasting:
         self.study_storage = study_storage
         self.forecasters = forecasters
 
-    def update(self, config: Config) -> None:
-        self.config_repository.save(config)
-        self.state_manager.update(config)
-        self.backtest_repository.clear()
-
     def fit(self, config: FitConfig) -> None:
         for forecaster in self.forecasters:
             if config.target and forecaster.name != config.target:
@@ -68,8 +63,10 @@ class Forecasting:
         result = forecaster.backtest(df, steps=config.steps)
 
         logging.info(
-            "Backtest finished: mae=%.3f",
+            "Backtest finished: mae=%.3f rmse=%.3f r2=%.4f",
             result.mae,
+            result.rmse,
+            result.r2,
         )
 
         self.backtest_repository.save(result)

@@ -22,6 +22,7 @@ from domain.types import (
     OptimizeConfig,
     PredictConfig,
     TuneConfig,
+    UpdateConfig,
     ValidateConfig,
 )
 from web.charts import backtest_chart, dashboard_chart
@@ -107,8 +108,20 @@ async def state(request: Request):
     return request.app.state.container.state_manager.load()
 
 
+@app.post("/api/config")
+async def config(request: Request, config: Config):
+    job = Job(type=JobType.CONFIG, config=config)
+
+    request.app.state.worker.submit(job)
+
+    return {
+        "job_id": job.id,
+        "state": "queued",
+    }
+
+
 @app.post("/api/update")
-async def update(request: Request, config: Config):
+async def update(request: Request, config: UpdateConfig):
     job = Job(type=JobType.UPDATE, config=config)
 
     request.app.state.worker.submit(job)

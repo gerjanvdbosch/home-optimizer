@@ -47,29 +47,24 @@ class SolarForecaster(SklearnForecaster):
     @property
     def exog_columns(self) -> list[str]:
         return [
-            # 1. Solcast niveaus & onzekerheidsbandbreedte
             "p50",
             "p90",
             "spread_upper",
             "spread_lower",
             "solcast_skewness",
             "clear_sky_ratio",
-            # 2. Open-Meteo stralingscomponenten (de zwaarste signaaldragers)
-            "gti",
+            "global_tilted_irradiance",
             "direct_radiation",
             "direct_normal_irradiance",
             "diffuse_radiation",
             "diffuse_fraction",
-            # 3. Weersverschil, atmosfeer & thermische condities
             "weather_discrepancy",
             "temperature",
             "wind_speed",
             "cloud_cover_low",
             "cloud_cover_mid",
-            # 4. Fysische zonnebaan
             "solar_elevation",
             "lead_time_hours",
-            # 5. Zuivere dynamische lags (geen ruis-lags meer)
             "lag_30m_error",
             "lag_30m_trend",
             "lag_24h_mean",
@@ -78,7 +73,6 @@ class SolarForecaster(SklearnForecaster):
     def _get_split_time(
         self, df: pd.DataFrame, test_ratio: float
     ) -> pd.Timestamp | None:
-        """Berekent intern de splitsingstijd op basis van de unieke forecast issuance tijden."""
         if test_ratio <= 0.0 or test_ratio >= 1.0:
             return None
 
@@ -88,19 +82,14 @@ class SolarForecaster(SklearnForecaster):
 
     def search_space(self, trial: Trial) -> dict[str, Any]:
         return {
-            # Iets lagere range, want lage learning rate scoort bewezen beter
             "learning_rate": trial.suggest_float(
                 "learning_rate", 0.008, 0.05, log=True
             ),
-            # Verhoogd van 63 naar 127
             "max_leaf_nodes": trial.suggest_int("max_leaf_nodes", 15, 127),
-            # Ondergrens verhoogd naar 40 tegen overfitting (Trial 1 faalde op 29)
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 40, 120),
-            # Mag wat forser regulariseren
             "l2_regularization": trial.suggest_float(
                 "l2_regularization", 1.0, 200.0, log=True
             ),
-            # Verhoogd van 8 naar 14
             "max_depth": trial.suggest_int("max_depth", 6, 14),
         }
 
@@ -162,8 +151,6 @@ class SolarForecaster(SklearnForecaster):
             2 * np.pi * (df["target_time"].dt.dayofyear - 172) / 365.25
         )
 
-        # --- FEATURE 1: ZONSTAND & CLEAR-SKY ---
-        # Fysische benadering van zonnehoogte voor Nederland (~52° NB)
         lat_rad = np.radians(52.0)
         doy = df["target_time"].dt.dayofyear
         dec_rad = np.radians(-23.45 * np.cos(np.radians(360.0 / 365.25 * (doy + 10))))
@@ -176,27 +163,21 @@ class SolarForecaster(SklearnForecaster):
         ).clip(lower=0.0)
         df["clear_sky_ratio"] = (df["p50"] / (df["p90"] + 50.0)).clip(0.0, 1.2)
 
-        df["weather_discrepancy"] = df["p50"] - df["gti"]
+        df["weather_discrepancy"] = df["p50"] - df["global_tilted_irradiance"]
 
-        # --- FEATURE 3: PANEELTEMPERATUUR & THERMISCH RENDEMENTSVERLIES ---
         wind_clipped = df["wind_speed"].clip(lower=0.0)
-        df["estimated_cell_temp"] = df["temperature"] + df["gti"] * np.exp(
-            -3.56 - 0.075 * wind_clipped
-        )
-        # Rendement daalt met ~0.4% per graad boven 25°C STC
+        df["estimated_cell_temp"] = df["temperature"] + df[
+            "global_tilted_irradiance"
+        ] * np.exp(-3.56 - 0.075 * wind_clipped)
         df["temp_loss_factor"] = 1.0 - 0.004 * (df["estimated_cell_temp"] - 25.0)
 
-        df["weather_discrepancy"] = df["p50"] - df["gti"]
+        df["weather_discrepancy"] = df["p50"] - df["global_tilted_irradiance"]
 
         actuals = (
             df[["target_time", "time", "P_solar", "P_max", "P_std", "p50"]]
             .dropna(subset=["P_solar"])
-            .sort_values(
-                ["target_time", "time"]
-            )  # sorteer zodat de nieuwste forecast onderaan staat
-            .drop_duplicates(
-                "target_time", keep="last"
-            )  # pak de allernieuwste forecast voor dat tijdstip!
+            .sort_values(["target_time", "time"])
+            .drop_duplicates("target_time", keep="last")
             .set_index("target_time")
             .sort_index()
             .asfreq("30min")
@@ -206,7 +187,6 @@ class SolarForecaster(SklearnForecaster):
         lag_2 = actuals.shift(2)
         lag_3 = actuals.shift(3)
 
-        # --- FEATURE 2: RELATIEVE FOUTEN EN RATIO'S ---
         eps = 50.0
         solcast_error = actuals["P_solar"] - actuals["p50"]
         solcast_rel_error = (actuals["P_solar"] - actuals["p50"]) / (
@@ -214,11 +194,9 @@ class SolarForecaster(SklearnForecaster):
         )
         perf_ratio = actuals["P_solar"] / (actuals["p50"] + eps)
 
-        # --- FEATURE 4: VOLATILITEIT & BEWOLKINGSTYPE UIT P_max / P_std ---
         volatility = (actuals["P_std"] / (actuals["P_solar"] + eps)).clip(0.0, 5.0)
         peak_ratio = (actuals["P_max"] / (actuals["P_solar"] + eps)).clip(1.0, 10.0)
 
-        # Mappen naar forecast-tijdstip `time`
         df["lag_30m_mean"] = df["time"].map(lag_1["P_solar"]).fillna(0.0)
         df["lag_30m_max"] = df["time"].map(lag_1["P_max"]).fillna(0.0)
         df["lag_30m_std"] = df["time"].map(lag_1["P_std"]).fillna(0.0)
@@ -248,20 +226,17 @@ class SolarForecaster(SklearnForecaster):
         df["lag_2h_std"] = df["time"].map(rolling_2h_solar.std()).fillna(0.0)
         df["lag_2h_error_mean"] = df["time"].map(rolling_2h_error.mean()).fillna(0.0)
 
-        # --- FEATURE 5: EXPONENTIEEL VERVAL VAN DE ACTUELE MEETFOUT ---
         decay_rate = 0.5
         df["persisted_error_decayed"] = df["lag_30m_error"] * np.exp(
             -decay_rate * df["lead_time_hours"]
         )
 
-        # Lag 24h veilig stellen zonder future leakage
         days_back = np.ceil(df["lead_time_hours"].clip(lower=0.5) / 24.0).astype(int)
         ref_past_target = df["target_time"] - pd.to_timedelta(days_back * 24, unit="h")
         df["lag_24h_mean"] = ref_past_target.map(actuals["P_solar"]).fillna(0.0)
 
         spread_up = (df["p90"] - df["p50"]).clip(lower=0)
         spread_down = (df["p50"] - df["p10"]).clip(lower=0)
-        # Ratio > 1 betekent: meer kans op uitschieters naar boven dan naar beneden
         df["solcast_skewness"] = ((spread_up + 10.0) / (spread_down + 10.0)).clip(
             0.1, 10.0
         )
@@ -286,7 +261,6 @@ class SolarForecaster(SklearnForecaster):
     def predict_result(self, prediction: np.ndarray, df: pd.DataFrame) -> pd.Series:
         p50 = df["p50"].to_numpy()
 
-        # Bij 0.5u: 0.15 | Bij 12u: 0.50
         dynamic_shrinkage = np.clip(
             0.15 + 0.03 * df["lead_time_hours"].to_numpy(), 0.15, 0.55
         )
@@ -404,7 +378,6 @@ class SolarForecaster(SklearnForecaster):
             )
         ]
 
-        # Verzamellijsten voor berekening van MAE, RMSE en R2
         y_true_daylight: list[float] = []
         y_pred_daylight: list[float] = []
         y_base_daylight: list[float] = []
@@ -445,7 +418,6 @@ class SolarForecaster(SklearnForecaster):
                 except ValueError:
                     continue
 
-            # Warm-up check: model wel trainen, maar pas evalueren vanaf split_time
             if split_time is not None and update_time < split_time:
                 continue
 
@@ -465,7 +437,6 @@ class SolarForecaster(SklearnForecaster):
             baseline_errors_all.extend(err_base.tolist())
             ml_errors_all.extend(err_ml.tolist())
 
-            # DAGLICHT VERZAMELING (voor zuivere MAE, RMSE en R²)
             daylight_mask = test_clean["p50"] >= MIN_SOLAR_IRRADIANCE
             if daylight_mask.any():
                 y_true_daylight.extend(
@@ -509,13 +480,11 @@ class SolarForecaster(SklearnForecaster):
                 )
             )
 
-        # --- BEREKENING METRICS (MAE, RMSE, R²) ---
         if y_true_daylight:
             y_true = np.array(y_true_daylight)
             y_pred = np.array(y_pred_daylight)
             y_base = np.array(y_base_daylight)
 
-            # 1. MAE
             day_base_mae = float(np.mean(np.abs(y_true - y_base)))
             day_ml_mae = float(np.mean(np.abs(y_true - y_pred)))
             day_imp_mae = (
@@ -524,7 +493,6 @@ class SolarForecaster(SklearnForecaster):
                 else 0.0
             )
 
-            # 2. RMSE
             day_base_rmse = float(np.sqrt(np.mean((y_true - y_base) ** 2)))
             day_ml_rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
             day_imp_rmse = (
@@ -533,7 +501,6 @@ class SolarForecaster(SklearnForecaster):
                 else 0.0
             )
 
-            # 3. R²
             ss_tot = float(np.sum((y_true - np.mean(y_true)) ** 2))
             day_base_r2 = (
                 float(1.0 - (np.sum((y_true - y_base) ** 2) / ss_tot))
@@ -555,15 +522,14 @@ class SolarForecaster(SklearnForecaster):
         )
         all_ml_mae = float(np.mean(ml_errors_all)) if ml_errors_all else 0.0
 
-        logging.info("--- Solar Daylight Metrics ---")
         logging.info(
-            "  MAE:  baseline=%.2f W | ML=%.2f W | verbetering=%+.1f%%",
+            "  MAE: baseline=%.2f W | ML=%.2f W | improvement=%+.1f%%",
             day_base_mae,
             day_ml_mae,
             day_imp_mae,
         )
         logging.info(
-            "  RMSE: baseline=%.2f W | ML=%.2f W | verbetering=%+.1f%%",
+            "  RMSE: baseline=%.2f W | ML=%.2f W | improvement=%+.1f%%",
             day_base_rmse,
             day_ml_rmse,
             day_imp_rmse,
@@ -744,7 +710,7 @@ class SolarForecaster(SklearnForecaster):
                 "open_meteo",
                 config.forecast.open_meteo,
                 attributes=[
-                    "gti",
+                    "global_tilted_irradiance",
                     "direct_radiation",
                     "direct_normal_irradiance",
                     "diffuse_radiation",
@@ -762,7 +728,7 @@ class SolarForecaster(SklearnForecaster):
                 target_label="right",
                 target_closed="right",
                 target_shift=[
-                    "gti",
+                    "global_tilted_irradiance",
                     "direct_radiation",
                     "direct_normal_irradiance",
                     "diffuse_radiation",

@@ -2,275 +2,158 @@ import logging
 
 import numpy as np
 import pyomo.environ as pyo
-from highspy import Highs
+from pyomo.contrib.appsi.base import TerminationCondition
+from pyomo.contrib.appsi.solvers.highs import Highs
 
 from domain.types import BoilerThermalModel, MPCConfig, MPCInput, MPCResult
+from features.boiler import CP_WATER_J_PER_KG_K, RHO_WATER_KG_PER_L, discretize_zoh
 
 logger = logging.getLogger(__name__)
 
 
+def _lumped_state_space(
+    volume_l: float,
+    ua_total_w_per_k: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Continuous state-space for a single lumped tank node: dT/dt = A T + B u,
+    u = [T_ambient, Q_in_effective, Q_tap_forecast].
+
+    Used only for MPC planning, not for the calibrated identification/validation
+    model (see features/boiler.py, which keeps top and bottom separate). Mixing
+    during active heating was found to saturate at the sampling-resolution
+    ceiling there (UA_mix_active pinned at its bound), meaning the tank is
+    practically fully mixed within one MPC step - so a single node using the
+    well-identified UA_top+UA_bottom sum and q_in_nominal_w is a defensible
+    simplification. It also keeps these dynamics linear in the binary boiler_on
+    decision: the full two-node model would need a disjunctive/big-M
+    reformulation to let UA_mix switch with boiler_on, for precision in the
+    individual UA_top/UA_bottom split that isn't there anyway.
+
+    Q_tap_forecast is an additional heat-sink term (cold mains water entering,
+    warm water drawn out) - the third B column carries a negative coefficient
+    since, unlike Q_in, it removes energy from the tank: C dT/dt = Q_in -
+    UA*(T-T_ambient) - Q_tap.
+    """
+
+    c_total = RHO_WATER_KG_PER_L * volume_l * CP_WATER_J_PER_KG_K
+
+    a = np.array([[-ua_total_w_per_k / c_total]])
+    b = np.array(
+        [[ua_total_w_per_k / c_total, 1.0 / c_total, -1.0 / c_total]]
+    )
+
+    return a, b
+
+
 class MPCOptimizer:
-    """
-    Mixed-integer MPC optimizer for the DHW tank.
-
-    The thermal model itself is kept outside Pyomo. This class only:
-    1. validates MPC input,
-    2. builds the Pyomo optimization model,
-    3. solves it with HiGHS,
-    4. extracts the optimal control trajectory.
-
-    Thermal dynamics are supplied by BoilerThermalModel.
-    """
-
     def __init__(
         self,
         thermal_model: BoilerThermalModel,
-        config: MPCConfig | None = None,
+        config: MPCConfig,
     ) -> None:
         self.thermal_model = thermal_model
-        self.config = config or MPCConfig()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        self.config = config
 
     def solve(self, data: MPCInput) -> MPCResult:
-        """
-        Solve the MPC optimization problem.
-
-        Parameters
-        ----------
-        data:
-            Current measured state and future forecasts.
-
-        Returns
-        -------
-        MPCResult
-            Optimal temperature trajectory and boiler schedule.
-        """
-
         self._validate_input(data)
 
         model = self._build_model(data)
 
         solver = Highs()
+        results = solver.solve(model)
 
-        result = solver.solve(model)
-
-        termination = result.termination_condition
-
-        if termination not in {
-            pyo.TerminationCondition.optimal,
-            pyo.TerminationCondition.feasible,
-        }:
+        if results.termination_condition != TerminationCondition.optimal:
             raise RuntimeError(
-                f"MPC optimization failed. Termination condition: {termination}"
+                "MPC optimization failed. Termination condition: "
+                f"{results.termination_condition}"
             )
 
-        return self._extract_result(model, data)
-
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
+        return self._extract_result(model, data, results.termination_condition)
 
     def _validate_input(self, data: MPCInput) -> None:
-        """
-        Validate MPC input data.
-
-        All forecast arrays must have identical length.
-        """
-
-        fields = {
-            "T_ambient_forecast": data.T_ambient_forecast,
-            "T_cold_forecast": data.T_cold_forecast,
-            "flow_forecast": data.flow_forecast,
-            "T_setpoint_forecast": data.T_setpoint_forecast,
-            "solar_available_w": data.solar_available_w,
-        }
-
-        lengths = {name: len(values) for name, values in fields.items()}
-
-        if len(set(lengths.values())) != 1:
-            raise ValueError(
-                "All forecast arrays must have the same length. "
-                f"Received lengths: {lengths}"
-            )
-
-        horizon = len(data.T_ambient_forecast)
+        horizon = len(data.solar_forecast_w)
 
         if horizon < 2:
             raise ValueError("MPC horizon must contain at least 2 steps.")
 
+        if len(data.target_temperature_top) != horizon:
+            raise ValueError(
+                "target_temperature_top must have the same length as "
+                f"solar_forecast_w ({horizon}), got "
+                f"{len(data.target_temperature_top)}."
+            )
+
+        # Empty means "no forecast available" (treated as no draws elsewhere) -
+        # only a non-empty, mismatched length is an actual bug.
+        if data.tap_forecast_w and len(data.tap_forecast_w) != horizon:
+            raise ValueError(
+                "tap_forecast_w must be empty or have the same length as "
+                f"solar_forecast_w ({horizon}), got {len(data.tap_forecast_w)}."
+            )
+
         if self.config.step_hours <= 0:
             raise ValueError("step_hours must be greater than zero.")
 
-        if self.config.boiler_power_w < 0:
-            raise ValueError("boiler_power_w cannot be negative.")
+        if self.config.boiler_electrical_power_w < 0:
+            raise ValueError("boiler_electrical_power_w cannot be negative.")
 
         if self.config.boiler_min_runtime_steps < 1:
             raise ValueError("boiler_min_runtime_steps must be at least 1.")
 
-    # ------------------------------------------------------------------
-    # Pyomo model
-    # ------------------------------------------------------------------
-
     def _build_model(self, data: MPCInput) -> pyo.ConcreteModel:
-        """
-        Build the complete Pyomo MPC model.
-        """
-
-        horizon = len(data.T_ambient_forecast)
+        horizon = len(data.solar_forecast_w)
 
         model = pyo.ConcreteModel()
 
-        # --------------------------------------------------------------
-        # Time index
-        # --------------------------------------------------------------
-
         model.K = pyo.RangeSet(0, horizon - 1)
 
-        # --------------------------------------------------------------
-        # State variables
-        # --------------------------------------------------------------
+        model.T = pyo.Var(model.K, bounds=(0.0, 100.0))
 
-        model.T_top = pyo.Var(
+        model.boiler_on = pyo.Var(model.K, domain=pyo.Binary)
+
+        model.boiler_start = pyo.Var(model.K, domain=pyo.Binary)
+
+        model.slack = pyo.Var(model.K, domain=pyo.NonNegativeReals)
+
+        # Equal-volume-node assumption, same as the calibrated identification
+        # model: the average of the two measured sensors approximates the tank's
+        # current total stored thermal energy per unit mass.
+        initial_temperature = (data.current_temp_top + data.current_temp_bottom) / 2.0
+
+        model.initial_temperature = pyo.Constraint(
+            expr=model.T[0] == float(initial_temperature)
+        )
+
+        def temperature_rule(m: pyo.ConcreteModel, k: int):
+            return m.T[k] + m.slack[k] >= float(data.target_temperature_top[k])
+
+        model.temperature_constraint = pyo.Constraint(
             model.K,
-            bounds=(0.0, 100.0),
+            rule=temperature_rule,
         )
 
-        model.T_mid = pyo.Var(
-            model.K,
-            bounds=(0.0, 100.0),
-        )
+        initial_boiler_on = int(data.boiler_on_current)
 
-        model.T_bottom = pyo.Var(
-            model.K,
-            bounds=(0.0, 100.0),
-        )
-
-        # --------------------------------------------------------------
-        # Binary boiler variables
-        # --------------------------------------------------------------
-
-        model.boiler_on = pyo.Var(
-            model.K,
-            domain=pyo.Binary,
-        )
-
-        model.boiler_start = pyo.Var(
-            model.K,
-            domain=pyo.Binary,
-        )
-
-        # --------------------------------------------------------------
-        # Soft-constraint slack variables
-        # --------------------------------------------------------------
-
-        model.top_slack = pyo.Var(
-            model.K,
-            domain=pyo.NonNegativeReals,
-        )
-
-        model.bottom_slack = pyo.Var(
-            model.K,
-            domain=pyo.NonNegativeReals,
-        )
-
-        # --------------------------------------------------------------
-        # Initial state
-        # --------------------------------------------------------------
-
-        initial_mid = self._get_initial_mid_temperature(data)
-
-        model.initial_top = pyo.Constraint(
-            expr=model.T_top[0] == float(data.T_top_current)
-        )
-
-        model.initial_mid = pyo.Constraint(expr=model.T_mid[0] == float(initial_mid))
-
-        model.initial_bottom = pyo.Constraint(
-            expr=model.T_bottom[0] == float(data.T_bottom_current)
-        )
-
-        # --------------------------------------------------------------
-        # Temperature constraints
-        # --------------------------------------------------------------
-
-        def top_temperature_rule(
-            m: pyo.ConcreteModel,
-            k: int,
-        ):
-            """
-            Keep the top of the tank above the requested temperature.
-
-            The constraint is soft, so the optimizer can violate it if
-            necessary, at a large penalty.
-            """
-
-            required_temperature = max(
-                float(data.T_setpoint_forecast[k]),
-                self.config.boiler_min_top_temperature,
-            )
-
-            return m.T_top[k] + m.top_slack[k] >= required_temperature
-
-        model.top_temperature_constraint = pyo.Constraint(
-            model.K,
-            rule=top_temperature_rule,
-        )
-
-        def bottom_temperature_rule(
-            m: pyo.ConcreteModel,
-            k: int,
-        ):
-            """
-            Keep the bottom of the tank above its minimum temperature.
-
-            This is deliberately NOT tied to the top setpoint. The
-            thermal stratification of the tank should be preserved.
-            """
-
-            return (
-                m.T_bottom[k] + m.bottom_slack[k]
-                >= self.config.boiler_min_bottom_temperature
-            )
-
-        model.bottom_temperature_constraint = pyo.Constraint(
-            model.K,
-            rule=bottom_temperature_rule,
-        )
-
-        # --------------------------------------------------------------
-        # Boiler startup logic
-        # --------------------------------------------------------------
-
-        initial_boiler_on = int(
-            bool(
-                getattr(
-                    data,
-                    "boiler_on_current",
-                    False,
-                )
-            )
-        )
-
-        def startup_rule(
-            m: pyo.ConcreteModel,
-            k: int,
-        ):
+        # Inequality, not equality: boiler_start must be 1 on a real 0->1
+        # transition (RHS=1, forcing boiler_start[k]>=1), but on a 1->0 stop the
+        # RHS is -1 and boiler_start[k]=0 already satisfies ">=-1" trivially. An
+        # equality here would force boiler_start=-1 on every stop, which is
+        # infeasible against its own binary domain - making any schedule that
+        # ever turns the boiler back off unsolvable, and forcing it to stay on
+        # forever once started (confirmed: this was the actual cause of an
+        # apparently-wasteful "never stops heating" result before this fix).
+        # weight_switching in the objective still drives it to 0 except at real
+        # starts, since setting it higher only adds cost.
+        def startup_rule(m: pyo.ConcreteModel, k: int):
             if k == 0:
-                return m.boiler_start[k] == (m.boiler_on[k] - initial_boiler_on)
+                return m.boiler_start[k] >= (m.boiler_on[k] - initial_boiler_on)
 
-            return m.boiler_start[k] == (m.boiler_on[k] - m.boiler_on[k - 1])
+            return m.boiler_start[k] >= (m.boiler_on[k] - m.boiler_on[k - 1])
 
         model.startup_constraint = pyo.Constraint(
             model.K,
             rule=startup_rule,
         )
-
-        # --------------------------------------------------------------
-        # Minimum runtime
-        # --------------------------------------------------------------
 
         model.minimum_runtime = pyo.ConstraintList()
 
@@ -287,72 +170,29 @@ class MPCOptimizer:
                     model.boiler_on[k] >= model.boiler_start[start]
                 )
 
-        # --------------------------------------------------------------
-        # Thermal dynamics
-        # --------------------------------------------------------------
+        # Exact zero-order-hold dynamics for the lumped tank node - one constant
+        # (A_d, B_d) pair for the whole horizon, since (unlike the two-node
+        # calibration model) this simplified model has no on/off mixing-regime
+        # switch: only the heat input, not the loss coefficient, depends on
+        # boiler_on, so it stays linear without per-step matrix recomputation.
+        a, b = _lumped_state_space(
+            self.thermal_model.volume_l,
+            self.thermal_model.ua_top_w_per_k + self.thermal_model.ua_bottom_w_per_k,
+        )
+        a_d, b_d = discretize_zoh(a, b, self.config.step_hours * 3600.0)
 
         model.thermal_dynamics = pyo.ConstraintList()
 
-        dt_seconds = self.config.step_hours * 3600.0
+        tap_forecast_w = data.tap_forecast_w or (0.0,) * horizon
 
         for k in range(horizon - 1):
-            ambient = float(data.T_ambient_forecast[k])
-
-            cold = float(data.T_cold_forecast[k])
-
-            flow_lpm = float(data.flow_forecast[k])
-
-            # Exact zero-order-hold discretization.
-            #
-            # Inputs are:
-            #   u[0] = heater power [W]
-            #   u[1] = ambient temperature [°C]
-            #   u[2] = cold-water temperature [°C]
-            A_d, B_d, d_d = self.thermal_model.discrete_matrices(
-                dt_seconds=dt_seconds,
-                flow_lpm=flow_lpm,
+            model.thermal_dynamics.add(
+                model.T[k + 1]
+                == a_d[0, 0] * model.T[k]
+                + b_d[0, 0] * float(data.ambient_temperature)
+                + b_d[0, 1] * self.thermal_model.q_in_nominal_w * model.boiler_on[k]
+                + b_d[0, 2] * float(tap_forecast_w[k])
             )
-
-            x_current = [
-                model.T_top[k],
-                model.T_mid[k],
-                model.T_bottom[k],
-            ]
-
-            x_next = [
-                model.T_top[k + 1],
-                model.T_mid[k + 1],
-                model.T_bottom[k + 1],
-            ]
-
-            heater_power = self.config.boiler_power_w * model.boiler_on[k]
-
-            u = [
-                heater_power,
-                ambient,
-                cold,
-            ]
-
-            # Three thermal states:
-            #   0 = top
-            #   1 = middle
-            #   2 = bottom
-            for i in range(3):
-                rhs = float(d_d[i])
-
-                # A_d * x
-                for j in range(3):
-                    rhs += float(A_d[i, j]) * x_current[j]
-
-                # B_d * u
-                for j in range(3):
-                    rhs += float(B_d[i, j]) * u[j]
-
-                model.thermal_dynamics.add(x_next[i] == rhs)
-
-        # --------------------------------------------------------------
-        # Objective
-        # --------------------------------------------------------------
 
         model.objective = pyo.Objective(
             expr=self._build_objective(model, data),
@@ -361,199 +201,60 @@ class MPCOptimizer:
 
         return model
 
-    # ------------------------------------------------------------------
-    # Objective
-    # ------------------------------------------------------------------
-
     def _build_objective(
         self,
         model: pyo.ConcreteModel,
         data: MPCInput,
     ):
-        """
-        Build MPC objective.
-
-        Objective:
-
-            energy cost
-          - solar priority
-          + switching penalty
-          + temperature slack penalty
-
-        Energy is calculated in kWh.
-        """
-
         objective = 0.0
 
         dt_hours = self.config.step_hours
 
         for k in model.K:
-            boiler_on = model.boiler_on[k]
+            # Precomputed constant (depends only on the forecast, not on any
+            # decision variable) - solar is free and unused solar earns nothing
+            # back, so grid draw is simply whatever the assumed electrical load
+            # exceeds available solar by. This keeps the cost term linear in the
+            # binary boiler_on[k].
+            solar_available_w = max(0.0, float(data.solar_forecast_w[k]))
 
-            # ----------------------------------------------------------
-            # Boiler energy
-            # ----------------------------------------------------------
-
-            boiler_energy_kwh = (
-                self.config.boiler_power_w * dt_hours * boiler_on / 1000.0
-            )
-
-            objective += self.config.weight_energy * boiler_energy_kwh
-
-            # ----------------------------------------------------------
-            # Solar priority
-            # ----------------------------------------------------------
-
-            solar_available_w = max(
+            grid_power_w = max(
                 0.0,
-                float(data.solar_available_w[k]),
+                self.config.boiler_electrical_power_w - solar_available_w,
             )
 
-            # The boiler cannot consume more PV power than its own
-            # maximum electrical power.
-            solar_usable_w = min(
-                solar_available_w,
-                self.config.boiler_power_w,
+            grid_energy_kwh = grid_power_w * dt_hours / 1000.0
+
+            objective += (
+                self.config.price_eur_per_kwh * grid_energy_kwh * model.boiler_on[k]
             )
-
-            solar_energy_kwh = solar_usable_w * dt_hours * boiler_on / 1000.0
-
-            # More available solar makes boiler operation more
-            # attractive.
-            objective -= self.config.weight_solar_priority * solar_energy_kwh
-
-            # ----------------------------------------------------------
-            # Switching penalty
-            # ----------------------------------------------------------
 
             objective += self.config.weight_switching * model.boiler_start[k]
 
-            # ----------------------------------------------------------
-            # Soft temperature constraints
-            # ----------------------------------------------------------
-
-            objective += self.config.weight_temperature_slack * model.top_slack[k]
-
-            objective += self.config.weight_temperature_slack * model.bottom_slack[k]
+            objective += self.config.weight_temperature_slack * model.slack[k]
 
         return objective
-
-    # ------------------------------------------------------------------
-    # Initial hidden state
-    # ------------------------------------------------------------------
-
-    def _get_initial_mid_temperature(
-        self,
-        data: MPCInput,
-    ) -> float:
-        """
-        Determine the initial hidden middle-node temperature.
-
-        Priority:
-        1. measured/provided T_mid_current,
-        2. identified model initial T_mid_0,
-        3. average of top and bottom temperature.
-        """
-
-        current_mid = getattr(
-            data,
-            "T_mid_current",
-            None,
-        )
-
-        if current_mid is not None:
-            return float(current_mid)
-
-        model_mid = getattr(
-            self.thermal_model,
-            "T_mid_0",
-            None,
-        )
-
-        if model_mid is not None:
-            return float(model_mid)
-
-        return (float(data.T_top_current) + float(data.T_bottom_current)) / 2.0
-
-    # ------------------------------------------------------------------
-    # Result extraction
-    # ------------------------------------------------------------------
 
     def _extract_result(
         self,
         model: pyo.ConcreteModel,
         data: MPCInput,
+        termination_condition: TerminationCondition,
     ) -> MPCResult:
-        """
-        Extract the optimized MPC trajectory from Pyomo.
-        """
+        horizon = len(data.solar_forecast_w)
 
-        horizon = len(data.T_ambient_forecast)
+        temperatures = tuple(float(pyo.value(model.T[k])) for k in range(horizon))
 
-        T_top = np.array(
-            [pyo.value(model.T_top[k]) for k in range(horizon)],
-            dtype=float,
+        schedule = tuple(
+            round(float(pyo.value(model.boiler_on[k]))) for k in range(horizon)
         )
-
-        T_mid = np.array(
-            [pyo.value(model.T_mid[k]) for k in range(horizon)],
-            dtype=float,
-        )
-
-        T_bottom = np.array(
-            [pyo.value(model.T_bottom[k]) for k in range(horizon)],
-            dtype=float,
-        )
-
-        boiler_on = np.array(
-            [round(float(pyo.value(model.boiler_on[k]))) for k in range(horizon)],
-            dtype=int,
-        )
-
-        boiler_start = np.array(
-            [round(float(pyo.value(model.boiler_start[k]))) for k in range(horizon)],
-            dtype=int,
-        )
-
-        top_slack = np.array(
-            [float(pyo.value(model.top_slack[k])) for k in range(horizon)],
-            dtype=float,
-        )
-
-        bottom_slack = np.array(
-            [float(pyo.value(model.bottom_slack[k])) for k in range(horizon)],
-            dtype=float,
-        )
-
-        # --------------------------------------------------------------
-        # Boiler power and energy
-        # --------------------------------------------------------------
-
-        boiler_power_w = self.config.boiler_power_w * boiler_on
-
-        boiler_energy_kwh = float(
-            np.sum(boiler_power_w * self.config.step_hours) / 1000.0
-        )
-
-        # --------------------------------------------------------------
-        # Objective value
-        # --------------------------------------------------------------
 
         objective_value = float(pyo.value(model.objective))
 
-        # --------------------------------------------------------------
-        # Result object
-        # --------------------------------------------------------------
-
         return MPCResult(
-            T_top=T_top,
-            T_mid=T_mid,
-            T_bottom=T_bottom,
-            boiler_on=boiler_on,
-            boiler_start=boiler_start,
-            boiler_power_w=boiler_power_w,
-            boiler_energy_kwh=boiler_energy_kwh,
-            top_slack=top_slack,
-            bottom_slack=bottom_slack,
+            schedule=schedule,
+            temperatures=temperatures,
             objective_value=objective_value,
+            solver_status=str(termination_condition),
+            termination_condition=str(termination_condition),
         )

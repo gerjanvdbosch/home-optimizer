@@ -10,22 +10,24 @@ from domain.types import (
     State,
 )
 from features.dataset import DatasetBuilder, DatasetDefinition, DatasetLoader
-from infrastructure.repositories import StateRepository
+from infrastructure.repositories import ConfigRepository, StateRepository
 
 
 class StateManager:
     def __init__(
         self,
         loader: DatasetLoader,
-        repository: StateRepository,
+        state_repository: StateRepository,
+        config_repository: ConfigRepository,
     ):
         self.loader = loader
-        self.repository = repository
+        self.state_repository = state_repository
+        self.config_repository = config_repository
 
     def load(self) -> State:
-        return self.repository.load()
+        return self.state_repository.load()
 
-    def update(self, config: Config) -> None:
+    def update(self) -> None:
         now = datetime.now(timezone.utc)
 
         start = now.replace(
@@ -35,6 +37,8 @@ class StateManager:
             microsecond=0,
         )
 
+        config = self.config_repository.load()
+
         df = self.loader.load(
             self._dataset(config),
             start,
@@ -43,7 +47,7 @@ class StateManager:
 
         state = self._map(df, self.load(), config=config)
 
-        self.repository.save(state)
+        self.state_repository.save(state)
 
     def update_prediction(self, name: str, series: pd.Series) -> None:
         state = self.load()
@@ -58,34 +62,28 @@ class StateManager:
         else:
             raise ValueError(f"Unknown prediction: '{name}'")
 
-        self.repository.save(state)
+        self.state_repository.save(state)
 
     def update_schedule(
         self,
         schedule: Sequence[int],
-        temperatures_top: Sequence[int],
-        temperatures_bottom: Sequence[int],
-        power_kw: float,
+        temperatures: Sequence[float],
+        power_w: float,
         times: list[datetime],
     ) -> None:
         state = self.load()
 
         state.schedule.heat_pump.power = [
-            SeriesPoint(time=t, value=float(val) * power_kw)
+            SeriesPoint(time=t, value=float(val) * power_w)
             for t, val in zip(times, schedule, strict=False)
         ]
 
-        state.schedule.heat_pump.boiler.temperatures_top = [
+        state.schedule.heat_pump.boiler.temperatures = [
             SeriesPoint(time=t, value=float(val))
-            for t, val in zip(times, temperatures_top, strict=False)
+            for t, val in zip(times, temperatures, strict=False)
         ]
 
-        state.schedule.heat_pump.boiler.temperatures_bottom = [
-            SeriesPoint(time=t, value=float(val))
-            for t, val in zip(times, temperatures_bottom, strict=False)
-        ]
-
-        self.repository.save(state)
+        self.state_repository.save(state)
 
     def _map(
         self,
@@ -127,11 +125,11 @@ class StateManager:
 
             if times:
                 state.schedule.heat_pump.boiler.target_temperature = (
-                    self._resolve_schedule(
+                    self.resolve_schedule(
                         config.heat_pump.boiler.target_temperature, times
                     )
                 )
-                state.schedule.climate.target_temperature = self._resolve_schedule(
+                state.schedule.climate.target_temperature = self.resolve_schedule(
                     config.climate.target_temperature, times
                 )
 
@@ -149,7 +147,26 @@ class StateManager:
             for _, row in df[["time", column]].dropna().iterrows()
         ]
 
-    def _resolve_schedule(
+    def align_predictions(
+        self,
+        points: list[SeriesPoint],
+        times: list[datetime],
+        default: float = 0.0,
+    ) -> list[float]:
+        """Looks up a forecast's own points by exact timestamp against `times`
+        (typically another forecast's horizon, e.g. solar's), falling back to
+        `default` wherever no matching point exists - the forecast may not have
+        been run, may cover a different horizon, or may not exist at all for
+        this installation. `default=0.0` means "assume none of whatever this
+        forecast predicts", the same assumption implicitly made before a given
+        forecast existed at all, not a claim that the true value is zero.
+        """
+
+        by_time = {point.time: point.value for point in points}
+
+        return [by_time.get(t, default) for t in times]
+
+    def resolve_schedule(
         self,
         target: float | list[tuple[time, float]],
         times: list[datetime],

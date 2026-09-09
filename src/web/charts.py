@@ -212,24 +212,12 @@ def dashboard_chart(state: State) -> str:
 
     add_series(
         fig,
-        "Boiler bottom",
-        state.schedule.heat_pump.boiler.temperatures_bottom,
-        row=3,
-        col=1,
-        line=dict(width=1, color="#636EFA", shape="spline"),
-        legendgroup="boiler_bottom",
-        unit="°C",
-        decimal=2,
-    )
-
-    add_series(
-        fig,
-        "Boiler top",
-        state.schedule.heat_pump.boiler.temperatures_top,
+        "Boiler temperature",
+        state.schedule.heat_pump.boiler.temperatures,
         row=3,
         col=1,
         line=dict(width=2, color="#19D3F3", shape="spline"),
-        legendgroup="boiler_top",
+        legendgroup="boiler_temperature",
         unit="°C",
         decimal=2,
     )
@@ -241,7 +229,6 @@ def dashboard_chart(state: State) -> str:
         row=3,
         col=1,
         line=dict(width=1, color="#19D3F3", shape="hv", dash="dot"),
-        visible="legendonly",
         unit="°C",
         decimal=1,
     )
@@ -401,7 +388,10 @@ def backtest_chart(result: BacktestResult | None) -> str:
 
     fig.update_layout(
         title=dict(
-            text=f"{result.name.capitalize()} backtest - MAE {result.mae:.3f}",
+            text=(
+                f"{result.name.capitalize()} backtest - "
+                f"MAE {result.mae:.3f}, RMSE {result.rmse:.3f}, R2 {result.r2:.3f}"
+            ),
             x=0.01,
             y=0.95,
             font=dict(

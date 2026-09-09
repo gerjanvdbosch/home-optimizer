@@ -6,7 +6,7 @@ from typing import Generic, TypeVar
 import pandas as pd
 from joblib import dump, load
 
-from domain.types import BacktestResult, Config
+from domain.types import Config
 from features.dataset import DatasetDefinition
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,9 @@ SystemModel = TypeVar("SystemModel")
 class SystemIdentifier(Generic[SystemModel]):
     def __init__(self) -> None:
         self.model: SystemModel | None = None
+        # Remembered so a subclass can locate sibling model files saved alongside
+        # its own (see BoilerThermalIdentifier's use of the tap-demand forecaster).
+        self.models_path: Path | None = None
 
     @property
     @abstractmethod
@@ -36,34 +39,37 @@ class SystemIdentifier(Generic[SystemModel]):
     @abstractmethod
     def validate(
         self, df: pd.DataFrame, horizon_hours: float = 2.0
-    ) -> BacktestResult: ...
+    ) -> dict[str, float]: ...
 
     @abstractmethod
     def dataset(self, config: Config) -> DatasetDefinition: ...
 
     def get_model(self, dt_hours: float = 0.25) -> SystemModel:
         if self.model is None:
-            raise RuntimeError(f"[{self.name}] Model is nog niet gekalibreerd.")
+            raise RuntimeError(f"Model {self.name} not calibrated")
+
         if hasattr(self.model, "model_copy"):
             return self.model.model_copy(update={"dt_hours": dt_hours})
+
         return self.model
 
     def save(self, path: Path) -> None:
         if self.model is None:
-            raise RuntimeError(f"[{self.name}] Kan ongekalibreerd model niet opslaan.")
+            raise RuntimeError(f"Model {self.name} not calibrated")
+
         path.mkdir(parents=True, exist_ok=True)
+
         target_file = path / f"{self.name}.joblib"
+
         dump(self.model, target_file)
-        logger.info("[%s] Model succesvol opgeslagen naar %s", self.name, target_file)
 
     def load(self, path: Path) -> None:
+        self.models_path = path
+
         target_file = path / f"{self.name}.joblib"
+
         if not target_file.exists():
-            logger.warning(
-                "[%s] Geen opgeslagen model gevonden op %s",
-                self.name,
-                target_file,
-            )
+            logger.warning(f"Model {self.name} not calibrated")
             return
+
         self.model = load(target_file)
-        logger.info("[%s] Model succesvol geladen uit %s", self.name, target_file)

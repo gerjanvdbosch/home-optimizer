@@ -20,6 +20,7 @@ from features.dataset import (
     TimeSeriesLoader,
 )
 from features.solar import SolarForecaster
+from features.tap import TapForecaster
 from infrastructure.influx import InfluxDatabase, InfluxSensorResolver
 from infrastructure.repositories import (
     BacktestRepository,
@@ -71,7 +72,8 @@ def create_container() -> Container:
 
     state_manager = StateManager(
         loader=dataset_loader,
-        repository=state_repository,
+        state_repository=state_repository,
+        config_repository=config_repository,
     )
 
     models_path = settings.data_path / "models"
@@ -86,6 +88,7 @@ def create_container() -> Container:
         forecasters=[
             SolarForecaster(),
             BaseloadForecaster(),
+            TapForecaster(models_path=models_path),
         ],
     )
 
@@ -102,6 +105,7 @@ def create_container() -> Container:
 
     optimization = Optimization(
         state_manager=state_manager,
+        config_repository=config_repository,
         models_path=models_path,
     )
 
