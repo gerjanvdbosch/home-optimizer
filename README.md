@@ -1,6 +1,12 @@
 # Home Optimizer
 
-A Home Assistant add-on that learns your home's thermal behavior and uses model
+> ⚠️ **Work in Progress**
+>
+> This project is currently under development and should be considered experimental.
+> Features, configuration, and API endpoints may change at any time. It is not yet
+> recommended for production use.
+
+A Home Assistant addon that learns your home's thermal behavior and uses model
 predictive control to schedule your heat pump around solar production and electricity
 prices.
 
@@ -146,7 +152,7 @@ for configuration.
 
 ```yaml
 influxdb:
-  host: a0d7b954-influxdb
+  host: f6484555-influxdb-vistalba
   port: 8086
   database: home_assistant
   username: YOUR_USERNAME

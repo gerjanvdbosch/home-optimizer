@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "addon-home-optimizer"
-version = "dev"
+version = "0.1.dev0"
 description = "Smart heat pump control based on thermal behavior, solar, and energy prices."
 readme = "README.md"
 requires-python = ">=3.11"
