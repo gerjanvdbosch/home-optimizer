@@ -10,7 +10,8 @@ Guidelines for coding agents in this repository.
   clarity, or architecture.
 * Where possible, choose a simple and efficient solution over additional abstractions or
   complexity.
-* Reuse existing code and structures; avoid duplication and unnecessary refactors.
+* Reuse existing code; avoid duplicate logic and unnecessary refactors. Check for
+  existing functionality before adding new code.
 * Understand the existing code and architecture before making changes.
 
 ## Physical System

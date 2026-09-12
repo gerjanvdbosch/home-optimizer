@@ -3,6 +3,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Generic, TypeVar
 
+import numpy as np
 import pandas as pd
 from joblib import dump, load
 
@@ -73,3 +74,23 @@ class SystemIdentifier(Generic[SystemModel]):
             return
 
         self.model = load(target_file)
+
+    @staticmethod
+    def _parameter_std_errors(fit_result) -> np.ndarray:
+        """Standard errors from a scipy.optimize.least_squares result's own
+        Jacobian - shared by any subclass identifying parameters this way
+        (see BoilerThermalIdentifier and HeatPumpCOPIdentifier), so a
+        parameter pinned at a bound or otherwise poorly determined by the
+        data can be reported rather than presented as a precise value.
+        """
+
+        degrees_of_freedom = max(len(fit_result.fun) - len(fit_result.x), 1)
+        residual_variance = float(np.sum(fit_result.fun**2) / degrees_of_freedom)
+
+        try:
+            covariance = residual_variance * np.linalg.inv(
+                fit_result.jac.T @ fit_result.jac
+            )
+            return np.sqrt(np.diag(covariance))
+        except np.linalg.LinAlgError:
+            return np.full(len(fit_result.x), np.nan)

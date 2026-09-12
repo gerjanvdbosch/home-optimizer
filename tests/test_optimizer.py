@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
 
-from domain.types import BoilerThermalModel, MPCConfig, MPCInput
+from domain.types import BoilerThermalModel, HeatPumpCOPModel, MPCConfig, MPCInput
 from features.boiler import CP_WATER_J_PER_KG_K, RHO_WATER_KG_PER_L, discretize_zoh
+from features.cop import HeatPumpCOPIdentifier
 from features.optimizer import MPCOptimizer, _lumped_state_space
 
 THERMAL_MODEL = BoilerThermalModel(
@@ -12,6 +13,15 @@ THERMAL_MODEL = BoilerThermalModel(
     ua_mix_idle_w_per_k=0.03,
     ua_mix_active_w_per_k=9638.6,
     q_in_nominal_w=3700.0,
+)
+
+COP_MODEL = HeatPumpCOPModel(
+    eta_carnot=0.5,
+    delta_t_cond=5.0,
+    delta_t_evap=10.0,
+    reference_supply_temperature_c=45.0,
+    q_th_at_power_fit_low_w=3000.0,
+    q_th_at_power_fit_high_w=5000.0,
 )
 
 # Solar rising to a midday peak then falling, 24 steps of 15 minutes (6 hours).
@@ -26,7 +36,6 @@ def _make_input(**overrides) -> MPCInput:
         current_temp_top=30.0,
         current_temp_bottom=28.0,
         boiler_on_current=False,
-        thermal_model=THERMAL_MODEL,
         target_temperature_top=(10.0,) * len(SOLAR_FORECAST_W),
     )
     defaults.update(overrides)
@@ -255,6 +264,142 @@ def test_no_heating_scheduled_when_target_already_below_current():
 
     assert all(v == 0 for v in result.schedule)
     assert result.objective_value == pytest.approx(0.0, abs=1e-9)
+
+
+def test_electrical_power_matches_the_line_the_objective_was_built_from():
+    """MPCResult.electrical_power_w (the reported schedule) must be computed
+    from exactly the same (alpha, beta) line the objective itself uses to
+    cost active_power_w[k] (see _power_line_coefficients) evaluated at the
+    solved T[k] - not a separate, display-only estimate. This is the
+    consistency the whole linear-in-T reformulation exists for.
+    """
+
+    target = [10.0] * len(SOLAR_FORECAST_W)
+    target[10] = 40.0
+
+    outdoor_forecast = (5.0,) * len(SOLAR_FORECAST_W)
+
+    data = _make_input(
+        target_temperature_top=tuple(target),
+        outdoor_temperature_forecast=outdoor_forecast,
+    )
+
+    optimizer = MPCOptimizer(THERMAL_MODEL, MPCConfig(), cop_model=COP_MODEL)
+    result = optimizer.solve(data)
+
+    alpha, beta = optimizer._power_line_coefficients(data, 10)
+    expected_power_w = alpha + beta * result.temperatures[10]
+
+    assert result.electrical_power_w[10] == pytest.approx(expected_power_w)
+    # Differs meaningfully from the flat fallback, proving the model is
+    # actually driving the value, not coincidentally matching it.
+    assert result.electrical_power_w[10] != pytest.approx(
+        MPCConfig().boiler_electrical_power_w
+    )
+
+
+def test_reported_electrical_power_rises_as_tank_heats_through_a_run():
+    """The whole point of reporting from T[k] instead of a fixed reference is
+    that reported electrical draw should visibly rise across a multi-step
+    compressor run as the tank heats up - the behavior confirmed on real
+    data (P_el rising through a DHW cycle as T_supply rises) that a single
+    flat reference cannot reproduce.
+    """
+
+    target = [10.0] * len(SOLAR_FORECAST_W)
+    target[16] = 45.0
+
+    outdoor_forecast = (10.0,) * len(SOLAR_FORECAST_W)
+
+    data = _make_input(
+        target_temperature_top=tuple(target),
+        outdoor_temperature_forecast=outdoor_forecast,
+    )
+
+    optimizer = MPCOptimizer(
+        THERMAL_MODEL, MPCConfig(boiler_min_runtime_steps=4), cop_model=COP_MODEL
+    )
+    result = optimizer.solve(data)
+
+    on_steps = [k for k, v in enumerate(result.schedule) if v == 1]
+    assert len(on_steps) >= 2
+    assert on_steps == list(range(on_steps[0], on_steps[-1] + 1))  # one contiguous run
+
+    on_steps_power = [result.electrical_power_w[k] for k in on_steps]
+    # Strictly increasing across the run: later steps have a hotter tank
+    # (T[k] rises monotonically while heating), hence a lower COP and higher
+    # reported electrical draw.
+    assert all(
+        on_steps_power[i] < on_steps_power[i + 1]
+        for i in range(len(on_steps_power) - 1)
+    )
+
+
+def test_electrical_power_falls_back_to_flat_assumption_without_cop_model():
+    data = _make_input()
+    optimizer = MPCOptimizer(THERMAL_MODEL, MPCConfig())
+    result = optimizer.solve(data)
+
+    assert all(
+        p == pytest.approx(MPCConfig().boiler_electrical_power_w)
+        for p in result.electrical_power_w
+    )
+
+
+def test_electrical_power_falls_back_without_outdoor_forecast_even_with_cop_model():
+    data = _make_input()  # no outdoor_temperature_forecast
+
+    optimizer = MPCOptimizer(THERMAL_MODEL, MPCConfig(), cop_model=COP_MODEL)
+    result = optimizer.solve(data)
+
+    assert all(
+        p == pytest.approx(MPCConfig().boiler_electrical_power_w)
+        for p in result.electrical_power_w
+    )
+
+
+def test_cop_clamped_to_sanity_range_for_implausible_inputs():
+    """An outdoor/target combination outside anything the model was fit on
+    must not translate into an absurd electrical-power estimate - COP is
+    clamped to HeatPumpCOPIdentifier's own [MIN_COP, MAX_COP] sanity range
+    before the linear (alpha, beta) fit is built (see
+    _power_line_coefficients), so the fit itself never sees an implausible
+    endpoint.
+    """
+
+    target = [10.0] * len(SOLAR_FORECAST_W)
+    target[10] = 40.0
+    margin = max(COP_MODEL.reference_supply_temperature_c - max(target), 0.0)
+
+    # An outdoor forecast this close to the fit range's high end (offset by
+    # the same margin _power_line_coefficients applies internally) pushes
+    # the raw formula's COP above any real compressor's achievable
+    # efficiency - implausible on purpose, to exercise the clamp.
+    outdoor_forecast = (66.0,) * len(SOLAR_FORECAST_W)
+
+    data = _make_input(
+        target_temperature_top=tuple(target),
+        outdoor_temperature_forecast=outdoor_forecast,
+    )
+
+    raw_cop = COP_MODEL.cop(66.0, HeatPumpCOPIdentifier.POWER_FIT_T_HIGH_C + margin)
+    assert raw_cop > HeatPumpCOPIdentifier.MAX_COP  # sanity-check the setup
+
+    optimizer = MPCOptimizer(THERMAL_MODEL, MPCConfig(), cop_model=COP_MODEL)
+    result = optimizer.solve(data)
+
+    alpha, beta = optimizer._power_line_coefficients(data, 10)
+    expected_power_w = alpha + beta * result.temperatures[10]
+
+    assert result.electrical_power_w[10] == pytest.approx(expected_power_w)
+    # The clamp must actually have engaged for this scenario, i.e. the fit's
+    # high endpoint used the clamped, not the implausible raw, COP.
+    unclamped_power_at_high = COP_MODEL.q_th_at_power_fit_high_w / raw_cop
+    clamped_power_at_high = alpha + beta * HeatPumpCOPIdentifier.POWER_FIT_T_HIGH_C
+    assert clamped_power_at_high == pytest.approx(
+        COP_MODEL.q_th_at_power_fit_high_w / HeatPumpCOPIdentifier.MAX_COP
+    )
+    assert clamped_power_at_high != pytest.approx(unclamped_power_at_high)
 
 
 def test_lumped_state_space_matches_full_tank_capacity():

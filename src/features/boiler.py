@@ -229,6 +229,13 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
     # minimum, not a fitted threshold).
     MIN_FLOW_LPM = 0.0
 
+    # Whitelist, not a blacklist of "anything that isn't SWW" (same principle
+    # as DHW_ACTIVE_STATE above): the only state prepare()'s flow-gap bridging
+    # may trust as "compressor definitely off" - a hypothetical space-heating
+    # state must not be forced to 0 here either, even though this identifier's
+    # own calorimetric override is separately gated on boiler_on regardless.
+    HEAT_PUMP_OFF_STATE = "Uit"
+
     TRAIN_RATIO = 0.80
 
     # Once a mixing conductance is large enough that the top/bottom gap decays to
@@ -350,6 +357,31 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
     def label(self) -> str:
         return "Boiler temperatures"
 
+    def _bridge_flow_reporting_gaps(self, df: pd.DataFrame) -> pd.DataFrame:
+        """flow_lpm is rate-like: dataset() fetches it with no InfluxDB fill at
+        all, so a real reporting gap shows up here as NaN rather than a
+        guessed value. The compressor's own, separately and reliably reported
+        state settles what a gap actually means: bridging forward while state
+        confirms it is still active (confirmed on real data - T_supply/
+        T_return kept rising smoothly through a 15-minute flow_lpm gap during
+        a DHW ramp-up, a real reporting hiccup, not zero flow), but resetting
+        to 0 the moment state reports idle regardless of how long ago the last
+        reading was - the exact bug this replaces (a stale nonzero reading
+        persisting for minutes past a real, confirmed shutoff).
+        """
+
+        df = df.copy()
+        df["flow_lpm"] = pd.to_numeric(df["flow_lpm"], errors="coerce")
+        is_off = df["state"] == self.HEAT_PUMP_OFF_STATE
+
+        df["flow_lpm"] = df["flow_lpm"].ffill()
+        df["flow_lpm"] = df["flow_lpm"].where(~is_off, 0.0)
+        # No prior reading at all (e.g. the very start of the fetched window)
+        # - assume 0 rather than leaving it unresolved.
+        df["flow_lpm"] = df["flow_lpm"].fillna(0.0)
+
+        return df
+
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
@@ -379,32 +411,45 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
 
         df["boiler_on"] = df["state"] == self.DHW_ACTIVE_STATE
 
-        # Calorimetric heat input: Q = (rho*cp/60) * flow_lpm * (T_supply - T_return)
-        # replaces the fitted constant Q_in_nominal_w wherever real, valid flow/temp
-        # data exists during SWW - real time-varying delivered power instead of one
-        # average value. Confirmed for this installation: no simultaneous space
-        # heating + SWW, so a positive flow during SWW is unambiguously the boiler
-        # coil. Strictly gated on boiler_on (never on flow being merely nonzero):
-        # this installation's flow sensor does not report while idle, so InfluxDB's
-        # fill leaves stale readings behind after shutoff (observed directly:
-        # ~14 L/min minutes after state flipped to "Uit") - trusting flow_lpm's
-        # value on its own during "Uit" would inject phantom heat into idle data.
-        # Falls back to the fitted Q_in_nominal_w (see calibrate()) wherever this
-        # column is unavailable or invalid, including whenever these sensors are
-        # not configured at all - NaN here means "no override", not "no heat".
+        if "flow_lpm" in df.columns:
+            df = self._bridge_flow_reporting_gaps(df)
+
+        # Calorimetric heat input: Q = (rho*cp/60) * flow_lpm * max(T_supply -
+        # T_return, 0) replaces the fitted constant Q_in_nominal_w wherever
+        # real, valid flow data exists during SWW - real time-varying
+        # delivered power instead of one average value. Confirmed for this
+        # installation: no simultaneous space heating + SWW, so a positive
+        # flow during SWW is unambiguously the boiler coil. Strictly gated
+        # on boiler_on (never on flow being merely nonzero): this
+        # installation's flow sensor does not report while idle, so
+        # InfluxDB's fill leaves stale readings behind after shutoff
+        # (observed directly: ~14 L/min minutes after state flipped to
+        # "Uit") - trusting flow_lpm's value on its own during "Uit" would
+        # inject phantom heat into idle data.
+        #
+        # T_supply <= T_return is clipped to Q=0 rather than treated as
+        # invalid: confirmed on real data (see calibrate()'s diagnostic) -
+        # every such case occurred exactly at a heating run's first sample,
+        # the compressor having just started with the refrigerant not yet
+        # hot enough to exceed the tank's own return temperature. That is a
+        # real, valid measurement of "no net heat yet", not a sensor
+        # problem - falling back to Q_in_nominal_w there would incorrectly
+        # apply the *rest* of the cycle's steady, well-measured average to
+        # this brief, physically distinct startup instant.
+        #
+        # Falls back to the fitted Q_in_nominal_w (see calibrate()) only
+        # wherever flow itself is absent/non-positive, or these columns are
+        # not configured at all - NaN here means "no override", not "no
+        # heat".
         calorimetric_columns = ["T_supply", "T_return", "flow_lpm"]
 
         if all(column in df.columns for column in calorimetric_columns):
             T_supply = pd.to_numeric(df["T_supply"], errors="coerce")
             T_return = pd.to_numeric(df["T_return"], errors="coerce")
             flow_lpm = pd.to_numeric(df["flow_lpm"], errors="coerce")
-            delta_t_water = T_supply - T_return
+            delta_t_water = (T_supply - T_return).clip(lower=0.0)
 
-            valid = (
-                df["boiler_on"]
-                & (flow_lpm > self.MIN_FLOW_LPM)
-                & (delta_t_water > 0)
-            )
+            valid = df["boiler_on"] & (flow_lpm > self.MIN_FLOW_LPM)
 
             q_calorimetric_w = (
                 (RHO_WATER_KG_PER_L / 60.0) * CP_WATER_J_PER_KG_K
@@ -500,19 +545,6 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
 
         return windows
 
-    @staticmethod
-    def _parameter_std_errors(fit_result) -> np.ndarray:
-        degrees_of_freedom = max(len(fit_result.fun) - len(fit_result.x), 1)
-        residual_variance = float(np.sum(fit_result.fun**2) / degrees_of_freedom)
-
-        try:
-            covariance = residual_variance * np.linalg.inv(
-                fit_result.jac.T @ fit_result.jac
-            )
-            return np.sqrt(np.diag(covariance))
-        except np.linalg.LinAlgError:
-            return np.full(len(fit_result.x), np.nan)
-
     def calibrate(self, df: pd.DataFrame) -> BoilerThermalModel:
         df = self.prepare(df)
 
@@ -563,10 +595,11 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
         # A calorimetric mean, wherever reliable, is a direct measurement of the
         # real average delivered power - a better anchor for q_in_nominal_w than
         # letting least_squares fit it freely, since that fit is only ever
-        # informed by the (typically few) heating timesteps lacking a valid
-        # override (see _resolve_q_in): those timesteps are a small, arbitrary
-        # subset (e.g. before flow ramps up at cycle start), not representative
-        # evidence for the installation's real heating power. Below
+        # informed by the (typically very few) heating timesteps lacking a
+        # valid override (see _resolve_q_in and prepare()'s Q=0 handling for
+        # T_supply<=T_return): a small, arbitrary, sensor-limited remainder
+        # (real flow reading missing entirely), not representative evidence
+        # for the installation's real heating power. Below
         # MIN_CALORIMETRIC_Q_IN_SAMPLES, the sample mean itself is not yet
         # reliable enough to anchor anything, so the fit stays fully free.
         calorimetric_q_in_bounds: tuple[float, float] | None = None
@@ -612,6 +645,26 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
                     f"the {heating_count - override_valid_count} timestep(s) "
                     f"lacking a valid override."
                 ),
+            )
+
+        # DIAGNOSTIC: heating timesteps still lacking a calorimetric override
+        # (see prepare()'s `valid` mask - now only flow_lpm <= MIN_FLOW_LPM;
+        # T_supply <= T_return is a valid Q=0 measurement, not a missing
+        # one - confirmed on real data to occur exactly at a heating run's
+        # first sample, a genuine startup transient, not scattered mid-cycle
+        # noise). Only this smaller, genuinely sensor-limited remainder
+        # still relies on q_in_nominal_w's fallback.
+        missing_override = boiler_on & ~override_valid
+        missing_override_count = int(np.sum(missing_override))
+
+        if missing_override_count > 0:
+            logger.info(
+                "Boiler thermal calibration: %d/%d heating timesteps still "
+                "lack a calorimetric override (flow_lpm<=%.1f) and rely on "
+                "q_in_nominal_w.",
+                missing_override_count,
+                heating_count,
+                self.MIN_FLOW_LPM,
             )
 
         # A real after-heat tail was directly observed in this installation's own
@@ -1624,9 +1677,14 @@ class BoilerThermalIdentifier(SystemIdentifier[BoilerThermalModel]):
                 # while idle (no raw points in a bucket), fill="previous" would
                 # keep carrying forward the last active flow reading indefinitely -
                 # observed directly in this installation's data (flow still showing
-                # ~14 L/min minutes after state flipped to "Uit"). fill=0 is the
-                # physically correct assumption for a bucket with no flow reports.
-                fill=0,
+                # ~14 L/min minutes after state flipped to "Uit"). fill="none" (no
+                # InfluxDB fill at all) leaves a genuine reporting gap as a real
+                # gap instead of guessing at either extreme here - prepare()
+                # resolves it using the compressor's own separately-reported
+                # state: bridge a brief gap while state confirms it is still
+                # active, but trust 0 the moment state reports idle, regardless of
+                # how long ago the last reading was.
+                fill="none",
             )
             .timeseries(
                 "state",

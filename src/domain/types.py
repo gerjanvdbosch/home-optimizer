@@ -14,7 +14,7 @@ HeatPumpMode = Literal["heat", "cool"]
 
 ForecasterType = Literal["solar", "baseload", "tap"]
 
-IdentificationType = Literal["boiler"]
+IdentificationType = Literal["boiler", "cop_dhw"]
 
 
 class JobType(str, Enum):
@@ -139,6 +139,13 @@ class HeatPumpConfig(BaseModel):
     return_temperature: SensorReference = Field()
     compressor_frequency: SensorReference = Field()
     flow: SensorReference = Field()
+    # Optional: not every installation reports this separately, and its
+    # absence should not break anything - see
+    # HeatPumpCOPIdentifier.BOOSTER_ACTIVE_STATE for why it matters when
+    # present (a resistive backup heater, not the compressor, so its
+    # electrical draw follows entirely different physics and must not be
+    # mixed into the heat pump's own COP calibration).
+    booster: SensorReference | None = Field(default=None)
     boiler: BoilerConfig = Field()
 
 
@@ -404,19 +411,63 @@ class BoilerThermalModel:
     q_in_nominal_w: float
 
 
+# Exact by definition of the Kelvin scale (0 degC = 273.15 K) - used
+# wherever a Celsius temperature must enter a formula (like COP) that is
+# only valid on an absolute temperature scale.
+KELVIN_OFFSET_C = 273.15
+
+
 @dataclass
 class HeatPumpCOPModel:
     eta_carnot: float
     delta_t_cond: float
     delta_t_evap: float
+    # The 95th percentile of this mode's own observed supply temperature
+    # (see HeatPumpCOPIdentifier.calibrate()) - planning's stand-in for the
+    # heat pump's actual supply temperature, which it has no forecast for
+    # (see MPCOptimizer._power_line_coefficients). Not read by cop() itself
+    # (default 0.0 is harmless there, e.g. for a trial fit's parameter
+    # vector - see HeatPumpCOPIdentifier._predict_cop).
+    reference_supply_temperature_c: float = 0.0
+    # Real, calorimetric thermal output (W) observed near
+    # HeatPumpCOPIdentifier.POWER_FIT_T_LOW_C/HIGH_C (see calibrate()) - used
+    # by MPCOptimizer instead of BoilerThermalModel's fixed q_in_nominal_w
+    # when estimating electrical power: real data confirmed Q_th is not
+    # constant across a compressor run (it rises from a low start, peaks
+    # mid-cycle, then falls as the compressor modulates down approaching
+    # setpoint), so q_in_nominal_w (calibrated for the tank's temperature
+    # *trajectory*, a different purpose) understated real electrical draw
+    # through the middle of a cycle. Not read by cop() itself (default 0.0
+    # is harmless there, e.g. for a trial fit's parameter vector).
+    q_th_at_power_fit_low_w: float = 0.0
+    q_th_at_power_fit_high_w: float = 0.0
+
+    def cop(self, T_outdoor: float, T_supply: float) -> float:
+        """Carnot COP scaled by eta_carnot - see
+        HeatPumpCOPIdentifier's class docstring (features/cop.py) for the
+        physical derivation. Kept on the model itself, not just the
+        identifier, so planning code (MPCOptimizer) can evaluate a
+        calibrated model directly without depending on the identifier that
+        produced it. Works equally on scalars or numpy arrays (T_outdoor,
+        T_supply is plain arithmetic, no numpy-specific code needed) - used
+        both by MPCOptimizer (scalars, one step at a time) and by
+        HeatPumpCOPIdentifier._predict_cop (arrays, one call per fit
+        iteration).
+        """
+
+        T_cond_K = T_supply + self.delta_t_cond + KELVIN_OFFSET_C
+        T_evap_K = T_outdoor - self.delta_t_evap + KELVIN_OFFSET_C
+
+        return self.eta_carnot * T_cond_K / (T_cond_K - T_evap_K)
 
 
 @dataclass(frozen=True)
 class MPCConfig:
     step_hours: float = 0.25
-    # No calibrated COP model is wired in yet (HeatPumpCOPModel exists, unused) - an
-    # explicit, stated electrical-power assumption for costing, kept separate from
-    # the calibrated thermal q_in_nominal_w used for the temperature dynamics.
+    # Fallback electrical-power assumption for costing, used only when no
+    # calibrated HeatPumpCOPModel or outdoor-temperature forecast is
+    # available (see MPCOptimizer._electrical_power_w) - otherwise superseded
+    # by the calibrated, outdoor-temperature-dependent COP model.
     boiler_electrical_power_w: float = 3000.0
     boiler_min_runtime_steps: int = 2
     # Flat price for now - will become a per-installation config option later.
@@ -435,7 +486,6 @@ class MPCInput:
     current_temp_top: float
     current_temp_bottom: float
     boiler_on_current: bool
-    thermal_model: BoilerThermalModel
     target_temperature_top: tuple[float, ...] = ()
     # Forecasted additional heat-sink power (W) from tap draws (see
     # features/tap.py's TapForecaster), on top of the passive UA loss already in
@@ -449,12 +499,27 @@ class MPCInput:
     # model (see BoilerThermalIdentifier.excess_loss_w's docstring) - not tap
     # draws alone.
     tap_forecast_w: tuple[float, ...] = ()
+    # Open-Meteo outdoor-temperature forecast (deg C), aligned to the
+    # horizon - the evaporator's heat source for an air-water heat pump (see
+    # HeatPumpCOPModel.cop()), distinct from `ambient_temperature` above
+    # (the boiler's own indoor location). Empty means "no forecast
+    # available", falling back to the flat boiler_electrical_power_w
+    # assumption for costing (see MPCOptimizer._electrical_power_w) rather
+    # than inventing a temperature.
+    outdoor_temperature_forecast: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
 class MPCResult:
     schedule: tuple[int, ...]
     temperatures: tuple[float, ...]
+    # The electrical power (W) assumed for each step while boiler_on - from
+    # the calibrated COP model where available, otherwise the flat
+    # boiler_electrical_power_w fallback (see
+    # MPCOptimizer._electrical_power_w) - reported alongside the schedule so
+    # StateManager.update_schedule() can log the actual assumed consumption
+    # per step, not a single flat number.
+    electrical_power_w: tuple[float, ...]
     objective_value: float
     solver_status: str
     termination_condition: str

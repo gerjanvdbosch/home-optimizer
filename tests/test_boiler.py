@@ -1109,6 +1109,85 @@ def test_calorimetric_q_in_ignores_stale_flow_after_shutoff():
     assert np.isnan(q_in_override[6])
 
 
+def test_calorimetric_q_in_is_zero_when_supply_has_not_yet_exceeded_return():
+    """Regression test for a real finding: right at a heating run's first
+    sample, the compressor has just started and the refrigerant has not yet
+    warmed the supply water above the tank's own return temperature -
+    confirmed on real data, every T_supply<=T_return occurrence in this
+    installation's calorimetric data landed exactly at elapsed=0 of its
+    heating run. That is a real, valid measurement of "no net heat yet" (Q=0)
+    given a real, positive flow reading - not a missing/invalid one that
+    should fall back to q_in_nominal_w (the *rest* of the cycle's steady,
+    well-measured average, which does not describe this specific instant).
+    """
+
+    n = 4
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    time = pd.to_datetime(
+        [start + timedelta(seconds=DT_SECONDS * i) for i in range(n)], utc=True
+    )
+
+    state = ["Uit", "SWW", "SWW", "SWW"]
+    # Row 1: the run's first heating sample - real, positive flow, but supply
+    # not yet above return (compressor just started). Row 2 onward: normal
+    # ramping calorimetric power.
+    flow_lpm = [0.0, 10.0, 12.0, 14.0]
+    t_supply = [35.0, 35.0, 40.0, 45.0]
+    t_return = [35.0, 36.0, 35.0, 36.0]
+
+    df = pd.DataFrame(
+        {
+            "time": time,
+            "T_ambient": 20.0,
+            "T_top": 45.0,
+            "T_bottom": 45.0,
+            "state": state,
+            "flow_lpm": flow_lpm,
+            "T_supply": t_supply,
+            "T_return": t_return,
+        }
+    )
+
+    identifier = BoilerThermalIdentifier()
+    prepared = identifier.prepare(df)
+
+    q_in_override = prepared["q_in_override_w"].to_numpy()
+
+    # Input row 1 (SWW, T_supply<=T_return, real flow) -> prepared index 0: a
+    # real, valid Q=0 measurement, not NaN.
+    assert q_in_override[0] == pytest.approx(0.0)
+
+    # Input rows 2-3 (SWW, T_supply>T_return) -> prepared indices 1-2: normal
+    # positive calorimetric power, unaffected by the clip.
+    assert q_in_override[1] > 0.0
+    assert q_in_override[2] > 0.0
+
+
+def test_flow_reporting_gap_bridges_while_active_but_zeroes_when_idle():
+    """Regression test for _bridge_flow_reporting_gaps (mirrors the identical
+    fix in HeatPumpCOPIdentifier): a genuine flow_lpm reporting gap (NaN -
+    dataset() fetches it with no InfluxDB fill at all) must bridge forward to
+    the last reading while state confirms heating is still active - real data
+    showed T_supply/T_return rising smoothly through exactly such a gap
+    during a DHW ramp-up - but reset to 0 the moment state reports idle
+    regardless of how long ago the last reading was, the same real bug found
+    for a stale flow reading persisting past a confirmed shutoff.
+    """
+
+    df = pd.DataFrame(
+        {
+            "state": ["SWW", "SWW", "SWW", "Uit"],
+            "flow_lpm": [12.0, np.nan, 12.0, np.nan],
+        }
+    )
+
+    identifier = BoilerThermalIdentifier()
+    bridged = identifier._bridge_flow_reporting_gaps(df)
+
+    assert bridged["flow_lpm"].iloc[1] == pytest.approx(12.0)
+    assert bridged["flow_lpm"].iloc[3] == 0.0
+
+
 def test_calibration_anchors_q_in_to_calorimetric_mean_not_free_fit():
     """Regression test for a real finding: q_in_nominal_w is only ever fit from
     the (typically few) heating timesteps lacking a valid calorimetric override

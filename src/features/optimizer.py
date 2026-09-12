@@ -5,8 +5,15 @@ import pyomo.environ as pyo
 from pyomo.contrib.appsi.base import TerminationCondition
 from pyomo.contrib.appsi.solvers.highs import Highs
 
-from domain.types import BoilerThermalModel, MPCConfig, MPCInput, MPCResult
+from domain.types import (
+    BoilerThermalModel,
+    HeatPumpCOPModel,
+    MPCConfig,
+    MPCInput,
+    MPCResult,
+)
 from features.boiler import CP_WATER_J_PER_KG_K, RHO_WATER_KG_PER_L, discretize_zoh
+from features.cop import HeatPumpCOPIdentifier
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +57,14 @@ class MPCOptimizer:
         self,
         thermal_model: BoilerThermalModel,
         config: MPCConfig,
+        cop_model: HeatPumpCOPModel | None = None,
     ) -> None:
         self.thermal_model = thermal_model
         self.config = config
+        # None until a cop_dhw model has actually been calibrated (see
+        # HeatPumpCOPIdentifier) - _power_line_coefficients() falls back to
+        # the flat boiler_electrical_power_w assumption until then.
+        self.cop_model = cop_model
 
     def solve(self, data: MPCInput) -> MPCResult:
         self._validate_input(data)
@@ -89,6 +101,17 @@ class MPCOptimizer:
             raise ValueError(
                 "tap_forecast_w must be empty or have the same length as "
                 f"solar_forecast_w ({horizon}), got {len(data.tap_forecast_w)}."
+            )
+
+        # Same "empty means no forecast" convention as tap_forecast_w above.
+        if (
+            data.outdoor_temperature_forecast
+            and len(data.outdoor_temperature_forecast) != horizon
+        ):
+            raise ValueError(
+                "outdoor_temperature_forecast must be empty or have the same "
+                f"length as solar_forecast_w ({horizon}), got "
+                f"{len(data.outdoor_temperature_forecast)}."
             )
 
         if self.config.step_hours <= 0:
@@ -194,12 +217,132 @@ class MPCOptimizer:
                 + b_d[0, 2] * float(tap_forecast_w[k])
             )
 
+        # active_power_w[k] represents boiler_on[k] * max(0, electrical_power_w[k]
+        # - solar[k]) - the grid draw actually costed at step k. electrical
+        # power is linear in T[k] (see _power_line_coefficients), so this
+        # would ordinarily need a McCormick linearization to multiply by the
+        # binary boiler_on[k]; folding the max(0, ...) and the on/off gating
+        # into one big-M lower bound (below) avoids a second, separate
+        # linearization for that product.
+        model.active_power_w = pyo.Var(model.K, domain=pyo.NonNegativeReals)
+
+        model.active_power_constraint = pyo.ConstraintList()
+
+        for k in range(horizon):
+            alpha, beta = self._power_line_coefficients(data, k)
+
+            solar_available_w = max(0.0, float(data.solar_forecast_w[k]))
+
+            # Safe upper bound on (alpha + beta*T - solar) for T within its
+            # own declared bounds and solar >= 0 - large enough that the
+            # constraint is always non-binding once relaxed by
+            # (1 - boiler_on[k]), so active_power_w[k] is free to fall to 0
+            # (via the objective's minimization) whenever boiler_on[k] = 0.
+            t_lower, t_upper = model.T[k].bounds
+            big_m = max(alpha + beta * t_lower, alpha + beta * t_upper) + 1.0
+
+            model.active_power_constraint.add(
+                model.active_power_w[k]
+                >= (alpha + beta * model.T[k] - solar_available_w)
+                - big_m * (1 - model.boiler_on[k])
+            )
+
         model.objective = pyo.Objective(
             expr=self._build_objective(model, data),
             sense=pyo.minimize,
         )
 
         return model
+
+    def _power_line_coefficients(self, data: MPCInput, k: int) -> tuple[float, float]:
+        """Coefficients (alpha, beta) of a linear approximation
+        electrical_power_w[k] = alpha + beta * T for step k, where T stands
+        for the MPC's own tank temperature at that step (model.T[k]).
+
+        The true relationship (via HeatPumpCOPModel.cop(), a ratio of
+        temperatures) is concave in T, not linear - and a concave function
+        cannot be represented by inequality "tangent cut" constraints under
+        minimization the way a convex one can (tangent lines of a concave
+        function are upper bounds; minimizing gives the solver no pressure
+        to rise to meet them, so it would just drive the variable to 0
+        instead of the true curve). Representing it exactly would need a
+        real piecewise-linear formulation (SOS2 or binary-selected
+        segments), adding real complexity. Real data on this installation
+        confirmed electrical power is very close to linear in supply
+        temperature over a DHW cycle's normal active-heating range
+        (HeatPumpCOPIdentifier.POWER_FIT_T_LOW_C to ...HIGH_C) - so a single
+        secant line through the two ends of that range is an adequate, much
+        simpler stand-in, and (being a genuine straight line, not a bound)
+        is usable directly inside the objective, exactly as used for
+        reporting (see _extract_result) - the same numbers the optimizer
+        actually costs with are the ones shown.
+
+        Q_th at each reference point comes from the calibrated
+        q_th_at_power_fit_low_w/high_w (real, calorimetric thermal output
+        measured near that supply temperature - see
+        HeatPumpCOPIdentifier.calibrate()), not BoilerThermalModel's fixed
+        q_in_nominal_w: real data confirmed Q_th is not constant across a
+        compressor run (it rises from a low start, peaks mid-cycle, then
+        falls as the compressor modulates down approaching setpoint), and
+        q_in_nominal_w - calibrated for the tank's temperature *trajectory*,
+        a different purpose - understated real electrical draw through the
+        middle of a cycle by using a constant well below the true mid-cycle
+        Q_th.
+
+        T[k] (rather than a single fixed reference temperature) is what
+        this line is evaluated against: the heat pump's actual supply
+        temperature physically tracks the tank it is currently charging (it
+        must stay hotter to keep pushing heat in), which is exactly what
+        T[k] represents, already decision-consistent with the rest of the
+        model. The margin between T[k] and the real supply temperature is
+        not directly measured (cop_dhw has no tank-temperature column to
+        calibrate it against), so it is approximated as
+        reference_supply_temperature_c's own margin above the highest
+        configured target - the same "how much hotter does supply run than
+        the target it's aiming for" gap already implied by that calibrated
+        value, floored at 0 so supply is never modelled as colder than the
+        tank it is heating.
+
+        Falls back to (boiler_electrical_power_w, 0.0) - flat, independent
+        of T - when no calibrated model or outdoor-temperature forecast
+        exists for this step.
+        """
+
+        if self.cop_model is None or k >= len(data.outdoor_temperature_forecast):
+            return self.config.boiler_electrical_power_w, 0.0
+
+        margin = max(
+            self.cop_model.reference_supply_temperature_c
+            - max(data.target_temperature_top),
+            0.0,
+        )
+        T_outdoor = data.outdoor_temperature_forecast[k]
+
+        def power_at(T_tank_c: float, q_th_w: float) -> float:
+            cop = self.cop_model.cop(T_outdoor, T_tank_c + margin)
+            cop = min(
+                max(cop, HeatPumpCOPIdentifier.MIN_COP), HeatPumpCOPIdentifier.MAX_COP
+            )
+
+            return q_th_w / cop
+
+        power_low = power_at(
+            HeatPumpCOPIdentifier.POWER_FIT_T_LOW_C,
+            self.cop_model.q_th_at_power_fit_low_w,
+        )
+        power_high = power_at(
+            HeatPumpCOPIdentifier.POWER_FIT_T_HIGH_C,
+            self.cop_model.q_th_at_power_fit_high_w,
+        )
+
+        fit_range_c = (
+            HeatPumpCOPIdentifier.POWER_FIT_T_HIGH_C
+            - HeatPumpCOPIdentifier.POWER_FIT_T_LOW_C
+        )
+        beta = (power_high - power_low) / fit_range_c
+        alpha = power_low - beta * HeatPumpCOPIdentifier.POWER_FIT_T_LOW_C
+
+        return alpha, beta
 
     def _build_objective(
         self,
@@ -211,23 +354,9 @@ class MPCOptimizer:
         dt_hours = self.config.step_hours
 
         for k in model.K:
-            # Precomputed constant (depends only on the forecast, not on any
-            # decision variable) - solar is free and unused solar earns nothing
-            # back, so grid draw is simply whatever the assumed electrical load
-            # exceeds available solar by. This keeps the cost term linear in the
-            # binary boiler_on[k].
-            solar_available_w = max(0.0, float(data.solar_forecast_w[k]))
+            grid_energy_kwh = model.active_power_w[k] * dt_hours / 1000.0
 
-            grid_power_w = max(
-                0.0,
-                self.config.boiler_electrical_power_w - solar_available_w,
-            )
-
-            grid_energy_kwh = grid_power_w * dt_hours / 1000.0
-
-            objective += (
-                self.config.price_eur_per_kwh * grid_energy_kwh * model.boiler_on[k]
-            )
+            objective += self.config.price_eur_per_kwh * grid_energy_kwh
 
             objective += self.config.weight_switching * model.boiler_start[k]
 
@@ -251,9 +380,21 @@ class MPCOptimizer:
 
         objective_value = float(pyo.value(model.objective))
 
+        # Same (alpha, beta) line the objective itself was built from (see
+        # _power_line_coefficients) - the reported curve is exactly what the
+        # optimizer costed with, not a separate display-only estimate.
+        power_coefficients = [
+            self._power_line_coefficients(data, k) for k in range(horizon)
+        ]
+        electrical_power_w = tuple(
+            alpha + beta * temperatures[k]
+            for k, (alpha, beta) in enumerate(power_coefficients)
+        )
+
         return MPCResult(
             schedule=schedule,
             temperatures=temperatures,
+            electrical_power_w=electrical_power_w,
             objective_value=objective_value,
             solver_status=str(termination_condition),
             termination_condition=str(termination_condition),

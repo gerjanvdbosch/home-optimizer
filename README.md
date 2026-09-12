@@ -190,6 +190,7 @@ actions:
             "return_temperature": "sensor.ecodan_heatpump_ca09ec_retour_temp",
             "flow": "sensor.ecodan_heatpump_ca09ec_flow_waarde",
             "compressor_frequency": "sensor.ecodan_heatpump_compressor_frequentie",
+            "booster": "binary_sensor.ecodan_heatpump_ca09ec_status_booster_heater", 
             "boiler": {
               "setpoint": "sensor.ecodan_heatpump_ca09ec_sww_setpoint_waarde",
               "top_temperature": "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor",

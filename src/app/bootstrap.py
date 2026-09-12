@@ -13,6 +13,7 @@ from app.state import StateManager
 from domain.types import Settings
 from features.baseload import BaseloadForecaster
 from features.boiler import BoilerThermalIdentifier
+from features.cop import HeatPumpCOPIdentifier
 from features.dataset import (
     AttributeSeriesLoader,
     AttributeTimeSeriesLoader,
@@ -100,6 +101,9 @@ def create_container() -> Container:
         path=models_path,
         identifiers=[
             BoilerThermalIdentifier(),
+            HeatPumpCOPIdentifier(
+                mode=BoilerThermalIdentifier.DHW_ACTIVE_STATE, key="dhw"
+            ),
         ],
     )
 

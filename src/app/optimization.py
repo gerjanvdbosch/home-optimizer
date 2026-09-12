@@ -4,6 +4,7 @@ from pathlib import Path
 from app.state import StateManager
 from domain.types import MPCConfig, MPCInput
 from features.boiler import BoilerThermalIdentifier
+from features.cop import HeatPumpCOPIdentifier
 from features.optimizer import MPCOptimizer
 from infrastructure.repositories import ConfigRepository
 
@@ -45,6 +46,15 @@ class Optimization:
         dynamics_forecaster.load(path=self.models_path)
         thermal_model = dynamics_forecaster.get_model()
 
+        # None if cop_dhw hasn't been calibrated yet (load() warns and leaves
+        # it unset rather than raising) - MPCOptimizer falls back to the flat
+        # boiler_electrical_power_w assumption in that case.
+        cop_identifier = HeatPumpCOPIdentifier(
+            mode=BoilerThermalIdentifier.DHW_ACTIVE_STATE, key="dhw"
+        )
+        cop_identifier.load(path=self.models_path)
+        cop_model = cop_identifier.model
+
         heat_pump_state = state.measurements.heat_pump.state
         boiler_on_current = bool(heat_pump_state) and (
             heat_pump_state[-1].value == BoilerThermalIdentifier.DHW_ACTIVE_STATE
@@ -60,6 +70,24 @@ class Optimization:
             self.state_manager.align_predictions(state.predictions.tap, forecast_times)
         )
 
+        # state.forecast.open_meteo.temperature is the raw Open-Meteo forecast
+        # (see StateManager._map()), not a model prediction, so it is only
+        # ever missing outright (fresh install, forecast fetch not yet run) -
+        # left empty in that case rather than defaulting every step to 0.0
+        # deg C, which align_predictions' usual "assume none" fallback would
+        # do here (a plausible default for "no tap draws", not for "outdoor
+        # temperature"). MPCOptimizer falls back to the flat
+        # boiler_electrical_power_w assumption when this is empty.
+        outdoor_temperature_forecast = (
+            tuple(
+                self.state_manager.align_predictions(
+                    state.forecast.open_meteo.temperature, forecast_times
+                )
+            )
+            if state.forecast.open_meteo.temperature
+            else ()
+        )
+
         data = MPCInput(
             solar_forecast_w=solar_forecast,
             ambient_temperature=state.measurements.heat_pump.boiler.ambient_temperature[
@@ -72,12 +100,14 @@ class Optimization:
                 -1
             ].value,
             boiler_on_current=boiler_on_current,
-            thermal_model=thermal_model,
             target_temperature_top=target_temps,
             tap_forecast_w=tap_forecast,
+            outdoor_temperature_forecast=outdoor_temperature_forecast,
         )
 
-        optimizer = MPCOptimizer(thermal_model=thermal_model, config=mpc_config)
+        optimizer = MPCOptimizer(
+            thermal_model=thermal_model, config=mpc_config, cop_model=cop_model
+        )
         result = optimizer.solve(data)
 
         logger.info(
@@ -89,6 +119,6 @@ class Optimization:
         self.state_manager.update_schedule(
             schedule=result.schedule,
             temperatures=result.temperatures,
-            power_w=mpc_config.boiler_electrical_power_w,
+            power_w=result.electrical_power_w,
             times=forecast_times,
         )

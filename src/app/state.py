@@ -68,14 +68,14 @@ class StateManager:
         self,
         schedule: Sequence[int],
         temperatures: Sequence[float],
-        power_w: float,
+        power_w: Sequence[float],
         times: list[datetime],
     ) -> None:
         state = self.load()
 
         state.schedule.heat_pump.power = [
-            SeriesPoint(time=t, value=float(val) * power_w)
-            for t, val in zip(times, schedule, strict=False)
+            SeriesPoint(time=t, value=float(on) * float(power))
+            for t, on, power in zip(times, schedule, power_w, strict=False)
         ]
 
         state.schedule.heat_pump.boiler.temperatures = [
